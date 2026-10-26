@@ -1,6 +1,6 @@
 use crate::common::{complete_at, create_test_backend};
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── extract_partial_variable_name unit tests ───────────────────────────────
 
@@ -137,7 +137,7 @@ fn test_extract_partial_variable_name_after_arrow_returns_none() {
 async fn test_completion_variable_name_basic() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_basic.php").unwrap();
+    let uri = Uri::parse("file:///var_basic.php").unwrap();
     let text = concat!("<?php\n", "$user = new stdClass();\n", "$us\n",);
 
     // Cursor at end of `$us` on line 2
@@ -145,7 +145,7 @@ async fn test_completion_variable_name_basic() {
 
     let var_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .collect();
 
     let labels: Vec<&str> = var_items.iter().map(|i| i.label.as_str()).collect();
@@ -161,7 +161,7 @@ async fn test_completion_variable_name_basic() {
 async fn test_completion_bare_dollar_shows_all_variables() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_dollar.php").unwrap();
+    let uri = Uri::parse("file:///var_dollar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$name = 'Alice';\n",
@@ -175,7 +175,7 @@ async fn test_completion_bare_dollar_shows_all_variables() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -201,7 +201,7 @@ async fn test_completion_bare_dollar_shows_all_variables() {
 async fn test_completion_variable_names_deduplicated() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_dedup.php").unwrap();
+    let uri = Uri::parse("file:///var_dedup.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$user = getUser();\n",
@@ -214,7 +214,7 @@ async fn test_completion_variable_names_deduplicated() {
 
     let user_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE) && i.label == "$user")
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable) && i.label == "$user")
         .collect();
 
     assert_eq!(
@@ -230,14 +230,14 @@ async fn test_completion_variable_names_deduplicated() {
 async fn test_completion_superglobals() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_super.php").unwrap();
+    let uri = Uri::parse("file:///var_super.php").unwrap();
     let text = concat!("<?php\n", "$_GE\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 4).await;
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -253,14 +253,14 @@ async fn test_completion_superglobals() {
 async fn test_completion_all_superglobals() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_all_super.php").unwrap();
+    let uri = Uri::parse("file:///var_all_super.php").unwrap();
     let text = concat!("<?php\n", "$_\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 2).await;
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -291,7 +291,7 @@ async fn test_completion_all_superglobals() {
 async fn test_completion_superglobal_detail() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_sg_detail.php").unwrap();
+    let uri = Uri::parse("file:///var_sg_detail.php").unwrap();
     let text = concat!("<?php\n", "$_POST\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 6).await;
@@ -307,7 +307,7 @@ async fn test_completion_superglobal_detail() {
     assert!(
         post.tags
             .as_ref()
-            .is_some_and(|t| t.contains(&CompletionItemTag::DEPRECATED)),
+            .is_some_and(|t| t.contains(&CompletionItemTag::Deprecated)),
         "Superglobals should be tagged deprecated (grayed out)"
     );
 }
@@ -317,7 +317,7 @@ async fn test_completion_superglobal_detail() {
 async fn test_completion_variable_detail() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_detail.php").unwrap();
+    let uri = Uri::parse("file:///var_detail.php").unwrap();
     let text = concat!("<?php\n", "$myVariable = 42;\n", "$myV\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
@@ -331,12 +331,12 @@ async fn test_completion_variable_detail() {
     );
 }
 
-/// Variable completions should use CompletionItemKind::VARIABLE.
+/// Variable completions should use CompletionItemKind::Variable.
 #[tokio::test]
 async fn test_completion_variable_kind() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_kind.php").unwrap();
+    let uri = Uri::parse("file:///var_kind.php").unwrap();
     let text = concat!("<?php\n", "$count = 42;\n", "$cou\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
@@ -345,7 +345,7 @@ async fn test_completion_variable_kind() {
     assert!(count_item.is_some(), "Should find $count in completions");
     assert_eq!(
         count_item.unwrap().kind,
-        Some(CompletionItemKind::VARIABLE),
+        Some(CompletionItemKind::Variable),
         "Variable completions should use VARIABLE kind"
     );
 }
@@ -355,7 +355,7 @@ async fn test_completion_variable_kind() {
 async fn test_completion_superglobals_sort_after_variables() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_sg_sort.php").unwrap();
+    let uri = Uri::parse("file:///var_sg_sort.php").unwrap();
     let text = concat!("<?php\n", "$_GET['name'];\n", "$_myVar = 1;\n", "$_\n",);
 
     // Cursor at `$_` on line 3 — matches both $_myVar and superglobals
@@ -363,7 +363,7 @@ async fn test_completion_superglobals_sort_after_variables() {
 
     let var_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .collect();
 
     let my_var = var_items.iter().find(|i| i.label == "$_myVar");
@@ -388,7 +388,7 @@ async fn test_completion_superglobals_sort_after_variables() {
         !my_var
             .tags
             .as_ref()
-            .is_some_and(|t| t.contains(&CompletionItemTag::DEPRECATED)),
+            .is_some_and(|t| t.contains(&CompletionItemTag::Deprecated)),
         "User-defined variables should not be tagged deprecated"
     );
 
@@ -397,7 +397,7 @@ async fn test_completion_superglobals_sort_after_variables() {
         get_sg
             .tags
             .as_ref()
-            .is_some_and(|t| t.contains(&CompletionItemTag::DEPRECATED)),
+            .is_some_and(|t| t.contains(&CompletionItemTag::Deprecated)),
         "Superglobals should be tagged deprecated (grayed out)"
     );
 
@@ -417,7 +417,7 @@ async fn test_completion_superglobals_sort_after_variables() {
 async fn test_completion_variable_uses_text_edit_with_dollar() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_insert.php").unwrap();
+    let uri = Uri::parse("file:///var_insert.php").unwrap();
     let text = concat!("<?php\n", "$result = compute();\n", "$res\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
@@ -429,7 +429,7 @@ async fn test_completion_variable_uses_text_edit_with_dollar() {
     // Should use text_edit (not insert_text) with an explicit range
     // covering the typed prefix including `$`.
     match &item.text_edit {
-        Some(CompletionTextEdit::Edit(te)) => {
+        Some(CompletionItemTextEdit::TextEdit(te)) => {
             assert_eq!(
                 te.new_text, "$result",
                 "text_edit new_text should be $result"
@@ -447,7 +447,7 @@ async fn test_completion_variable_uses_text_edit_with_dollar() {
 async fn test_completion_variable_from_function_params() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_params.php").unwrap();
+    let uri = Uri::parse("file:///var_params.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function greet(string $firstName, string $lastName): string {\n",
@@ -460,7 +460,7 @@ async fn test_completion_variable_from_function_params() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -476,7 +476,7 @@ async fn test_completion_variable_from_function_params() {
 async fn test_completion_variable_from_method_params() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_method_params.php").unwrap();
+    let uri = Uri::parse("file:///var_method_params.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class UserService {\n",
@@ -491,7 +491,7 @@ async fn test_completion_variable_from_method_params() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -509,7 +509,7 @@ async fn test_completion_variable_from_method_params() {
 async fn test_completion_variable_from_later_in_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_later.php").unwrap();
+    let uri = Uri::parse("file:///var_later.php").unwrap();
     let text = concat!("<?php\n", "$ear\n", "$earlyVar = 1;\n", "$laterVar = 2;\n",);
 
     // Cursor at end of `$ear` on line 1 — both $earlyVar and $laterVar
@@ -518,7 +518,7 @@ async fn test_completion_variable_from_later_in_file() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -539,7 +539,7 @@ async fn test_completion_variable_from_later_in_file() {
 async fn test_completion_variable_defined_before_cursor() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_before.php").unwrap();
+    let uri = Uri::parse("file:///var_before.php").unwrap();
     let text = concat!("<?php\n", "$earlyVar = 1;\n", "$laterVar = 2;\n", "$ear\n",);
 
     // Cursor at end of `$ear` on line 3 — both variables are defined
@@ -548,7 +548,7 @@ async fn test_completion_variable_defined_before_cursor() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -565,7 +565,7 @@ async fn test_completion_variable_defined_before_cursor() {
 async fn test_completion_variable_far_below_cursor_not_suggested() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_far_below.php").unwrap();
+    let uri = Uri::parse("file:///var_far_below.php").unwrap();
 
     // Build a file where the cursor is near the top and a matching
     // variable is defined much further down.
@@ -581,7 +581,7 @@ async fn test_completion_variable_far_below_cursor_not_suggested() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -597,7 +597,7 @@ async fn test_completion_variable_far_below_cursor_not_suggested() {
 async fn test_completion_excludes_variable_at_cursor() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_exclude.php").unwrap();
+    let uri = Uri::parse("file:///var_exclude.php").unwrap();
     let text = concat!("<?php\n", "$uniqueTestVar\n",);
 
     // Cursor at end of `$uniqueTestVar` on line 1 — only occurrence
@@ -620,7 +620,7 @@ async fn test_completion_excludes_variable_at_cursor() {
 async fn test_completion_variable_not_after_arrow() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_no_arrow.php").unwrap();
+    let uri = Uri::parse("file:///var_no_arrow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo { public string $name; }\n",
@@ -635,7 +635,7 @@ async fn test_completion_variable_not_after_arrow() {
     let standalone_var_items: Vec<_> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::VARIABLE) && i.detail.as_deref() == Some("variable")
+            i.kind == Some(CompletionItemKind::Variable) && i.detail.as_deref() == Some("variable")
         })
         .collect();
 
@@ -654,7 +654,7 @@ async fn test_completion_variable_not_after_arrow() {
 async fn test_completion_multiple_matching_variables() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_multi.php").unwrap();
+    let uri = Uri::parse("file:///var_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$userData = [];\n",
@@ -669,7 +669,7 @@ async fn test_completion_multiple_matching_variables() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -701,7 +701,7 @@ async fn test_completion_multiple_matching_variables() {
 async fn test_completion_this_inside_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_this.php").unwrap();
+    let uri = Uri::parse("file:///var_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class MyClass {\n",
@@ -715,7 +715,7 @@ async fn test_completion_this_inside_method() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -731,7 +731,7 @@ async fn test_completion_this_inside_method() {
 async fn test_completion_variable_from_foreach() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_foreach.php").unwrap();
+    let uri = Uri::parse("file:///var_foreach.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$items = [1, 2, 3];\n",
@@ -745,7 +745,7 @@ async fn test_completion_variable_from_foreach() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -761,7 +761,7 @@ async fn test_completion_variable_from_foreach() {
 async fn test_completion_variable_from_foreach_key() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_foreach_key.php").unwrap();
+    let uri = Uri::parse("file:///var_foreach_key.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$items = [1, 2, 3];\n",
@@ -775,7 +775,7 @@ async fn test_completion_variable_from_foreach_key() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -791,7 +791,7 @@ async fn test_completion_variable_from_foreach_key() {
 async fn test_completion_variable_from_catch() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_catch.php").unwrap();
+    let uri = Uri::parse("file:///var_catch.php").unwrap();
     let text = concat!(
         "<?php\n",
         "try {\n",
@@ -805,7 +805,7 @@ async fn test_completion_variable_from_catch() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -821,14 +821,14 @@ async fn test_completion_variable_from_catch() {
 async fn test_completion_globals_superglobal() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_globals.php").unwrap();
+    let uri = Uri::parse("file:///var_globals.php").unwrap();
     let text = concat!("<?php\n", "$GL\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 3).await;
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -844,14 +844,14 @@ async fn test_completion_globals_superglobal() {
 async fn test_completion_argc_argv() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_cli.php").unwrap();
+    let uri = Uri::parse("file:///var_cli.php").unwrap();
     let text = concat!("<?php\n", "$arg\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 4).await;
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -872,7 +872,7 @@ async fn test_completion_argc_argv() {
 async fn test_completion_variable_inside_if_block() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_if.php").unwrap();
+    let uri = Uri::parse("file:///var_if.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$config = loadConfig();\n",
@@ -886,7 +886,7 @@ async fn test_completion_variable_inside_if_block() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -908,7 +908,7 @@ async fn test_completion_variable_inside_if_block() {
 async fn test_completion_no_variable_for_classname() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_no_class.php").unwrap();
+    let uri = Uri::parse("file:///var_no_class.php").unwrap();
     let text = concat!("<?php\n", "MyClass\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 7).await;
@@ -917,7 +917,7 @@ async fn test_completion_no_variable_for_classname() {
     let var_items: Vec<_> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::VARIABLE) && i.detail.as_deref() == Some("variable")
+            i.kind == Some(CompletionItemKind::Variable) && i.detail.as_deref() == Some("variable")
         })
         .collect();
 
@@ -933,14 +933,14 @@ async fn test_completion_no_variable_for_classname() {
 async fn test_completion_variable_with_underscores() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_underscore.php").unwrap();
+    let uri = Uri::parse("file:///var_underscore.php").unwrap();
     let text = concat!("<?php\n", "$my_long_variable_name = 'hello';\n", "$my_lo\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 6).await;
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -956,14 +956,14 @@ async fn test_completion_variable_with_underscores() {
 async fn test_completion_variable_case_insensitive() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_case.php").unwrap();
+    let uri = Uri::parse("file:///var_case.php").unwrap();
     let text = concat!("<?php\n", "$MyVariable = 42;\n", "$myv\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -979,7 +979,7 @@ async fn test_completion_variable_case_insensitive() {
 async fn test_completion_variable_in_closure() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_closure.php").unwrap();
+    let uri = Uri::parse("file:///var_closure.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$outerVar = 'hello';\n",
@@ -992,7 +992,7 @@ async fn test_completion_variable_in_closure() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1008,7 +1008,7 @@ async fn test_completion_variable_in_closure() {
 async fn test_completion_no_matching_variables() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_no_match.php").unwrap();
+    let uri = Uri::parse("file:///var_no_match.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$apple = 1;\n",
@@ -1022,7 +1022,7 @@ async fn test_completion_no_matching_variables() {
     // the cursor itself, which should be excluded. So no matches.
     let var_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE) && i.label.starts_with("$zzz"))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable) && i.label.starts_with("$zzz"))
         .collect();
 
     assert!(
@@ -1038,7 +1038,7 @@ async fn test_completion_no_matching_variables() {
 async fn test_completion_this_not_visible_at_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_this_scope.php").unwrap();
+    let uri = Uri::parse("file:///var_this_scope.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1054,7 +1054,7 @@ async fn test_completion_this_not_visible_at_top_level() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1070,7 +1070,7 @@ async fn test_completion_this_not_visible_at_top_level() {
 async fn test_completion_this_not_in_static_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_this_static.php").unwrap();
+    let uri = Uri::parse("file:///var_this_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1085,7 +1085,7 @@ async fn test_completion_this_not_in_static_method() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1101,7 +1101,7 @@ async fn test_completion_this_not_in_static_method() {
 async fn test_completion_variables_scoped_to_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_method_scope.php").unwrap();
+    let uri = Uri::parse("file:///var_method_scope.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1119,7 +1119,7 @@ async fn test_completion_variables_scoped_to_method() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1135,7 +1135,7 @@ async fn test_completion_variables_scoped_to_method() {
 async fn test_completion_params_scoped_to_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_param_scope.php").unwrap();
+    let uri = Uri::parse("file:///var_param_scope.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1151,7 +1151,7 @@ async fn test_completion_params_scoped_to_method() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1173,7 +1173,7 @@ async fn test_completion_params_scoped_to_method() {
 async fn test_completion_properties_not_listed_as_variables() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_no_props.php").unwrap();
+    let uri = Uri::parse("file:///var_no_props.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Post {\n",
@@ -1191,7 +1191,7 @@ async fn test_completion_properties_not_listed_as_variables() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1218,7 +1218,7 @@ async fn test_completion_properties_not_listed_as_variables() {
 async fn test_completion_variables_from_function_not_at_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_far_scope.php").unwrap();
+    let uri = Uri::parse("file:///var_far_scope.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$a\n",
@@ -1232,7 +1232,7 @@ async fn test_completion_variables_from_function_not_at_top_level() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1249,7 +1249,7 @@ async fn test_completion_variables_from_function_not_at_top_level() {
 async fn test_completion_variable_used_in_different_contexts() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_contexts.php").unwrap();
+    let uri = Uri::parse("file:///var_contexts.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function process(array $data): void {\n",
@@ -1265,7 +1265,7 @@ async fn test_completion_variable_used_in_different_contexts() {
 
     let result_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE) && i.label == "$result")
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable) && i.label == "$result")
         .collect();
 
     assert_eq!(
@@ -1281,7 +1281,7 @@ async fn test_completion_variable_used_in_different_contexts() {
 async fn test_completion_foreach_variable_not_visible_after_loop() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_foreach_scope.php").unwrap();
+    let uri = Uri::parse("file:///var_foreach_scope.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$items = [1, 2, 3];\n",
@@ -1298,7 +1298,7 @@ async fn test_completion_foreach_variable_not_visible_after_loop() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1323,7 +1323,7 @@ async fn test_completion_foreach_variable_not_visible_after_loop() {
 async fn test_completion_foreach_variable_not_visible_before_loop() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_foreach_before.php").unwrap();
+    let uri = Uri::parse("file:///var_foreach_before.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$items = [1, 2, 3];\n",
@@ -1338,7 +1338,7 @@ async fn test_completion_foreach_variable_not_visible_before_loop() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1358,7 +1358,7 @@ async fn test_completion_foreach_variable_not_visible_before_loop() {
 async fn test_completion_foreach_variable_visible_inside_loop() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_foreach_inside.php").unwrap();
+    let uri = Uri::parse("file:///var_foreach_inside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$items = [1, 2, 3];\n",
@@ -1372,7 +1372,7 @@ async fn test_completion_foreach_variable_visible_inside_loop() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1397,14 +1397,14 @@ async fn test_completion_foreach_variable_visible_inside_loop() {
 async fn test_completion_superglobal_not_duplicated() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_sg_dedup.php").unwrap();
+    let uri = Uri::parse("file:///var_sg_dedup.php").unwrap();
     let text = concat!("<?php\n", "$name = $_GET['name'];\n", "$_G\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 3).await;
 
     let get_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE) && i.label == "$_GET")
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable) && i.label == "$_GET")
         .collect();
 
     assert_eq!(
@@ -1422,7 +1422,7 @@ async fn test_completion_superglobal_not_duplicated() {
 async fn test_completion_variables_visible_at_eof_no_newline() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_eof_no_nl.php").unwrap();
+    let uri = Uri::parse("file:///var_eof_no_nl.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$items = [1, 2, 3];\n",
@@ -1435,7 +1435,7 @@ async fn test_completion_variables_visible_at_eof_no_newline() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1456,7 +1456,7 @@ async fn test_completion_variables_visible_at_eof_no_newline() {
 async fn test_completion_variables_visible_at_eof_with_newline() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_eof_nl.php").unwrap();
+    let uri = Uri::parse("file:///var_eof_nl.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$items = [1, 2, 3];\n",
@@ -1469,7 +1469,7 @@ async fn test_completion_variables_visible_at_eof_with_newline() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1490,7 +1490,7 @@ async fn test_completion_variables_visible_at_eof_with_newline() {
 async fn test_completion_variables_visible_at_end_of_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_eof_method.php").unwrap();
+    let uri = Uri::parse("file:///var_eof_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1506,7 +1506,7 @@ async fn test_completion_variables_visible_at_end_of_method() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1523,7 +1523,7 @@ async fn test_completion_variables_visible_at_end_of_method() {
 async fn test_completion_variables_visible_after_foreach_at_eof() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_after_foreach_eof.php").unwrap();
+    let uri = Uri::parse("file:///var_after_foreach_eof.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$items = [1, 2, 3];\n",
@@ -1538,7 +1538,7 @@ async fn test_completion_variables_visible_after_foreach_at_eof() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1559,7 +1559,7 @@ async fn test_completion_variables_visible_after_foreach_at_eof() {
 async fn test_completion_variables_at_eof_after_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_eof_class.php").unwrap();
+    let uri = Uri::parse("file:///var_eof_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1574,7 +1574,7 @@ async fn test_completion_variables_at_eof_after_class() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1590,7 +1590,7 @@ async fn test_completion_variables_at_eof_after_class() {
 async fn test_completion_variables_at_eof_after_function_decl() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_eof_func.php").unwrap();
+    let uri = Uri::parse("file:///var_eof_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function helper(): mixed { return null; }\n",
@@ -1603,7 +1603,7 @@ async fn test_completion_variables_at_eof_after_function_decl() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1619,7 +1619,7 @@ async fn test_completion_variables_at_eof_after_function_decl() {
 async fn test_completion_variables_at_eof_class_function_foreach() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_eof_cls_fn_fe.php").unwrap();
+    let uri = Uri::parse("file:///var_eof_cls_fn_fe.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -1638,7 +1638,7 @@ async fn test_completion_variables_at_eof_class_function_foreach() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1658,7 +1658,7 @@ async fn test_completion_variables_at_eof_class_function_foreach() {
 async fn test_completion_variables_after_foreach_with_classes_above() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_classes_foreach_eof.php").unwrap();
+    let uri = Uri::parse("file:///var_classes_foreach_eof.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -1695,7 +1695,7 @@ async fn test_completion_variables_after_foreach_with_classes_above() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1741,7 +1741,7 @@ async fn test_completion_variables_after_foreach_with_classes_above() {
 async fn test_completion_variables_visible_when_cursor_past_last_line() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_past_eof.php").unwrap();
+    let uri = Uri::parse("file:///var_past_eof.php").unwrap();
     // Content ends with "$\n" — 4 lines (0..3).  The editor may place
     // the cursor on line 4 (past the last line) after the trailing newline.
     let text = concat!(
@@ -1758,7 +1758,7 @@ async fn test_completion_variables_visible_when_cursor_past_last_line() {
 
     let var_labels: Vec<&str> = items_on_dollar
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1775,12 +1775,12 @@ async fn test_completion_variables_visible_when_cursor_past_last_line() {
 
     // Now test with cursor past the end (line 4) — should still see
     // variables because the editor may report this position.
-    let uri2 = Url::parse("file:///var_past_eof2.php").unwrap();
+    let uri2 = Uri::parse("file:///var_past_eof2.php").unwrap();
     let items_past_end = complete_at(&backend, &uri2, text, 4, 0).await;
 
     let var_labels_past: Vec<&str> = items_past_end
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1801,7 +1801,7 @@ async fn test_completion_variables_at_eof_real_file_scenario() {
     // Reproduce: user is at the very end of a file similar to example.php
     // and types `$` — should see all variables defined at top level.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///eof_real.php").unwrap();
+    let uri = Uri::parse("file:///eof_real.php").unwrap();
 
     // Simulate a large file with classes, functions, and top-level code
     let text = concat!(
@@ -1856,7 +1856,7 @@ async fn test_completion_variables_at_eof_real_file_scenario() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1894,7 +1894,7 @@ async fn test_completion_variables_at_eof_of_braced_namespace() {
     // Variable suggestions at the end of the first block must still
     // find all variables declared within it.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///braced_ns_eof.php").unwrap();
+    let uri = Uri::parse("file:///braced_ns_eof.php").unwrap();
 
     let text = r#"<?php
 namespace Demo {
@@ -1925,7 +1925,7 @@ namespace Other {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -1954,7 +1954,7 @@ async fn test_completion_variables_at_eof_inside_namespace() {
     // the parser stops the span at the last successfully parsed statement).
     // Variable completion must still find variables inside the namespace.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ns_eof.php").unwrap();
+    let uri = Uri::parse("file:///ns_eof.php").unwrap();
 
     let text = concat!(
         "<?php\n",
@@ -1984,7 +1984,7 @@ async fn test_completion_variables_at_eof_inside_namespace() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2018,7 +2018,7 @@ async fn test_completion_variables_at_eof_inside_namespace() {
 #[tokio::test]
 async fn test_var_docblock_variable_name_suggested() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_docblock_varname.php").unwrap();
+    let uri = Uri::parse("file:///var_docblock_varname.php").unwrap();
 
     // The docblock declares `$test`, and the next line assigns it.
     // When typing `$t` on a later line, `$test` should be suggested.
@@ -2035,7 +2035,7 @@ async fn test_var_docblock_variable_name_suggested() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2052,7 +2052,7 @@ async fn test_var_docblock_variable_name_suggested() {
 #[tokio::test]
 async fn test_var_docblock_variable_name_before_assignment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_docblock_before_assign.php").unwrap();
+    let uri = Uri::parse("file:///var_docblock_before_assign.php").unwrap();
 
     // The docblock names `$adminUser` but the next statement assigns `$x`.
     // Both `$adminUser` (from docblock) and `$x` (from assignment) should
@@ -2069,7 +2069,7 @@ async fn test_var_docblock_variable_name_before_assignment() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2085,7 +2085,7 @@ async fn test_var_docblock_variable_name_before_assignment() {
 #[tokio::test]
 async fn test_var_docblock_variable_name_in_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_docblock_method.php").unwrap();
+    let uri = Uri::parse("file:///var_docblock_method.php").unwrap();
 
     let text = concat!(
         "<?php\n",
@@ -2103,7 +2103,7 @@ async fn test_var_docblock_variable_name_in_method() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2118,7 +2118,7 @@ async fn test_var_docblock_variable_name_in_method() {
 #[tokio::test]
 async fn test_var_docblock_without_name_no_phantom_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_docblock_no_name.php").unwrap();
+    let uri = Uri::parse("file:///var_docblock_no_name.php").unwrap();
 
     let text = concat!(
         "<?php\n",
@@ -2131,7 +2131,7 @@ async fn test_var_docblock_without_name_no_phantom_variable() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2159,7 +2159,7 @@ async fn test_var_docblock_without_name_no_phantom_variable() {
 async fn test_completion_arrow_function_param_visible_in_body() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///arrow_param_basic.php").unwrap();
+    let uri = Uri::parse("file:///arrow_param_basic.php").unwrap();
     // Cursor is at `$im|` inside the arrow function body.
     let text = concat!(
         "<?php\n",                                                 // 0
@@ -2173,7 +2173,7 @@ async fn test_completion_arrow_function_param_visible_in_body() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2190,7 +2190,7 @@ async fn test_completion_arrow_function_param_visible_in_body() {
 async fn test_completion_arrow_function_outer_scope_visible_in_body() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///arrow_outer_scope.php").unwrap();
+    let uri = Uri::parse("file:///arrow_outer_scope.php").unwrap();
     let text = concat!(
         "<?php\n",                          // 0
         "$outerVar = 'hello';\n",           // 1
@@ -2202,7 +2202,7 @@ async fn test_completion_arrow_function_outer_scope_visible_in_body() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2224,7 +2224,7 @@ async fn test_completion_arrow_function_both_param_and_outer_visible() {
 
     // ── probe 1: prefix "$im" should match the arrow param $image ──
     {
-        let uri = Url::parse("file:///arrow_both_scopes_a.php").unwrap();
+        let uri = Uri::parse("file:///arrow_both_scopes_a.php").unwrap();
         let text = concat!(
             "<?php\n",                                           // 0
             "$outerVar = 'hello';\n",                            // 1
@@ -2235,7 +2235,7 @@ async fn test_completion_arrow_function_both_param_and_outer_visible() {
 
         let var_labels: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+            .filter(|i| i.kind == Some(CompletionItemKind::Variable))
             .map(|i| i.label.as_str())
             .collect();
 
@@ -2248,7 +2248,7 @@ async fn test_completion_arrow_function_both_param_and_outer_visible() {
 
     // ── probe 2: prefix "$out" should match the outer-scope $outerVar ──
     {
-        let uri = Url::parse("file:///arrow_both_scopes_b.php").unwrap();
+        let uri = Uri::parse("file:///arrow_both_scopes_b.php").unwrap();
         let text = concat!(
             "<?php\n",                                            // 0
             "$outerVar = 'hello';\n",                             // 1
@@ -2259,7 +2259,7 @@ async fn test_completion_arrow_function_both_param_and_outer_visible() {
 
         let var_labels: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+            .filter(|i| i.kind == Some(CompletionItemKind::Variable))
             .map(|i| i.label.as_str())
             .collect();
 
@@ -2277,7 +2277,7 @@ async fn test_completion_arrow_function_both_param_and_outer_visible() {
 async fn test_completion_arrow_function_param_visible_inside_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///arrow_in_method.php").unwrap();
+    let uri = Uri::parse("file:///arrow_in_method.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "class Demo {\n",                                                 // 1
@@ -2295,7 +2295,7 @@ async fn test_completion_arrow_function_param_visible_inside_method() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2321,7 +2321,7 @@ async fn test_completion_closure_in_return_isolates_outer_scope() {
 
     // ── probe 1: "$bra" matches the closure parameter $brand ──
     {
-        let uri = Url::parse("file:///closure_isolation_a.php").unwrap();
+        let uri = Uri::parse("file:///closure_isolation_a.php").unwrap();
         let text = concat!(
             "<?php\n",                                                                      // 0
             "class Mapper {\n",                                                             // 1
@@ -2340,7 +2340,7 @@ async fn test_completion_closure_in_return_isolates_outer_scope() {
 
         let var_labels: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+            .filter(|i| i.kind == Some(CompletionItemKind::Variable))
             .map(|i| i.label.as_str())
             .collect();
 
@@ -2360,7 +2360,7 @@ async fn test_completion_closure_in_return_isolates_outer_scope() {
 
     // ── probe 2: "$key" matches the use-captured $keywords ──
     {
-        let uri = Url::parse("file:///closure_isolation_b.php").unwrap();
+        let uri = Uri::parse("file:///closure_isolation_b.php").unwrap();
         let text = concat!(
             "<?php\n",                                                                      // 0
             "class Mapper {\n",                                                             // 1
@@ -2379,7 +2379,7 @@ async fn test_completion_closure_in_return_isolates_outer_scope() {
 
         let var_labels: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+            .filter(|i| i.kind == Some(CompletionItemKind::Variable))
             .map(|i| i.label.as_str())
             .collect();
 
@@ -2396,7 +2396,7 @@ async fn test_completion_closure_in_return_isolates_outer_scope() {
 async fn test_completion_closure_body_variable_visible() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///closure_body_var.php").unwrap();
+    let uri = Uri::parse("file:///closure_body_var.php").unwrap();
     let text = concat!(
         "<?php\n",                                                      // 0
         "class Mapper {\n",                                             // 1
@@ -2415,7 +2415,7 @@ async fn test_completion_closure_body_variable_visible() {
 
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2442,7 +2442,7 @@ async fn test_completion_closure_this_visible_in_instance_method() {
 
     // ── probe 1: "$thi" matches $this ──
     {
-        let uri = Url::parse("file:///closure_this_a.php").unwrap();
+        let uri = Uri::parse("file:///closure_this_a.php").unwrap();
         let text = concat!(
             "<?php\n",                                                      // 0
             "class Processor {\n",                                          // 1
@@ -2460,7 +2460,7 @@ async fn test_completion_closure_this_visible_in_instance_method() {
 
         let var_labels: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+            .filter(|i| i.kind == Some(CompletionItemKind::Variable))
             .map(|i| i.label.as_str())
             .collect();
 
@@ -2473,7 +2473,7 @@ async fn test_completion_closure_this_visible_in_instance_method() {
 
     // ── probe 2: "$out" would match $outer if it leaked — it must not ──
     {
-        let uri = Url::parse("file:///closure_this_b.php").unwrap();
+        let uri = Uri::parse("file:///closure_this_b.php").unwrap();
         let text = concat!(
             "<?php\n",                                                      // 0
             "class Processor {\n",                                          // 1
@@ -2491,7 +2491,7 @@ async fn test_completion_closure_this_visible_in_instance_method() {
 
         let var_labels: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+            .filter(|i| i.kind == Some(CompletionItemKind::Variable))
             .map(|i| i.label.as_str())
             .collect();
 
@@ -2509,7 +2509,7 @@ async fn test_completion_closure_this_visible_in_instance_method() {
 #[tokio::test]
 async fn test_completion_closure_inside_if_condition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_if_cond.php").unwrap();
+    let uri = Uri::parse("file:///closure_if_cond.php").unwrap();
     let text = concat!(
         "<?php\n",                      // 0
         "function test_if_cond() {\n",  // 1
@@ -2526,7 +2526,7 @@ async fn test_completion_closure_inside_if_condition() {
     let items = complete_at(&backend, &uri, text, 5, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2546,7 +2546,7 @@ async fn test_completion_closure_inside_if_condition() {
 #[tokio::test]
 async fn test_completion_closure_inside_foreach_body() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_foreach.php").unwrap();
+    let uri = Uri::parse("file:///closure_foreach.php").unwrap();
     let text = concat!(
         "<?php\n",                          // 0
         "function test_foreach() {\n",      // 1
@@ -2563,7 +2563,7 @@ async fn test_completion_closure_inside_foreach_body() {
     let items = complete_at(&backend, &uri, text, 6, 13).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2588,7 +2588,7 @@ async fn test_completion_closure_inside_foreach_body() {
 #[tokio::test]
 async fn test_completion_closure_inside_for_loop() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_for.php").unwrap();
+    let uri = Uri::parse("file:///closure_for.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "function test_for() {\n",             // 1
@@ -2605,7 +2605,7 @@ async fn test_completion_closure_inside_for_loop() {
     let items = complete_at(&backend, &uri, text, 6, 13).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2630,7 +2630,7 @@ async fn test_completion_closure_inside_for_loop() {
 #[tokio::test]
 async fn test_completion_closure_inside_while_loop() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_while.php").unwrap();
+    let uri = Uri::parse("file:///closure_while.php").unwrap();
     let text = concat!(
         "<?php\n",                      // 0
         "function test_while() {\n",    // 1
@@ -2647,7 +2647,7 @@ async fn test_completion_closure_inside_while_loop() {
     let items = complete_at(&backend, &uri, text, 6, 13).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2667,7 +2667,7 @@ async fn test_completion_closure_inside_while_loop() {
 #[tokio::test]
 async fn test_completion_closure_inside_do_while() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_dowhile.php").unwrap();
+    let uri = Uri::parse("file:///closure_dowhile.php").unwrap();
     let text = concat!(
         "<?php\n",                      // 0
         "function test_dowhile() {\n",  // 1
@@ -2684,7 +2684,7 @@ async fn test_completion_closure_inside_do_while() {
     let items = complete_at(&backend, &uri, text, 6, 13).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2704,7 +2704,7 @@ async fn test_completion_closure_inside_do_while() {
 #[tokio::test]
 async fn test_completion_closure_inside_try_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_try.php").unwrap();
+    let uri = Uri::parse("file:///closure_try.php").unwrap();
     let text = concat!(
         "<?php\n",                          // 0
         "function test_try() {\n",          // 1
@@ -2722,7 +2722,7 @@ async fn test_completion_closure_inside_try_block() {
     let items = complete_at(&backend, &uri, text, 6, 13).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2743,7 +2743,7 @@ async fn test_completion_closure_inside_try_block() {
 #[tokio::test]
 async fn test_completion_closure_inside_catch_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_catch.php").unwrap();
+    let uri = Uri::parse("file:///closure_catch.php").unwrap();
     let text = concat!(
         "<?php\n",                            // 0
         "function test_catch() {\n",          // 1
@@ -2762,7 +2762,7 @@ async fn test_completion_closure_inside_catch_block() {
     let items = complete_at(&backend, &uri, text, 8, 13).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2787,7 +2787,7 @@ async fn test_completion_closure_inside_catch_block() {
 #[tokio::test]
 async fn test_completion_closure_inside_finally_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_finally.php").unwrap();
+    let uri = Uri::parse("file:///closure_finally.php").unwrap();
     let text = concat!(
         "<?php\n",                          // 0
         "function test_finally() {\n",      // 1
@@ -2808,7 +2808,7 @@ async fn test_completion_closure_inside_finally_block() {
     let items = complete_at(&backend, &uri, text, 10, 13).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2828,7 +2828,7 @@ async fn test_completion_closure_inside_finally_block() {
 #[tokio::test]
 async fn test_completion_closure_inside_switch_case() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_switch.php").unwrap();
+    let uri = Uri::parse("file:///closure_switch.php").unwrap();
     let text = concat!(
         "<?php\n",                          // 0
         "function test_switch() {\n",       // 1
@@ -2847,7 +2847,7 @@ async fn test_completion_closure_inside_switch_case() {
     let items = complete_at(&backend, &uri, text, 7, 17).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2867,7 +2867,7 @@ async fn test_completion_closure_inside_switch_case() {
 #[tokio::test]
 async fn test_completion_closure_inside_return_statement() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_return.php").unwrap();
+    let uri = Uri::parse("file:///closure_return.php").unwrap();
     let text = concat!(
         "<?php\n",                    // 0
         "function test_return() {\n", // 1
@@ -2882,7 +2882,7 @@ async fn test_completion_closure_inside_return_statement() {
     let items = complete_at(&backend, &uri, text, 5, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2902,7 +2902,7 @@ async fn test_completion_closure_inside_return_statement() {
 #[tokio::test]
 async fn test_completion_closure_inside_echo() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_echo.php").unwrap();
+    let uri = Uri::parse("file:///closure_echo.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "function test_echo() {\n",               // 1
@@ -2917,7 +2917,7 @@ async fn test_completion_closure_inside_echo() {
     let items = complete_at(&backend, &uri, text, 5, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2937,7 +2937,7 @@ async fn test_completion_closure_inside_echo() {
 #[tokio::test]
 async fn test_completion_closure_in_array_value() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_array.php").unwrap();
+    let uri = Uri::parse("file:///closure_array.php").unwrap();
     let text = concat!(
         "<?php\n",                    // 0
         "function test_array() {\n",  // 1
@@ -2952,7 +2952,7 @@ async fn test_completion_closure_in_array_value() {
     let items = complete_at(&backend, &uri, text, 5, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2972,7 +2972,7 @@ async fn test_completion_closure_in_array_value() {
 #[tokio::test]
 async fn test_completion_closure_in_legacy_array() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_legacy_array.php").unwrap();
+    let uri = Uri::parse("file:///closure_legacy_array.php").unwrap();
     let text = concat!(
         "<?php\n",                          // 0
         "function test_legacy_array() {\n", // 1
@@ -2987,7 +2987,7 @@ async fn test_completion_closure_in_legacy_array() {
     let items = complete_at(&backend, &uri, text, 5, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3007,7 +3007,7 @@ async fn test_completion_closure_in_legacy_array() {
 #[tokio::test]
 async fn test_completion_closure_in_binary_expression() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_binary.php").unwrap();
+    let uri = Uri::parse("file:///closure_binary.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "function test_binary() {\n",                   // 1
@@ -3023,7 +3023,7 @@ async fn test_completion_closure_in_binary_expression() {
     let items = complete_at(&backend, &uri, text, 6, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3043,7 +3043,7 @@ async fn test_completion_closure_in_binary_expression() {
 #[tokio::test]
 async fn test_completion_closure_in_ternary() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_ternary.php").unwrap();
+    let uri = Uri::parse("file:///closure_ternary.php").unwrap();
     let text = concat!(
         "<?php\n",                        // 0
         "function test_ternary() {\n",    // 1
@@ -3058,7 +3058,7 @@ async fn test_completion_closure_in_ternary() {
     let items = complete_at(&backend, &uri, text, 5, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3078,7 +3078,7 @@ async fn test_completion_closure_in_ternary() {
 #[tokio::test]
 async fn test_completion_closure_in_parenthesized_expr() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_paren.php").unwrap();
+    let uri = Uri::parse("file:///closure_paren.php").unwrap();
     let text = concat!(
         "<?php\n",                    // 0
         "function test_paren() {\n",  // 1
@@ -3093,7 +3093,7 @@ async fn test_completion_closure_in_parenthesized_expr() {
     let items = complete_at(&backend, &uri, text, 5, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3113,7 +3113,7 @@ async fn test_completion_closure_in_parenthesized_expr() {
 #[tokio::test]
 async fn test_completion_closure_in_method_call_arg() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_method_arg.php").unwrap();
+    let uri = Uri::parse("file:///closure_method_arg.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "function test_method_arg() {\n",       // 1
@@ -3129,7 +3129,7 @@ async fn test_completion_closure_in_method_call_arg() {
     let items = complete_at(&backend, &uri, text, 6, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3149,7 +3149,7 @@ async fn test_completion_closure_in_method_call_arg() {
 #[tokio::test]
 async fn test_completion_closure_in_nullsafe_method_call_arg() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_nullsafe.php").unwrap();
+    let uri = Uri::parse("file:///closure_nullsafe.php").unwrap();
     let text = concat!(
         "<?php\n",                               // 0
         "function test_nullsafe() {\n",          // 1
@@ -3165,7 +3165,7 @@ async fn test_completion_closure_in_nullsafe_method_call_arg() {
     let items = complete_at(&backend, &uri, text, 6, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3185,7 +3185,7 @@ async fn test_completion_closure_in_nullsafe_method_call_arg() {
 #[tokio::test]
 async fn test_completion_closure_in_static_method_call_arg() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_static_call.php").unwrap();
+    let uri = Uri::parse("file:///closure_static_call.php").unwrap();
     let text = concat!(
         "<?php\n",                                                 // 0
         "class StaticHost {\n",                                    // 1
@@ -3203,7 +3203,7 @@ async fn test_completion_closure_in_static_method_call_arg() {
     let items = complete_at(&backend, &uri, text, 8, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3223,7 +3223,7 @@ async fn test_completion_closure_in_static_method_call_arg() {
 #[tokio::test]
 async fn test_completion_arrow_fn_param_in_call_arg() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///arrow_fn_call_arg.php").unwrap();
+    let uri = Uri::parse("file:///arrow_fn_call_arg.php").unwrap();
     let text = concat!(
         "<?php\n",                            // 0
         "function test_arrow_call() {\n",     // 1
@@ -3238,7 +3238,7 @@ async fn test_completion_arrow_fn_param_in_call_arg() {
     let items = complete_at(&backend, &uri, text, 3, 32).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3253,7 +3253,7 @@ async fn test_completion_arrow_fn_param_in_call_arg() {
 #[tokio::test]
 async fn test_completion_global_statement_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///global_stmt.php").unwrap();
+    let uri = Uri::parse("file:///global_stmt.php").unwrap();
     let text = concat!(
         "<?php\n",                    // 0
         "function test_global() {\n", // 1
@@ -3265,7 +3265,7 @@ async fn test_completion_global_statement_variable() {
     let items = complete_at(&backend, &uri, text, 3, 5).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3280,7 +3280,7 @@ async fn test_completion_global_statement_variable() {
 #[tokio::test]
 async fn test_completion_static_statement_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///static_stmt.php").unwrap();
+    let uri = Uri::parse("file:///static_stmt.php").unwrap();
     let text = concat!(
         "<?php\n",                    // 0
         "function test_static() {\n", // 1
@@ -3292,7 +3292,7 @@ async fn test_completion_static_statement_variable() {
     let items = complete_at(&backend, &uri, text, 3, 5).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3307,7 +3307,7 @@ async fn test_completion_static_statement_variable() {
 #[tokio::test]
 async fn test_completion_var_docblock_standalone() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_docblock_standalone.php").unwrap();
+    let uri = Uri::parse("file:///var_docblock_standalone.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "function test_var_docblock() {\n",     // 1
@@ -3320,7 +3320,7 @@ async fn test_completion_var_docblock_standalone() {
     let items = complete_at(&backend, &uri, text, 4, 5).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3336,7 +3336,7 @@ async fn test_completion_var_docblock_standalone() {
 #[tokio::test]
 async fn test_completion_interface_scope_no_this() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///iface_scope.php").unwrap();
+    let uri = Uri::parse("file:///iface_scope.php").unwrap();
     // Interfaces can't have concrete methods in PHP, but the parser might
     // still accept code there. We place the cursor inside the interface body
     // outside any method to check that $this is absent and the scope is handled.
@@ -3351,7 +3351,7 @@ async fn test_completion_interface_scope_no_this() {
     let items = complete_at(&backend, &uri, text, 3, 7).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3366,7 +3366,7 @@ async fn test_completion_interface_scope_no_this() {
 #[tokio::test]
 async fn test_completion_enum_scope_this_visible() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///enum_scope.php").unwrap();
+    let uri = Uri::parse("file:///enum_scope.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "enum Color {\n",                          // 1
@@ -3381,7 +3381,7 @@ async fn test_completion_enum_scope_this_visible() {
     let items = complete_at(&backend, &uri, text, 5, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3396,7 +3396,7 @@ async fn test_completion_enum_scope_this_visible() {
 #[tokio::test]
 async fn test_completion_trait_scope_this_visible() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///trait_scope.php").unwrap();
+    let uri = Uri::parse("file:///trait_scope.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "trait MyTrait {\n",                      // 1
@@ -3410,7 +3410,7 @@ async fn test_completion_trait_scope_this_visible() {
     let items = complete_at(&backend, &uri, text, 4, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3430,7 +3430,7 @@ async fn test_completion_trait_scope_this_visible() {
 #[tokio::test]
 async fn test_completion_switch_body_variable_visible() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///switch_var.php").unwrap();
+    let uri = Uri::parse("file:///switch_var.php").unwrap();
     let text = concat!(
         "<?php\n",                        // 0
         "function test_switch_var() {\n", // 1
@@ -3450,7 +3450,7 @@ async fn test_completion_switch_body_variable_visible() {
     let items = complete_at(&backend, &uri, text, 11, 5).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3475,7 +3475,7 @@ async fn test_completion_switch_body_variable_visible() {
 #[tokio::test]
 async fn test_completion_unset_removes_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///unset_var.php").unwrap();
+    let uri = Uri::parse("file:///unset_var.php").unwrap();
     let text = concat!(
         "<?php\n",                   // 0
         "function test_unset() {\n", // 1
@@ -3489,7 +3489,7 @@ async fn test_completion_unset_removes_variable() {
     let items = complete_at(&backend, &uri, text, 5, 5).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3509,7 +3509,7 @@ async fn test_completion_unset_removes_variable() {
 #[tokio::test]
 async fn test_completion_for_loop_init_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///for_init.php").unwrap();
+    let uri = Uri::parse("file:///for_init.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "function test_for_init() {\n",        // 1
@@ -3522,7 +3522,7 @@ async fn test_completion_for_loop_init_variable() {
     let items = complete_at(&backend, &uri, text, 3, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3537,7 +3537,7 @@ async fn test_completion_for_loop_init_variable() {
 #[tokio::test]
 async fn test_completion_colon_delimited_if() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///colon_if.php").unwrap();
+    let uri = Uri::parse("file:///colon_if.php").unwrap();
     let text = concat!(
         "<?php\n",            // 0
         "$colbefore = 1;\n",  // 1
@@ -3552,7 +3552,7 @@ async fn test_completion_colon_delimited_if() {
     let items = complete_at(&backend, &uri, text, 5, 1).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3567,7 +3567,7 @@ async fn test_completion_colon_delimited_if() {
 #[tokio::test]
 async fn test_completion_colon_delimited_for() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///colon_for.php").unwrap();
+    let uri = Uri::parse("file:///colon_for.php").unwrap();
     let text = concat!(
         "<?php\n",                       // 0
         "$forbefore = 1;\n",             // 1
@@ -3581,7 +3581,7 @@ async fn test_completion_colon_delimited_for() {
     let items = complete_at(&backend, &uri, text, 5, 1).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3596,7 +3596,7 @@ async fn test_completion_colon_delimited_for() {
 #[tokio::test]
 async fn test_completion_colon_delimited_while() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///colon_while.php").unwrap();
+    let uri = Uri::parse("file:///colon_while.php").unwrap();
     let text = concat!(
         "<?php\n",                // 0
         "$wbefore = 1;\n",        // 1
@@ -3610,7 +3610,7 @@ async fn test_completion_colon_delimited_while() {
     let items = complete_at(&backend, &uri, text, 5, 1).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3625,7 +3625,7 @@ async fn test_completion_colon_delimited_while() {
 #[tokio::test]
 async fn test_completion_block_statement() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///block_stmt.php").unwrap();
+    let uri = Uri::parse("file:///block_stmt.php").unwrap();
     let text = concat!(
         "<?php\n",                   // 0
         "function test_block() {\n", // 1
@@ -3639,7 +3639,7 @@ async fn test_completion_block_statement() {
     let items = complete_at(&backend, &uri, text, 4, 9).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3657,7 +3657,7 @@ async fn test_completion_block_statement() {
 #[tokio::test]
 async fn test_completion_closure_this_carried_from_outer_scope() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///closure_this_carry.php").unwrap();
+    let uri = Uri::parse("file:///closure_this_carry.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "class MyService {\n",                    // 1
@@ -3674,7 +3674,7 @@ async fn test_completion_closure_this_carried_from_outer_scope() {
     let items = complete_at(&backend, &uri, text, 6, 13).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -3700,7 +3700,7 @@ async fn test_completion_closure_this_carried_from_outer_scope() {
 #[tokio::test]
 async fn test_completion_namespace_scope_implicit() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ns_implicit.php").unwrap();
+    let uri = Uri::parse("file:///ns_implicit.php").unwrap();
     let text = concat!(
         "<?php\n",          // 0
         "namespace App;\n", // 1
@@ -3711,7 +3711,7 @@ async fn test_completion_namespace_scope_implicit() {
     let items = complete_at(&backend, &uri, text, 3, 1).await;
     let var_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::VARIABLE))
+        .filter(|i| i.kind == Some(CompletionItemKind::Variable))
         .map(|i| i.label.as_str())
         .collect();
 

@@ -1,18 +1,17 @@
 use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::request::{GotoTypeDefinitionParams, GotoTypeDefinitionResponse};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
 async fn goto_type_definition(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
-) -> Option<GotoTypeDefinitionResponse> {
-    let params = GotoTypeDefinitionParams {
+) -> Option<TypeDefinitionResponse> {
+    let params = TypeDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position { line, character },
@@ -23,9 +22,9 @@ async fn goto_type_definition(
     backend.goto_type_definition(params).await.unwrap()
 }
 
-fn assert_single_location(response: GotoTypeDefinitionResponse, expected_line: u32) -> Location {
+fn assert_single_location(response: TypeDefinitionResponse, expected_line: u32) -> Location {
     match response {
-        GotoTypeDefinitionResponse::Scalar(loc) => {
+        TypeDefinitionResponse::Definition(Definition::Location(loc)) => {
             assert_eq!(
                 loc.range.start.line, expected_line,
                 "Expected type definition on line {}, got line {}",
@@ -33,7 +32,7 @@ fn assert_single_location(response: GotoTypeDefinitionResponse, expected_line: u
             );
             loc
         }
-        GotoTypeDefinitionResponse::Array(locs) => {
+        TypeDefinitionResponse::Definition(Definition::LocationList(locs)) => {
             assert_eq!(
                 locs.len(),
                 1,
@@ -47,18 +46,18 @@ fn assert_single_location(response: GotoTypeDefinitionResponse, expected_line: u
             );
             locs[0].clone()
         }
-        GotoTypeDefinitionResponse::Link(_) => {
+        TypeDefinitionResponse::DefinitionLinkList(_) => {
             panic!("Expected Scalar or Array response, got Link");
         }
     }
 }
 
 fn assert_multiple_locations(
-    response: GotoTypeDefinitionResponse,
+    response: TypeDefinitionResponse,
     expected_lines: &[u32],
 ) -> Vec<Location> {
     match response {
-        GotoTypeDefinitionResponse::Array(locs) => {
+        TypeDefinitionResponse::Definition(Definition::LocationList(locs)) => {
             assert_eq!(
                 locs.len(),
                 expected_lines.len(),
@@ -73,7 +72,7 @@ fn assert_multiple_locations(
             assert_eq!(actual_lines, expected_sorted, "Location lines don't match");
             locs
         }
-        GotoTypeDefinitionResponse::Scalar(loc) => {
+        TypeDefinitionResponse::Definition(Definition::Location(loc)) => {
             assert_eq!(
                 expected_lines.len(),
                 1,
@@ -83,7 +82,7 @@ fn assert_multiple_locations(
             assert_eq!(loc.range.start.line, expected_lines[0]);
             vec![loc]
         }
-        GotoTypeDefinitionResponse::Link(_) => {
+        TypeDefinitionResponse::DefinitionLinkList(_) => {
             panic!("Expected Array response, got Link");
         }
     }
@@ -94,7 +93,7 @@ fn assert_multiple_locations(
 #[tokio::test]
 async fn test_variable_type_definition_from_type_hint() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "class Logger {\n",                                  // 1
@@ -120,7 +119,7 @@ async fn test_variable_type_definition_from_type_hint() {
 #[tokio::test]
 async fn test_variable_type_definition_from_assignment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                    // 0
         "class User {\n",             // 1
@@ -142,7 +141,7 @@ async fn test_variable_type_definition_from_assignment() {
 #[tokio::test]
 async fn test_this_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "class MyClass {\n",                    // 1
@@ -164,7 +163,7 @@ async fn test_this_type_definition() {
 #[tokio::test]
 async fn test_method_return_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class Result {\n",                                     // 1
@@ -193,7 +192,7 @@ async fn test_method_return_type_definition() {
 #[tokio::test]
 async fn test_property_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                        // 0
         "class Address {\n",              // 1
@@ -222,7 +221,7 @@ async fn test_property_type_definition() {
 #[tokio::test]
 async fn test_self_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // 0
         "class Widget {\n",                              // 1
@@ -242,7 +241,7 @@ async fn test_self_type_definition() {
 #[tokio::test]
 async fn test_parent_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "class Base {\n",                         // 1
@@ -270,7 +269,7 @@ async fn test_parent_type_definition() {
 #[tokio::test]
 async fn test_class_reference_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "class Foo {\n",                        // 1
@@ -295,7 +294,7 @@ async fn test_class_reference_type_definition() {
 #[tokio::test]
 async fn test_function_call_return_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                          // 0
         "class Config {\n",                 // 1
@@ -325,7 +324,7 @@ async fn test_function_call_return_type_definition() {
 #[tokio::test]
 async fn test_scalar_type_returns_none() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                // 0
         "function test() {\n",    // 1
@@ -348,7 +347,7 @@ async fn test_scalar_type_returns_none() {
 #[tokio::test]
 async fn test_nullable_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "class Token {\n",                             // 1
@@ -376,7 +375,7 @@ async fn test_nullable_type_definition() {
 #[tokio::test]
 async fn test_union_type_multiple_locations() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class Cat {\n",                            // 1
@@ -428,7 +427,7 @@ async fn test_cross_file_type_definition() {
         )],
     );
 
-    let uri = Url::parse("file:///test_consumer.php").unwrap();
+    let uri = Uri::parse("file:///test_consumer.php").unwrap();
     let text = concat!(
         "<?php\n",                                        // 0
         "namespace App;\n",                               // 1
@@ -450,7 +449,7 @@ async fn test_cross_file_type_definition() {
     );
 
     match result.unwrap() {
-        GotoTypeDefinitionResponse::Scalar(loc) => {
+        TypeDefinitionResponse::Definition(Definition::Location(loc)) => {
             let path = loc.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/Models/User.php"),
@@ -469,7 +468,7 @@ async fn test_cross_file_type_definition() {
 #[tokio::test]
 async fn test_docblock_var_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                        // 0
         "class Order {\n",                // 1
@@ -494,7 +493,7 @@ async fn test_docblock_var_type_definition() {
 #[tokio::test]
 async fn test_foreach_variable_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                             // 0
         "class Item {\n",                                      // 1
@@ -525,7 +524,7 @@ async fn test_foreach_variable_type_definition() {
 #[tokio::test]
 async fn test_static_method_return_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class Connection {\n",                                 // 1
@@ -556,7 +555,7 @@ async fn test_static_method_return_type_definition() {
 #[tokio::test]
 async fn test_class_declaration_returns_none() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",       // 0
         "class Foo {\n", // 1
@@ -577,7 +576,7 @@ async fn test_class_declaration_returns_none() {
 #[tokio::test]
 async fn test_chained_method_return_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class Builder {\n",                        // 1
@@ -608,7 +607,7 @@ async fn test_chained_method_return_type_definition() {
 #[tokio::test]
 async fn test_method_returning_self_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "class Fluent {\n",                    // 1
@@ -636,7 +635,7 @@ async fn test_method_returning_self_type_definition() {
 #[tokio::test]
 async fn test_union_with_scalar_filters_scalars() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class ErrorResult {\n",                                // 1
@@ -668,7 +667,7 @@ async fn test_union_with_scalar_filters_scalars() {
 #[tokio::test]
 async fn test_catch_variable_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "class AppException extends Exception {\n", // 1 (note: Exception may not be defined in test)
@@ -698,7 +697,7 @@ async fn test_catch_variable_type_definition() {
 #[tokio::test]
 async fn test_parameter_type_definition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class Request {\n",                                      // 1

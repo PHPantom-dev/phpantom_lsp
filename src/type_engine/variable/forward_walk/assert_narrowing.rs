@@ -10,7 +10,7 @@ use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::PhpType;
-use crate::type_engine::types::narrowing;
+use crate::type_engine::type_ops::condition_facts;
 use crate::types::ResolvedType;
 
 /// The guard functions whose first argument is a condition the call
@@ -106,8 +106,8 @@ pub(crate) fn process_assert_narrowing<'b>(
                 let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                     &PhpType::named(atom(&name)),
                     &ctx.current_class.fqn(),
-                    ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
                 );
                 if !resolved.is_empty() {
                     scope.set(
@@ -144,7 +144,7 @@ pub(crate) fn process_assert_narrowing<'b>(
                 .unwrap_or_default()
         };
         let reexport_ctx = build_var_ctx("", ctx, &reexport_resolver);
-        narrowing::collect_assert_reexport_conditions(expr, &reexport_ctx)
+        condition_facts::collect_assert_reexport_conditions(expr, &reexport_ctx)
     };
     for (condition, asserts_true) in reexport_conditions {
         if asserts_true {
@@ -174,10 +174,10 @@ pub(crate) fn process_assert_narrowing<'b>(
         }
     }
 
-    // PHPUnit's `assertSame()`, `assertCount()` and `assertArrayHasKey()`
-    // (and their negations) prove the `===`, `count()` and
-    // `array_key_exists()` checks they stand for, so those are narrowed as
-    // if they were written out in an `assert()`.
+    // PHPUnit's `assertSame()`, `assertCount()`, `assertArrayHasKey()` and
+    // `assertNotEmpty()` (and their negations) prove the `===`, `count()`,
+    // `array_key_exists()` and `!empty()` checks they stand for, so those
+    // are narrowed as if they were written out in an `assert()`.
     if let Expression::Call(call) = unwrapped {
         let phpunit_assertion = {
             let snapshot = scope.locals.clone();
@@ -185,10 +185,10 @@ pub(crate) fn process_assert_narrowing<'b>(
                 snapshot.get(&atom(vn)).cloned().unwrap_or_default()
             };
             let var_ctx = build_var_ctx("", ctx, &resolver);
-            narrowing::phpunit_assertion(call, &var_ctx)
+            condition_facts::phpunit_assertion(call, &var_ctx)
         };
         match phpunit_assertion {
-            Some(narrowing::PhpunitAssertion::Same {
+            Some(condition_facts::PhpunitAssertion::Same {
                 expected,
                 actual,
                 identical,
@@ -205,16 +205,23 @@ pub(crate) fn process_assert_narrowing<'b>(
                 });
                 apply_condition_narrowing(&comparison, scope, ctx);
             }
-            Some(narrowing::PhpunitAssertion::Count {
+            Some(condition_facts::PhpunitAssertion::Count {
                 expected,
                 haystack,
                 equal,
             }) => apply_count_assertion(haystack, expected, equal, scope, ctx),
-            Some(narrowing::PhpunitAssertion::HasKey {
+            Some(condition_facts::PhpunitAssertion::HasKey {
                 key,
                 array,
                 present,
             }) => apply_array_key_assertion(key, array, present, scope, ctx),
+            Some(condition_facts::PhpunitAssertion::Truthy { actual, empty }) => {
+                if empty {
+                    apply_condition_narrowing_inverse(actual, scope, ctx);
+                } else {
+                    apply_condition_narrowing(actual, scope, ctx);
+                }
+            }
             None => {}
         }
     }
@@ -233,10 +240,10 @@ pub(crate) fn process_assert_narrowing<'b>(
         let mut results = before.clone();
 
         // @phpstan-assert / @psalm-assert
-        let mut type_guard: Option<(narrowing::TypeGuardKind, bool)> = None;
+        let mut type_guard: Option<(condition_facts::TypeGuardKind, bool)> = None;
         let mut intersected = false;
         ResolvedType::apply_narrowing(&mut results, |classes| {
-            narrowing::try_apply_custom_assert_narrowing(
+            condition_facts::try_apply_custom_assert_narrowing(
                 expr,
                 &var_ctx,
                 classes,
@@ -261,9 +268,17 @@ pub(crate) fn process_assert_narrowing<'b>(
         // and `assertIsNotObject` drops the class.
         if let Some((kind, exclude)) = type_guard {
             if exclude {
-                narrowing::apply_type_guard_exclusion(kind, &mut results, Some(ctx.class_loader));
+                condition_facts::apply_type_guard_exclusion(
+                    kind,
+                    &mut results,
+                    Some(ctx.file.class_loader),
+                );
             } else {
-                narrowing::apply_type_guard_inclusion(kind, &mut results, Some(ctx.class_loader));
+                condition_facts::apply_type_guard_inclusion(
+                    kind,
+                    &mut results,
+                    Some(ctx.file.class_loader),
+                );
             }
         }
 
@@ -273,7 +288,7 @@ pub(crate) fn process_assert_narrowing<'b>(
         // subject's resolved types directly so a value that was tracked as
         // exactly `null` (e.g. after `$obj->prop = null;`) no longer reads
         // as null after the assertion.
-        if narrowing::call_asserts_not_null(expr, &var_ctx) {
+        if condition_facts::call_asserts_not_null(expr, &var_ctx) {
             results.retain_mut(|rt| match rt.type_string.non_null_type() {
                 Some(non_null) => {
                     rt.type_string = non_null;
@@ -350,7 +365,7 @@ pub(crate) fn process_self_out_narrowing<'b>(
 
     let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
         argument_list,
-        ctx.content,
+        ctx.file.content,
     );
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
 
@@ -394,8 +409,8 @@ pub(crate) fn process_self_out_narrowing<'b>(
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &final_ty,
                 &ctx.current_class.fqn(),
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             Some(if classes.is_empty() {
                 vec![ResolvedType::from_type_string(final_ty)]
@@ -445,7 +460,7 @@ fn apply_never_branch_narrowing<'b>(
     let resolver =
         |vn: &str| -> Vec<ResolvedType> { snapshot.get(&atom(vn)).cloned().unwrap_or_default() };
     let var_ctx = build_var_ctx("", ctx, &resolver);
-    let Some(info) = narrowing::extract_conditional_return_call(call, &var_ctx) else {
+    let Some(info) = condition_facts::extract_conditional_return_call(call, &var_ctx) else {
         return;
     };
 
@@ -457,8 +472,8 @@ fn apply_never_branch_narrowing<'b>(
         let Some(argument) = info.argument_list.arguments.iter().nth(index) else {
             continue;
         };
-        let arg_expr = narrowing::argument_value(argument);
-        let Some(key) = narrowing::expr_to_subject_key(arg_expr) else {
+        let arg_expr = condition_facts::argument_value(argument);
+        let Some(key) = condition_facts::expr_to_subject_key(arg_expr) else {
             continue;
         };
         let current = scope.get(&key).to_vec();
@@ -466,11 +481,11 @@ fn apply_never_branch_narrowing<'b>(
             continue;
         }
         let joined = ResolvedType::types_joined(&current);
-        let ruled_out = narrowing::never_ruled_out_members(
+        let ruled_out = condition_facts::never_ruled_out_members(
             &info.return_type,
             &parameter.name,
             &joined,
-            ctx.class_loader,
+            ctx.file.class_loader,
         );
         if ruled_out.is_empty() {
             continue;
@@ -497,7 +512,7 @@ fn apply_never_branch_narrowing<'b>(
 /// A type with a single alternative is left alone: removing its only
 /// member would leave nothing to describe the value with.
 fn subtract_members(ty: &PhpType, ruled_out: &[PhpType]) -> Option<PhpType> {
-    let members = narrowing::split_into_runtime_members(ty);
+    let members = condition_facts::split_into_runtime_members(ty);
     if members.len() < 2 {
         return None;
     }

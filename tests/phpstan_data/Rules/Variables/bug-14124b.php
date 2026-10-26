@@ -17,7 +17,10 @@ function example3a(array &$convert): void
 			}
 		}
 	}
-	assertType('array<string, list<list<string>>>', $convert);
+	// More precise than upstream, which reports
+	// `array<string, list<list<string>>>`: every element was overwritten
+	// through the reference with an upper-cased string.
+	assertType('array<string, list<list<uppercase-string>>>', $convert);
 }
 
 /**

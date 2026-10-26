@@ -67,10 +67,10 @@ pub(crate) fn process_statement<'b>(
         // loop's join, not to the statement that follows it.  The loop
         // that owns the edge folds it back in.
         Statement::Break(brk) => {
-            record_exit_edge(exit_level(brk.level), true, scope);
+            record_exit_edge(ctx.flow, exit_level(brk.level), true, scope);
         }
         Statement::Continue(cont) => {
-            record_exit_edge(exit_level(cont.level), false, scope);
+            record_exit_edge(ctx.flow, exit_level(cont.level), false, scope);
         }
         Statement::Unset(unset_stmt) => {
             for val in unset_stmt.values.iter() {
@@ -157,7 +157,7 @@ pub(crate) fn process_statement<'b>(
             // For a closure walked to see what it writes to its `use (&$x)`
             // captures, that state is part of the exit state even though
             // the branch merge drops the branch it sits in.
-            record_return_edge(scope);
+            record_return_edge(ctx.flow, scope);
         }
         // An echoed expression narrows exactly the way a returned one
         // does: `echo $s ? strtoupper($s) : '';` proves `$s` a string

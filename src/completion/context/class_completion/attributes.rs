@@ -1,5 +1,5 @@
 //! Detection of the `#[…]` attribute-list context and its target kind.
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 /// Detect whether the cursor is inside a PHP attribute list (`#[…]`).
 ///

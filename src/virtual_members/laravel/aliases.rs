@@ -35,7 +35,6 @@ use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
-use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
@@ -127,6 +126,11 @@ impl LaravelAliasCell {
     #[cfg(test)]
     pub(crate) fn publish_for_test(&self, tables: Arc<LaravelAliases>) {
         *self.tables.write() = Some(tables);
+    }
+
+    /// A stamp that moves with every [`invalidate`](Self::invalidate).
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Discard the built tables so the next reader rebuilds them.
@@ -226,7 +230,8 @@ impl Backend {
     pub(crate) fn container_binding_target(&self, key: &str) -> Option<ContainerBindingTarget> {
         let fqn = self.container_alias_concrete_fqn(key)?;
         let site = self
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .read()
             .bindings
             .get(key)
@@ -318,11 +323,11 @@ impl Backend {
     fn laravel_aliases(&self) -> Arc<LaravelAliases> {
         use std::sync::atomic::Ordering;
 
-        if let Some(cached) = self.laravel_aliases.peek() {
+        if let Some(cached) = self.laravel.aliases.peek() {
             return cached;
         }
 
-        let cell = Arc::as_ptr(&self.laravel_aliases) as usize;
+        let cell = Arc::as_ptr(&self.laravel.aliases) as usize;
         // Break re-entry: the build reads framework source via
         // `find_or_load_class`, whose miss path falls back to
         // `resolve_laravel_alias` and lands back here on this same thread.
@@ -333,13 +338,13 @@ impl Backend {
             return empty_aliases();
         }
 
-        let _build = self.laravel_aliases.build.lock();
+        let _build = self.laravel.aliases.build.lock();
         // Another thread may have published while we waited for the lock.
-        if let Some(cached) = self.laravel_aliases.peek() {
+        if let Some(cached) = self.laravel.aliases.peek() {
             return cached;
         }
 
-        let generation = self.laravel_aliases.generation.load(Ordering::Acquire);
+        let generation = self.laravel.aliases.generation.load(Ordering::Acquire);
         let built = {
             let _marker = BuildMarker::enter(cell);
             Arc::new(build_laravel_aliases(self))
@@ -347,8 +352,8 @@ impl Backend {
         // An invalidation that landed mid-build read state the project has
         // already moved past: hand the tables to this caller, but leave the
         // slot empty so the next reader builds them against what arrived.
-        if self.laravel_aliases.generation.load(Ordering::Acquire) == generation {
-            *self.laravel_aliases.tables.write() = Some(Arc::clone(&built));
+        if self.laravel.aliases.generation.load(Ordering::Acquire) == generation {
+            *self.laravel.aliases.tables.write() = Some(Arc::clone(&built));
         }
         built
     }
@@ -366,7 +371,7 @@ fn build_laravel_aliases(backend: &Backend) -> LaravelAliases {
     // (`$this->app->singleton('sentry', fn () => new HubAdapter())`).  These
     // are registered after the core aliases at runtime, so a provider that
     // rebinds a core key wins here too.
-    for (key, binding) in backend.laravel_provider_resources.read().bindings.iter() {
+    for (key, binding) in backend.laravel.provider_resources.read().bindings.iter() {
         container.insert(key.clone(), binding.class.clone());
     }
 
@@ -413,7 +418,7 @@ fn read_source_by_fqn(backend: &Backend, fqn: &str) -> Option<String> {
     if let Some(content) = backend.get_file_content(&uri) {
         return Some(content);
     }
-    let path = Url::parse(&uri).ok()?.to_file_path().ok()?;
+    let path = crate::util::uri_to_path(&uri)?;
     std::fs::read_to_string(&path).ok()
 }
 
@@ -425,7 +430,7 @@ fn read_project_config(backend: &Backend, file_name: &str) -> Option<String> {
     if !path.is_file() {
         return None;
     }
-    if let Ok(uri) = Url::from_file_path(&path)
+    if let Some(uri) = crate::util::path_to_url(&path)
         && let Some(content) = backend.get_file_content(uri.as_ref())
     {
         return Some(content);

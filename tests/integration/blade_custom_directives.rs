@@ -9,11 +9,12 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document, open_php, template_diagnostics,
+        LARAVEL_APP_COMPOSER, completion_response, create_psr4_workspace, open_document, open_php,
+        template_diagnostics,
     };
     use phpantom_lsp::Backend;
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     const PROVIDERS_PHP: &str =
         "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n";
@@ -56,7 +57,7 @@ class Post
 
     /// A workspace whose provider registers one `Blade::directive()` and one
     /// `Blade::if()`, with `page.blade.php` holding `template`.
-    async fn start(template: &str) -> (Backend, tempfile::TempDir, Url) {
+    async fn start(template: &str) -> (Backend, tempfile::TempDir, Uri) {
         let (backend, dir) = create_psr4_workspace(
             LARAVEL_APP_COMPOSER,
             &[
@@ -68,7 +69,7 @@ class Post
         );
         backend.initialized(InitializedParams {}).await;
 
-        let uri = Url::from_file_path(dir.path().join(TEMPLATE)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(TEMPLATE)).unwrap();
         open_document(&backend, &uri, "blade", template).await;
         (backend, dir, uri)
     }
@@ -145,25 +146,12 @@ class Post
     #[tokio::test]
     async fn registered_directives_are_offered_as_completions() {
         let (backend, _dir, uri) = start("<div>\n@\n</div>\n").await;
-        let response = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri },
-                    position: Position {
-                        line: 1,
-                        character: 1,
-                    },
-                },
-                work_done_progress_params: Default::default(),
-                partial_result_params: Default::default(),
-                context: None,
-            })
+        let response = completion_response(&backend, &uri, 1, 1, None)
             .await
-            .unwrap()
             .expect("directive completion should answer");
         let items = match response {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
 
@@ -202,7 +190,7 @@ class Post
         );
 
         let provider_path = dir.path().join("app/Providers/AppServiceProvider.php");
-        let provider_uri = Url::from_file_path(&provider_path).unwrap();
+        let provider_uri = Uri::from_file_path(&provider_path).unwrap();
         let edited = PROVIDER.replace(
             "Blade::if('admin'",
             "Blade::directive('money', fn ($e) => $e);\n\n        Blade::if('admin'",
@@ -211,14 +199,14 @@ class Post
         backend
             .did_change(DidChangeTextDocumentParams {
                 text_document: VersionedTextDocumentIdentifier {
-                    uri: provider_uri,
+                    text_document_identifier: TextDocumentIdentifier { uri: provider_uri },
                     version: 2,
                 },
-                content_changes: vec![TextDocumentContentChangeEvent {
-                    range: None,
-                    range_length: None,
-                    text: edited,
-                }],
+                content_changes: vec![
+                    TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                        TextDocumentContentChangeWholeDocument { text: edited },
+                    ),
+                ],
             })
             .await;
 

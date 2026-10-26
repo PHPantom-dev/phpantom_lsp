@@ -3,8 +3,9 @@ use super::*;
 use mago_span::HasSpan;
 
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
-use crate::type_engine::types::narrowing;
+use crate::type_engine::type_ops::condition_facts;
 use crate::types::{ClassInfo, ResolvedType};
 
 use super::super::rhs_resolution::{
@@ -276,7 +277,7 @@ pub(crate) fn process_assignment_expr<'b>(
             {
                 return;
             }
-            if let Some(key) = narrowing::expr_to_subject_key(assignment.lhs) {
+            if let Some(key) = condition_facts::expr_to_subject_key(assignment.lhs) {
                 // A write that dispatches to `__set` is opaque: the
                 // magic setter may transform, reroute, or drop the
                 // value, and a later read goes through `__get`, which
@@ -531,13 +532,17 @@ fn adopt_declared_type_args(
             crate::inheritance::resolve_property_type_hint(
                 ctx.current_class,
                 prop_name,
-                ctx.class_loader,
+                ctx.file.class_loader,
             )
         }
         _ => ResolvedType::into_arced_classes(resolve_rhs_with_scope(object, scope, ctx))
             .iter()
             .find_map(|owner| {
-                crate::inheritance::resolve_property_type_hint(owner, prop_name, ctx.class_loader)
+                crate::inheritance::resolve_property_type_hint(
+                    owner,
+                    prop_name,
+                    ctx.file.class_loader,
+                )
             }),
     };
     let Some(declared) = declared else {
@@ -547,7 +552,7 @@ fn adopt_declared_type_args(
     if let TypeKind::Generic(g) = declared.kind()
         && g.args.len() == created.args.len()
         && crate::util::short_name(&g.name).eq_ignore_ascii_case(&cls.name)
-        && (ctx.class_loader)(&g.name).is_some_and(|c| c.fqn() == cls.fqn())
+        && (ctx.file.class_loader)(Fqn::new(&g.name)).is_some_and(|c| c.fqn() == cls.fqn())
     {
         rt.type_string = declared;
     }
@@ -612,7 +617,7 @@ fn property_write_dispatches_to_magic_set(
         crate::virtual_members::property_write_is_magic(
             cls,
             prop_name,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         )
     };
@@ -677,7 +682,8 @@ pub(crate) fn process_compound_assignment<'b>(
         // operators below read the target's current type, which a member
         // path the scope has never seen does not have.
         _ if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) => {
-            match crate::type_engine::types::narrowing::expr_to_subject_key(assignment.lhs) {
+            match crate::type_engine::type_ops::condition_facts::expr_to_subject_key(assignment.lhs)
+            {
                 Some(key) => key,
                 None => return,
             }
@@ -821,9 +827,9 @@ pub(crate) fn resolve_rhs_with_types<'b>(
         let class_name = crate::class_lookup::class_expression_name(
             class,
             ctx.current_class,
-            ctx.all_classes,
-            ctx.source_class_loader,
-            ctx.source_imports,
+            ctx.file.all_classes,
+            ctx.file.source_class_loader,
+            ctx.file.source_imports,
         )
         .filter(|name| !name.is_empty());
         if let Some(name) = class_name {
@@ -833,8 +839,8 @@ pub(crate) fn resolve_rhs_with_types<'b>(
             let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &PhpType::named(atom(resolved_name)),
                 &ctx.current_class.fqn(),
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             // The identifier is spelled as the source writes it, which for a
             // name reached through a namespace import (`Support\Pen` behind
@@ -864,6 +870,8 @@ pub(crate) fn resolve_rhs_with_types<'b>(
             &prefix.operator,
             prefix.operand,
             || resolve_rhs_with_types(prefix.operand, scope, ctx, expr_types),
+            ctx.file.class_loader,
+            ctx.resolved_class_cache,
         )
     {
         return vec![ResolvedType::from_type_string(ty)];

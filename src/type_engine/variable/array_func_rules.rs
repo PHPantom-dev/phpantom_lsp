@@ -52,6 +52,14 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     /// decline as soon as it sees one.
     fn is_spread(&self, index: usize) -> bool;
 
+    /// Whether the argument at `index` is written as `name: value`.
+    ///
+    /// The accessors here are positional, so a named argument may stand
+    /// for a different parameter than its index suggests: in
+    /// `number_format($n, 2, thousands_separator: '')` index 2 is the
+    /// thousands separator, not the decimal one.
+    fn is_named(&self, index: usize) -> bool;
+
     /// The return type the callback at `index` declares: the `: T` hint of
     /// an inline closure or arrow function, or the declared return of the
     /// function a callable string names (`'intval'`).  `None` when the
@@ -90,7 +98,9 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     /// it accepts (`None` when none pass) and whether it can reject any.
     /// `None` when `guard` is not a type check.
     fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
-        crate::type_engine::types::narrowing::split_type_by_guard_name(guard, subject, None)
+        crate::type_engine::type_ops::condition_facts::split_type_by_guard_name(
+            guard, subject, None,
+        )
     }
 }
 
@@ -113,6 +123,12 @@ pub(in crate::type_engine) fn array_func_raw_type(
     // the result describes all of them together rather than just the first.
     if func_name.eq_ignore_ascii_case("array_merge") {
         return array_merge_type(args);
+    }
+
+    if func_name.eq_ignore_ascii_case("array_fill")
+        && let Some(filled) = array_fill_type(args)
+    {
+        return Some(filled);
     }
 
     if func_name.eq_ignore_ascii_case("array_keys")
@@ -888,7 +904,7 @@ fn callback_guard_names(args: &dyn ArrayFuncArgs, index: usize) -> Option<Vec<St
         .map(|member| {
             let content = member.as_literal()?.string_content()?;
             let name = content.trim_start_matches('\\');
-            crate::type_engine::types::narrowing::type_guard_kind_from_name(name)?;
+            crate::type_engine::type_ops::condition_facts::type_guard_kind_from_name(name)?;
             Some(name.to_string())
         })
         .collect()
@@ -958,6 +974,9 @@ fn min_max_type(args: &dyn ArrayFuncArgs, want_max: bool) -> Option<PhpType> {
     if let Some(extreme) = extreme_number(raw_args.iter(), want_max) {
         return Some(extreme);
     }
+    if let Some(extreme) = extreme_int_range(&raw_args, want_max) {
+        return Some(extreme);
+    }
 
     let mut members = Vec::new();
     for raw in &raw_args {
@@ -973,6 +992,37 @@ fn min_max_type(args: &dyn ArrayFuncArgs, want_max: bool) -> Option<PhpType> {
         1 => members.pop(),
         _ => Some(PhpType::union(members)),
     }
+}
+
+/// `array_fill($start, $count, $value)`: `$count` copies of `$value`, so
+/// the entries are exactly the value's type, written-out value included.
+/// Counting from `0` makes it a list, and a `$count` that cannot be `0`
+/// leaves it non-empty.
+fn array_fill_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    use crate::type_engine::type_ops::int_interval::IntInterval;
+
+    if (0..3).any(|index| args.is_spread(index) || args.is_named(index)) {
+        return None;
+    }
+    let value = args.arg_raw_type(2)?;
+    let from_zero = args
+        .arg_raw_type(0)
+        .and_then(|start| start.as_literal().and_then(LiteralValue::parse_i64))
+        == Some(0);
+    let filled = if from_zero {
+        PhpType::list(value)
+    } else {
+        PhpType::generic_array(PhpType::int(), value)
+    };
+    let non_empty = args
+        .arg_raw_type(1)
+        .and_then(|count| IntInterval::of_int(&count))
+        .is_some_and(|count| count.min.is_some_and(|min| min >= 1));
+    Some(if non_empty {
+        filled.non_empty_array_form()
+    } else {
+        filled
+    })
 }
 
 /// The largest (or smallest) of `values` when every one is an `int` or
@@ -994,6 +1044,48 @@ fn extreme_number<'a>(
         }
     }
     best.map(|(_, value)| value.clone())
+}
+
+/// The range `max()` (or `min()`) of integer arguments lands in, so
+/// `max(1, $n)` is `int<1, max>` for an `int $n`. `None` when any argument
+/// may be something other than an integer.
+fn extreme_int_range(args: &[PhpType], want_max: bool) -> Option<PhpType> {
+    use crate::type_engine::type_ops::int_interval::IntInterval;
+
+    let mut intervals = args.iter().map(|arg| {
+        let members = arg
+            .union_members()
+            .into_iter()
+            .map(IntInterval::of_int)
+            .collect::<Option<Vec<_>>>()?;
+        Some(IntInterval::hull_of(&members))
+    });
+    let first = intervals.next()??;
+    // A `None` bound is unbounded, so on the side the extreme moves
+    // towards it wins, and on the other side it loses.
+    let toward = |a: Option<i64>, b: Option<i64>| {
+        a.zip(b)
+            .map(|(a, b)| if want_max { a.max(b) } else { a.min(b) })
+    };
+    let away = |a: Option<i64>, b: Option<i64>| match (a, b) {
+        (Some(a), Some(b)) => Some(if want_max { a.max(b) } else { a.min(b) }),
+        (bound, None) | (None, bound) => bound,
+    };
+    let extreme = intervals.try_fold(first, |acc, interval| {
+        let interval = interval?;
+        Some(if want_max {
+            IntInterval {
+                min: away(acc.min, interval.min),
+                max: toward(acc.max, interval.max),
+            }
+        } else {
+            IntInterval {
+                min: toward(acc.min, interval.min),
+                max: away(acc.max, interval.max),
+            }
+        })
+    })?;
+    Some(extreme.into_type())
 }
 
 /// Widen literal `int`/`float`/`string` members the way

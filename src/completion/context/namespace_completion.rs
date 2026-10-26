@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
@@ -146,8 +146,8 @@ impl Backend {
             let ws = self.workspace.workspace_root.read();
             let mappings = self.workspace.psr4_mappings.read();
             if let Some(ref root) = *ws {
-                if let Ok(url) = Url::parse(uri) {
-                    if let Ok(file_path) = url.to_file_path() {
+                if let Some(url) = crate::util::parse_url(uri) {
+                    if let Some(file_path) = crate::util::url_to_path(&url) {
                         infer_namespaces_from_path(&file_path, root, &mappings)
                     } else {
                         Vec::new()
@@ -199,9 +199,9 @@ impl Backend {
 
         // ── 2. namespace_map (already-opened files) ─────────────────
         {
-            let nmap = self.file_namespaces.read();
-            for spans in nmap.values() {
-                for span in spans {
+            let files = self.files.read();
+            for state in files.values() {
+                for span in &state.namespaces {
                     if let Some(ns) = &span.namespace {
                         insert_if_under_psr4(ns, &mut namespaces, &psr4_prefixes);
                     }
@@ -302,14 +302,14 @@ impl Backend {
 
                 CompletionItem {
                     label: ns.clone(),
-                    kind: Some(CompletionItemKind::MODULE),
+                    kind: Some(CompletionItemKind::Module),
                     detail,
                     insert_text: Some(ns.clone()),
                     filter_text: Some(ns.clone()),
                     sort_text: Some(sort_text),
                     preselect: Some(preselect),
                     text_edit: replace_range.map(|range| {
-                        CompletionTextEdit::Edit(TextEdit {
+                        CompletionItemTextEdit::TextEdit(TextEdit {
                             range,
                             new_text: ns,
                         })

@@ -19,7 +19,7 @@ pub(super) fn apply_loose_literal_narrowing(
     ctx: &ForwardWalkCtx<'_>,
     truthy: bool,
 ) {
-    let (inner, negated) = narrowing::unwrap_condition_negation(condition);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(condition);
     let Expression::Binary(bin) = inner else {
         return;
     };
@@ -59,7 +59,7 @@ pub(crate) fn apply_loose_in_array_narrowing<'b>(
     ctx: &ForwardWalkCtx<'_>,
     inverted: bool,
 ) {
-    let (inner, negated) = narrowing::unwrap_condition_negation(condition);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(condition);
     let Some((needle, haystack)) = loose_in_array_target(inner) else {
         return;
     };
@@ -108,12 +108,12 @@ fn loose_in_array_target<'b>(
     let args: Vec<_> = call.argument_list.arguments.iter().collect();
     match args.len() {
         2 => {}
-        3 if is_false_expr(unwrap_parens(narrowing::argument_value(args[2]))) => {}
+        3 if is_false_expr(unwrap_parens(condition_facts::argument_value(args[2]))) => {}
         _ => return None,
     }
     Some((
-        narrowing::argument_value(args[0]),
-        narrowing::argument_value(args[1]),
+        condition_facts::argument_value(args[0]),
+        condition_facts::argument_value(args[1]),
     ))
 }
 

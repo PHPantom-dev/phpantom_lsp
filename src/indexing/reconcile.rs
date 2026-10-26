@@ -7,7 +7,9 @@
 //! two are reconciled: a newly excluded tree keeps answering workspace
 //! symbol search and completion, and a newly included one contributes
 //! nothing. A new `[indexing] include` entry is the same kind of change:
-//! it names files the last walk never saw.
+//! it names files the last walk never saw, and so is a folder added to
+//! the editor's workspace. A folder removed from it leaves the index at
+//! once.
 //!
 //! Eviction is answered from the indexes themselves and runs
 //! immediately. Re-inclusion cannot be: nothing in memory records the
@@ -16,12 +18,12 @@
 //! notifications and each one would otherwise queue a scan of its own.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use tower_lsp::lsp_types::{FileChangeType, Url};
+use tower_lsp_server::gen_lsp_types::FileChangeType;
 
 use crate::Backend;
 use crate::classmap_scanner::IndexFilters;
@@ -42,17 +44,34 @@ pub(crate) struct DiscoveryInputs {
     filters: Arc<IndexFilters>,
     /// The `[indexing] include` entries as written.
     include: Vec<String>,
+    /// The editor's other workspace folders, after the containment dedup
+    /// in [`Backend::extra_roots`], so a folder that was hidden inside a
+    /// removed parent counts as added.
+    pub(super) extra_roots: Vec<PathBuf>,
+    /// The stub paths in priority order, as
+    /// [`Backend::stub_paths`] resolves them.
+    stub_paths: Vec<PathBuf>,
 }
 
 impl DiscoveryInputs {
     /// Whether replacing `previous` with `self` can bring a file into the
     /// index that `previous` kept out, which takes another walk.
-    fn may_admit_more_than(&self, previous: &DiscoveryInputs) -> bool {
+    pub(super) fn may_admit_more_than(&self, previous: &DiscoveryInputs) -> bool {
         self.filters.may_admit_more_than(&previous.filters)
             || self
                 .include
                 .iter()
                 .any(|entry| !previous.include.contains(entry))
+            || self
+                .extra_roots
+                .iter()
+                .any(|root| !previous.extra_roots.contains(root))
+            // A path that stops being a stub path is code the walks skipped
+            // while it was one.
+            || previous
+                .stub_paths
+                .iter()
+                .any(|path| !self.stub_paths.contains(path))
     }
 }
 
@@ -64,6 +83,8 @@ impl Backend {
         DiscoveryInputs {
             filters: self.index_filters(),
             include: self.config().indexing.include.unwrap_or_default(),
+            extra_roots: self.extra_roots(),
+            stub_paths: self.stub_paths(),
         }
     }
 
@@ -72,11 +93,30 @@ impl Backend {
     ///
     /// Cheap when nothing moved: the walk is only scheduled when a path
     /// or extension could have come back into scope or a new `include`
-    /// entry names files no walk has seen, and a purely widened exclude
-    /// list is answered by eviction alone. A removed `include` entry is
-    /// not evicted; its symbols stay until the next restart.
+    /// entry or workspace folder names files no walk has seen, and a
+    /// purely widened exclude list is answered by eviction alone. A
+    /// removed `include` entry is not evicted; its symbols stay until the
+    /// next restart. A removed workspace folder is, since taking a folder
+    /// out of a workspace is routine.
     pub(crate) fn reconcile_index_for_input_change(&self, previous: &DiscoveryInputs) {
         let current = self.discovery_inputs();
+        let mut rediscover = current.may_admit_more_than(previous);
+
+        let removed_roots: Vec<&PathBuf> = previous
+            .extra_roots
+            .iter()
+            .filter(|root| !current.extra_roots.contains(root))
+            .collect();
+        if !removed_roots.is_empty() {
+            let (evicted, still_covered) = self.retire_extra_roots(&removed_roots);
+            tracing::info!(
+                "PHPantom: {} workspace folder(s) removed, {evicted} indexed file(s) dropped",
+                removed_roots.len()
+            );
+            self.clear_resolved_class_cache();
+            self.member_completion_cache.lock().clear();
+            rediscover |= still_covered;
+        }
 
         if !Arc::ptr_eq(&previous.filters, &current.filters) {
             let evicted = self.evict_newly_filtered_symbols(&previous.filters, &current.filters);
@@ -91,7 +131,16 @@ impl Backend {
             }
         }
 
-        if current.may_admit_more_than(previous) {
+        // The stub index is rebuilt whole rather than grown the way an
+        // `include` entry is: a removed stub path that kept overriding the
+        // declaration the user went back to would be worse than one that
+        // merely kept filling gaps.  The order matters too, so a
+        // reordering is a change.
+        if current.stub_paths != previous.stub_paths {
+            self.refresh_stub_paths();
+        }
+
+        if rediscover {
             self.schedule_filter_rediscovery();
         }
     }
@@ -100,10 +149,7 @@ impl Backend {
     /// of scope, and report how many files were dropped.
     ///
     /// Needs no disk access: the candidates are the files the indexes
-    /// already name. They are handed to
-    /// [`reindex_files_batch`](Backend::reindex_files_batch) as deletions
-    /// rather than purged here, so an excluded file leaves the index by
-    /// exactly the same route a deleted one does and no index is missed.
+    /// already name.
     ///
     /// Only the *change* is applied. A file both filter sets exclude was
     /// put in the index by something the filters do not govern (a
@@ -115,48 +161,124 @@ impl Backend {
         previous: &IndexFilters,
         current: &IndexFilters,
     ) -> usize {
-        let mut filtered: HashMap<String, PathBuf> = HashMap::new();
-        let note = |uri: &str, filtered: &mut HashMap<String, PathBuf>| {
-            note_if_newly_filtered(uri, previous, current, filtered)
+        let filtered = self.indexed_files_matching(|path| {
+            is_out_of_scope(current, path) && !is_out_of_scope(previous, path)
+        });
+        self.evict_indexed_files(filtered)
+    }
+
+    /// Every file on disk the indexes name whose path satisfies
+    /// `matches`, keyed by the URI the index holds it under, leaving out
+    /// the documents open in the editor.
+    ///
+    /// URIs that name no file on disk (embedded stubs, PHAR members) are
+    /// never offered to `matches`: no setting about paths can speak about
+    /// them.
+    pub(super) fn indexed_files_matching(
+        &self,
+        matches: impl Fn(&Path) -> bool,
+    ) -> HashMap<String, PathBuf> {
+        self.indexed_files_where(|_| true, matches)
+    }
+
+    /// [`indexed_files_matching`](Self::indexed_files_matching) for the
+    /// files under `trees`, each a directory or a single file.
+    ///
+    /// Answered from the URIs' prefixes, so the many URIs outside `trees`
+    /// are rejected without being decoded into a path.
+    pub(super) fn indexed_files_under(&self, trees: &[PathBuf]) -> HashMap<String, PathBuf> {
+        let prefixes: Vec<(String, String)> = trees
+            .iter()
+            .map(|tree| {
+                (
+                    crate::util::path_to_uri(tree),
+                    crate::util::dir_uri_prefix(tree),
+                )
+            })
+            .collect();
+        self.indexed_files_where(
+            |uri| {
+                prefixes
+                    .iter()
+                    .any(|(exact, prefix)| uri == exact || uri.starts_with(prefix.as_str()))
+            },
+            |path| trees.iter().any(|tree| path.starts_with(tree)),
+        )
+    }
+
+    /// The indexed files whose URI passes `uri_may_match` and whose path
+    /// then satisfies `matches`, leaving out the open documents.
+    fn indexed_files_where(
+        &self,
+        uri_may_match: impl Fn(&str) -> bool,
+        matches: impl Fn(&Path) -> bool,
+    ) -> HashMap<String, PathBuf> {
+        let mut found: HashMap<String, PathBuf> = HashMap::new();
+        let mut note = |uri: &str| {
+            if !uri_may_match(uri) || found.contains_key(uri) {
+                return;
+            }
+            if let Some(path) = crate::util::uri_to_path(uri)
+                && matches(&path)
+            {
+                found.insert(uri.to_string(), path);
+            }
         };
 
         for uri in self.symbols.fqn_uri_index.read().values() {
-            note(uri, &mut filtered);
+            note(uri);
         }
         for uri in self.symbols.uri_classes_index.read().keys() {
-            note(uri, &mut filtered);
+            note(uri);
+        }
+        for uri in self.uris_with_symbol_maps() {
+            note(&uri);
+        }
+        for uri in self.parsed_uris.read().iter() {
+            note(uri);
         }
         // A file whose only symbols are functions or constants is in
         // neither class index, and one that declares nothing at all is
-        // still parsed and still holds a symbol map.
+        // still parsed and still holds a symbol map.  These indexes hold
+        // paths, so the path is tested before a URI is built for it.
+        let mut note_path = |path: &Path| {
+            if matches(path) {
+                let uri = crate::util::path_to_uri(path);
+                if uri_may_match(&uri) && !found.contains_key(&uri) {
+                    found.insert(uri, path.to_path_buf());
+                }
+            }
+        };
         for path in self.symbols.autoload_function_index.read().values() {
-            note(&crate::util::path_to_uri(path), &mut filtered);
+            note_path(path);
         }
         for path in self.symbols.autoload_constant_index.read().values() {
-            note(&crate::util::path_to_uri(path), &mut filtered);
-        }
-        for uri in self.symbol_maps.read().keys() {
-            note(uri, &mut filtered);
-        }
-        for uri in self.parsed_uris.read().iter() {
-            note(uri, &mut filtered);
+            note_path(path);
         }
 
-        // A document open in the editor is served whatever the filters
-        // say (`did_open` parses it outright), so dropping its symbol
-        // map would break the file the user is looking at to honour a
-        // setting about workspace discovery.
-        if !filtered.is_empty() {
+        // A document open in the editor is served whatever the indexing
+        // settings say (`did_open` parses it outright), so dropping its
+        // symbol map would break the file the user is looking at to
+        // honour a setting about workspace discovery.
+        if !found.is_empty() {
             let open = self.open_files.read();
-            filtered.retain(|uri, _| !open.contains_key(uri));
+            found.retain(|uri, _| !open.contains_key(uri));
         }
-        if filtered.is_empty() {
+        found
+    }
+
+    /// Drop `files` from every index and report how many there were.
+    ///
+    /// They are handed to [`reindex_files_batch`](Backend::reindex_files_batch)
+    /// as deletions rather than purged here, so a file leaves the index by
+    /// exactly the same route a deleted one does and no index is missed.
+    pub(super) fn evict_indexed_files(&self, files: HashMap<String, PathBuf>) -> usize {
+        if files.is_empty() {
             return 0;
         }
-
-        let changes: Vec<(String, PathBuf, FileChangeType)> = filtered
+        let changes: Vec<(String, PathBuf, FileChangeType)> = files
             .into_iter()
-            .map(|(uri, path)| (uri, path, FileChangeType::DELETED))
+            .map(|(uri, path)| (uri, path, FileChangeType::Deleted))
             .collect();
         self.reindex_files_batch(&changes);
         changes.len()
@@ -207,14 +329,14 @@ impl Backend {
         let Some(root) = self.workspace.workspace_root.read().clone() else {
             return;
         };
-        tracing::info!("PHPantom: file filters changed, rediscovering workspace symbols");
+        tracing::info!("PHPantom: discovery inputs changed, rediscovering workspace symbols");
 
         let progress_token = self.progress_create("phpantom/rediscovery").await;
         if let Some(ref tok) = progress_token {
             self.progress_begin(
                 tok,
                 "PHPantom: Reindexing",
-                Some("File filters changed".to_string()),
+                Some("Indexing settings changed".to_string()),
             )
             .await;
         }
@@ -223,7 +345,17 @@ impl Backend {
             .as_ref()
             .map(|tok| self.spawn_progress_poller(tok.clone(), Arc::clone(&progress)));
 
-        let composer_package = crate::composer::read_composer_package(&root);
+        let composer_package = match crate::composer::try_read_composer_package(&root) {
+            Ok(package) => package,
+            Err(e) => {
+                self.log(
+                    tower_lsp_server::gen_lsp_types::MessageType::Warning,
+                    format!("{e}; PSR-4 mappings from it are ignored"),
+                )
+                .await;
+                None
+            }
+        };
         self.discover_workspace_symbols(
             &root,
             self.php_version(),
@@ -252,28 +384,6 @@ impl Backend {
         // skips every file that already has a symbol map.
         self.start_full_background_index().await;
         self.request_diagnostic_refresh().await;
-    }
-}
-
-/// Record `uri` in `filtered` when `current` keeps its file out of the
-/// index and `previous` did not.
-///
-/// URIs that name no file on disk (embedded stubs, PHAR members) are
-/// left alone: no file filter can speak about them.
-fn note_if_newly_filtered(
-    uri: &str,
-    previous: &IndexFilters,
-    current: &IndexFilters,
-    filtered: &mut HashMap<String, PathBuf>,
-) {
-    if filtered.contains_key(uri) {
-        return;
-    }
-    let Some(path) = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()) else {
-        return;
-    };
-    if is_out_of_scope(current, &path) && !is_out_of_scope(previous, &path) {
-        filtered.insert(uri.to_string(), path);
     }
 }
 
@@ -398,11 +508,29 @@ mod tests {
         let inputs = |include: &[&str]| DiscoveryInputs {
             filters: IndexFilters::empty(),
             include: include.iter().map(|s| s.to_string()).collect(),
+            extra_roots: Vec::new(),
+            stub_paths: Vec::new(),
         };
 
         assert!(inputs(&[".castor", "stub.php"]).may_admit_more_than(&inputs(&[".castor"])));
         assert!(!inputs(&[".castor"]).may_admit_more_than(&inputs(&[".castor", "stub.php"])));
         assert!(!inputs(&[".castor"]).may_admit_more_than(&inputs(&[".castor"])));
+    }
+
+    /// A path that stops being a stub path holds code the walks skipped
+    /// while it was one. A new stub path takes no walk: the stub index
+    /// scans it itself.
+    #[test]
+    fn a_dropped_stub_path_asks_for_a_walk() {
+        let inputs = |stub_paths: &[&str]| DiscoveryInputs {
+            filters: IndexFilters::empty(),
+            include: Vec::new(),
+            extra_roots: Vec::new(),
+            stub_paths: stub_paths.iter().map(PathBuf::from).collect(),
+        };
+
+        assert!(inputs(&[]).may_admit_more_than(&inputs(&["/stubs"])));
+        assert!(!inputs(&["/stubs"]).may_admit_more_than(&inputs(&[])));
     }
 
     /// Discovery re-run over a populated index has to find the files the

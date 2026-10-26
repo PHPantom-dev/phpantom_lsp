@@ -4,9 +4,12 @@
 //! the target class: it appears in completion, resolves for member access,
 //! and is not flagged as an unknown member.
 
-use crate::common::{create_psr4_workspace, open_php_str};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::message_text;
+use crate::common::{
+    completion_response, create_psr4_workspace, goto_definition_at, hover_response, open_php_str,
+};
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -85,27 +88,18 @@ class Consumer {
     .await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        12,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -143,27 +137,18 @@ class Consumer {
     .await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 28,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        28,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -206,9 +191,9 @@ class Consumer {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(
@@ -237,26 +222,17 @@ class Consumer {
     open_php_str(&backend, provider_uri, PROVIDER_PHP).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 22,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    let result = goto_definition_at(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        22,
+    )
+    .await;
 
     match result.expect("go-to-definition should resolve a macro call") {
-        GotoDefinitionResponse::Scalar(location) => {
-            assert_eq!(location.uri, Url::parse(provider_uri).unwrap());
+        DefinitionResponse::Definition(Definition::Location(location)) => {
+            assert_eq!(location.uri, Uri::parse(provider_uri).unwrap());
             // The `Collection::macro('sumField', ...)` line in PROVIDER_PHP.
             assert_eq!(location.range.start.line, 5);
             assert_eq!(location.range.start.character, 27);
@@ -323,27 +299,18 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        12,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -388,9 +355,9 @@ class Consumer {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(
@@ -458,27 +425,18 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        12,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -559,27 +517,18 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        12,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -642,27 +591,18 @@ class Consumer {
     open_php_str(&backend, "file:///src/ConfidentialScope.php", scope).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 16,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        16,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -748,27 +688,18 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        12,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -857,33 +788,24 @@ class Consumer {
     // Open the provider at its real workspace URI and add a helper
     // reference; the changed reference set must trigger an index rebuild
     // that scans the newly referenced helper.
-    let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
+    let provider_uri = Uri::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
     open_php_str(&backend, &provider_uri, provider_after).await;
 
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        12,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -917,24 +839,16 @@ class Consumer {
     .await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap();
+    let result = hover_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        14,
+    )
+    .await;
 
     let hover = result.expect("hover should return a result");
-    if let HoverContents::Markup(markup) = hover.contents {
+    if let Contents::MarkupContent(markup) = hover.contents {
         let value = &markup.value;
         assert!(
             value.contains("macro"),
@@ -945,7 +859,7 @@ class Consumer {
             "explicit return type should not show (inferred), got:\n{value}"
         );
     } else {
-        panic!("expected HoverContents::Markup");
+        panic!("expected Contents::MarkupContent");
     }
 }
 
@@ -980,24 +894,16 @@ class Consumer {
     .await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap();
+    let result = hover_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        14,
+    )
+    .await;
 
     let hover = result.expect("hover should return a result");
-    if let HoverContents::Markup(markup) = hover.contents {
+    if let Contents::MarkupContent(markup) = hover.contents {
         let value = &markup.value;
         assert!(
             value.contains("macro"),
@@ -1008,7 +914,7 @@ class Consumer {
             "inferred return type should show (inferred) annotation, got:\n{value}"
         );
     } else {
-        panic!("expected HoverContents::Markup");
+        panic!("expected Contents::MarkupContent");
     }
 }
 
@@ -1078,27 +984,18 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        12,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -1150,9 +1047,9 @@ class Consumer {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(
@@ -1190,26 +1087,17 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 22,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    let result = goto_definition_at(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        22,
+    )
+    .await;
 
-    let mixin_uri = Url::from_file_path(dir.path().join("src/Mixins/CollectionMixin.php")).unwrap();
+    let mixin_uri = Uri::from_file_path(dir.path().join("src/Mixins/CollectionMixin.php")).unwrap();
     match result.expect("go-to-definition should resolve a mixin macro call") {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, mixin_uri);
             // The `public function sumField(): Closure` line in the mixin file.
             assert_eq!(location.range.start.line, 4);
@@ -1250,24 +1138,16 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 20,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap();
+    let result = hover_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        20,
+    )
+    .await;
 
     let hover = result.expect("hover should resolve a mixin macro call");
-    if let HoverContents::Markup(markup) = hover.contents {
+    if let Contents::MarkupContent(markup) = hover.contents {
         let value = &markup.value;
         assert!(
             value.contains("macro"),
@@ -1278,7 +1158,7 @@ class Consumer {
             "hover should show the recovered return type, got:\n{value}"
         );
     } else {
-        panic!("expected HoverContents::Markup");
+        panic!("expected Contents::MarkupContent");
     }
 }
 
@@ -1347,23 +1227,15 @@ class Consumer {
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     // Hover on `toAssoc` in `$c->toAssoc('id', 'name')` (name starts at col 19).
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 21,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap()
-        .expect("hover should resolve the mixin macro call");
-    let HoverContents::Markup(markup) = hover.contents else {
+    let hover = hover_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        21,
+    )
+    .await
+    .expect("hover should resolve the mixin macro call");
+    let Contents::MarkupContent(markup) = hover.contents else {
         panic!("expected markup hover");
     };
     assert!(
@@ -1452,23 +1324,15 @@ class Consumer {
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     // Hover on `makeWidget` in `$c->makeWidget()` (name starts at col 12).
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap()
-        .expect("hover should resolve the mixin macro call");
-    let HoverContents::Markup(markup) = hover.contents else {
+    let hover = hover_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        14,
+    )
+    .await
+    .expect("hover should resolve the mixin macro call");
+    let Contents::MarkupContent(markup) = hover.contents else {
         panic!("expected markup hover");
     };
     assert!(
@@ -1578,27 +1442,18 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        15,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -1669,9 +1524,9 @@ class Consumer {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(
@@ -1723,27 +1578,18 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        15,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()

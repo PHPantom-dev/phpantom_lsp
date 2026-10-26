@@ -155,7 +155,7 @@ pub(crate) fn collect_condition_subject_vars(expr: &Expression<'_>, out: &mut Ve
 /// (`$this->cache`, `$row["id"]`, `mb_strpos($s, $m)`) rather than a
 /// plain variable.
 pub(crate) fn is_synthetic_key(key: &str) -> bool {
-    narrowing::is_member_path_key(key) || narrowing::is_call_key(key)
+    condition_facts::is_member_path_key(key) || condition_facts::is_call_key(key)
 }
 
 /// Remove synthetic property/array access keys from the scope.
@@ -201,14 +201,14 @@ pub(crate) fn seed_synthetic_key_if_needed(
 ) {
     // Only seed compound keys (property access, array access, or a
     // static property).
-    if !narrowing::is_member_path_key(key) {
+    if !condition_facts::is_member_path_key(key) {
         return;
     }
     // A call key that carries arguments cannot be re-resolved from its
     // text — the arguments decide the return type.  Those are seeded from
     // the expression they were built from, by
     // [`seed_call_subject_keys`].
-    if narrowing::is_call_key_with_arguments(key) {
+    if condition_facts::is_call_key_with_arguments(key) {
         return;
     }
     if scope.contains(key) {
@@ -250,8 +250,8 @@ pub(crate) fn seed_assert_arg_subject_keys(
             Argument::Positional(pos) => pos.value,
             Argument::Named(named) => named.value,
         };
-        if let Some(key) = narrowing::expr_to_subject_key(arg_expr)
-            && narrowing::is_member_path_key(&key)
+        if let Some(key) = condition_facts::expr_to_subject_key(arg_expr)
+            && condition_facts::is_member_path_key(&key)
         {
             seed_synthetic_key_if_needed(&key, scope, ctx);
         }
@@ -269,14 +269,16 @@ pub(crate) fn seed_assert_arg_subject_keys(
     let resolver =
         |vn: &str| -> Vec<ResolvedType> { snapshot.get(&atom(vn)).cloned().unwrap_or_default() };
     let var_ctx = build_var_ctx("", ctx, &resolver);
-    let Some(info) = narrowing::extract_call_assertions(call, &var_ctx) else {
+    let Some(info) = condition_facts::extract_call_assertions(call, &var_ctx) else {
         return;
     };
     let keys: Vec<String> = info
         .assertions
         .iter()
-        .filter_map(|assertion| narrowing::assertion_subject_key(&assertion.param_name, &info))
-        .filter(|key| narrowing::is_member_path_key(key))
+        .filter_map(|assertion| {
+            condition_facts::assertion_subject_key(&assertion.param_name, &info)
+        })
+        .filter(|key| condition_facts::is_member_path_key(key))
         .collect();
     for key in keys {
         seed_synthetic_key_if_needed(&key, scope, ctx);
@@ -296,8 +298,8 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
     match expr {
         // instanceof: `$a->foo instanceof Foo` or `$row["page"] instanceof Foo`
         Expression::Binary(bin) if bin.operator.is_instanceof() => {
-            if let Some(key) = narrowing::expr_to_subject_key(bin.lhs)
-                && narrowing::is_member_path_key(&key)
+            if let Some(key) = condition_facts::expr_to_subject_key(bin.lhs)
+                && condition_facts::is_member_path_key(&key)
                 && !keys.contains(&key)
             {
                 keys.push(key);
@@ -316,8 +318,8 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
             ) =>
         {
             for side in [bin.lhs, bin.rhs] {
-                if let Some(key) = narrowing::class_identity_subject_key(side)
-                    && narrowing::is_member_path_key(&key)
+                if let Some(key) = condition_facts::class_identity_subject_key(side)
+                    && condition_facts::is_member_path_key(&key)
                     && !keys.contains(&key)
                 {
                     keys.push(key);
@@ -348,15 +350,16 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
         // `is_a($a->foo, Foo::class)`, `in_array($a->foo, $list, true)`.
         Expression::Call(Call::Function(func_call)) => {
             if let Expression::Identifier(ident) = func_call.function {
-                let is_type_guard = narrowing::narrows_first_argument(bytes_to_str(ident.value()));
+                let is_type_guard =
+                    condition_facts::narrows_first_argument(bytes_to_str(ident.value()));
                 if is_type_guard && let Some(first_arg) = func_call.argument_list.arguments.first()
                 {
                     let arg_expr = match first_arg {
                         Argument::Positional(pos) => pos.value,
                         Argument::Named(named) => named.value,
                     };
-                    if let Some(key) = narrowing::expr_to_subject_key(arg_expr)
-                        && narrowing::is_member_path_key(&key)
+                    if let Some(key) = condition_facts::expr_to_subject_key(arg_expr)
+                        && condition_facts::is_member_path_key(&key)
                         && !keys.contains(&key)
                     {
                         keys.push(key);
@@ -372,8 +375,8 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
             Access::Property(_) | Access::NullSafeProperty(_) | Access::StaticProperty(_),
         )
         | Expression::ArrayAccess(_) => {
-            if let Some(key) = narrowing::expr_to_subject_key(expr)
-                && narrowing::is_member_path_key(&key)
+            if let Some(key) = condition_facts::expr_to_subject_key(expr)
+                && condition_facts::is_member_path_key(&key)
                 && !keys.contains(&key)
             {
                 keys.push(key);
@@ -472,7 +475,7 @@ pub(crate) fn seed_call_subject_keys(
                 Call::StaticMethod(sc) => &sc.argument_list,
             };
             for argument in argument_list.arguments.iter() {
-                seed_call_subject(narrowing::argument_value(argument), scope, ctx);
+                seed_call_subject(condition_facts::argument_value(argument), scope, ctx);
             }
             seed_call_subject(condition, scope, ctx);
         }
@@ -491,7 +494,7 @@ pub(crate) fn seed_call_subject_keys(
 /// Seed one expression under its call key, when it has one and the scope
 /// does not already carry it.
 fn seed_call_subject(expr: &Expression<'_>, scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
-    let Some(key) = narrowing::expr_to_subject_key(expr) else {
+    let Some(key) = condition_facts::expr_to_subject_key(expr) else {
         return;
     };
     if !seeds_from_expression(&key) || scope.contains(&key) {
@@ -512,8 +515,9 @@ fn seed_call_subject(expr: &Expression<'_>, scope: &mut ScopeState, ctx: &Forwar
 /// which neither has. What it does own is `$h->get()`, whose receiver the
 /// walker's scope already holds, so that shape is left to it.
 fn seeds_from_expression(key: &str) -> bool {
-    narrowing::is_call_key(key)
-        && (narrowing::is_call_key_with_arguments(key) || !narrowing::is_member_path_key(key))
+    condition_facts::is_call_key(key)
+        && (condition_facts::is_call_key_with_arguments(key)
+            || !condition_facts::is_member_path_key(key))
 }
 
 pub(crate) fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &mut Vec<String>) {

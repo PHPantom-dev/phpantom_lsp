@@ -6,9 +6,9 @@
 use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionList, CompletionResponse, CompletionTextEdit,
-    NumberOrString, Position, Range, TextEdit,
+use tower_lsp_server::gen_lsp_types::{
+    Code, CompletionItem, CompletionItemKind, CompletionItemTextEdit, CompletionList,
+    CompletionResponse, Position, Range, TextEdit,
 };
 
 use crate::Backend;
@@ -59,6 +59,7 @@ impl Backend {
         // a complete docblock skeleton as a single snippet item.
         // Must run before the docblock-interior checks below.
         let class_loader = self.class_loader(ctx);
+        let resolved_class_loader = self.resolved_class_loader(ctx);
         let function_loader = self.function_loader(ctx);
         if let Some(response) = crate::completion::phpdoc::generation::try_generate_docblock(
             content,
@@ -67,6 +68,7 @@ impl Backend {
             &ctx.namespace,
             &ctx.classes,
             &class_loader,
+            &resolved_class_loader,
             Some(self),
             Some(&function_loader),
             uri,
@@ -101,7 +103,7 @@ impl Backend {
         let cache = self.phpstan_tool.last_diags.lock();
         if let Some(diags) = cache.get(uri) {
             for diag in diags {
-                let Some(NumberOrString::String(code)) = &diag.code else {
+                let Some(Code::String(code)) = &diag.code else {
                     continue;
                 };
                 if code.is_empty() || code == "phpstan" || code.starts_with("ignore.unmatched") {
@@ -117,7 +119,7 @@ impl Backend {
             .enumerate()
             .map(|(idx, id)| CompletionItem {
                 label: id.clone(),
-                kind: Some(CompletionItemKind::VALUE),
+                kind: Some(CompletionItemKind::Value),
                 detail: Some("PHPStan error identifier".to_string()),
                 insert_text: Some(id),
                 sort_text: Some(format!("0_{idx:03}")),
@@ -125,7 +127,7 @@ impl Backend {
             })
             .collect();
 
-        CompletionResponse::Array(items)
+        CompletionResponse::CompletionItemList(items)
     }
 
     // ─── Strategy: PHPDoc tag completion ─────────────────────────────────
@@ -147,6 +149,7 @@ impl Backend {
     ) -> CompletionResponse {
         let context = crate::completion::phpdoc::detect_context(content, position);
         let class_loader = self.class_loader(ctx);
+        let resolved_class_loader = self.resolved_class_loader(ctx);
         let function_loader = self.function_loader(ctx);
 
         // For inline variable assignments, try to infer the type from
@@ -156,11 +159,15 @@ impl Backend {
                 let sym = crate::completion::phpdoc::extract_symbol_info(content, position);
                 crate::completion::phpdoc::generation::infer_inline_variable_type(
                     &sym,
-                    content,
                     position,
-                    ctx,
-                    &class_loader,
-                    Some(self),
+                    crate::type_engine::resolver::FileCtx::new(
+                        content,
+                        &ctx.classes,
+                        &resolved_class_loader,
+                        &class_loader,
+                    )
+                    .with_imports(Some(&ctx.use_map))
+                    .with_backend(Some(self)),
                     Some(
                         &function_loader
                             as &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
@@ -173,6 +180,7 @@ impl Backend {
         let smart = crate::completion::phpdoc::SmartContext {
             inferred_inline_var_type: inferred_var_type,
             class_loader: Some(&class_loader),
+            resolved_class_loader: Some(&resolved_class_loader),
             function_loader: Some(&function_loader),
             import_target: Some((self, uri)),
             local_classes: &ctx.classes,
@@ -186,7 +194,7 @@ impl Backend {
             &ctx.namespace,
             &smart,
         );
-        CompletionResponse::Array(items)
+        CompletionResponse::CompletionItemList(items)
     }
 
     // ─── Strategy: docblock type / variable completion ───────────────────
@@ -229,9 +237,11 @@ impl Backend {
                     return if class_items.is_empty() {
                         None
                     } else {
-                        Some(CompletionResponse::List(CompletionList {
+                        Some(CompletionResponse::CompletionList(CompletionList {
                             is_incomplete: class_incomplete,
                             items: class_items,
+                            apply_kind: None,
+                            item_defaults: None,
                         }))
                     };
                 }
@@ -245,7 +255,7 @@ impl Backend {
                     .enumerate()
                     .map(|(idx, t)| CompletionItem {
                         label: t.to_string(),
-                        kind: Some(CompletionItemKind::KEYWORD),
+                        kind: Some(CompletionItemKind::Keyword),
                         detail: Some("PHP built-in type".to_string()),
                         insert_text: Some(t.to_string()),
                         filter_text: Some(t.to_string()),
@@ -270,9 +280,11 @@ impl Backend {
                 if items.is_empty() {
                     None
                 } else {
-                    Some(CompletionResponse::List(CompletionList {
+                    Some(CompletionResponse::CompletionList(CompletionList {
                         is_incomplete: class_incomplete,
                         items,
+                        apply_kind: None,
+                        item_defaults: None,
                     }))
                 }
             }
@@ -308,9 +320,9 @@ impl Backend {
                             .unwrap_or_else(|| PhpType::mixed().to_string());
                         CompletionItem {
                             label: name.clone(),
-                            kind: Some(CompletionItemKind::VARIABLE),
+                            kind: Some(CompletionItemKind::Variable),
                             detail: Some(detail),
-                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                            text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                                 range: replace_range,
                                 new_text: name.clone(),
                             })),
@@ -323,7 +335,7 @@ impl Backend {
                 if items.is_empty() {
                     None
                 } else {
-                    Some(CompletionResponse::Array(items))
+                    Some(CompletionResponse::CompletionItemList(items))
                 }
             }
             None => {

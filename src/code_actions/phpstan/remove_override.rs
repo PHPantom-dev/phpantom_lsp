@@ -18,12 +18,12 @@
 //! Phase 2 (`resolve_remove_override`) computes the workspace edit on
 //! demand when the user picks the action.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::attributes::attributed_member_at;
 use crate::Backend;
-use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::phpstan::{phpstan_identifier, phpstan_member_name};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 
 /// PHPStan identifiers we match on.
 const METHOD_OVERRIDE_ID: &str = "method.override";
@@ -44,7 +44,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -85,40 +85,24 @@ impl Backend {
             // Try to extract a readable member name from any of the
             // grouped diagnostics (some identifiers like
             // `property.overrideAttribute` don't include the name).
-            let member_name = diags.iter().find_map(|d| {
-                let id = match &d.code {
-                    Some(NumberOrString::String(s)) => s.as_str(),
-                    _ => return None,
-                };
-                extract_member_name(&d.message, id)
-            });
+            let member_name = diags
+                .iter()
+                .find_map(|d| phpstan_member_name(crate::util::message_text(&d.message)));
 
             let title = match member_name {
                 Some(name) => format!("Remove #[Override] from {}", name),
                 None => "Remove #[Override]".to_string(),
             };
 
-            let extra = serde_json::json!({
-                "diagnostic_message": first.message,
-                "diagnostic_line": first.range.start.line,
-                "diagnostic_code": match &first.code {
-                    Some(NumberOrString::String(s)) => s.as_str(),
-                    _ => "",
-                },
-            });
-
-            let data = make_code_action_data("phpstan.removeOverride", uri, &params.range, extra);
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(deferred_quickfix(
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(diags.iter().map(|d| (*d).clone()).collect()),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(data),
-            }));
+                "phpstan.removeOverride",
+                uri,
+                &params.range,
+                diags.iter().map(|d| (*d).clone()).collect(),
+                true,
+                serde_json::Value::Null,
+            ));
         }
     }
 
@@ -139,47 +123,12 @@ impl Backend {
         let edit =
             attributed_member_at(content, diag_line)?.remove_attribute_edit(content, "Override")?;
 
-        let doc_uri: Url = uri.parse().ok()?;
+        let doc_uri: Uri = uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-/// Extract a member name from a PHPStan `method.override`,
-/// `property.override`, or `property.overrideAttribute` message.
-///
-/// Expected formats:
-/// - `"Method Foo::bar() has #[\Override] attribute but does not override any method."`
-/// - `"Property Foo::$baz has #[\Override] attribute but does not override any property."`
-/// - `"Attribute class Override can be used with properties only on PHP 8.5 and later."`
-///   (no member name extractable — returns `None`)
-fn extract_member_name<'a>(message: &'a str, identifier: &str) -> Option<&'a str> {
-    if identifier == METHOD_OVERRIDE_ID {
-        let after = message.strip_prefix("Method ")?;
-        let paren_pos = after.find('(')?;
-        let class_and_name = &after[..paren_pos];
-        let name = class_and_name.rsplit("::").next()?;
-        if name.is_empty() {
-            return None;
-        }
-        Some(name)
-    } else if identifier == PROPERTY_OVERRIDE_ID {
-        let after = message.strip_prefix("Property ")?;
-        let has_pos = after.find(" has ")?;
-        let class_and_name = &after[..has_pos];
-        let name = class_and_name.rsplit("::").next()?;
-        if name.is_empty() {
-            return None;
-        }
-        Some(name)
-    } else {
-        // property.overrideAttribute message doesn't contain the
-        // property name, so we return None and the title will be
-        // the generic "Remove #[Override]".
-        None
-    }
-}
 
 /// Check whether a `method.override` / `property.override` diagnostic
 /// is stale by verifying that the member still carries `#[Override]`.
@@ -192,42 +141,6 @@ pub(crate) fn is_remove_override_stale(content: &str, diag_line: usize) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── extract_member_name ─────────────────────────────────────────
-
-    #[test]
-    fn extracts_method_name_from_method_override_message() {
-        let msg =
-            "Method App\\Foo::bar() has #[\\Override] attribute but does not override any method.";
-        assert_eq!(extract_member_name(msg, METHOD_OVERRIDE_ID), Some("bar"));
-    }
-
-    #[test]
-    fn extracts_property_name_from_property_override_message() {
-        let msg = "Property App\\Foo::$baz has #[\\Override] attribute but does not override any property.";
-        assert_eq!(extract_member_name(msg, PROPERTY_OVERRIDE_ID), Some("$baz"));
-    }
-
-    #[test]
-    fn returns_none_for_unrelated_message() {
-        let msg = "Some other PHPStan error.";
-        assert_eq!(extract_member_name(msg, METHOD_OVERRIDE_ID), None);
-    }
-
-    #[test]
-    fn returns_none_for_override_attribute_message() {
-        let msg = "Attribute class Override can be used with properties only on PHP 8.5 and later.";
-        assert_eq!(extract_member_name(msg, PROPERTY_OVERRIDE_ATTR_ID), None);
-    }
-
-    #[test]
-    fn extracts_constructor_name() {
-        let msg = "Method App\\Foo::__construct() has #[\\Override] attribute but does not override any method.";
-        assert_eq!(
-            extract_member_name(msg, METHOD_OVERRIDE_ID),
-            Some("__construct")
-        );
-    }
 
     // ── is_remove_override_stale ────────────────────────────────────
 

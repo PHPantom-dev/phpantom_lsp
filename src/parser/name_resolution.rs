@@ -13,10 +13,10 @@ use crate::Backend;
 use crate::atom::{Atom, atom};
 use crate::names::{lookup_import, resolve_to_fqn};
 use crate::php_type::PhpType;
-use crate::type_engine::types::docblock_narrowing;
+use crate::type_engine::type_ops::docblock_narrowing;
 use crate::types::{
     ClassInfo, DocTypeSlot, DocblockMembers, FunctionInfo, MethodInfo, NamespaceSpan,
-    ParameterInfo, TypeAliasDef, UnverifiedDocType,
+    ParameterInfo, SeeRef, TypeAliasDef, UnverifiedDocType,
 };
 
 /// The imports and namespace a declaration's names are qualified against.
@@ -63,6 +63,30 @@ fn qualify_in_place<'t>(
         }
     }
     changed
+}
+
+/// Qualify the class each `@see` reference names, so a hover in another
+/// file can link to it.  `self_fqn` and `parent_fqn` are the classes
+/// `self` (and `static`) and `parent` name, when the declaration sits in a
+/// class.
+fn qualify_see_refs(
+    refs: &mut [SeeRef],
+    scope: NameScope<'_>,
+    self_fqn: Option<&str>,
+    parent_fqn: Option<&str>,
+) {
+    for see in refs {
+        see.class = match see.written_class() {
+            None => None,
+            Some(name)
+                if name.eq_ignore_ascii_case("self") || name.eq_ignore_ascii_case("static") =>
+            {
+                self_fqn.map(atom)
+            }
+            Some(name) if name.eq_ignore_ascii_case("parent") => parent_fqn.map(atom),
+            Some(name) => Some(atom(&resolve_to_fqn(name, scope.use_map, scope.namespace))),
+        };
+    }
 }
 
 /// Qualify the class names a parameter's default and types spell.
@@ -209,6 +233,7 @@ impl Backend {
                 &resolver,
             );
             func.unverified_doc_types = unverified.into_boxed_slice();
+            qualify_see_refs(&mut func.see_refs, scope, None, None);
         }
     }
 
@@ -362,15 +387,38 @@ impl Backend {
                 )
             };
 
+            // A `@see self::foo()` in a trait points into the trait itself.
+            let own_fqn = crate::util::build_fqn(&class.name, namespace.as_deref());
+            let see_keywords = (Some(own_fqn.as_str()), class.parent_class.as_deref());
+            qualify_see_refs(&mut class.see_refs, scope, see_keywords.0, see_keywords.1);
+
             for method in class.methods.make_mut() {
+                let method = Arc::make_mut(method);
                 Self::qualify_method_names(
-                    Arc::make_mut(method),
+                    method,
                     scope,
                     &skip_names,
                     &resolver,
                     (self_fqn.as_deref(), parent_fqn.as_deref()),
                     &mut unverified,
                 );
+                if let Some(extras) = method.extras.as_deref_mut() {
+                    qualify_see_refs(&mut extras.see_refs, scope, see_keywords.0, see_keywords.1);
+                }
+            }
+            for prop in class.properties.make_mut() {
+                if !prop.see_refs.is_empty() {
+                    let see_refs = &mut Arc::make_mut(prop).see_refs;
+                    qualify_see_refs(see_refs, scope, see_keywords.0, see_keywords.1);
+                }
+            }
+            if class.constants.iter().any(|c| !c.see_refs.is_empty()) {
+                for constant in class.constants.make_mut() {
+                    if !constant.see_refs.is_empty() {
+                        let see_refs = &mut Arc::make_mut(constant).see_refs;
+                        qualify_see_refs(see_refs, scope, see_keywords.0, see_keywords.1);
+                    }
+                }
             }
             Self::qualify_property_names(class, &skip_names, &resolver, &mut unverified);
             unverified.sort_unstable_by(|a, b| {
@@ -395,7 +443,7 @@ impl Backend {
         // A member signature is read from every file that uses the class,
         // where the alias names it would no longer be in scope.
         if !all_alias_names.is_empty() {
-            crate::type_engine::types::aliases::expand_local_type_aliases(classes);
+            crate::type_engine::type_ops::aliases::expand_local_type_aliases(classes);
         }
     }
 

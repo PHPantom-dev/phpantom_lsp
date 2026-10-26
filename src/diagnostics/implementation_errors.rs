@@ -7,9 +7,10 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::code_actions::implement_methods::collect_missing_methods;
 use crate::symbol_map::SymbolKind;
 use crate::types::ClassLikeKind;
@@ -32,9 +33,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
-            return;
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
         self.collect_implementation_error_diagnostics_with_context(&ctx, uri, content, out);
     }
 
@@ -131,7 +130,7 @@ impl Backend {
 
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 "missing_implementation",
                 message,
             ));
@@ -145,7 +144,7 @@ impl Backend {
 fn method_source_description(
     class: &crate::types::ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> String {
     use crate::inheritance::{ancestors, find_declaring_ancestor, find_declaring_trait};
 
@@ -156,7 +155,7 @@ fn method_source_description(
     };
 
     for iface_name in &class.interfaces {
-        if let Some(iface) = class_loader(iface_name)
+        if let Some(iface) = class_loader(Fqn::new(iface_name))
             && (declares(&iface)
                 || find_declaring_ancestor(&iface, class_loader, &declares).is_some())
         {

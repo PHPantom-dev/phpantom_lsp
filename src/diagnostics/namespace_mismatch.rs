@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
@@ -41,7 +41,7 @@ pub(crate) fn namespace_mismatch_diagnostic(
 
     Some(make_diagnostic(
         range,
-        DiagnosticSeverity::WARNING,
+        DiagnosticSeverity::Warning,
         "namespace_mismatch",
         format!("Namespace `{actual_display}` does not match PSR-4 expected `{expected_display}`"),
     ))
@@ -64,7 +64,7 @@ pub(crate) fn psr4_expectation(
     }
 
     let workspace_root = backend.workspace_root().read().clone()?;
-    let file_path = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok())?;
+    let file_path = crate::util::uri_to_path(uri)?;
 
     let mappings = backend.psr4_mappings().read().clone();
     if mappings.is_empty() {

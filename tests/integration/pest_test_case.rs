@@ -1,3 +1,4 @@
+use crate::common::message_text;
 use crate::common::{
     complete_at, create_psr4_workspace, method_names, unknown_member_diagnostics_with_scope_cache,
     workspace_uri,
@@ -109,7 +110,7 @@ fn unknown_members_in(backend: &Backend, path: &str, text: &str) -> Vec<String> 
     let uri = workspace_uri(backend, path);
     unknown_member_diagnostics_with_scope_cache(backend, uri.as_str(), text)
         .into_iter()
-        .map(|d| d.message)
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 
@@ -325,5 +326,65 @@ it('opens the basket', function (): void {
     assert!(
         messages[0].contains("Tests\\Page"),
         "Expected spec/Pest.php to bind BrowserTestCase, got: {messages:?}"
+    );
+}
+
+/// A `Pest.php` written outside the editor, as `pest --init` or a branch
+/// switch does, binds the tests under it from the next lookup on, even
+/// after a lookup found the directory without one.
+#[tokio::test]
+async fn a_pest_php_created_on_disk_is_read() {
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::{
+        DidChangeWatchedFilesParams, FileChangeType, FileEvent, Uri,
+    };
+
+    let files = [
+        ("vendor/pest/Functions.php", PEST_FUNCTIONS),
+        ("vendor/pest/TestCall.php", TEST_CALL),
+        ("vendor/phpunit/TestCase.php", PHPUNIT_TEST_CASE),
+        ("tests/BrowserTestCase.php", BROWSER_TEST_CASE),
+        ("tests/Page.php", PAGE),
+    ];
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    for (path, content) in files {
+        backend.update_ast(workspace_uri(&backend, path).as_str(), content);
+    }
+    let text = r#"<?php
+it('opens the basket', function (): void {
+    $this->visitPage('/basket')->missing();
+});
+"#;
+
+    let before = unknown_members_in(&backend, "tests/Browser/BasketTest.php", text);
+    assert!(
+        before.iter().any(|m| m.contains("visitPage")),
+        "Without a Pest.php `visitPage()` should be unknown, got: {before:?}"
+    );
+
+    let pest_path = dir.path().join("tests/Pest.php");
+    std::fs::write(
+        &pest_path,
+        "<?php\npest()->extends(Tests\\BrowserTestCase::class)->in('Browser');\n",
+    )
+    .unwrap();
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Uri::from_file_path(&pest_path).unwrap(),
+                kind: FileChangeType::Created,
+            }],
+        })
+        .await;
+
+    let after = unknown_members_in(&backend, "tests/Browser/BasketTest.php", text);
+    assert_eq!(
+        after.len(),
+        1,
+        "Only `missing()` on the page should be unknown, got: {after:?}"
+    );
+    assert!(
+        after[0].contains("Tests\\Page"),
+        "Expected the new Pest.php to bind BrowserTestCase, got: {after:?}"
     );
 }

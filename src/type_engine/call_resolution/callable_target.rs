@@ -6,16 +6,16 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::atom;
-use crate::class_lookup::{find_class_at_offset, resolve_class_keyword};
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset, resolve_class_keyword};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
 use crate::text_position::position_to_offset;
 use crate::type_engine::conditional_resolution::TemplateContext;
-use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
+use crate::type_engine::resolver::{CtxLoaders, FileCtx, ResolutionCtx};
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use super::constant_operands::evaluate_constant_operands;
 use super::target_cache::CALLABLE_TARGET_CACHE;
@@ -47,7 +47,7 @@ impl Backend {
             param.type_hint.as_ref().and_then(|hint| {
                 crate::virtual_members::laravel::replace_eloquent_collections_in_param_type(
                     hint,
-                    rctx.class_loader,
+                    rctx.file.class_loader,
                 )
             })
         };
@@ -102,17 +102,17 @@ impl Backend {
                 this_type: None,
             };
             let evaluated =
-                crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
+                crate::type_engine::type_ops::conditional::evaluate_nested_conditionals_text(
                     ret,
                     &bound.parameters,
                     at,
                     None,
-                    crate::type_engine::types::conditional::ConditionalClassContext {
+                    crate::type_engine::type_ops::conditional::ConditionalClassContext {
                         calling: rctx.current_class.map(|c| c.fqn().as_str()),
                         declaring: Some(owner.fqn().as_str()),
                         written_class: Some(&|name: &str| rctx.written_names().resolve_class(name)),
                     },
-                    rctx.class_loader,
+                    rctx.file.class_loader,
                     &tpl,
                 );
             bound.return_type = Some(evaluated);
@@ -146,159 +146,171 @@ impl Backend {
             )
         };
 
-        for rt in &resolved_types {
-            let owner = match &rt.class_info {
-                Some(ci) => Arc::clone(ci),
-                None => continue,
-            };
+        resolved_types
+            .iter()
+            .find_map(|rt| Self::method_target_on_receiver(rt, method_name, rctx, args_text))
+    }
 
-            // Extract generic type arguments from the resolved type
-            // string (e.g. `Collection<User>` → `[User]`) so we can
-            // substitute class-level template parameters in the
-            // method's parameter and return types.
-            let generic_args: Vec<PhpType> = match &rt.type_string.kind() {
-                TypeKind::Generic(g) => g.args.clone(),
-                _ => {
-                    // When the resolved type has no generic annotation
-                    // but the class declares template parameters (e.g.
-                    // `$errors = new Collection()` without `<string>`),
-                    // fill in declared defaults, then upper bounds or
-                    // `mixed`. This prevents raw template names like
-                    // `TValue` from leaking into method parameter and
-                    // return types.
-                    if !owner.template_params.is_empty() {
-                        crate::inheritance::default_type_args(&owner)
-                    } else {
-                        vec![]
-                    }
-                }
-            };
+    /// The method `method_name` on one resolved receiver type as a
+    /// [`ResolvedCallableTarget`], with the receiver's generic arguments
+    /// substituted into the method's parameter and return types.
+    ///
+    /// `None` when the receiver is not a class or has no such method.
+    pub(crate) fn method_target_on_receiver(
+        rt: &ResolvedType,
+        method_name: &str,
+        rctx: &ResolutionCtx<'_>,
+        args_text: Option<&str>,
+    ) -> Option<ResolvedCallableTarget> {
+        let owner = Arc::clone(rt.class_info.as_ref()?);
 
-            // ── Callable target cache check ─────────────────────────
-            // When args_text is None (argument_count diagnostics),
-            // the callable target depends only on the resolved class
-            // and method name, not on the specific chain expression.
-            // Cache by "FQN::method_lower" so that `$q->where(...)`,
-            // `$query->where(...)`, and `Product::query()->where(...)`
-            // all share the result.
-            //
-            // When args_text is Some (type_error diagnostics with
-            // method-level template substitution), the result depends
-            // on the call-site arguments and cannot be cached this way.
-            let method_lower = method_name.to_ascii_lowercase();
-            let generic_arg_strings: Vec<String> =
-                generic_args.iter().map(|a| a.to_string()).collect();
-            let callable_cache_key = if args_text.is_none() {
-                let fqn = owner.fqn();
-                let key_str = if generic_arg_strings.is_empty() {
-                    format!("{}::{}", fqn, method_lower)
+        // Extract generic type arguments from the resolved type
+        // string (e.g. `Collection<User>` → `[User]`) so we can
+        // substitute class-level template parameters in the
+        // method's parameter and return types.
+        let generic_args: Vec<PhpType> = match &rt.type_string.kind() {
+            TypeKind::Generic(g) => g.args.clone(),
+            _ => {
+                // When the resolved type has no generic annotation
+                // but the class declares template parameters (e.g.
+                // `$errors = new Collection()` without `<string>`),
+                // fill in declared defaults, then upper bounds or
+                // `mixed`. This prevents raw template names like
+                // `TValue` from leaking into method parameter and
+                // return types.
+                if !owner.template_params.is_empty() {
+                    crate::inheritance::default_type_args(&owner)
                 } else {
-                    format!(
-                        "{}<{}>::{}",
-                        fqn,
-                        generic_arg_strings.join(","),
-                        method_lower
-                    )
-                };
-                Some(key_str)
+                    vec![]
+                }
+            }
+        };
+
+        // ── Callable target cache check ─────────────────────────
+        // When args_text is None (argument_count diagnostics),
+        // the callable target depends only on the resolved class
+        // and method name, not on the specific chain expression.
+        // Cache by "FQN::method_lower" so that `$q->where(...)`,
+        // `$query->where(...)`, and `Product::query()->where(...)`
+        // all share the result.
+        //
+        // When args_text is Some (type_error diagnostics with
+        // method-level template substitution), the result depends
+        // on the call-site arguments and cannot be cached this way.
+        let method_lower = method_name.to_ascii_lowercase();
+        let generic_arg_strings: Vec<String> = generic_args.iter().map(|a| a.to_string()).collect();
+        let callable_cache_key = if args_text.is_none() {
+            let fqn = owner.fqn();
+            let key_str = if generic_arg_strings.is_empty() {
+                format!("{}::{}", fqn, method_lower)
             } else {
-                None
+                format!(
+                    "{}<{}>::{}",
+                    fqn,
+                    generic_arg_strings.join(","),
+                    method_lower
+                )
+            };
+            Some(key_str)
+        } else {
+            None
+        };
+
+        if let Some(ref key) = callable_cache_key {
+            let cached = CALLABLE_TARGET_CACHE.with(|cell| {
+                let borrow = cell.borrow();
+                borrow.as_ref().and_then(|map| map.get(key).cloned())
+            });
+            match cached {
+                Some(Some(target)) => return Some(target),
+                Some(None) => return None,
+                None => {}
+            }
+        }
+
+        // Always use a fully-resolved class so that inherited
+        // docblock types (return types, parameter types,
+        // descriptions) are visible in signature help.  The
+        // candidate from `resolve_target_classes` may not have
+        // gone through `resolve_class_fully` (e.g. bare `new X`
+        // instantiation without generics).
+        //
+        // Use the fused resolve+substitute helper so that the
+        // result of `apply_generic_args` is cached under
+        // `(FQN, generic_args)`.  For Eloquent Builder<Model>
+        // chains where the same generic class appears at dozens
+        // of call sites, this avoids re-cloning and
+        // re-substituting hundreds of virtual members each time.
+        let effective = crate::virtual_members::resolve_class_fully_with_generics(
+            &owner,
+            rctx.file.class_loader,
+            rctx.resolved_class_cache,
+            &generic_arg_strings,
+            &generic_args,
+        );
+
+        if let Some(m) = effective.get_method_ci(&method_lower) {
+            let (result_method, self_bound_params) =
+                Self::bind_method_to_call_site(m, &effective, method_name, args_text, rctx);
+
+            let target = ResolvedCallableTarget {
+                parameters: result_method.parameters.clone(),
+                return_type: result_method.return_type.clone(),
+                reads_func_args: result_method.reads_func_args,
+                no_discard: result_method.is_no_discard,
+                owner_class: Some(owner.fqn()),
+                self_bound_params,
+                ..Default::default()
             };
 
-            if let Some(ref key) = callable_cache_key {
-                let cached = CALLABLE_TARGET_CACHE.with(|cell| {
-                    let borrow = cell.borrow();
-                    borrow.as_ref().and_then(|map| map.get(key).cloned())
-                });
-                match cached {
-                    Some(Some(target)) => return Some(target),
-                    Some(None) => continue,
-                    None => {}
-                }
-            }
-
-            // Always use a fully-resolved class so that inherited
-            // docblock types (return types, parameter types,
-            // descriptions) are visible in signature help.  The
-            // candidate from `resolve_target_classes` may not have
-            // gone through `resolve_class_fully` (e.g. bare `new X`
-            // instantiation without generics).
-            //
-            // Use the fused resolve+substitute helper so that the
-            // result of `apply_generic_args` is cached under
-            // `(FQN, generic_args)`.  For Eloquent Builder<Model>
-            // chains where the same generic class appears at dozens
-            // of call sites, this avoids re-cloning and
-            // re-substituting hundreds of virtual members each time.
-            let effective = crate::virtual_members::resolve_class_fully_with_generics(
-                &owner,
-                rctx.class_loader,
-                rctx.resolved_class_cache,
-                &generic_arg_strings,
-                &generic_args,
-            );
-
-            if let Some(m) = effective.get_method_ci(&method_lower) {
-                let (result_method, self_bound_params) =
-                    Self::bind_method_to_call_site(m, &effective, method_name, args_text, rctx);
-
-                let target = ResolvedCallableTarget {
-                    parameters: result_method.parameters.clone(),
-                    return_type: result_method.return_type.clone(),
-                    reads_func_args: result_method.reads_func_args,
-                    owner_class: Some(owner.fqn()),
-                    self_bound_params,
-                    ..Default::default()
-                };
-
-                // Store positive result in the callable target cache.
-                if let Some(ref key) = callable_cache_key {
-                    CALLABLE_TARGET_CACHE.with(|cell| {
-                        let mut borrow = cell.borrow_mut();
-                        if let Some(ref mut map) = *borrow {
-                            map.insert(key.clone(), Some(target.clone()));
-                        }
-                    });
-                }
-
-                return Some(target);
-            }
-
-            // Fall back to the candidate directly — it may contain
-            // model-specific members (e.g. Eloquent scope methods
-            // injected onto Builder<Model>) that the FQN-keyed
-            // cache does not have.
-            if let Some(m) = owner.get_method_ci(method_name) {
-                let target = ResolvedCallableTarget {
-                    parameters: m.parameters.clone(),
-                    return_type: m.return_type.clone(),
-                    reads_func_args: m.reads_func_args,
-                    owner_class: Some(owner.fqn()),
-                    ..Default::default()
-                };
-
-                // Store the owner-candidate fallback in the callable target cache.
-                if let Some(ref key) = callable_cache_key {
-                    CALLABLE_TARGET_CACHE.with(|cell| {
-                        let mut borrow = cell.borrow_mut();
-                        if let Some(ref mut map) = *borrow {
-                            map.insert(key.clone(), Some(target.clone()));
-                        }
-                    });
-                }
-
-                return Some(target);
-            }
-
-            // Store negative result (method not found) in the cache.
+            // Store positive result in the callable target cache.
             if let Some(ref key) = callable_cache_key {
                 CALLABLE_TARGET_CACHE.with(|cell| {
                     let mut borrow = cell.borrow_mut();
                     if let Some(ref mut map) = *borrow {
-                        map.insert(key.clone(), None);
+                        map.insert(key.clone(), Some(target.clone()));
                     }
                 });
             }
+
+            return Some(target);
+        }
+
+        // Fall back to the candidate directly — it may contain
+        // model-specific members (e.g. Eloquent scope methods
+        // injected onto Builder<Model>) that the FQN-keyed
+        // cache does not have.
+        if let Some(m) = owner.get_method_ci(method_name) {
+            let target = ResolvedCallableTarget {
+                parameters: m.parameters.clone(),
+                return_type: m.return_type.clone(),
+                reads_func_args: m.reads_func_args,
+                no_discard: m.is_no_discard,
+                owner_class: Some(owner.fqn()),
+                ..Default::default()
+            };
+
+            // Store the owner-candidate fallback in the callable target cache.
+            if let Some(ref key) = callable_cache_key {
+                CALLABLE_TARGET_CACHE.with(|cell| {
+                    let mut borrow = cell.borrow_mut();
+                    if let Some(ref mut map) = *borrow {
+                        map.insert(key.clone(), Some(target.clone()));
+                    }
+                });
+            }
+
+            return Some(target);
+        }
+
+        // Store negative result (method not found) in the cache.
+        if let Some(ref key) = callable_cache_key {
+            CALLABLE_TARGET_CACHE.with(|cell| {
+                let mut borrow = cell.borrow_mut();
+                if let Some(ref mut map) = *borrow {
+                    map.insert(key.clone(), None);
+                }
+            });
         }
         None
     }
@@ -308,7 +320,7 @@ impl Backend {
     ///
     /// Resolves the class via [`crate::type_engine::resolver::resolve_static_owner_class`], merges
     /// via `resolve_class_fully`, and looks up `method_name`.
-    fn resolve_static_method_callable(
+    pub(crate) fn resolve_static_method_callable(
         class: &str,
         method_name: &str,
         rctx: &ResolutionCtx<'_>,
@@ -330,14 +342,14 @@ impl Backend {
             let args = type_args.unwrap_or_else(|| crate::inheritance::default_type_args(&owner));
             crate::virtual_members::resolve_class_fully_with_type_args(
                 &owner,
-                rctx.class_loader,
+                rctx.file.class_loader,
                 rctx.resolved_class_cache,
                 &args,
             )
         } else {
             crate::virtual_members::resolve_class_fully_maybe_cached(
                 &owner,
-                rctx.class_loader,
+                rctx.file.class_loader,
                 rctx.resolved_class_cache,
             )
         };
@@ -351,6 +363,7 @@ impl Backend {
             parameters: result_method.parameters.clone(),
             return_type: result_method.return_type.clone(),
             reads_func_args: result_method.reads_func_args,
+            no_discard: result_method.is_no_discard,
             owner_class: Some(owner.fqn()),
             self_bound_params,
             ..Default::default()
@@ -363,6 +376,7 @@ impl Backend {
             parameters: func.parameters.clone(),
             return_type: func.return_type.clone(),
             reads_func_args: func.reads_func_args,
+            no_discard: func.is_no_discard,
             overloads: func.overloads.clone(),
             ..Default::default()
         }
@@ -406,6 +420,7 @@ impl Backend {
                 return ResolvedCallableTarget {
                     parameters: parameters.into(),
                     return_type: func.return_type.clone(),
+                    no_discard: func.is_no_discard,
                     self_bound_params: super::template_subs::self_bound_template_params(
                         &func.template_bindings,
                         &func.parameters,
@@ -438,12 +453,12 @@ impl Backend {
     /// `Gift` instead of the raw `T`.
     fn resolve_constructor_callable(
         class_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: &crate::virtual_members::ResolvedClassCache,
         args_text: Option<&str>,
         rctx: &ResolutionCtx<'_>,
     ) -> Option<ResolvedCallableTarget> {
-        let ci = class_loader(class_name)?;
+        let ci = class_loader(Fqn::new(class_name))?;
         let merged = crate::virtual_members::resolve_class_fully_cached(&ci, class_loader, cache);
         let ctor = match merged.get_method("__construct") {
             Some(c) => c.clone(),
@@ -618,20 +633,19 @@ impl Backend {
             namespace,
         );
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&resolved_class_loader);
 
         let rctx = self.resolution_ctx_at(
-            current_class,
-            &file_ctx.classes,
-            content,
-            cursor_offset,
-            CtxLoaders::new(
+            FileCtx::new(
+                content,
+                &file_ctx.classes,
                 &resolved_class_loader,
                 &class_loader,
-                &function_loader_cl,
-                &laravel_macro_this_resolver,
             )
-            .with_imports(use_map),
+            .with_imports(Some(use_map)),
+            current_class,
+            cursor_offset,
+            CtxLoaders::new(&function_loader_cl, &laravel_macro_this_resolver),
         );
 
         // ── Invoked value: `($this->handler)(…)` ──────────────────
@@ -666,6 +680,27 @@ impl Backend {
 
         let result = match effective {
             // ── Constructor: `new ClassName` or `new ClassName()` ────
+            // `new $class` builds the class the variable names, the same
+            // one `$class::` reaches.
+            SubjectExpr::NewExpr { class_name } if class_name.starts_with('$') => {
+                let named = crate::type_engine::resolver::resolve_target_classes_expr(
+                    effective,
+                    crate::AccessKind::Arrow,
+                    &rctx,
+                );
+                match named.as_slice() {
+                    [only] => only.class_info.as_ref().and_then(|class| {
+                        Self::resolve_constructor_callable(
+                            &class.fqn(),
+                            &resolved_class_loader,
+                            &self.resolved_class_cache,
+                            effective_args_text,
+                            &rctx,
+                        )
+                    }),
+                    _ => None,
+                }
+            }
             SubjectExpr::NewExpr { class_name } => {
                 let resolved_class_name =
                     Self::resolve_class_name_keyword(class_name, rctx.current_class);
@@ -708,21 +743,39 @@ impl Backend {
             }
 
             // ── Variable used as a callable target: `$fn(…)` ────────
-            // Check for a first-class callable assignment and recurse.
+            // Check for a partial application assignment and recurse.  One
+            // with bound arguments (`$fn = $r->make(1, ?)`) passes them on
+            // with the call's own and takes only the parameters its
+            // placeholders leave open.
             SubjectExpr::Variable(var_name) if !visited_vars.iter().any(|v| v == var_name) => {
-                let callable_target =
+                let assigned =
                     Self::extract_callable_target_from_variable(var_name, content, cursor_offset)?;
+                let wrapped_args = assigned.bound.as_deref().map(|bound| {
+                    crate::call_args::bind_partial_text_arguments(
+                        bound,
+                        effective_args_text.unwrap_or(""),
+                    )
+                });
                 visited_vars.push(var_name.clone());
                 let resolved = self.resolve_callable_target_inner(
-                    &callable_target,
+                    &assigned.target,
                     content,
                     cursor_offset,
                     file_ctx,
-                    call_args_text,
+                    wrapped_args.as_deref().or(call_args_text),
                     visited_vars,
                 );
                 visited_vars.pop();
-                resolved
+                match (resolved, assigned.bound.as_deref()) {
+                    (Some(mut target), Some(bound)) => {
+                        target.parameters =
+                            crate::call_args::partial_application_params(&target.parameters, bound)
+                                .into();
+                        target.overloads.clear();
+                        Some(target)
+                    }
+                    (resolved, _) => resolved,
+                }
             }
 
             // ── Bare class name used as a function name ─────────────
@@ -848,7 +901,7 @@ pub(crate) fn invoked_value_types(
             ),
         );
         types.extend(owners.iter().filter_map(|owner| {
-            crate::inheritance::resolve_property_type_hint(owner, property, ctx.class_loader)
+            crate::inheritance::resolve_property_type_hint(owner, property, ctx.file.class_loader)
         }));
     }
     types

@@ -1,0 +1,34 @@
+// test: comparing an integer with a written-out bound narrows it to a range
+// feature: hover
+// expect_hover: $above => int<1, max>
+// expect_hover: $flipped => int<1, max>
+// expect_hover: $atMost => int<min, 0>
+// expect_hover: $upper => int<5, 10>
+// expect_hover: $lower => int<0, 4>
+// expect_hover: $port => int<0, 65535>
+---
+<?php
+
+/**
+ * @param int<0, 10> $r
+ */
+function test(int $n, int $length, int $r, mixed $raw): void {
+    if ($n > 0) {
+        $above = $n;
+    } else {
+        $atMost = $n;
+    }
+    if ($length < 0) {
+        $flipped = $length * -1;
+    }
+    if ($r >= 5) {
+        $upper = $r;
+    } else {
+        $lower = $r;
+    }
+    $p = (int) $raw;
+    assert($p >= 0);
+    assert($p <= 65_535);
+    $port = $p;
+    $<>port;
+}

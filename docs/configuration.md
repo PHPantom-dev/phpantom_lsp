@@ -65,9 +65,11 @@ The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/php
 
 | Key                        | Type   | Default | Description |
 | -------------------------- | ------ | ------- | ----------- |
+| `enabled`                  | bool   | `true`  | Show diagnostics in the editor at all. Set to `false` to report nothing: no native diagnostics (syntax errors included), no external tool runs, and no workspace pass. Every other key in this section is then moot. `analyze` ignores it. |
 | `unresolved-member-access` | bool   | `false` | Report `->`, `?->`, `::` where the subject is `mixed` or its type could not be worked out. Useful for type coverage, noisy on untyped codebases. |
 | `extra-arguments`          | bool   | `false` | Report calls that pass more arguments than the function accepts. |
 | `report-magic-properties`  | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |
+| `partial-union-members`    | bool   | `false` | Report a member access on a union when only some of its classes declare the member. Matches PHPStan's `checkUnionTypes`. |
 | `downgrade-nullable-argument-mismatch` | bool | `false` | Downgrade `type_mismatch_argument` to a warning when the only reason an argument fails to satisfy the parameter is a stray `null` (every non-null member of the argument's type is already compatible). |
 | `workspace`                | bool   | `false` | Compute diagnostics for the whole workspace in the background after startup, so problems appear for files you have not opened. Costs a project-wide sweep every session. Requires the default `full` indexing strategy. |
 | `workspace-external`       | bool   | `true`  | Run configured external tools (PHPStan, PHPCS, PHPMD, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when `workspace` is enabled. |
@@ -146,6 +148,73 @@ that declaration, and an included file cannot override it. Adding an
 entry while the editor is running indexes it straight away; removing one
 takes effect on the next restart.
 
+The other folders of a multi-root workspace need no entry here. Every
+folder the editor lists beside the one PHPantom is rooted in is indexed
+the same way as an outside path, as a library, so a project resolves the
+classes of a shared library open in the same window. A folder that sits
+inside another one, or inside the project, is already covered and is not
+indexed twice. Adding a folder to the workspace indexes it straight away,
+and removing one drops its symbols straight away.
+
+### `[stubs]`
+
+| Key     | Type     | Default | Description |
+| ------- | -------- | ------- | ----------- |
+| `paths` | string[] | `[]`    | Stub files and directories whose declarations win over every other declaration of the same name, relative to the workspace root unless absolute. |
+
+```toml
+[stubs]
+paths = ["stubs", "/opt/company/php-stubs"]
+```
+
+A class, function, or constant a stub path declares is what that name
+means, whatever the project, its dependencies, or PHP's own built-in
+stubs declare under it. That makes a stub path the place for
+hand-written stubs of a PHP extension, type information for code that
+only exists at runtime, or a corrected signature for a function whose
+built-in declaration you disagree with.
+
+Paths are read the way `include` paths are: a named file directly, a
+named directory recursively with hidden and gitignored entries included,
+and `exclude` patterns still pruning what is below it. Entries that do
+not exist are ignored. Where two stub paths declare the same name, the
+one listed first wins. A directory holding a checkout of
+[phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs) is read
+from its `PhpStormStubsMap.php`, so only the files the map names count.
+
+Stub packages installed with Composer need no entry here. A package
+named `jetbrains/phpstorm-stubs`, `php-stubs/*`, or `*-stubs` (such as
+`php-stubs/wordpress-stubs` or `php-stubs/woocommerce-stubs`), or one
+whose `type` is `php-stubs` or `phpstorm-stubs`, is used as a stub path
+automatically, ranked below the paths listed here. Installing,
+updating, or removing one takes effect straight away.
+`phpstan/php-8-stubs` is the exception: PHPantom's own stubs of PHP's
+functions are more precise, so it stays ordinary vendor code.
+
+A stub file is never analysed, renamed into, or searched for references,
+whether it sits inside the workspace or not, and go-to-definition lands
+in it. Editing, adding, or removing a stub path takes effect straight
+away, as does a change to a stub file inside the workspace. A stub
+directory outside the workspace is not watched, so an edit inside it is
+seen after a restart.
+
+#### Which key do I want?
+
+| You want | Key |
+| -------- | --- |
+| PHPantom to skip a path | `[indexing] exclude` |
+| PHP the workspace scan skips (hidden, gitignored, or outside the workspace) to resolve where nothing else declares the name | `[indexing] include` |
+| A declaration to win over every other declaration of the same name | `[stubs] paths` |
+
+The difference between `include` and `[stubs]` only shows when
+something else declares the same name: an included path fills gaps, a
+stub path overrides. So a generated stub such as Castor's
+`.castor.stub.php` works under either key, but belongs under `[stubs]`,
+which also keeps `analyze` from reporting on it. Listing the
+`_ide_helper.php` laravel-ide-helper generates under `[stubs]` is how you
+deliberately make its stand-in classes win, where `include` only lets
+them fill gaps.
+
 ### `[semantic_tokens]`
 
 PHPantom defaults to `contextual` semantic tokens so editor syntax
@@ -166,8 +235,9 @@ highlighting remains in charge of ordinary PHP syntax.
 | Key            | Type    | Default | Description |
 | -------------- | ------- | ------- | ----------- |
 | `pint`         | string  | unset   | Command or path for Laravel Pint. Unset: auto-detect from `require-dev`. `""`: disable. |
-| `pint-blade`   | boolean | unset   | Whether `.blade.php` files are formatted by Pint's `Pint/laravel_blade` rule. Unset: follow the workspace `pint.json`. `true`: send them to Pint with `--blade`. `false`: never; use the built-in Blade formatter. |
-| `blade-php`    | boolean | unset   | Whether the built-in Blade formatter also formats the PHP a template carries. Unset: leave every fragment as written. `true`: format it. No effect on a project whose Blade files go to Pint. |
+| `pint-blade`   | boolean | unset   | Whether `.blade.php` files are formatted by Pint's `Pint/laravel_blade` rule. Unset: follow the workspace `pint.json`. `true`: send them to Pint with `--blade`. `false`: never. |
+| `blade-formatter` | string | unset | Command or path for [blade-formatter](https://github.com/shufo/blade-formatter), used for `.blade.php` files. Unset: use it when the project does (see below). `""`: never. Any other value: always, even over Pint. |
+| `blade-php`    | boolean | unset   | Whether the built-in Blade formatter also formats the PHP a template carries. Unset: leave every fragment as written. `true`: format it. No effect on a project whose Blade files go to Pint or blade-formatter. |
 | `php-cs-fixer` | string  | unset   | Command or path for php-cs-fixer. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `phpcbf`       | string  | unset   | Command or path for phpcbf. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `timeout`      | integer | `10000` | Max runtime in milliseconds per external formatting tool. |
@@ -258,6 +328,16 @@ Editor settings and `.phpantom.toml` are two layers of one filter set rather tha
 
 The interface is deliberately generic (a list of globs and a list of extensions, never an editor's own setting names), so any client can translate its native settings into it. See [Editor Setup](editor-setup.md) for what each editor does with it.
 
+## Editor-supplied stubs
+
+An editor extension that ships stubs alongside the server (phpstorm-stubs as plain files, for instance) passes their directory the same way:
+
+```json
+{ "stubs": { "path": "/path/to/bundled/stubs" } }
+```
+
+It is read from `initializationOptions` and `workspace/didChangeConfiguration`, also under a `phpantom` key, and a notification without a `stubs` block leaves it as it is. The directory is treated exactly like a [`[stubs]`](#stubs) path listed after the project's own, so the project's choices win where both declare a name. This is meant for extensions, not users: to add stubs yourself, use `[stubs] paths`.
+
 ## Code Formatting
 
 PHPantom ships a built-in PHP formatter (mago-formatter) that works out of the box, so `textDocument/formatting` requests are answered without any setup. The formatter is chosen per project in this order:
@@ -268,7 +348,7 @@ PHPantom ships a built-in PHP formatter (mago-formatter) that works out of the b
 
 **Formatting a selection** (`textDocument/rangeFormatting`) works with every one of these. None of them can format part of a file, so PHPantom formats the whole file and applies only the changes on the selected lines. A change that runs past the edge of the selection is applied whole, so the file never ends up half-formatted mid-statement, and lines the formatter moved (sorted imports, for example) are moved as a unit rather than dropped or duplicated.
 
-**Blade templates** are resolved on their own, since only Pint knows how to format one. A `.blade.php` file goes to Pint when the project's `pint.json` turns the `Pint/laravel_blade` rule on (or `pint-blade = true` asks for it, which also passes `--blade`), and otherwise to PHPantom's built-in Blade formatter. The built-in formatter reindents the template without changing the content of any line: indentation follows the nesting of directives, HTML and component tags, multi-line attribute lists and values, and brackets left open at the end of a line, using the editor's tab size and spaces-or-tabs setting. The bodies of `<script>`, `<style>`, and `@php` blocks are moved as a unit and keep their own layout; `<pre>`, `<textarea>`, and `@verbatim` contents are left exactly as written, as is anything between `{{-- blade-formatter-disable --}}` and `{{-- blade-formatter-enable --}}`. Templates whose indentation is output are never touched: Envoy task files, Markdown mail templates (under `resources/views/mail`, `resources/views/emails`, or `vendor/mail`, or using `<x-mail::` components), and Laravel Boost guidelines.
+**Blade templates** are resolved on their own, since of the PHP formatters only Pint knows how to format one. A `.blade.php` file goes to Pint when the project's `pint.json` turns the `Pint/laravel_blade` rule on (or `pint-blade = true` asks for it, which also passes `--blade`). Otherwise it goes to [blade-formatter](https://github.com/shufo/blade-formatter) when the project uses it, meaning `package.json` lists `blade-formatter`, the workspace root has a `.bladeformatterrc.json` or `.bladeformatterrc`, and `npm install` has put it in `node_modules/.bin`. It runs from the workspace root so it reads that config file, and templates listed in `.bladeignore` are left alone. That way saving a template formats it exactly as the project's own `blade-formatter` run would. Everything else goes to PHPantom's built-in Blade formatter. The built-in formatter reindents the template without changing the content of any line: indentation follows the nesting of directives, HTML and component tags, multi-line attribute lists and values, and brackets left open at the end of a line, using the editor's tab size and spaces-or-tabs setting. The bodies of `<script>`, `<style>`, and `@php` blocks are moved as a unit and keep their own layout; `<pre>`, `<textarea>`, and `@verbatim` contents are left exactly as written, as is anything between `{{-- blade-formatter-disable --}}` and `{{-- blade-formatter-enable --}}`. Templates whose indentation is output are never touched: Envoy task files, Markdown mail templates (under `resources/views/mail`, `resources/views/emails`, or `vendor/mail`, or using `<x-mail::` components), and Laravel Boost guidelines.
 
 Setting `blade-php = true` adds a pass that formats the PHP a template carries through the same built-in PHP formatter (and the same `mago.toml` settings) a `.php` file gets: `@php` bodies and `<?php` islands as statement lists, echoes, `<?=` islands, and directive arguments as expressions, along with the spacing that is Blade's own rather than PHP's, so `@if($a&&$b)` becomes `@if ($a && $b)` and `{{$x}}` becomes `{{ $x }}`. It is opt-in because it changes the content of a line, which the reindenter on its own never does. A fragment written across several lines is formatted where it stands, wrapped for the width the column it sits at actually leaves it. How many lines a fragment takes stays the author's, though: an array broken over several lines is respaced without being joined onto one, and a long line is respaced without being broken up. A fragment the formatter cannot parse is left exactly as written and the rest of the template still formats, and the pass stays out of everything the reindenter leaves alone, plus Alpine and Livewire attribute values, which are JavaScript.
 

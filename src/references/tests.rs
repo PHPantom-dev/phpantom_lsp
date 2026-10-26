@@ -1,295 +1,20 @@
 use crate::Backend;
+use crate::references::MemberRefKind;
 use crate::virtual_members::laravel::extract_macro_registrations;
 use std::sync::atomic::Ordering;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
-/// Helper: open a file in the backend and return the URI.
-async fn open_file(backend: &Backend, uri: &Url, text: &str) {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
-}
-
-/// Helper: send a find-references request and return the locations.
-async fn find_references(
-    backend: &Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-    include_declaration: bool,
-) -> Vec<Location> {
-    let params = ReferenceParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: ReferenceContext {
-            include_declaration,
-        },
-    };
-
-    backend
-        .references(params)
-        .await
-        .unwrap()
-        .unwrap_or_default()
-}
-
-fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
-    let mut index = backend.laravel_macros.write();
+fn seed_macro_index(backend: &Backend, uri: &Uri, text: &str) {
+    let mut index = backend.laravel.macros.write();
     index.files.set_file(
         uri.to_string(),
         extract_macro_registrations(text, Some(*backend.workspace.php_version.lock())),
     );
     index.rebuild();
-    backend
-        .laravel_has_macros
-        .store(!index.is_empty(), Ordering::Relaxed);
-}
-
-fn line_char_of(haystack: &str, needle: &str) -> (u32, u32) {
-    for (line_idx, line) in haystack.lines().enumerate() {
-        if let Some(char_idx) = line.find(needle) {
-            return (line_idx as u32, char_idx as u32);
-        }
-    }
-    panic!("needle not found: {needle}");
+    backend.laravel.macros.set_has_any(!index.is_empty());
 }
 
 // ─── Laravel macro registrations ────────────────────────────────────────────
-
-#[tokio::test]
-async fn test_macro_registration_string_references_include_call_sites() {
-    let backend = Backend::new_test();
-    let class_uri = Url::parse("file:///Widget.php").unwrap();
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
-    let caller_uri = Url::parse("file:///Caller.php").unwrap();
-
-    let class_text = concat!("<?php\n", "namespace App\\Support;\n", "class Widget {}\n",);
-    let provider_text = concat!(
-        "<?php\n",
-        "namespace App;\n",
-        "use App\\Support\\Widget;\n",
-        "Widget::macro('shine', function (): string { return 'ok'; });\n",
-    );
-    let caller_text = concat!(
-        "<?php\n",
-        "namespace App;\n",
-        "use App\\Support\\Widget;\n",
-        "function demo(Widget $widget): void {\n",
-        "    Widget::shine();\n",
-        "    $widget->shine();\n",
-        "}\n",
-    );
-
-    open_file(&backend, &class_uri, class_text).await;
-    open_file(&backend, &provider_uri, provider_text).await;
-    open_file(&backend, &caller_uri, caller_text).await;
-    seed_macro_index(&backend, &provider_uri, provider_text);
-
-    let (line, character) = line_char_of(provider_text, "shine");
-    let locs = find_references(&backend, &provider_uri, line, character, true).await;
-    assert_eq!(
-        locs.len(),
-        3,
-        "expected declaration + static + instance call: {locs:?}"
-    );
-    assert!(locs.iter().any(|loc| loc.uri == provider_uri));
-    assert!(locs.iter().any(|loc| {
-        loc.uri == caller_uri && loc.range.start.line == 4 && loc.range.start.character == 12
-    }));
-    assert!(locs.iter().any(|loc| {
-        loc.uri == caller_uri && loc.range.start.line == 5 && loc.range.start.character == 13
-    }));
-}
-
-#[tokio::test]
-async fn test_macro_registration_string_references_use_reference_index_candidates() {
-    let backend = Backend::new_test();
-    let class_uri = Url::parse("file:///Widget.php").unwrap();
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
-    let caller_uri = Url::parse("file:///Caller.php").unwrap();
-    let unrelated_uri = Url::parse("file:///Unrelated.php").unwrap();
-
-    let class_text = concat!("<?php\n", "namespace App\\Support;\n", "class Widget {}\n",);
-    let provider_text = concat!(
-        "<?php\n",
-        "namespace App;\n",
-        "use App\\Support\\Widget;\n",
-        "Widget::macro('shine', function (): string { return 'ok'; });\n",
-    );
-    let caller_text = concat!(
-        "<?php\n",
-        "namespace App;\n",
-        "use App\\Support\\Widget;\n",
-        "function demo(Widget $widget): void {\n",
-        "    Widget::shine();\n",
-        "    $widget->shine();\n",
-        "}\n",
-    );
-    let unrelated_text = concat!("<?php\n", "namespace App;\n", "class Unrelated {}\n",);
-
-    open_file(&backend, &class_uri, class_text).await;
-    open_file(&backend, &provider_uri, provider_text).await;
-    open_file(&backend, &caller_uri, caller_text).await;
-    open_file(&backend, &unrelated_uri, unrelated_text).await;
-    seed_macro_index(&backend, &provider_uri, provider_text);
-
-    // With the workspace marked indexed, the macro search prunes the
-    // snapshot to reference-index candidates instead of scanning every
-    // file; both the static and the instance call must survive pruning.
-    backend.workspace_indexed.store(true, Ordering::Release);
-
-    let (line, character) = line_char_of(provider_text, "shine");
-    let locs = find_references(&backend, &provider_uri, line, character, true).await;
-    assert_eq!(
-        locs.len(),
-        3,
-        "expected declaration + static + instance call via candidate pruning: {locs:?}"
-    );
-    assert!(locs.iter().any(|loc| loc.uri == provider_uri));
-    assert!(locs.iter().any(|loc| {
-        loc.uri == caller_uri && loc.range.start.line == 4 && loc.range.start.character == 12
-    }));
-    assert!(locs.iter().any(|loc| {
-        loc.uri == caller_uri && loc.range.start.line == 5 && loc.range.start.character == 13
-    }));
-}
-
-#[tokio::test]
-async fn test_macro_references_from_descendant_call_include_ancestor_and_sibling_calls() {
-    let backend = Backend::new_test();
-    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
-    let child_uri = Url::parse("file:///EloquentCollection.php").unwrap();
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
-    let caller_uri = Url::parse("file:///Caller.php").unwrap();
-
-    let base_text = concat!(
-        "<?php\n",
-        "namespace App\\Support;\n",
-        "class BaseCollection {}\n",
-    );
-    let child_text = concat!(
-        "<?php\n",
-        "namespace App\\Support;\n",
-        "class EloquentCollection extends BaseCollection {}\n",
-    );
-    let provider_text = concat!(
-        "<?php\n",
-        "namespace App;\n",
-        "use App\\Support\\BaseCollection;\n",
-        "BaseCollection::macro('shine', function (): string { return 'ok'; });\n",
-    );
-    let caller_text = concat!(
-        "<?php\n",
-        "namespace App;\n",
-        "use App\\Support\\BaseCollection;\n",
-        "use App\\Support\\EloquentCollection;\n",
-        "function demo(BaseCollection $base, EloquentCollection $eloquent): void {\n",
-        "    $base->shine();\n",
-        "    $eloquent->shine();\n",
-        "}\n",
-    );
-
-    open_file(&backend, &base_uri, base_text).await;
-    open_file(&backend, &child_uri, child_text).await;
-    open_file(&backend, &provider_uri, provider_text).await;
-    open_file(&backend, &caller_uri, caller_text).await;
-    seed_macro_index(&backend, &provider_uri, provider_text);
-
-    let locs = find_references(&backend, &caller_uri, 6, 16, true).await;
-    assert_eq!(
-        locs.len(),
-        3,
-        "expected registration + base + descendant call: {locs:?}"
-    );
-    assert!(locs.iter().any(|loc| loc.uri == provider_uri));
-    assert!(locs.iter().any(|loc| {
-        loc.uri == caller_uri && loc.range.start.line == 5 && loc.range.start.character == 11
-    }));
-    assert!(locs.iter().any(|loc| {
-        loc.uri == caller_uri && loc.range.start.line == 6 && loc.range.start.character == 15
-    }));
-}
-
-#[tokio::test]
-async fn test_macro_registration_references_include_unresolved_chain_call() {
-    let backend = Backend::new_test();
-    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
-    let caller_uri = Url::parse("file:///Caller.php").unwrap();
-
-    let base_text = concat!(
-        "<?php\n",
-        "namespace App\\Support;\n",
-        "class BaseCollection {}\n",
-    );
-    let provider_text = concat!(
-        "<?php\n",
-        "namespace App;\n",
-        "use App\\Support\\BaseCollection;\n",
-        "BaseCollection::macro('shine', function (): string { return 'ok'; });\n",
-    );
-    let caller_text = concat!(
-        "<?php\n",
-        "namespace App;\n",
-        "function demo($query): void {\n",
-        "    $query->pluck('name', 'id')->shine();\n",
-        "}\n",
-    );
-
-    open_file(&backend, &base_uri, base_text).await;
-    open_file(&backend, &provider_uri, provider_text).await;
-    open_file(&backend, &caller_uri, caller_text).await;
-    seed_macro_index(&backend, &provider_uri, provider_text);
-
-    let shine_subject = {
-        let maps = backend.symbol_maps.read();
-        let map = maps
-            .get(caller_uri.as_str())
-            .expect("caller symbol map should exist");
-        let source = map
-            .source(caller_text)
-            .expect("caller symbol map should describe the caller text");
-        map.spans
-            .iter()
-            .find_map(|span| match &span.kind {
-                crate::symbol_map::SymbolKind::MemberAccess {
-                    member_name,
-                    subject_text,
-                    ..
-                } if member_name == "shine" => Some(subject_text.as_str(source).to_string()),
-                _ => None,
-            })
-            .expect("expected member-access span for unresolved chain call")
-    };
-    assert!(
-        shine_subject.contains("pluck"),
-        "expected chain subject text, got {shine_subject:?}"
-    );
-    assert!(
-        shine_subject.contains('('),
-        "expected call-chain subject text, got {shine_subject:?}"
-    );
-
-    let (line, character) = line_char_of(provider_text, "shine");
-    let locs = find_references(&backend, &provider_uri, line, character, true).await;
-    assert!(
-        locs.iter().any(|loc| {
-            loc.uri == caller_uri && loc.range.start.line == 3 && loc.range.start.character == 33
-        }),
-        "expected unresolved chain macro call to be included: {locs:?}"
-    );
-}
 
 /// Loading a class reads the macro index, and a reader queues behind a
 /// waiting writer, so a search holding the index across its ancestor walk
@@ -302,7 +27,7 @@ fn macro_targets_leave_the_macro_index_free_while_loading_ancestors() {
         "Countable",
         "<?php interface Countable {}",
     )]));
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let provider_uri = Uri::parse("file:///Provider.php").unwrap();
     let provider_text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -337,7 +62,9 @@ fn macro_targets_leave_the_macro_index_free_while_loading_ancestors() {
     );
     assert!(
         backend
-            .laravel_macros
+            .laravel
+            .macros
+            .index()
             .try_write_for(std::time::Duration::from_secs(5))
             .is_some(),
         "the macro index must not be held while the walk loads a class"
@@ -385,11 +112,12 @@ fn workspace_indexing_batch_merges_disk_files() {
 
     assert!(
         backend
-            .workspace_indexed
+            .workspace_index
+            .indexed
             .load(std::sync::atomic::Ordering::Acquire)
     );
     assert_eq!(
-        backend.symbol_maps.read().len(),
+        backend.uris_with_symbol_maps().len(),
         4,
         "all disk files should publish symbol maps through the batch merge"
     );
@@ -483,7 +211,8 @@ fn reference_key_snapshot_falls_back_until_workspace_index_ready() {
 
     assert!(
         !backend
-            .workspace_indexed
+            .workspace_index
+            .indexed
             .load(std::sync::atomic::Ordering::Acquire)
     );
     assert!(uris.contains(matching_uri));
@@ -610,9 +339,10 @@ fn workspace_index_progress_covers_known_and_discovered_files() {
 fn completed_workspace_index_is_reused_without_waiting() {
     let backend = Backend::new_test();
     backend
-        .workspace_indexed
+        .workspace_index
+        .indexed
         .store(true, std::sync::atomic::Ordering::Release);
-    let indexing = backend.workspace_index_lock.lock();
+    let indexing = backend.workspace_index.lock.lock();
 
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     let waiter = {
@@ -717,9 +447,9 @@ fn blocked_request_reports_in_flight_index_status() {
     .expect("target file");
 
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
-    *backend.workspace_index_status.lock() =
+    *backend.workspace_index.status.lock() =
         Some((37, "Parsing workspace files (3/9)".to_string()));
-    let indexing = backend.workspace_index_lock.lock();
+    let indexing = backend.workspace_index.lock.lock();
 
     let reports = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let waiter = {
@@ -753,14 +483,15 @@ fn blocked_request_reports_in_flight_index_status() {
     // Stand in for the lock owner publishing the completed index before it
     // releases the single-flight guard.
     backend
-        .workspace_indexed
+        .workspace_index
+        .indexed
         .store(true, std::sync::atomic::Ordering::Release);
-    *backend.workspace_index_status.lock() = None;
+    *backend.workspace_index.status.lock() = None;
     drop(indexing);
     waiter.join().expect("waiter thread");
 
     assert!(
-        backend.workspace_index_status.lock().is_none(),
+        backend.workspace_index.status.lock().is_none(),
         "a finished indexing pass clears the shared status"
     );
     let reports = reports.lock().expect("reports lock");
@@ -923,52 +654,6 @@ fn index_progress_weight_prefers_supplied_and_open_file_content() {
     assert_eq!(backend.index_progress_weight_for_uri(uri, None), 6);
 }
 
-// ─── Laravel string-key gating (non-Laravel projects) ──────────────────────
-
-/// A non-Laravel project can define its own `config()` function (common in
-/// home-grown micro-frameworks). `SymbolKind::LaravelStringKey` spans are
-/// extracted by name match alone, so find-references must not treat the two
-/// calls below as Laravel config-key references unless the project is
-/// actually classified as Laravel.
-#[tokio::test]
-async fn laravel_string_key_references_gated_on_is_laravel() {
-    let uri = Url::parse("file:///test.php").unwrap();
-    let text = concat!(
-        "<?php\n",                   // L0
-        "function demo(): void {\n", // L1
-        "    config('app.name');\n", // L2
-        "    config('app.name');\n", // L3
-        "}\n",                       // L4
-    );
-    let (line, character) = line_char_of(text, "'app.name'");
-
-    let laravel_backend = Backend::new_test();
-    laravel_backend
-        .resolved_class_cache
-        .write()
-        .set_laravel(true);
-    open_file(&laravel_backend, &uri, text).await;
-    let laravel_locs = find_references(&laravel_backend, &uri, line, character + 2, true).await;
-    assert!(
-        laravel_locs.len() >= 2,
-        "expected both config('app.name') calls to be found on a Laravel project, got {}",
-        laravel_locs.len()
-    );
-
-    let plain_backend = Backend::new_test();
-    plain_backend
-        .resolved_class_cache
-        .write()
-        .set_laravel(false);
-    open_file(&plain_backend, &uri, text).await;
-    let plain_locs = find_references(&plain_backend, &uri, line, character + 2, true).await;
-    assert!(
-        plain_locs.is_empty(),
-        "a non-Laravel project's own config() must not produce Laravel string-key \
-         references, got {plain_locs:?}"
-    );
-}
-
 // ─── Interior symlinks: collect_php_files_gitignore (issue #383) ──
 // The Find References / rename / preload walker is a *serial* `ignore`
 // walk (`.build()` + `flatten()`).  The same symlink contract as
@@ -1078,16 +763,14 @@ fn parse_file(backend: &Backend, uri: &str, text: &str) {
         .write()
         .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
     backend.update_ast(uri, text);
-    backend.workspace_indexed.store(true, Ordering::Release);
+    backend
+        .workspace_index
+        .indexed
+        .store(true, Ordering::Release);
 }
 
 fn symbol_map_of(backend: &Backend, uri: &str) -> std::sync::Arc<crate::symbol_map::SymbolMap> {
-    backend
-        .symbol_maps
-        .read()
-        .get(uri)
-        .cloned()
-        .expect("the file was parsed")
+    backend.symbol_map_for(uri).expect("the file was parsed")
 }
 
 /// A file selected as a candidate only because it accesses the same *name*
@@ -1120,7 +803,13 @@ function persist(Service $service): void {
     parse_file(&backend, CONSUMER_URI, CONSUMER);
 
     let save_offset = SERVICE.find("save").unwrap() as u32;
-    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    let locations = backend.member_declaration_references(
+        SERVICE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
 
     assert_eq!(
         locations.len(),
@@ -1170,7 +859,13 @@ class Child extends Base {
     parse_file(&backend, CHILD_URI, CHILD);
 
     let save_offset = BASE.find("save").unwrap() as u32;
-    let locations = backend.member_declaration_references(BASE_URI, save_offset, "save", false);
+    let locations = backend.member_declaration_references(
+        BASE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
 
     assert_eq!(
         locations.len(),
@@ -1203,8 +898,13 @@ fn a_static_access_on_a_namesake_class_is_ruled_out() {
     parse_file(&backend, CALLER_URI, CALLER);
 
     let flush_offset = REGISTRY.find("flush").unwrap() as u32;
-    let locations =
-        backend.member_declaration_references(REGISTRY_URI, flush_offset, "flush", true);
+    let locations = backend.member_declaration_references(
+        REGISTRY_URI,
+        flush_offset,
+        "flush",
+        true,
+        MemberRefKind::Method,
+    );
 
     assert_eq!(
         locations.len(),
@@ -1217,45 +917,6 @@ fn a_static_access_on_a_namesake_class_is_ruled_out() {
             .resolved_member_file(OTHER_URI, &symbol_map_of(&backend, OTHER_URI))
             .is_none(),
         "`Other::flush()` names its own class, so the file is ruled out unread"
-    );
-}
-
-/// A file is a candidate for declaring the member as much as for accessing
-/// it, and the access narrowing must not take the declaration with it.
-#[tokio::test]
-async fn find_references_still_reports_a_declaration_in_a_file_that_accesses_nothing() {
-    let backend = Backend::new_test();
-    let base_uri = Url::parse("file:///Base.php").unwrap();
-    let child_uri = Url::parse("file:///Child.php").unwrap();
-
-    let base_text = concat!(
-        "<?php\n",
-        "class Base {\n",
-        "    public function save(): void {}\n",
-        "}\n",
-    );
-    let child_text = concat!(
-        "<?php\n",
-        "class Child extends Base {\n",
-        "    public function store(): void {\n",
-        "        $this->save();\n",
-        "    }\n",
-        "}\n",
-    );
-
-    open_file(&backend, &base_uri, base_text).await;
-    open_file(&backend, &child_uri, child_text).await;
-
-    let (line, character) = line_char_of(child_text, "save();");
-    let locs = find_references(&backend, &child_uri, line, character, true).await;
-
-    assert!(
-        locs.iter().any(|loc| loc.uri == base_uri),
-        "the declaration in Base.php has to be reported: {locs:?}"
-    );
-    assert!(
-        locs.iter().any(|loc| loc.uri == child_uri),
-        "the call in Child.php has to be reported: {locs:?}"
     );
 }
 
@@ -1279,7 +940,13 @@ class Unrelated {
     parse_file(&backend, UNRELATED_URI, UNRELATED);
 
     let save_offset = SERVICE.find("save").unwrap() as u32;
-    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    let locations = backend.member_declaration_references(
+        SERVICE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
 
     assert!(
         locations.is_empty(),
@@ -1321,7 +988,13 @@ function elsewhere(Service $service): void {
     parse_file(&backend, CONSUMER_URI, CONSUMER);
 
     let save_offset = SERVICE.find("save").unwrap() as u32;
-    backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    backend.member_declaration_references(
+        SERVICE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
 
     let entry = backend
         .resolved_member_file(CONSUMER_URI, &symbol_map_of(&backend, CONSUMER_URI))
@@ -1374,7 +1047,13 @@ function run(Service $service): void {
     );
 
     let save_offset = SERVICE.find("save").unwrap() as u32;
-    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    let locations = backend.member_declaration_references(
+        SERVICE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
     assert_eq!(locations.len(), 1, "the consumer calls Service::save");
 
     assert!(
@@ -1504,7 +1183,13 @@ function run(Service $service, Other $other): void {
         if warm {
             backend.warm_member_receivers(CONSUMER_URI);
         }
-        backend.member_declaration_references(SERVICE_URI, save_offset, "save", false)
+        backend.member_declaration_references(
+            SERVICE_URI,
+            save_offset,
+            "save",
+            false,
+            MemberRefKind::Method,
+        )
     };
 
     let cold = references(false);

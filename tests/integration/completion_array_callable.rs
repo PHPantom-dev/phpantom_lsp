@@ -2,19 +2,19 @@
 //! `[Class::class, 'method']` and `[$obj, 'method']`.
 
 use crate::common::{complete_at, create_psr4_workspace, create_test_backend};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 fn method_labels(items: &[CompletionItem]) -> Vec<String> {
     items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .filter_map(|i| i.filter_text.clone())
         .collect()
 }
 
 fn find_method<'a>(items: &'a [CompletionItem], name: &str) -> Option<&'a CompletionItem> {
     items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::METHOD) && i.filter_text.as_deref() == Some(name)
+        i.kind == Some(CompletionItemKind::Method) && i.filter_text.as_deref() == Some(name)
     })
 }
 
@@ -22,7 +22,7 @@ fn find_method<'a>(items: &'a [CompletionItem], name: &str) -> Option<&'a Comple
 #[tokio::test]
 async fn completes_this_callable_methods() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///this_callable.php").unwrap();
+    let uri = Uri::parse("file:///this_callable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Controller {\n",
@@ -54,7 +54,7 @@ async fn completes_this_callable_methods() {
 #[tokio::test]
 async fn inserts_plain_method_name() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///plain_insert.php").unwrap();
+    let uri = Uri::parse("file:///plain_insert.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Controller {\n",
@@ -76,7 +76,7 @@ async fn inserts_plain_method_name() {
     let items = complete_at(&backend, &uri, text, line, col).await;
     let handle = find_method(&items, "handle").expect("handle method");
     assert_eq!(handle.insert_text.as_deref(), Some("handle"));
-    assert_ne!(handle.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_ne!(handle.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// `[$handler, '|']` offers the methods of the class the variable holds,
@@ -84,7 +84,7 @@ async fn inserts_plain_method_name() {
 #[tokio::test]
 async fn completes_variable_callable_from_function_return() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///variable_callable.php").unwrap();
+    let uri = Uri::parse("file:///variable_callable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Handler {\n",
@@ -111,7 +111,7 @@ async fn completes_variable_callable_from_function_return() {
 #[tokio::test]
 async fn filters_by_prefix() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///prefix_filter.php").unwrap();
+    let uri = Uri::parse("file:///prefix_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Controller {\n",
@@ -142,7 +142,7 @@ async fn filters_by_prefix() {
 #[tokio::test]
 async fn rejects_plain_string_array() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///plain_array.php").unwrap();
+    let uri = Uri::parse("file:///plain_array.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Controller {\n",
@@ -200,7 +200,7 @@ async fn completes_class_const_callable_cross_file() {
             ("src/routes.php", routes),
         ],
     );
-    let uri = Url::parse("file:///routes.php").unwrap();
+    let uri = Uri::parse("file:///routes.php").unwrap();
 
     let line = routes.lines().position(|l| l.contains("$route")).unwrap() as u32;
     let col = routes
@@ -225,7 +225,7 @@ async fn completes_class_const_callable_cross_file() {
 #[tokio::test]
 async fn class_callable_follows_imports_and_leading_backslash() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///callable_imports.php").unwrap();
+    let uri = Uri::parse("file:///callable_imports.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace {\n",

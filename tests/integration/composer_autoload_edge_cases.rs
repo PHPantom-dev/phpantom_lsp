@@ -359,3 +359,24 @@ async fn components_in_every_directory_of_an_array_mapping_resolve() {
         );
     }
 }
+
+/// A class in a file that is not valid UTF-8 (here Latin-1) still loads,
+/// the same as the workspace scan indexes it.
+#[tokio::test]
+async fn a_class_in_a_latin1_file_resolves() {
+    let composer = r#"{"autoload": {"psr-4": {"App\\": "app/"}}}"#;
+    let (backend, dir) = create_psr4_workspace(composer, &[]);
+    let mut source = b"<?php\nnamespace App\\Models;\n/** Caf".to_vec();
+    source.push(0xE9);
+    source.extend_from_slice(b" */\nclass User { public function latin(): void {} }\n");
+    fs::create_dir_all(dir.path().join("app/Models")).unwrap();
+    fs::write(dir.path().join("app/Models/User.php"), source).unwrap();
+
+    let uri = open_php_at(&backend, &dir, "app/Consumer.php", USER_CONSUMER).await;
+    let position = position_after(USER_CONSUMER, "$u->");
+    let labels = complete_labels_at_opened(&backend, &uri, position.line, position.character).await;
+    assert!(
+        offers(&labels, "latin"),
+        "User should load from its Latin-1 file, got: {labels:?}"
+    );
+}

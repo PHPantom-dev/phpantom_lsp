@@ -53,7 +53,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use tower_lsp::lsp_types::{Diagnostic, MessageType};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, MessageType};
 
 use crate::Backend;
 use crate::diagnostics::ignore_rules::{self, CompiledIgnoreRule};
@@ -640,12 +640,12 @@ impl Backend {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        let backend = self.clone_for_diagnostic_worker();
+        let backend = self.clone_for_blocking();
         runtime.spawn(async move {
             // The same gating the index tail applies: a pull client's
             // results are only deliverable through workspace pulls, so a
             // client that has never pulled does not pay for the scan.
-            if backend.supports_pull_diagnostics.load(Ordering::Acquire) {
+            if backend.caps().pull_diagnostics {
                 backend.wait_for_first_workspace_pull().await;
                 if backend.shutdown_flag.load(Ordering::Acquire) {
                     return;
@@ -684,7 +684,7 @@ impl Backend {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        let backend = self.clone_for_diagnostic_worker();
+        let backend = self.clone_for_blocking();
         runtime.spawn(async move {
             backend.clear_workspace_diagnostics().await;
         });
@@ -706,7 +706,7 @@ impl Backend {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        let backend = self.clone_for_diagnostic_worker();
+        let backend = self.clone_for_blocking();
         runtime.spawn(async move {
             backend.flush_workspace_diag_updates(changed).await;
         });
@@ -737,8 +737,8 @@ impl Backend {
             // background index to have finished.  While that is still
             // running, its own tail re-reads the setting and starts the
             // pass itself.
-            && self.workspace_indexed.load(Ordering::Acquire)
-            && !self.full_index_in_progress.load(Ordering::Acquire)
+            && self.workspace_index.indexed.load(Ordering::Acquire)
+            && !self.workspace_index.full_in_progress.load(Ordering::Acquire)
     }
 
     /// Whether the running workspace pass has been told to stop, either
@@ -808,7 +808,7 @@ impl Backend {
         // cuts the pass off by design, so it is not reported either way.
         if outcome.unchecked() > 0 && !self.workspace_pass_stopping() {
             self.log(
-                MessageType::WARNING,
+                MessageType::Warning,
                 format!(
                     "Workspace diagnostics stopped with {} of {} files unchecked, after giving \
                      up on every file it had in hand. Those files keep the diagnostics they \
@@ -958,7 +958,7 @@ impl Backend {
                         "PHPantom: workspace diagnostics gave up on {name} after {secs}s"
                     );
                     self.log(
-                        MessageType::WARNING,
+                        MessageType::Warning,
                         format!(
                             "Workspace diagnostics gave up on {name} after {secs}s and moved on \
                              to the rest of the project. Open the file to have it diagnosed on \
@@ -1058,16 +1058,13 @@ impl Backend {
     fn workspace_diagnostic_target_uris(&self) -> Vec<String> {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
         let open_uris: HashSet<String> = self.open_files.read().keys().cloned().collect();
-        let maps = self.symbol_maps.read();
-        maps.keys()
-            .filter(|uri| {
-                !open_uris.contains(uri.as_str())
-                    && !uri.starts_with("phpantom-stub://")
-                    && !uri.starts_with("phpantom-stub-fn://")
-                    && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
-            })
-            .cloned()
-            .collect()
+        let mut uris = self.uris_with_symbol_maps();
+        uris.retain(|uri| {
+            !open_uris.contains(uri.as_str())
+                && !crate::stubs::is_stub_uri(uri)
+                && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
+        });
+        uris
     }
 
     /// Compute the full native diagnostic set for one file from disk.
@@ -1113,11 +1110,7 @@ impl Backend {
     /// matching `[[diagnostics.ignore]]` path globs and for naming a file in
     /// hover text.
     pub(crate) fn workspace_relative_path(&self, uri: &str) -> Option<String> {
-        let path = uri
-            .parse::<tower_lsp::lsp_types::Url>()
-            .ok()?
-            .to_file_path()
-            .ok()?;
+        let path = crate::util::uri_to_path(uri)?;
         let root = self.workspace.workspace_root.read().clone()?;
         Some(
             path.strip_prefix(&root)
@@ -1141,10 +1134,7 @@ impl Backend {
             return;
         };
 
-        if self
-            .supports_pull_diagnostics
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if self.caps().pull_diagnostics {
             self.request_diagnostic_refresh().await;
             return;
         }
@@ -1153,7 +1143,7 @@ impl Backend {
             if self.open_files.read().contains_key(&uri_str) {
                 continue;
             }
-            let Ok(uri) = uri_str.parse::<tower_lsp::lsp_types::Url>() else {
+            let Ok(uri) = uri_str.parse::<tower_lsp_server::gen_lsp_types::Uri>() else {
                 continue;
             };
             let diags = self.diag.workspace_diags.lock().merged(&uri_str);
@@ -1176,7 +1166,7 @@ impl Backend {
         }
         // Only user files participate in workspace diagnostics.
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
-        if uri.starts_with("phpantom-stub")
+        if crate::stubs::is_stub_uri(uri)
             || vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
         {
             return;
@@ -1491,19 +1481,19 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::{
-        DiagnosticSeverity, NumberOrString, PartialResultParams, Position, PreviousResultId, Range,
-        Url, WorkDoneProgressParams, WorkspaceDiagnosticParams, WorkspaceDiagnosticReportResult,
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::{
+        Code, DiagnosticSeverity, PartialResultParams, Position, PreviousResultId, Range, Uri,
+        WorkDoneProgressParams, WorkspaceDiagnosticParams, WorkspaceDiagnosticReport,
         WorkspaceDocumentDiagnosticReport,
     };
 
     fn diag(code: &str, line: u32) -> Diagnostic {
         Diagnostic {
             range: Range::new(Position::new(line, 0), Position::new(line, 5)),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String(code.to_string())),
-            message: format!("test {code}"),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String(code.to_string())),
+            message: format!("test {code}").into(),
             ..Default::default()
         }
     }
@@ -1684,9 +1674,9 @@ mod tests {
         };
 
         assert!(
-            broken_diags.iter().any(|d| {
-                matches!(&d.code, Some(NumberOrString::String(c)) if c == "unknown_class")
-            }),
+            broken_diags
+                .iter()
+                .any(|d| { matches!(&d.code, Some(Code::String(c)) if c == "unknown_class") }),
             "Broken.php should have an unknown_class diagnostic, got: {:?}",
             broken_diags
         );
@@ -1706,26 +1696,22 @@ mod tests {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        let WorkspaceDiagnosticReportResult::Report(report) = backend
+        let report: WorkspaceDiagnosticReport = backend
             .workspace_diagnostic(params)
             .await
-            .expect("workspace diagnostic")
-        else {
-            panic!("expected a full workspace diagnostic report");
-        };
+            .expect("workspace diagnostic");
 
-        let full_item = report
-            .items
-            .iter()
-            .find_map(|item| match item {
-                WorkspaceDocumentDiagnosticReport::Full(full)
-                    if full.uri.as_str() == broken_uri =>
-                {
-                    Some(full)
-                }
-                _ => None,
-            })
-            .expect("Broken.php should be reported");
+        let full_item =
+            report
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    WorkspaceDocumentDiagnosticReport::WorkspaceFullDocumentDiagnosticReport(
+                        full,
+                    ) if full.uri.as_str() == broken_uri => Some(full),
+                    _ => None,
+                })
+                .expect("Broken.php should be reported");
         assert!(!full_item.full_document_diagnostic_report.items.is_empty());
         let result_id = full_item
             .full_document_diagnostic_report
@@ -1738,23 +1724,20 @@ mod tests {
         let params = WorkspaceDiagnosticParams {
             identifier: None,
             previous_result_ids: vec![PreviousResultId {
-                uri: broken_uri.parse::<Url>().expect("uri"),
+                uri: broken_uri.parse::<Uri>().expect("uri"),
                 value: result_id.clone(),
             }],
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        let WorkspaceDiagnosticReportResult::Report(report) = backend
+        let report: WorkspaceDiagnosticReport = backend
             .workspace_diagnostic(params)
             .await
-            .expect("workspace diagnostic")
-        else {
-            panic!("expected a full workspace diagnostic report");
-        };
+            .expect("workspace diagnostic");
         assert!(
             report.items.iter().any(|item| matches!(
                 item,
-                WorkspaceDocumentDiagnosticReport::Unchanged(u)
+                WorkspaceDocumentDiagnosticReport::WorkspaceUnchangedDocumentDiagnosticReport(u)
                     if u.uri.as_str() == broken_uri
                         && u.unchanged_document_diagnostic_report.result_id == result_id
             )),
@@ -1889,7 +1872,10 @@ mod tests {
         let config = dir.path().join(crate::config::CONFIG_FILE_NAME);
         let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
         // Stand in for a finished full background index.
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         std::fs::write(&config, "[diagnostics]\nworkspace = false\n").expect("write config");
         backend.reload_config(dir.path());
@@ -1905,11 +1891,13 @@ mod tests {
         // An index that is still running starts the pass from its own
         // tail, so a reload must not start a second one.
         backend
-            .full_index_in_progress
+            .workspace_index
+            .full_in_progress
             .store(true, Ordering::Release);
         assert!(!backend.workspace_diagnostics_due_after_reload());
         backend
-            .full_index_in_progress
+            .workspace_index
+            .full_in_progress
             .store(false, Ordering::Release);
 
         // Nor may a pass that has already run be run again.

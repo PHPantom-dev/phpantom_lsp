@@ -1,14 +1,14 @@
 //! Environment-variable names: `env('APP_NAME')` and `Env::get('APP_NAME')`.
 //!
 //! The symbol map records both spellings as
-//! [`crate::symbol_map::LaravelStringKind::Env`] spans, so find-references
+//! [`crate::symbol_map::StringKeyKind::Env`] spans, so find-references
 //! and hover come from the same index every other Laravel string key uses.
 //! What a name resolves *to* is the line that declares it in the project's
 //! `.env`, which is what this module supplies.
 
 use std::path::Path;
 
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
 
@@ -53,8 +53,10 @@ pub(crate) fn resolve_env_definitions(backend: &Backend, key: &str) -> Vec<Locat
     let mut declarations = Vec::new();
     for name in dotenv_file_names(&root) {
         let path = root.join(&name);
-        let (Ok(content), Ok(uri)) = (std::fs::read_to_string(&path), Url::from_file_path(&path))
-        else {
+        let (Ok(content), Some(uri)) = (
+            std::fs::read_to_string(&path),
+            crate::util::path_to_url(&path),
+        ) else {
             continue;
         };
         match declaring_line(&content, key) {

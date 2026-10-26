@@ -7,12 +7,12 @@
 
 use std::collections::HashSet;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolMap;
 use crate::symbol_map::VarDefKind;
-use crate::text_position::position_to_byte_offset;
+use crate::text_position::{position_to_byte_offset, utf16_col_to_char_index};
 
 impl Backend {
     /// PHP superglobal variable names (always available in any scope).
@@ -60,7 +60,7 @@ impl Backend {
             (last, last.chars().count())
         } else {
             let l = lines[position.line as usize];
-            (l, (position.character as usize).min(l.chars().count()))
+            (l, utf16_col_to_char_index(l, position.character))
         };
 
         let chars: Vec<char> = line.chars().collect();
@@ -132,11 +132,11 @@ impl Backend {
         // to the cursor position.  Using `text_edit` with an explicit range
         // prevents the double-dollar problem in editors (Helix, Neovim)
         // that don't consider `$` part of a word boundary.
-        let prefix_char_len = prefix.chars().count() as u32;
+        let prefix_utf16_len = prefix.encode_utf16().count() as u32;
         let replace_range = Range {
             start: Position {
                 line: position.line,
-                character: position.character.saturating_sub(prefix_char_len),
+                character: position.character.saturating_sub(prefix_utf16_len),
             },
             end: position,
         };
@@ -153,9 +153,9 @@ impl Backend {
             }
             items.push(CompletionItem {
                 label: var_name.clone(),
-                kind: Some(CompletionItemKind::VARIABLE),
+                kind: Some(CompletionItemKind::Variable),
                 detail: Some("variable".to_string()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range: replace_range,
                     new_text: var_name.clone(),
                 })),
@@ -175,15 +175,15 @@ impl Backend {
             }
             items.push(CompletionItem {
                 label: name.to_string(),
-                kind: Some(CompletionItemKind::VARIABLE),
+                kind: Some(CompletionItemKind::Variable),
                 detail: Some("PHP superglobal".to_string()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range: replace_range,
                     new_text: name.to_string(),
                 })),
                 filter_text: Some(name.to_string()),
                 sort_text: Some(format!("z_{}", name.to_lowercase())),
-                tags: Some(vec![CompletionItemTag::DEPRECATED]),
+                tags: Some(vec![CompletionItemTag::Deprecated]),
                 ..CompletionItem::default()
             });
         }

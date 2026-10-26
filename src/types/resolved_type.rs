@@ -166,12 +166,23 @@ impl ResolvedType {
     ///
     /// Keying on the FQN rather than the short name keeps `NsA\Thing` and
     /// `NsB\Thing` apart, so a union over both retains the members of each.
+    ///
+    /// Two different cases of one enum share its class but are different
+    /// values, so both are kept; a case beside its whole enum is one of it,
+    /// and the entry that stays reads as the enum.
     pub(crate) fn push_unique(results: &mut Vec<ResolvedType>, rt: ResolvedType) {
+        let rt_case = enum_case_value(&rt.type_string);
         let dominating =
             results
                 .iter_mut()
                 .find(|existing| match (&existing.class_info, &rt.class_info) {
-                    (Some(a), Some(b)) => a.fqn() == b.fqn(),
+                    (Some(a), Some(b)) => {
+                        a.fqn() == b.fqn()
+                            && match (&rt_case, enum_case_value(&existing.type_string)) {
+                                (Some(new), Some(old)) => *new == old,
+                                _ => true,
+                            }
+                    }
                     (None, None) => existing.type_string == rt.type_string,
                     _ => false,
                 });
@@ -180,6 +191,9 @@ impl ResolvedType {
             // so it may only keep a factory count both agreed on.
             Some(existing) => {
                 existing.factory_count = existing.factory_count.join(rt.factory_count);
+                if rt_case.is_none() && enum_case_value(&existing.type_string).is_some() {
+                    existing.type_string = rt.type_string.clone();
+                }
                 // `Foo` and `?Foo` share a class, but the merged entry has
                 // to admit the `null` the dropped one carried.
                 if existing.class_info.is_some()
@@ -335,9 +349,14 @@ impl ResolvedType {
                     let TypeKind::Intersection(inner) = member.kind() else {
                         continue;
                     };
+                    // An object shape part (`Model&object{pivot: Pivot}`)
+                    // resolves to the synthetic class every shape shares.
                     let inner_fqns: Option<Vec<String>> = inner
                         .iter()
-                        .map(|part| part.base_name().map(str::to_string))
+                        .map(|part| match part.kind() {
+                            TypeKind::ObjectShape(_) => Some("__object_shape".to_string()),
+                            _ => part.base_name().map(str::to_string),
+                        })
                         .collect();
                     let Some(inner_fqns) = inner_fqns else {
                         continue;
@@ -348,18 +367,18 @@ impl ResolvedType {
                             fqn == name || crate::util::short_name(&fqn) == name
                         })
                     };
-                    let all_present = inner_fqns
-                        .iter()
-                        .all(|name| results.iter().any(|rt| matches(rt, name)));
-                    if !all_present {
-                        continue;
-                    }
+                    // A part that could not be loaded has no entry, but the
+                    // parts that did still hold one value with it.
+                    let mut tagged = false;
                     for rt in results.iter_mut() {
                         if inner_fqns.iter().any(|name| matches(rt, name)) {
                             rt.type_string = member.clone();
+                            tagged = true;
                         }
                     }
-                    attached.push(member.clone());
+                    if tagged {
+                        attached.push(member.clone());
+                    }
                 }
             }
 
@@ -712,6 +731,61 @@ impl ResolvedType {
         crate::util::retain_by_mask(entries, &keep);
     }
 
+    /// Replace the entries that each hold one case of an enum with a single
+    /// entry for the enum, wherever every one of its cases is held.
+    ///
+    /// A join of the branches a comparison split an enum into gets each
+    /// case back from its own branch, and the value is the whole enum
+    /// again once all of them are.
+    pub(crate) fn join_complete_enum_entries(entries: &mut Vec<ResolvedType>) {
+        let mut index = 0;
+        while index < entries.len() {
+            let Some(cls) = entries[index].class_info.clone() else {
+                index += 1;
+                continue;
+            };
+            if cls.kind != ClassLikeKind::Enum
+                || enum_case_value(&entries[index].type_string).is_none()
+            {
+                index += 1;
+                continue;
+            }
+            let fqn = cls.fqn();
+            let same_enum = |rt: &ResolvedType| {
+                rt.class_info.as_ref().is_some_and(|c| c.fqn() == fqn)
+                    && enum_case_value(&rt.type_string).is_some()
+            };
+            let mut cases = cls.constants.iter().filter(|c| c.is_enum_case).peekable();
+            let complete = cases.peek().is_some()
+                && cases.all(|case| {
+                    entries.iter().any(|rt| {
+                        same_enum(rt)
+                            && enum_case_value(&rt.type_string).is_some_and(|value| {
+                                value.as_enum_case().is_some_and(|(_, c)| c == case.name)
+                            })
+                    })
+                });
+            if !complete {
+                index += 1;
+                continue;
+            }
+            let nullable = entries
+                .iter()
+                .any(|rt| same_enum(rt) && rt.type_string.has_null_member());
+            let mut whole = ResolvedType::from_arc(Arc::clone(&cls));
+            if nullable {
+                whole.type_string = whole.type_string.or_null();
+            }
+            let mut position = 0;
+            entries.retain(|rt| {
+                position += 1;
+                position - 1 == index || !same_enum(rt)
+            });
+            entries[index] = whole;
+            index += 1;
+        }
+    }
+
     /// Combine the type strings of all entries into a single [`PhpType`].
     ///
     /// When there is exactly one entry, returns its `type_string` directly.
@@ -769,6 +843,12 @@ impl ResolvedType {
                     members.retain(|m| !m.is_empty_array_shape());
                 }
                 merge_template_alternatives(&mut members);
+                join_complete_enum_cases(&mut members, |fqn| {
+                    resolved
+                        .iter()
+                        .filter_map(|rt| rt.class_info.as_deref())
+                        .find(|cls| cls.fqn().eq_ignore_ascii_case(fqn))
+                });
                 PhpType::union(members)
             }
         }
@@ -984,4 +1064,67 @@ fn never_an_object(ty: &PhpType) -> bool {
             || member.is_subtype_of(&PhpType::string())
             || member.is_array_like()
     })
+}
+
+/// The enum case `ty` holds, seen past a `null` beside it: `Suit::Hearts`
+/// for `Suit::Hearts` and `?Suit::Hearts` alike.
+fn enum_case_value(ty: &PhpType) -> Option<PhpType> {
+    if ty.as_enum_case().is_some() {
+        return Some(ty.clone());
+    }
+    ty.non_null_type()
+        .filter(|inner| inner.as_enum_case().is_some())
+}
+
+/// Read every case of an enum among `members` back as the enum itself,
+/// wherever all of its cases are there: `Suit::Hearts|Suit::Spades` is
+/// `Suit` for an enum with no other case.
+///
+/// `enum_class` finds the enum a case names, which is what lists the cases
+/// it has. The enum takes the place the first of its cases held.
+pub(crate) fn join_complete_enum_cases<'c>(
+    members: &mut Vec<PhpType>,
+    enum_class: impl Fn(&str) -> Option<&'c ClassInfo>,
+) {
+    let mut index = 0;
+    while index < members.len() {
+        if members[index].as_enum_case().is_none() {
+            index += 1;
+            continue;
+        }
+        let whole = members[index].enum_cases_as_enums();
+        let TypeKind::Named(enum_name) = whole.kind() else {
+            index += 1;
+            continue;
+        };
+        let enum_name = enum_name.as_str();
+        let is_case_of = |member: &PhpType| {
+            member
+                .as_enum_case()
+                .is_some_and(|(name, _)| name.eq_ignore_ascii_case(enum_name))
+        };
+        let complete = enum_class(enum_name).is_some_and(|cls| {
+            let mut cases = cls.constants.iter().filter(|c| c.is_enum_case).peekable();
+            cases.peek().is_some()
+                && cases.all(|case| {
+                    members.iter().any(|member| {
+                        is_case_of(member)
+                            && member
+                                .as_enum_case()
+                                .is_some_and(|(_, name)| name == case.name)
+                    })
+                })
+        });
+        if !complete {
+            index += 1;
+            continue;
+        }
+        let mut position = 0;
+        members.retain(|member| {
+            position += 1;
+            position - 1 == index || !is_case_of(member)
+        });
+        members[index] = whole.clone();
+        index += 1;
+    }
 }

@@ -55,6 +55,13 @@ thread_local! {
     static SCOPE_COVERAGE: RefCell<ScopeCoverage> =
         const { RefCell::new(ScopeCoverage::Whole) };
 
+    /// The branches the walks that recorded [`DIAGNOSTIC_SCOPE`] proved
+    /// cannot run.  They come out of the same walk, so they live and die
+    /// with the snapshots: a pass whose scopes an earlier caller already
+    /// built (the `analyse` CLI builds them before collecting) still
+    /// finds them.
+    static SCOPE_UNREACHABLE: RefCell<Vec<(u32, u32)>> = const { RefCell::new(Vec::new()) };
+
     /// Set to `true` while `build_diagnostic_scopes` is populating the
     /// scope cache.  Code that would normally read from the cache should
     /// skip the lookup when this flag is set, because the cache is
@@ -119,7 +126,7 @@ impl Drop for DiagnosticScopeGuard {
                 *cell.borrow_mut() = None;
             });
             set_whole_scope_coverage();
-            end_unreachable_collection();
+            SCOPE_UNREACHABLE.with(|cell| cell.borrow_mut().clear());
         }
     }
 }
@@ -145,9 +152,9 @@ pub(crate) fn is_building_scopes() -> bool {
 /// already active (nested call), the guard is a no-op.
 ///
 /// The walk that populates the cache is also the walk that discovers
-/// which branches cannot run, so the collection of unreachable ranges
-/// shares this guard's lifetime: the ranges are still there when the
-/// collectors that ran against the cache hand back their diagnostics.
+/// which branches cannot run, so the ranges it found share this guard's
+/// lifetime: they are still there when the collectors that ran against
+/// the cache hand back their diagnostics (see [`scope_unreachable_ranges`]).
 pub(crate) fn with_diagnostic_scope_cache() -> DiagnosticScopeGuard {
     let already_active = DIAGNOSTIC_SCOPE.with(|cell| cell.borrow().is_some());
     if already_active {
@@ -157,8 +164,29 @@ pub(crate) fn with_diagnostic_scope_cache() -> DiagnosticScopeGuard {
         *cell.borrow_mut() = Some(BTreeMap::new());
     });
     set_whole_scope_coverage();
-    begin_unreachable_collection();
+    SCOPE_UNREACHABLE.with(|cell| cell.borrow_mut().clear());
     DiagnosticScopeGuard { owns: true }
+}
+
+/// Add the ranges a scope-building walk proved cannot run.
+pub(crate) fn record_scope_unreachable(ranges: Vec<(u32, u32)>) {
+    if ranges.is_empty() {
+        return;
+    }
+    SCOPE_UNREACHABLE.with(|cell| {
+        let mut recorded = cell.borrow_mut();
+        for range in ranges {
+            if !recorded.contains(&range) {
+                recorded.push(range);
+            }
+        }
+    });
+}
+
+/// The branches the walks behind the active scope cache proved cannot
+/// run, empty when no cache is active.
+pub(crate) fn scope_unreachable_ranges() -> Vec<(u32, u32)> {
+    SCOPE_UNREACHABLE.with(|cell| cell.borrow().clone())
 }
 
 /// Look up a variable's types from the diagnostic scope cache.

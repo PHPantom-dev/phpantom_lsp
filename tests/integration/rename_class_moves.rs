@@ -6,7 +6,7 @@ use crate::common::{
     initialize_with_resource_operations, open_document, open_php, rename, rename_result,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── File Rename on Class Rename ────────────────────────────────────────────
 
@@ -17,7 +17,7 @@ async fn rename_class_renames_file_when_psr4_match() {
     let backend = create_test_backend();
     initialize_with_resource_operations(&backend).await;
 
-    let uri = Url::parse("file:///src/Foo.php").unwrap();
+    let uri = Uri::parse("file:///src/Foo.php").unwrap();
     let text = concat!("<?php\n", "namespace App;\n", "\n", "class Foo {}\n",);
 
     open_php(&backend, &uri, text).await;
@@ -54,7 +54,7 @@ async fn rename_class_renames_file_when_psr4_match() {
     );
 
     // Text edits should target the new URI (file is renamed first).
-    let new_uri = Url::parse("file:///src/Bar.php").unwrap();
+    let new_uri = Uri::parse("file:///src/Bar.php").unwrap();
     let edits = doc_change_edits_for_uri(&ws, &new_uri);
     assert!(
         !edits.is_empty(),
@@ -73,7 +73,7 @@ async fn rename_class_no_file_rename_when_filename_mismatch() {
     let backend = create_test_backend();
     initialize_with_resource_operations(&backend).await;
 
-    let uri = Url::parse("file:///src/helpers.php").unwrap();
+    let uri = Uri::parse("file:///src/helpers.php").unwrap();
     let text = concat!("<?php\n", "namespace App;\n", "\n", "class Foo {}\n",);
 
     open_php(&backend, &uri, text).await;
@@ -100,7 +100,7 @@ async fn rename_class_no_file_rename_when_multiple_classes() {
     let backend = create_test_backend();
     initialize_with_resource_operations(&backend).await;
 
-    let uri = Url::parse("file:///src/Foo.php").unwrap();
+    let uri = Uri::parse("file:///src/Foo.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -134,7 +134,7 @@ async fn rename_class_no_file_rename_when_client_unsupported() {
     let backend = create_test_backend();
     // supports_file_rename is false by default.
 
-    let uri = Url::parse("file:///src/Foo.php").unwrap();
+    let uri = Uri::parse("file:///src/Foo.php").unwrap();
     let text = concat!("<?php\n", "namespace App;\n", "\n", "class Foo {}\n",);
 
     open_php(&backend, &uri, text).await;
@@ -160,8 +160,8 @@ async fn rename_class_cross_file_with_file_rename() {
     let backend = create_test_backend();
     initialize_with_resource_operations(&backend).await;
 
-    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Task.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -220,7 +220,7 @@ async fn rename_class_cross_file_with_file_rename() {
     );
 
     // The declaration file edits should target the new URI.
-    let new_decl_uri = Url::parse("file:///src/TaskDto.php").unwrap();
+    let new_decl_uri = Uri::parse("file:///src/TaskDto.php").unwrap();
     let decl_edits = doc_change_edits_for_uri(&ws, &new_decl_uri);
     assert!(
         !decl_edits.is_empty(),
@@ -242,8 +242,8 @@ async fn rename_class_from_reference_site_renames_file() {
     let backend = create_test_backend();
     initialize_with_resource_operations(&backend).await;
 
-    let uri_decl = Url::parse("file:///src/Animal.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Zoo.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/Animal.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Zoo.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -293,7 +293,7 @@ async fn rename_class_no_file_rename_for_non_namespaced() {
     let backend = create_test_backend();
     initialize_with_resource_operations(&backend).await;
 
-    let uri = Url::parse("file:///src/Widget.php").unwrap();
+    let uri = Uri::parse("file:///src/Widget.php").unwrap();
     let text = concat!("<?php\n", "class Widget {}\n",);
 
     open_php(&backend, &uri, text).await;
@@ -335,27 +335,25 @@ async fn psr4_move_workspace(files: &[(&str, &str)]) -> (Backend, tempfile::Temp
         let full = dir.path().join(rel);
         std::fs::create_dir_all(full.parent().expect("parent")).expect("mkdir");
         std::fs::write(&full, content).expect("write");
-        let uri = Url::from_file_path(&full).expect("uri");
+        let uri = Uri::from_file_path(&full).expect("uri");
         open_php(&backend, &uri, content).await;
     }
 
     (backend, dir)
 }
 
-fn ws_uri(dir: &tempfile::TempDir, rel: &str) -> Url {
-    Url::from_file_path(dir.path().join(rel)).expect("uri")
+fn ws_uri(dir: &tempfile::TempDir, rel: &str) -> Uri {
+    Uri::from_file_path(dir.path().join(rel)).expect("uri")
 }
 
 /// Every `(old, new)` file operation a workspace edit carries.
 fn file_moves(edit: &WorkspaceEdit) -> Vec<(String, String)> {
-    let Some(DocumentChanges::Operations(ops)) = &edit.document_changes else {
+    let Some(ops) = &edit.document_changes else {
         return Vec::new();
     };
     ops.iter()
         .filter_map(|op| match op {
-            DocumentChangeOperation::Op(ResourceOp::Rename(r)) => {
-                Some((r.old_uri.to_string(), r.new_uri.to_string()))
-            }
+            DocumentChange::RenameFile(r) => Some((r.old_uri.to_string(), r.new_uri.to_string())),
             _ => None,
         })
         .collect()
@@ -364,10 +362,12 @@ fn file_moves(edit: &WorkspaceEdit) -> Vec<(String, String)> {
 /// Every URI a workspace edit targets with text edits.
 fn edited_uris(edit: &WorkspaceEdit) -> Vec<String> {
     match &edit.document_changes {
-        Some(DocumentChanges::Operations(ops)) => ops
+        Some(ops) => ops
             .iter()
             .filter_map(|op| match op {
-                DocumentChangeOperation::Edit(e) => Some(e.text_document.uri.to_string()),
+                DocumentChange::TextDocumentEdit(e) => {
+                    Some(e.text_document.text_document_identifier.uri.to_string())
+                }
                 _ => None,
             })
             .collect(),
@@ -631,7 +631,7 @@ async fn rename_class_updates_phpstan_type_and_import_type_tags() {
     // `@phpstan-import-type`'s `from` is a real reference to it, so a
     // rename has to carry both along or the alias silently goes stale.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // 0
         "namespace App;\n",                              // 1
@@ -682,7 +682,7 @@ async fn blade_move_workspace(files: &[(&str, &str)]) -> (Backend, tempfile::Tem
         let full = dir.path().join(rel);
         std::fs::create_dir_all(full.parent().expect("parent")).expect("mkdir");
         std::fs::write(&full, content).expect("write");
-        let uri = Url::from_file_path(&full).expect("uri");
+        let uri = Uri::from_file_path(&full).expect("uri");
         let language_id = if rel.ends_with(".blade.php") {
             "blade"
         } else {
@@ -930,7 +930,7 @@ async fn a_namespace_move_rewrites_an_import_inside_a_php_block() {
 async fn moving_a_class_into_a_namespace_writes_it_after_a_declare() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///src/Foo.php").unwrap();
+    let uri = Uri::parse("file:///src/Foo.php").unwrap();
     let text = concat!(
         "<?php\n",
         "\n",
@@ -963,7 +963,7 @@ async fn moving_a_class_written_on_the_open_tag_line_declares_the_namespace_ahea
     // The line below the opening tag is past the class the statement covers.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///src/Foo.php").unwrap();
+    let uri = Uri::parse("file:///src/Foo.php").unwrap();
     let text = "<?php class Foo {}\n";
 
     open_php(&backend, &uri, text).await;

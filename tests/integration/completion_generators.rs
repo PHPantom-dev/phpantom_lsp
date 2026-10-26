@@ -1,5 +1,5 @@
 use crate::common::{complete_at, create_psr4_workspace, create_test_backend};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Foreach over Generator with @var annotation ────────────────────────────
 
@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::*;
 #[tokio::test]
 async fn test_foreach_generator_var_annotation_two_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_var_two.php").unwrap();
+    let uri = Uri::parse("file:///gen_var_two.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -45,7 +45,7 @@ async fn test_foreach_generator_var_annotation_two_params() {
 #[tokio::test]
 async fn test_foreach_generator_var_annotation_single_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_var_single.php").unwrap();
+    let uri = Uri::parse("file:///gen_var_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -77,7 +77,7 @@ async fn test_foreach_generator_var_annotation_single_param() {
 #[tokio::test]
 async fn test_foreach_generator_var_annotation_four_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_var_four.php").unwrap();
+    let uri = Uri::parse("file:///gen_var_four.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -125,7 +125,7 @@ async fn test_foreach_generator_var_annotation_four_params() {
 #[tokio::test]
 async fn test_foreach_generator_method_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_method_ret.php").unwrap();
+    let uri = Uri::parse("file:///gen_method_ret.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -162,7 +162,7 @@ async fn test_foreach_generator_method_return_type() {
 #[tokio::test]
 async fn test_foreach_generator_method_return_four_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_method_four.php").unwrap();
+    let uri = Uri::parse("file:///gen_method_four.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Task {\n",
@@ -204,7 +204,7 @@ async fn test_foreach_generator_method_return_four_params() {
 #[tokio::test]
 async fn test_foreach_generator_function_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_func_ret.php").unwrap();
+    let uri = Uri::parse("file:///gen_func_ret.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Invoice {\n",
@@ -238,7 +238,7 @@ async fn test_foreach_generator_function_return_type() {
 #[tokio::test]
 async fn test_foreach_iterable_single_param_var_annotation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///iter_var_single.php").unwrap();
+    let uri = Uri::parse("file:///iter_var_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -269,7 +269,7 @@ async fn test_foreach_iterable_single_param_var_annotation() {
 #[tokio::test]
 async fn test_foreach_iterable_two_params_var_annotation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///iter_var_two.php").unwrap();
+    let uri = Uri::parse("file:///iter_var_two.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -305,7 +305,7 @@ async fn test_foreach_iterable_two_params_var_annotation() {
 #[tokio::test]
 async fn test_foreach_iterable_method_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///iter_method_ret.php").unwrap();
+    let uri = Uri::parse("file:///iter_method_ret.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -339,7 +339,7 @@ async fn test_foreach_iterable_method_return_type() {
 #[tokio::test]
 async fn test_foreach_generator_param_annotation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_param.php").unwrap();
+    let uri = Uri::parse("file:///gen_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Ticket {\n",
@@ -380,7 +380,7 @@ async fn test_foreach_generator_param_annotation() {
 #[tokio::test]
 async fn test_foreach_generator_nested_generic_value() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_nested.php").unwrap();
+    let uri = Uri::parse("file:///gen_nested.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -435,7 +435,7 @@ async fn test_foreach_generator_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///gen_cross.php").unwrap();
+    let uri = Uri::parse("file:///gen_cross.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Models\\Article;\n",
@@ -466,7 +466,7 @@ async fn test_foreach_generator_cross_file() {
 #[tokio::test]
 async fn test_foreach_generator_property_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_chain.php").unwrap();
+    let uri = Uri::parse("file:///gen_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -508,7 +508,7 @@ async fn test_foreach_generator_property_chain() {
 #[tokio::test]
 async fn test_foreach_iterable_param_annotation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///iter_param.php").unwrap();
+    let uri = Uri::parse("file:///iter_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Event {\n",
@@ -549,7 +549,7 @@ async fn test_foreach_iterable_param_annotation() {
 #[tokio::test]
 async fn test_generator_yield_reverse_inference_tvalue() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_reverse.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_reverse.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -585,7 +585,7 @@ async fn test_generator_yield_reverse_inference_tvalue() {
 #[tokio::test]
 async fn test_generator_yield_reverse_inference_needs_the_variable_itself() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_other_variable.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_other_variable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -614,7 +614,7 @@ async fn test_generator_yield_reverse_inference_needs_the_variable_itself() {
 #[tokio::test]
 async fn test_generator_yield_reverse_inference_four_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_reverse4.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_reverse4.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -644,7 +644,7 @@ async fn test_generator_yield_reverse_inference_four_params() {
 #[tokio::test]
 async fn test_generator_yield_pair_reverse_inference() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_pair.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_pair.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -673,7 +673,7 @@ async fn test_generator_yield_pair_reverse_inference() {
 #[tokio::test]
 async fn test_generator_yield_send_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_send.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_send.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Request {\n",
@@ -708,7 +708,7 @@ async fn test_generator_yield_send_type() {
 #[tokio::test]
 async fn test_generator_yield_send_type_missing_tsend() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_send_no_tsend.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_send_no_tsend.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Emitter {\n",
@@ -734,7 +734,7 @@ async fn test_generator_yield_send_type_missing_tsend() {
 #[tokio::test]
 async fn test_generator_yield_reverse_inference_top_level_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -761,7 +761,7 @@ async fn test_generator_yield_reverse_inference_top_level_function() {
 #[tokio::test]
 async fn test_generator_yield_explicit_assignment_takes_priority() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_priority.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_priority.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -815,7 +815,7 @@ async fn test_generator_yield_reverse_inference_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///gen_yield_cross.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_cross.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Models\\Invoice;\n",
@@ -850,7 +850,7 @@ async fn test_generator_yield_reverse_inference_cross_file() {
 #[tokio::test]
 async fn test_generator_yield_inside_if_block_cursor_inside() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_if_inside.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_if_inside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -888,7 +888,7 @@ async fn test_generator_yield_inside_if_block_cursor_inside() {
 #[tokio::test]
 async fn test_generator_yield_inside_if_block_cursor_after() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_if_after.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_if_after.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -920,7 +920,7 @@ async fn test_generator_yield_inside_if_block_cursor_after() {
 #[tokio::test]
 async fn test_generator_yield_inside_foreach_cursor_inside() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_foreach_in.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_foreach_in.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -951,7 +951,7 @@ async fn test_generator_yield_inside_foreach_cursor_inside() {
 #[tokio::test]
 async fn test_generator_yield_multiple_vars_first() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_multi_first.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_multi_first.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -984,7 +984,7 @@ async fn test_generator_yield_multiple_vars_first() {
 #[tokio::test]
 async fn test_generator_yield_multiple_vars_second() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_multi_second.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_multi_second.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -1022,7 +1022,7 @@ async fn test_generator_yield_multiple_vars_second() {
 #[tokio::test]
 async fn test_generator_yield_chain_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_chain.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Profile {\n",
@@ -1057,7 +1057,7 @@ async fn test_generator_yield_chain_method_call() {
 #[tokio::test]
 async fn test_generator_yield_chain_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_yield_chain_prop.php").unwrap();
+    let uri = Uri::parse("file:///gen_yield_chain_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Profile {\n",
@@ -1090,7 +1090,7 @@ async fn test_generator_yield_chain_property() {
 #[tokio::test]
 async fn test_generator_tsend_after_multiple_classes_with_braces() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_tsend_multi_class.php").unwrap();
+    let uri = Uri::parse("file:///gen_tsend_multi_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Command {\n",
@@ -1142,7 +1142,7 @@ async fn test_generator_tsend_after_multiple_classes_with_braces() {
 #[tokio::test]
 async fn test_generator_tsend_with_attribute_below_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_tsend_attribute.php").unwrap();
+    let uri = Uri::parse("file:///gen_tsend_attribute.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Task {\n",
@@ -1172,7 +1172,7 @@ async fn test_generator_tsend_with_attribute_below_docblock() {
 #[tokio::test]
 async fn test_generator_tsend_inside_nested_control_flow() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_tsend_nested_flow.php").unwrap();
+    let uri = Uri::parse("file:///gen_tsend_nested_flow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Task {\n",

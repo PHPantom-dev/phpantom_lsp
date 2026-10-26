@@ -11,11 +11,12 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionTextEdit,
+use tower_lsp_server::gen_lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionItemTextEdit,
     InsertTextFormat, Position, Range, TextEdit,
 };
 
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::signature_render::{
     format_params, format_return_type, native_hint_expresses_return_type, native_param_hint,
@@ -55,7 +56,7 @@ const TRAIT_CONST_MIN: PhpVersion = PhpVersion::new(8, 2);
 pub(crate) fn collect_overridable_methods(
     class: &ClassInfo,
     partial: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<(MethodInfo, String, bool)> {
     let mut collector = OverrideCollector::<MethodInfo>::new(class, partial, class_loader);
 
@@ -177,7 +178,7 @@ impl OverridableMember for ConstantInfo {
 /// class can still declare itself.
 struct OverrideCollector<'a, M: OverridableMember> {
     partial: &'a str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
     /// Lowercased names the editing class already declares.
     own_names: HashSet<String>,
     /// Lowercased names already collected, so the nearest ancestor's
@@ -200,11 +201,7 @@ struct OverrideCollector<'a, M: OverridableMember> {
 }
 
 impl<'a, M: OverridableMember> OverrideCollector<'a, M> {
-    fn new(
-        class: &ClassInfo,
-        partial: &'a str,
-        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> Self {
+    fn new(class: &ClassInfo, partial: &'a str, class_loader: &'a ResolvedClassLoader<'a>) -> Self {
         Self {
             partial,
             class_loader,
@@ -253,7 +250,7 @@ impl<'a, M: OverridableMember> OverrideCollector<'a, M> {
         if !self.walk_interfaces || !self.visited.insert(iface_name.to_string()) {
             return;
         }
-        let Some(iface) = (self.class_loader)(iface_name) else {
+        let Some(iface) = (self.class_loader)(Fqn::new(iface_name)) else {
             return;
         };
         self.push_from_class(&iface);
@@ -400,13 +397,13 @@ pub(crate) fn build_override_completions(
 
         items.push(CompletionItem {
             label: label.clone(),
-            kind: Some(CompletionItemKind::METHOD),
+            kind: Some(CompletionItemKind::Method),
             detail: Some(format!("{detail_kind} · {}", short_name(declaring))),
             filter_text: Some(method.name.to_string()),
             sort_text: Some(sort_text),
             insert_text: Some(insert_text.clone()),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
-            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+            insert_text_format: Some(InsertTextFormat::Snippet),
+            text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                 range: opts.replace_range,
                 new_text: insert_text,
             })),
@@ -507,7 +504,7 @@ fn trait_override_docblock_edit(
 pub(crate) fn collect_overridable_properties(
     class: &ClassInfo,
     partial: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<(PropertyInfo, String, bool)> {
     let mut collector = OverrideCollector::<PropertyInfo>::new(class, partial, class_loader);
     // Interfaces cannot declare properties.
@@ -531,7 +528,7 @@ pub(crate) fn collect_overridable_constants(
     class: &ClassInfo,
     partial: &str,
     php_version: PhpVersion,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<(ConstantInfo, String)> {
     let mut collector = OverrideCollector::<ConstantInfo>::new(class, partial, class_loader);
     collector.walk_traits = php_version >= TRAIT_CONST_MIN;
@@ -598,7 +595,7 @@ pub(crate) fn build_property_override_completions(
                 type_str: type_str.as_deref(),
                 default,
                 declaring,
-                kind: CompletionItemKind::PROPERTY,
+                kind: CompletionItemKind::Property,
                 detail_kind: if *skip_override_attr {
                     "trait"
                 } else {
@@ -665,7 +662,7 @@ fn build_name_override_item(item: NameOverrideItem<'_>, replace_range: Range) ->
         filter_text: Some(name.to_string()),
         sort_text: Some(format!("0_{}", name.to_ascii_lowercase())),
         insert_text: Some(insert.clone()),
-        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+        text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
             range: replace_range,
             new_text: insert,
         })),
@@ -739,7 +736,7 @@ pub(crate) fn build_constant_override_completions(
                 type_str: type_str.as_deref(),
                 default,
                 declaring,
-                kind: CompletionItemKind::CONSTANT,
+                kind: CompletionItemKind::Constant,
                 detail_kind: "override",
                 insert,
                 override_edit: override_edit.clone(),
@@ -812,7 +809,8 @@ mod tests {
         let mut child = make_class("Child");
         child.parent_class = Some(atom("Base"));
 
-        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             if name == "Base" {
                 Some(Arc::new(base.clone()))
             } else {

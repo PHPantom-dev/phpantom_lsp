@@ -12,11 +12,11 @@ mod literals;
 mod operands;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_by_name};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::class_lookup::find_class_by_name;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::type_engine::variable::array_func_rules::{
@@ -56,9 +56,9 @@ pub(crate) struct MethodReturnCtx<'a> {
     /// All classes known in the current file.
     pub all_classes: &'a [Arc<ClassInfo>],
     /// Cross-file class resolution callback for already-resolved names.
-    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub class_loader: &'a ResolvedClassLoader<'a>,
     /// Server state for project-wide answers.  See
-    /// [`ResolutionCtx::backend`].
+    /// [`FileCtx::backend`](crate::type_engine::resolver::FileCtx::backend).
     pub backend: Option<&'a Backend>,
     /// Template substitution map (method-level `@template` bindings).
     pub template_subs: &'a HashMap<String, PhpType>,
@@ -106,9 +106,9 @@ impl<'a> MethodReturnCtx<'a> {
         is_static: bool,
     ) -> Self {
         Self {
-            all_classes: ctx.all_classes,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
+            all_classes: ctx.file.all_classes,
+            class_loader: ctx.file.class_loader,
+            backend: ctx.file.backend,
             template_subs,
             var_resolver: Some(var_resolver),
             cache: ctx.resolved_class_cache,
@@ -137,23 +137,20 @@ pub(super) fn build_var_resolver<'a>(
         let current_class = match ctx.current_class {
             Some(cc) => cc,
             None => {
-                placeholder =
-                    crate::class_lookup::class_context_placeholder(ctx.content, ctx.cursor_offset);
+                placeholder = crate::class_lookup::class_context_placeholder(
+                    ctx.file.content,
+                    ctx.cursor_offset,
+                );
                 &placeholder
             }
         };
         let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
-            source_imports: ctx.source_imports,
-            backend: ctx.backend,
             scope_var_resolver: ctx.scope_var_resolver,
             ..crate::type_engine::resolver::VarResolutionCtx::new(
                 var_name,
+                ctx.file,
                 current_class,
-                ctx.all_classes,
-                ctx.content,
                 ctx.cursor_offset,
-                ctx.class_loader,
-                ctx.source_class_loader,
             )
         };
         crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
@@ -186,7 +183,7 @@ fn resolve_conditional_return_hint(
     template_subs: &HashMap<String, PhpType>,
     call_site: crate::type_engine::conditional_resolution::ConditionalClassContext<'_>,
     owner: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let cond = method.conditional_return()?;
     let bound_cond = crate::type_engine::conditional_resolution::bind_callable_condition_templates(
@@ -245,7 +242,7 @@ impl Backend {
     pub(crate) fn configured_laravel_date_return(
         owner: &ClassInfo,
         method_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<(Arc<ClassInfo>, PhpType)> {
         if !matches!(
             owner.fqn().as_str(),
@@ -256,7 +253,9 @@ impl Backend {
         let return_type = owner
             .get_method_ci(method_name)
             .and_then(|method| method.return_type.as_ref())?;
-        let date_class = class_loader(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)?;
+        let date_class = class_loader(Fqn::new(
+            crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN,
+        ))?;
         let return_type = replace_support_carbon_return(return_type, date_class.fqn().as_str())?;
 
         Some((date_class, return_type))
@@ -353,8 +352,8 @@ impl Backend {
             crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                 &evaluated,
                 "",
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             )
         } else {
             classes
@@ -395,9 +394,12 @@ impl Backend {
             SubjectExpr::FunctionCall(func_name) => {
                 Self::return_types_of_function_call(func_name, text_args, ctx, return_type_hint_out)
             }
-            SubjectExpr::Variable(var_name) => {
-                Self::return_types_of_variable_invocation(var_name, ctx, return_type_hint_out)
-            }
+            SubjectExpr::Variable(var_name) => Self::return_types_of_variable_invocation(
+                var_name,
+                text_args,
+                ctx,
+                return_type_hint_out,
+            ),
             SubjectExpr::NewExpr { class_name } => Self::return_types_of_constructor_call(
                 class_name,
                 text_args,
@@ -457,6 +459,30 @@ impl Backend {
                 &tpl,
             )
         };
+        // A `static` nested inside the return type (`NodeBuilder<static>`)
+        // names the receiver with its own type arguments.  Resolving it
+        // against the owner's bare FQN would specialise the returned class
+        // with the un-parameterised owner, so the next call in the chain
+        // loses them.  Only done when the call's template values cover every
+        // class-level parameter, i.e. when the receiver's type is known.
+        let receiver_type = (!class_info.template_params.is_empty()
+            && class_info
+                .template_params
+                .iter()
+                .all(|p| template_subs.contains_key(p.as_str())))
+        .then(|| {
+            receiver_type_for_condition(
+                class_info.fqn().as_str(),
+                &class_info.template_params,
+                template_subs,
+            )
+        });
+        let bind_receiver = |ty: PhpType| -> PhpType {
+            match &receiver_type {
+                Some(receiver) if ty.contains_self_ref() => ty.replace_self_with_type(receiver),
+                _ => ty,
+            }
+        };
         // Helper: try to resolve a method's conditional return type, falling
         // back to template-substituted return type, then plain return type.
         let resolve_method = |method: &MethodInfo| -> Vec<Arc<ClassInfo>> {
@@ -476,7 +502,7 @@ impl Backend {
             ) {
                 let classes: Vec<Arc<ClassInfo>> =
                     crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
-                        &effective,
+                        &bind_receiver(effective),
                         &class_info.fqn(),
                         all_classes,
                         class_loader,
@@ -495,7 +521,7 @@ impl Backend {
             {
                 let substituted = ret.substitute(template_subs);
                 if &substituted != ret {
-                    let substituted = decide_nested(method, substituted);
+                    let substituted = bind_receiver(decide_nested(method, substituted));
                     let classes: Vec<Arc<ClassInfo>> =
                         crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             &substituted,
@@ -547,7 +573,7 @@ impl Backend {
                     return vec![Arc::new(class_info.clone())];
                 }
                 return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
-                    &decide_nested(method, ret.clone()),
+                    &bind_receiver(decide_nested(method, ret.clone())),
                     &class_info.fqn(),
                     all_classes,
                     class_loader,
@@ -743,7 +769,7 @@ fn is_valid_virtual_narrowing(
     native_type: &PhpType,
     owner_class: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     // `mixed` and `void` impose no constraint — any type is valid.
     if native_type.is_mixed() || native_type.is_void() {
@@ -790,7 +816,7 @@ fn is_type_subclass_of(
     candidate_type: &PhpType,
     ancestor_name: &str,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     // Cannot extract a base name → not a class type → not a subclass.
     if candidate_type.base_name().is_none() {
@@ -798,8 +824,8 @@ fn is_type_subclass_of(
     }
 
     // Build a combined loader that checks local classes first.
-    let combined_loader = |name: &str| -> Option<Arc<ClassInfo>> {
-        find_class_by_name(all_classes, name)
+    let combined_loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        find_class_by_name(all_classes, &name)
             .cloned()
             .or_else(|| class_loader(name))
     };
@@ -807,7 +833,7 @@ fn is_type_subclass_of(
     // Check if the candidate can be resolved at all.  When it cannot,
     // give the benefit of the doubt (e.g. trust an @method tag).
     if let Some(base) = candidate_type.base_name()
-        && combined_loader(base).is_none()
+        && combined_loader(Fqn::new(base)).is_none()
     {
         return true;
     }
@@ -999,7 +1025,7 @@ pub(super) fn resolve_chain_declared_return(
         // Fall back to the fully resolved class for inherited methods.
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             ci,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         if let Some(method) = resolved

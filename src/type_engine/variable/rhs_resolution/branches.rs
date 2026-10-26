@@ -374,8 +374,9 @@ pub(super) fn resolve_match_expression(
     // Two subject shapes carry narrowing information: `match (true)`
     // with `instanceof` conditions, and `match ($x::class)` with
     // `Foo::class` conditions.
-    let subject_var =
-        crate::type_engine::types::narrowing::match_class_subject_var(match_expr.expression);
+    let subject_var = crate::type_engine::type_ops::condition_facts::match_class_subject_var(
+        match_expr.expression,
+    );
     let is_true_subject = match_expr.expression.is_true();
     let narrows = is_true_subject || subject_var.is_some();
     let mut combined = Vec::new();
@@ -484,8 +485,10 @@ fn extract_match_arm_narrowings(
         // sees the union of them.
         let pair = match subject_var {
             Some(var) => {
-                crate::type_engine::types::narrowing::class_match_condition_class(condition, &names)
-                    .map(|ty| (var.to_owned(), ty))
+                crate::type_engine::type_ops::condition_facts::class_match_condition_class(
+                    condition, &names,
+                )
+                .map(|ty| (var.to_owned(), ty))
             }
             None => extract_instanceof_pair(condition, &names),
         };
@@ -500,8 +503,8 @@ fn extract_match_arm_narrowings(
         let resolved = type_resolution::type_hint_to_classes_typed(
             &class_type,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         if resolved.is_empty() {
             return HashMap::new();

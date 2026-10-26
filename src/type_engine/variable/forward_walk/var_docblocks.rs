@@ -130,7 +130,7 @@ pub(crate) fn try_process_inline_var_override<'b>(
     }
 
     // Look for `/** @var Type $varName */` before this expression.
-    let docs = docblocks_above(ctx.content, offset);
+    let docs = docblocks_above(ctx.file.content, offset);
     let Some((&doc_text, further)) = docs.split_first() else {
         return VarOverrideResult::None;
     };
@@ -341,11 +341,11 @@ pub(crate) fn apply_standalone_var_docblocks(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
-    let offset = (stmt_offset as usize).min(ctx.content.len());
+    let offset = (stmt_offset as usize).min(ctx.file.content.len());
     if offset == 0 {
         return false;
     }
-    apply_preceding_var_docblocks(&docblocks_above(ctx.content, offset), scope, ctx)
+    apply_preceding_var_docblocks(&docblocks_above(ctx.file.content, offset), scope, ctx)
 }
 
 /// Apply the `@var` docblocks above the code at the cursor when the parser
@@ -363,10 +363,11 @@ pub(crate) fn apply_var_docblocks_above_unparsed_cursor(
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
     let cursor = ctx.cursor_offset as usize;
-    let starts = unparsed_statement_starts(ctx.content, cursor);
+    let starts = unparsed_statement_starts(ctx.file.content, cursor);
     let mut applied = false;
     for &start in starts.iter().rev().filter(|&&start| start <= cursor) {
-        applied |= apply_preceding_var_docblocks(&docblocks_above(ctx.content, start), scope, ctx);
+        applied |=
+            apply_preceding_var_docblocks(&docblocks_above(ctx.file.content, start), scope, ctx);
     }
     applied
 }
@@ -465,11 +466,11 @@ pub(crate) fn apply_global_var_docblocks(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
-    let offset = (stmt_offset as usize).min(ctx.content.len());
+    let offset = (stmt_offset as usize).min(ctx.file.content.len());
     if offset == 0 {
         return false;
     }
-    let docs = docblocks_above(ctx.content, offset);
+    let docs = docblocks_above(ctx.file.content, offset);
     if let [only] = imported
         && let Some(php_type) = docs
             .first()

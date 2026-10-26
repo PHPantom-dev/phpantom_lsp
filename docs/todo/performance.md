@@ -20,7 +20,25 @@ against that bar.
 
 ---
 
-No outstanding items.
+## P86. A Symfony app's generated `config/reference.php` is slow to parse
+
+**Impact: Medium · Complexity: Medium**
+
+Symfony 7.3 and later generate `config/reference.php` for the application:
+one 100 KB class whose docblock declares some forty `@psalm-type` array
+shapes, several hundred lines each, nested into one another. Parsing that
+single file takes about 0.5 s in a debug build, roughly ten times what a
+PHP file of its size costs, so something on the way from the docblock to
+the type aliases is superlinear in the size of a shape.
+
+Every Symfony project pays it once, when the workspace index parses the
+file. On `projects/symfony-demo` (debug `analyze`, 2026-10-24) it is the
+whole difference between 0.74 s and 1.23 s, since the workspace walk that
+reads the service configuration now runs there too. Profile a single-file
+`analyze` of the file to find where the time goes.
+
+**Where to look:** `src/docblock/` (type-alias tags), the alias handling in
+`src/parser/classes/`.
 
 ---
 

@@ -166,7 +166,7 @@ pub(super) fn magic_constant_type(
     match magic {
         MagicConstant::Line(_) => {
             let offset = magic.span().start.offset as usize;
-            let line = crate::text_position::offset_to_position(ctx.content, offset).line + 1;
+            let line = crate::text_position::offset_to_position(ctx.file.content, offset).line + 1;
             PhpType::literal_int(line.to_string())
         }
         MagicConstant::Namespace(_) => {
@@ -197,7 +197,7 @@ pub(super) fn magic_constant_type(
         MagicConstant::Property(_) => {
             let offset = magic.span().start.offset;
             PhpType::literal_string_value(
-                enclosing_context_at(ctx.content, offset)
+                enclosing_context_at(ctx.file.content, offset)
                     .property
                     .unwrap_or_default(),
             )
@@ -215,7 +215,7 @@ fn enclosing_function_display_name(
     ctx: &VarResolutionCtx<'_>,
 ) -> String {
     let offset = magic.span().start.offset;
-    match enclosing_context_at(ctx.content, offset).function {
+    match enclosing_context_at(ctx.file.content, offset).function {
         Some(EnclosingFunction::Named(name)) => name,
         Some(EnclosingFunction::Closure) => "{closure}".to_string(),
         None => String::new(),

@@ -1,6 +1,5 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{completion_response, create_psr4_workspace, create_test_backend, open_php};
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Basic: $var->prop-> ────────────────────────────────────────────────────
 
@@ -10,7 +9,7 @@ use tower_lsp::lsp_types::*;
 async fn test_var_property_chain_simple() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_prop_chain.php").unwrap();
+    let uri = Uri::parse("file:///var_prop_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -28,38 +27,17 @@ async fn test_var_property_chain_simple() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$user->address->` on line 12
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 22, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $user->address->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -83,7 +61,7 @@ async fn test_var_property_chain_simple() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -95,7 +73,7 @@ async fn test_var_property_chain_simple() {
 async fn test_var_property_chain_deep() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///deep_chain.php").unwrap();
+    let uri = Uri::parse("file:///deep_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -116,38 +94,17 @@ async fn test_var_property_chain_deep() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$order->customer->address->` on line 15
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 34,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 34, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $order->customer->address->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("street")),
@@ -171,7 +128,7 @@ async fn test_var_property_chain_deep() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -183,7 +140,7 @@ async fn test_var_property_chain_deep() {
 async fn test_var_property_chain_from_parameter() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///param_chain.php").unwrap();
+    let uri = Uri::parse("file:///param_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -198,37 +155,16 @@ async fn test_var_property_chain_from_parameter() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 9,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 9, 22, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for parameter $user->address->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -241,7 +177,7 @@ async fn test_var_property_chain_from_parameter() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -252,7 +188,7 @@ async fn test_var_property_chain_from_parameter() {
 async fn test_var_property_chain_nullsafe() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nullsafe_chain.php").unwrap();
+    let uri = Uri::parse("file:///nullsafe_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Engine {\n",
@@ -267,37 +203,16 @@ async fn test_var_property_chain_nullsafe() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 9,
-                character: 21,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 9, 21, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $car?->engine->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("horsepower")),
@@ -310,7 +225,7 @@ async fn test_var_property_chain_nullsafe() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -321,7 +236,7 @@ async fn test_var_property_chain_nullsafe() {
 async fn test_var_property_chain_from_docblock_var() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///docblock_chain.php").unwrap();
+    let uri = Uri::parse("file:///docblock_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Settings {\n",
@@ -338,37 +253,16 @@ async fn test_var_property_chain_from_docblock_var() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 24,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 24, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for @var annotated $config->settings->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("debug")),
@@ -381,7 +275,7 @@ async fn test_var_property_chain_from_docblock_var() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -393,7 +287,7 @@ async fn test_var_property_chain_from_docblock_var() {
 async fn test_var_method_then_property_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_prop_chain.php").unwrap();
+    let uri = Uri::parse("file:///method_prop_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -411,38 +305,17 @@ async fn test_var_method_then_property_chain() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // `$order->getCustomer()->address->` is on line 12
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 38,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 38, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $order->getCustomer()->address->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -450,7 +323,7 @@ async fn test_var_method_then_property_chain() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -462,7 +335,7 @@ async fn test_var_method_then_property_chain() {
 async fn test_var_property_chain_inside_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inside_class.php").unwrap();
+    let uri = Uri::parse("file:///inside_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -479,37 +352,16 @@ async fn test_var_property_chain_inside_class() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 10,
-                character: 21,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 10, 21, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $db->logger->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("log")),
@@ -517,7 +369,7 @@ async fn test_var_property_chain_inside_class() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -529,7 +381,7 @@ async fn test_var_property_chain_inside_class() {
 async fn test_var_property_chain_docblock_property_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///docblock_prop_type.php").unwrap();
+    let uri = Uri::parse("file:///docblock_prop_type.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Renderer {\n",
@@ -545,37 +397,16 @@ async fn test_var_property_chain_docblock_property_type() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 10,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 10, 22, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for docblock-typed $view->renderer->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("render")),
@@ -583,7 +414,7 @@ async fn test_var_property_chain_docblock_property_type() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -594,7 +425,7 @@ async fn test_var_property_chain_docblock_property_type() {
 async fn test_var_property_chain_inherited_property() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inherited_prop.php").unwrap();
+    let uri = Uri::parse("file:///inherited_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Connection {\n",
@@ -612,37 +443,16 @@ async fn test_var_property_chain_inherited_property() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 18,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 18, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $repo->conn-> (inherited property)"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("query")),
@@ -655,7 +465,7 @@ async fn test_var_property_chain_inherited_property() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -708,38 +518,17 @@ async fn test_var_property_chain_cross_file_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///src/Controller.php").unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: controller_php.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    let uri = Uri::parse("file:///src/Controller.php").unwrap();
+    open_php(&backend, &uri, controller_php).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 5,
-                character: 24,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 5, 24, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for PSR-4 $user->address->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -757,7 +546,7 @@ async fn test_var_property_chain_cross_file_psr4() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -768,7 +557,7 @@ async fn test_var_property_chain_cross_file_psr4() {
 async fn test_var_property_chain_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///top_level_chain.php").unwrap();
+    let uri = Uri::parse("file:///top_level_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Point {\n",
@@ -782,37 +571,16 @@ async fn test_var_property_chain_top_level() {
         "$shape->origin->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 9,
-                character: 19,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 9, 19, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for top-level $shape->origin->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("x")),
@@ -825,7 +593,7 @@ async fn test_var_property_chain_top_level() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -837,7 +605,7 @@ async fn test_var_property_chain_top_level() {
 async fn test_var_property_chain_from_method_return() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///return_chain.php").unwrap();
+    let uri = Uri::parse("file:///return_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Stats {\n",
@@ -857,37 +625,16 @@ async fn test_var_property_chain_from_method_return() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 14,
-                character: 21,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 14, 21, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $report->stats->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("count")),
@@ -900,7 +647,7 @@ async fn test_var_property_chain_from_method_return() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -912,7 +659,7 @@ async fn test_var_property_chain_from_method_return() {
 async fn test_var_property_chain_nonexistent_property() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///no_prop.php").unwrap();
+    let uri = Uri::parse("file:///no_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -924,30 +671,9 @@ async fn test_var_property_chain_nonexistent_property() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 6,
-                character: 26,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 6, 26, None).await;
     // Should return None — no crash, no wrong results.
     assert!(
         result.is_none(),
@@ -964,7 +690,7 @@ async fn test_var_property_chain_nonexistent_property() {
 async fn test_var_property_chain_foreach_value() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_chain.php").unwrap();
+    let uri = Uri::parse("file:///foreach_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -984,37 +710,16 @@ async fn test_var_property_chain_foreach_value() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 30,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 30, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for foreach $user->address->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -1022,7 +727,7 @@ async fn test_var_property_chain_foreach_value() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -1033,7 +738,7 @@ async fn test_var_property_chain_foreach_value() {
 async fn test_var_property_chain_promoted_property() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///promoted_chain.php").unwrap();
+    let uri = Uri::parse("file:///promoted_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Formatter {\n",
@@ -1050,37 +755,16 @@ async fn test_var_property_chain_promoted_property() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 26,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 26, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $printer->formatter->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("format")),
@@ -1088,7 +772,7 @@ async fn test_var_property_chain_promoted_property() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -1100,7 +784,7 @@ async fn test_var_property_chain_promoted_property() {
 async fn test_var_property_chain_no_static_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///no_static.php").unwrap();
+    let uri = Uri::parse("file:///no_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Cache {\n",
@@ -1117,37 +801,16 @@ async fn test_var_property_chain_no_static_members() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 18,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 18, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $app->cache->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("get")),
@@ -1161,7 +824,7 @@ async fn test_var_property_chain_no_static_members() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -1173,7 +836,7 @@ async fn test_var_property_chain_no_static_members() {
 async fn test_this_property_chain_still_works() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///this_regression.php").unwrap();
+    let uri = Uri::parse("file:///this_regression.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -1187,37 +850,16 @@ async fn test_this_property_chain_still_works() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 7,
-                character: 23,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 7, 23, None).await;
     assert!(
         result.is_some(),
         "Completion should still work for $this->logger->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("info")),
@@ -1225,6 +867,6 @@ async fn test_this_property_chain_still_works() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }

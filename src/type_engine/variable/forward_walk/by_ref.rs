@@ -182,8 +182,8 @@ fn receiver_classes(
         }
         return super::super::closure_resolution::find_owner_by_name(
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         )
         .into_iter()
         .collect();
@@ -239,7 +239,7 @@ fn method_runs_callable_immediately(
 ) -> bool {
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         class,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     merged
@@ -376,7 +376,7 @@ pub(crate) fn seed_by_ref_capture_fixed_point<'b>(
 
     for _ in 0..depth.saturating_sub(1) {
         let mut probe = entry_scope.clone();
-        let return_frame = push_return_frame();
+        let return_frame = push_return_frame(discovery_ctx.flow);
         walk_body_forward(body_stmts.iter().copied(), &mut probe, &discovery_ctx);
         if let Some(returned) = return_frame.finish() {
             probe.merge_branch(&returned);
@@ -445,7 +445,7 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
 
     seed_by_ref_capture_fixed_point(closure, &mut closure_scope, &full_ctx, &captured);
 
-    let return_frame = push_return_frame();
+    let return_frame = push_return_frame(full_ctx.flow);
     walk_body_forward(
         closure.body.statements.iter(),
         &mut closure_scope,
@@ -609,7 +609,7 @@ fn method_call_on<'b>(
     classes.iter().find_map(|class| {
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             class,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         let parameters = merged.get_method(method_name)?.parameters.clone();

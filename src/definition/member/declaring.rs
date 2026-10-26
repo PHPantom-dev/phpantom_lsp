@@ -7,6 +7,7 @@
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance::{ancestors, find_declaring_ancestor, find_declaring_trait};
 use crate::types::*;
 use std::sync::Arc;
@@ -54,7 +55,7 @@ impl Backend {
     pub(in crate::definition) fn find_declaring_class(
         class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<(ClassInfo, String)> {
         let declares = |candidate: &ClassInfo| {
             Self::classify_member(candidate, member_name, MemberAccessHint::Unknown).is_some()
@@ -94,7 +95,7 @@ impl Backend {
     pub(in crate::definition) fn find_declaring_in_traits(
         trait_names: &[Atom],
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<(ClassInfo, String)> {
         let declares = |candidate: &ClassInfo| {
             Self::classify_member(candidate, member_name, MemberAccessHint::Unknown).is_some()
@@ -115,7 +116,7 @@ impl Backend {
     pub(in crate::definition) fn find_declaring_in_mixins(
         mixin_names: &[Atom],
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         depth: usize,
     ) -> Option<(ClassInfo, String)> {
         if depth > MAX_MIXIN_DEPTH as usize {
@@ -123,7 +124,7 @@ impl Backend {
         }
 
         for mixin_name in mixin_names {
-            let Some(mixin_class) = class_loader(mixin_name) else {
+            let Some(mixin_class) = class_loader(Fqn::new(mixin_name)) else {
                 continue;
             };
 

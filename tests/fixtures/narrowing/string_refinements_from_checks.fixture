@@ -1,0 +1,27 @@
+// test: emptiness, truthiness and class-string checks refine a string
+// feature: hover
+// expect_hover: $truthy => non-falsy-string
+// expect_hover: $notBlank => ?non-empty-string
+// expect_hover: $named => class-string
+---
+<?php
+
+interface Registry {
+    /** @phpstan-assert-if-true =class-string $className */
+    public function hasClass(string $className): bool;
+}
+
+function test(string $s, ?string $ns, string $class, Registry $registry): void {
+    if ($s) {
+        $truthy = $s;
+    }
+    if ($ns === '') {
+        $ns = null;
+    }
+    $notBlank = $ns;
+    if (!$registry->hasClass($class)) {
+        return;
+    }
+    $named = $class;
+    $<>named;
+}

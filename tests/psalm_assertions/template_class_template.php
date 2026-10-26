@@ -953,8 +953,9 @@ namespace PsalmTest_template_class_template_31 {
     }
     $t = (new Foo(''))->t();
 
-    // PHPantom, like PHPStan, widens a literal argument when inferring a class template.
-    assertType('string', $t);
+    // A template bounded by a scalar keeps the literal it is inferred from,
+    // as in PHPStan.
+    assertType('\'\'', $t);
 }
 
 // Test: template of simple type with additional comment with dot
@@ -982,6 +983,7 @@ namespace PsalmTest_template_class_template_32 {
     }
     $t = (new Foo(''))->t();
 
-    // PHPantom, like PHPStan, widens a literal argument when inferring a class template.
-    assertType('string', $t);
+    // A template bounded by a scalar keeps the literal it is inferred from,
+    // as in PHPStan.
+    assertType('\'\'', $t);
 }

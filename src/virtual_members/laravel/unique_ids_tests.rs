@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_method, no_loader};
 use crate::types::{
@@ -74,7 +75,8 @@ fn unique_ids_follow_parent_models_and_composed_traits() {
         middle.name = atom("App\\Models\\Intermediate");
         middle.parent_class = Some(parent.name);
         let middle = Arc::new(middle);
-        let loader = |name: &str| {
+        let loader = |name: Fqn<'_>| {
+            let name = name.as_str();
             [&nested, &wrapper, &parent, &middle]
                 .into_iter()
                 .find(|class| class.name == name)
@@ -144,10 +146,13 @@ fn unique_ids_preserve_explicit_attribute_types() {
 fn unique_ids_preserve_schema_metadata_and_dynamic_key_names() {
     let mut class = model(&[UUIDS]);
     let cache = new_resolved_class_cache();
-    cache.write().set_schema_index(SchemaIndex::from_tables(
-        Some("primary".into()),
-        parse_schema_dump("primary", "CREATE TABLE users (id varchar(36) NOT NULL);"),
-    ));
+    cache
+        .write()
+        .laravel_mut()
+        .set_schema_index(SchemaIndex::from_tables(
+            Some("primary".into()),
+            parse_schema_dump("primary", "CREATE TABLE users (id varchar(36) NOT NULL);"),
+        ));
     let members = LaravelModelProvider.provide(&class, &no_loader, Some(&cache));
     assert_key(&members, "id", "string");
     assert!(matches!(
@@ -175,7 +180,10 @@ fn unique_ids_handle_missing_parents_and_trait_cycles() {
     let mut cycle = make_class("CyclicTrait");
     cycle.used_traits = vec![cycle.name];
     let cycle = Arc::new(cycle);
-    let loader = |name: &str| (name == cycle.name).then(|| Arc::clone(&cycle));
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        (name == cycle.name).then(|| Arc::clone(&cycle))
+    };
     class.used_traits = vec![cycle.name, cycle.name];
     assert!(!uses_unique_string_ids(&class, &loader));
     class.used_traits.push(atom(ULIDS));
@@ -203,7 +211,8 @@ fn unique_ids_bound_inheritance_and_trait_depth() {
             Arc::new(class)
         })
         .collect();
-    let loader = |name: &str| {
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
         traits
             .iter()
             .find(|class| class.name == name)
@@ -234,7 +243,10 @@ fn unique_ids_overrides_decide_whether_the_primary_key_is_generated() {
     parent.name = atom("App\\Models\\BaseModel");
     parent.laravel_mut().unique_ids = Some(vec!["uuid".into()]);
     let parent = Arc::new(parent);
-    let loader = |name: &str| (name == parent.name).then(|| Arc::clone(&parent));
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        (name == parent.name).then(|| Arc::clone(&parent))
+    };
     let mut child = model(&[]);
     child.parent_class = Some(parent.name);
     assert_key(

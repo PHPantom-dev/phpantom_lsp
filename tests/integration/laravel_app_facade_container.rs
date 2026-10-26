@@ -12,7 +12,7 @@
 //! type.
 
 use crate::common::{create_psr4_workspace, hover_text, open_php_str};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },

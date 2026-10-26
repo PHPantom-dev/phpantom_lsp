@@ -1,0 +1,10 @@
+// test: Properties Doctrine reads or writes are not unused
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, UnusedPrivatePropertyRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/DeadCode/data/unused-private-property.php
+// expect_diagnostic: 17: Property PHPStan\Rules\Doctrine\ORM\UnusedPrivateProperty\EntityWithAGeneratedId::$unused is never written, only read. // SKIP: private properties nothing reads or writes are not reported
+// expect_diagnostic: 19: Property PHPStan\Rules\Doctrine\ORM\UnusedPrivateProperty\EntityWithAGeneratedId::$unused2 is unused. // SKIP: private properties nothing reads or writes are not reported
+// expect_diagnostic: 39: Property PHPStan\Rules\Doctrine\ORM\UnusedPrivateProperty\ReadOnlyEntityWithConstructor::$id is never written, only read. // SKIP: private properties nothing reads or writes are not reported
+---

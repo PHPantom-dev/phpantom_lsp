@@ -17,16 +17,16 @@
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::CodeActionData;
-use crate::code_actions::make_code_action_data;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{DocblockAbove, find_docblock_above_line};
+use crate::code_actions::{
+    CodeActionData, DocblockAbove, deferred_quickfix, find_docblock_above_line,
+};
 use crate::docblock::strip_docblock_line_delimiters;
 use crate::php_type::PhpType;
-use crate::util::short_name;
+use crate::util::{short_name, strip_fqn_prefix};
 
 /// PHPStan identifiers we match on.
 const UNUSED_TYPE_ID: &str = "throws.unusedType";
@@ -40,7 +40,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -54,10 +54,11 @@ impl Backend {
             }
 
             // Extract the type name from the message (validation only).
-            let type_name = match extract_throws_type(&diag.message, identifier) {
-                Some(t) => t,
-                None => continue,
-            };
+            let type_name =
+                match extract_throws_type(crate::util::message_text(&diag.message), identifier) {
+                    Some(t) => t,
+                    None => continue,
+                };
 
             let type_name_str = type_name.to_string();
             let short_name = short_name(&type_name_str);
@@ -91,27 +92,15 @@ impl Backend {
 
             let title = format!("Remove @throws {}", short_name);
 
-            let extra = serde_json::json!({
-                "diagnostic_message": diag.message,
-                "diagnostic_line": diag_line,
-                "diagnostic_code": identifier,
-            });
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(deferred_quickfix(
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(make_code_action_data(
-                    "phpstan.removeThrows",
-                    uri,
-                    &params.range,
-                    extra,
-                )),
-            }));
+                "phpstan.removeThrows",
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                serde_json::Value::Null,
+            ));
         }
     }
 
@@ -145,7 +134,7 @@ impl Backend {
             &block.namespace,
         )?;
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(
             doc_uri,
             vec![throws_edit],
@@ -203,10 +192,7 @@ fn build_remove_throws_edit(
 ) -> Option<TextEdit> {
     // PHPStan reports FQNs already (e.g. `App\Http\Controllers\Ex`),
     // so just normalise — don't resolve through the use-map.
-    let target_fqn = type_name
-        .strip_prefix('\\')
-        .unwrap_or(type_name)
-        .to_lowercase();
+    let target_fqn = strip_fqn_prefix(type_name).to_lowercase();
 
     let doc_lines: Vec<&str> = docblock.text.lines().collect();
 

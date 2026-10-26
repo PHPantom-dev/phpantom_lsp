@@ -5,14 +5,14 @@
 //! returning completions inside `/** … */` docblocks and normal code.
 
 use crate::common::{complete_at_raw, create_test_backend, inject_phpstan_diag};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Line comment suppression ───────────────────────────────────────────────
 
 #[tokio::test]
 async fn no_completion_inside_line_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_line.php").unwrap();
+    let uri = Uri::parse("file:///comment_line.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -33,7 +33,7 @@ async fn no_completion_inside_line_comment() {
 #[tokio::test]
 async fn no_completion_inside_line_comment_partial_word() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_line_word.php").unwrap();
+    let uri = Uri::parse("file:///comment_line_word.php").unwrap();
     let text = concat!("<?php\n", "// Foo\n",);
 
     let result = complete_at_raw(&backend, &uri, text, 1, 5).await;
@@ -47,7 +47,7 @@ async fn no_completion_inside_line_comment_partial_word() {
 #[tokio::test]
 async fn completion_inside_phpstan_ignore_identifier_list() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpstan_ignore_completion.php").unwrap();
+    let uri = Uri::parse("file:///phpstan_ignore_completion.php").unwrap();
     let text = concat!("<?php\n", "// @phpstan-ignore ret\n");
     inject_phpstan_diag(
         &backend,
@@ -69,7 +69,7 @@ async fn completion_inside_phpstan_ignore_identifier_list() {
 #[tokio::test]
 async fn no_completion_inside_phpstan_ignore_code_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpstan_ignore_reason_completion.php").unwrap();
+    let uri = Uri::parse("file:///phpstan_ignore_reason_completion.php").unwrap();
     let text = concat!(
         "<?php\n",
         "// @phpstan-ignore return.type (accepts broader input)\n",
@@ -85,7 +85,7 @@ async fn no_completion_inside_phpstan_ignore_code_comment() {
 #[tokio::test]
 async fn no_completion_inside_trailing_line_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_trailing.php").unwrap();
+    let uri = Uri::parse("file:///comment_trailing.php").unwrap();
     let text = concat!("<?php\n", "$x = 1; // $x->\n",);
 
     let result = complete_at_raw(&backend, &uri, text, 1, 15).await;
@@ -101,7 +101,7 @@ async fn no_completion_inside_trailing_line_comment() {
 #[tokio::test]
 async fn no_completion_inside_block_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_block.php").unwrap();
+    let uri = Uri::parse("file:///comment_block.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -121,7 +121,7 @@ async fn no_completion_inside_block_comment() {
 #[tokio::test]
 async fn no_completion_inside_multiline_block_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_block_multi.php").unwrap();
+    let uri = Uri::parse("file:///comment_block_multi.php").unwrap();
     let text = concat!("<?php\n", "/*\n", " * Some notes\n", " * Foo\n", " */\n",);
 
     let result = complete_at_raw(&backend, &uri, text, 3, 5).await;
@@ -135,7 +135,7 @@ async fn no_completion_inside_multiline_block_comment() {
 #[tokio::test]
 async fn no_completion_inside_block_comment_at_tag() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_block_tag.php").unwrap();
+    let uri = Uri::parse("file:///comment_block_tag.php").unwrap();
     // `@param` inside a `/* */` (not `/** */`) should NOT trigger PHPDoc completion
     let text = concat!("<?php\n", "/* @param */\n",);
 
@@ -152,7 +152,7 @@ async fn no_completion_inside_block_comment_at_tag() {
 #[tokio::test]
 async fn completion_still_works_inside_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_docblock.php").unwrap();
+    let uri = Uri::parse("file:///comment_docblock.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -178,7 +178,7 @@ async fn completion_still_works_inside_docblock() {
 #[tokio::test]
 async fn completion_still_works_in_normal_code() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_normal.php").unwrap();
+    let uri = Uri::parse("file:///comment_normal.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -205,7 +205,7 @@ async fn completion_still_works_in_normal_code() {
 #[tokio::test]
 async fn completion_works_after_line_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_after_line.php").unwrap();
+    let uri = Uri::parse("file:///comment_after_line.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -233,7 +233,7 @@ async fn completion_works_after_line_comment() {
 #[tokio::test]
 async fn completion_works_after_block_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_after_block.php").unwrap();
+    let uri = Uri::parse("file:///comment_after_block.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -263,7 +263,7 @@ async fn completion_works_after_block_comment() {
 #[tokio::test]
 async fn completion_works_when_comment_syntax_in_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_in_string.php").unwrap();
+    let uri = Uri::parse("file:///comment_in_string.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -294,7 +294,7 @@ async fn completion_works_when_comment_syntax_in_string() {
 #[tokio::test]
 async fn no_variable_completion_inside_line_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_var_line.php").unwrap();
+    let uri = Uri::parse("file:///comment_var_line.php").unwrap();
     let text = concat!("<?php\n", "$userName = 'Alice';\n", "// $us\n",);
 
     let result = complete_at_raw(&backend, &uri, text, 2, 5).await;
@@ -308,7 +308,7 @@ async fn no_variable_completion_inside_line_comment() {
 #[tokio::test]
 async fn no_variable_completion_inside_block_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_var_block.php").unwrap();
+    let uri = Uri::parse("file:///comment_var_block.php").unwrap();
     let text = concat!("<?php\n", "$userName = 'Alice';\n", "/* $us */\n",);
 
     let result = complete_at_raw(&backend, &uri, text, 2, 5).await;
@@ -324,7 +324,7 @@ async fn no_variable_completion_inside_block_comment() {
 #[tokio::test]
 async fn no_class_name_completion_inside_line_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_class_line.php").unwrap();
+    let uri = Uri::parse("file:///comment_class_line.php").unwrap();
     let text = concat!("<?php\n", "class MyService {}\n", "// MyS\n",);
 
     let result = complete_at_raw(&backend, &uri, text, 2, 5).await;
@@ -338,7 +338,7 @@ async fn no_class_name_completion_inside_line_comment() {
 #[tokio::test]
 async fn no_class_name_completion_inside_block_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///comment_class_block.php").unwrap();
+    let uri = Uri::parse("file:///comment_class_block.php").unwrap();
     let text = concat!("<?php\n", "class MyService {}\n", "/* MyS */\n",);
 
     let result = complete_at_raw(&backend, &uri, text, 2, 5).await;
@@ -354,7 +354,7 @@ async fn no_class_name_completion_inside_block_comment() {
 #[tokio::test]
 async fn no_class_completion_inside_docblock_description() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_desc_class.php").unwrap();
+    let uri = Uri::parse("file:///docblock_desc_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {}\n",
@@ -376,7 +376,7 @@ async fn no_class_completion_inside_docblock_description() {
 #[tokio::test]
 async fn no_variable_completion_inside_docblock_description() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_desc_var.php").unwrap();
+    let uri = Uri::parse("file:///docblock_desc_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$userName = 'Alice';\n",
@@ -398,7 +398,7 @@ async fn no_variable_completion_inside_docblock_description() {
 #[tokio::test]
 async fn no_member_completion_inside_docblock_description() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_desc_member.php").unwrap();
+    let uri = Uri::parse("file:///docblock_desc_member.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -422,7 +422,7 @@ async fn no_member_completion_inside_docblock_description() {
 #[tokio::test]
 async fn docblock_at_tag_still_completes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_at_tag.php").unwrap();
+    let uri = Uri::parse("file:///docblock_at_tag.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -447,7 +447,7 @@ async fn docblock_at_tag_still_completes() {
 #[tokio::test]
 async fn code_after_docblock_still_completes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_then_code.php").unwrap();
+    let uri = Uri::parse("file:///docblock_then_code.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -480,7 +480,7 @@ async fn code_after_docblock_still_completes() {
 #[tokio::test]
 async fn docblock_param_type_completion() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_param_type.php").unwrap();
+    let uri = Uri::parse("file:///docblock_param_type.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class UserService {}\n",
@@ -509,7 +509,7 @@ async fn docblock_param_type_completion() {
 #[tokio::test]
 async fn docblock_param_empty_type_completion() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_param_empty_type.php").unwrap();
+    let uri = Uri::parse("file:///docblock_param_empty_type.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -538,7 +538,7 @@ async fn docblock_param_empty_type_completion() {
 #[tokio::test]
 async fn docblock_return_type_completion() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_return_type.php").unwrap();
+    let uri = Uri::parse("file:///docblock_return_type.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Collection {}\n",
@@ -566,7 +566,7 @@ async fn docblock_return_type_completion() {
 #[tokio::test]
 async fn docblock_throws_type_completion() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_throws_type.php").unwrap();
+    let uri = Uri::parse("file:///docblock_throws_type.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class InvalidArgumentException extends \\Exception {}\n",
@@ -596,7 +596,7 @@ async fn docblock_throws_type_completion() {
 #[tokio::test]
 async fn docblock_var_type_completion() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_var_type.php").unwrap();
+    let uri = Uri::parse("file:///docblock_var_type.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class DateTime {}\n",
@@ -625,7 +625,7 @@ async fn docblock_var_type_completion() {
 #[tokio::test]
 async fn docblock_param_variable_completion() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_param_var.php").unwrap();
+    let uri = Uri::parse("file:///docblock_param_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -657,7 +657,7 @@ async fn docblock_param_variable_completion() {
 #[tokio::test]
 async fn docblock_param_variable_partial_filter() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_param_var_filter.php").unwrap();
+    let uri = Uri::parse("file:///docblock_param_var_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -689,7 +689,7 @@ async fn docblock_param_variable_partial_filter() {
 #[tokio::test]
 async fn docblock_param_variable_empty_offers_all() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_param_var_all.php").unwrap();
+    let uri = Uri::parse("file:///docblock_param_var_all.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -718,7 +718,7 @@ async fn docblock_param_variable_empty_offers_all() {
 #[tokio::test]
 async fn docblock_union_type_second_member() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_union.php").unwrap();
+    let uri = Uri::parse("file:///docblock_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class UserService {}\n",
@@ -748,7 +748,7 @@ async fn docblock_union_type_second_member() {
 #[tokio::test]
 async fn docblock_generic_type_inside_angle_brackets() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_generic.php").unwrap();
+    let uri = Uri::parse("file:///docblock_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class UserModel {}\n",
@@ -779,7 +779,7 @@ async fn docblock_generic_type_inside_angle_brackets() {
 #[tokio::test]
 async fn docblock_return_description_no_completion() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_return_desc.php").unwrap();
+    let uri = Uri::parse("file:///docblock_return_desc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {}\n",
@@ -801,7 +801,7 @@ async fn docblock_return_description_no_completion() {
 #[tokio::test]
 async fn docblock_param_description_no_completion() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_param_desc.php").unwrap();
+    let uri = Uri::parse("file:///docblock_param_desc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {}\n",
@@ -825,7 +825,7 @@ async fn docblock_param_description_no_completion() {
 #[tokio::test]
 async fn docblock_param_variable_insert_text_always_includes_dollar() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_param_var_insert.php").unwrap();
+    let uri = Uri::parse("file:///docblock_param_var_insert.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -844,7 +844,7 @@ async fn docblock_param_variable_insert_text_always_includes_dollar() {
     assert!(name_item.is_some(), "Should have a $name completion item");
     let item = name_item.unwrap();
     match &item.text_edit {
-        Some(CompletionTextEdit::Edit(te)) => {
+        Some(CompletionItemTextEdit::TextEdit(te)) => {
             assert_eq!(te.new_text, "$name", "text_edit new_text should be $name");
             // Range must cover the typed `$` at col 17..18.
             assert_eq!(te.range.start, Position::new(2, 17));
@@ -861,7 +861,7 @@ async fn docblock_param_variable_insert_text_always_includes_dollar() {
     );
     assert_eq!(
         item.kind,
-        Some(CompletionItemKind::VARIABLE),
+        Some(CompletionItemKind::Variable),
         "Kind should be VARIABLE"
     );
 }
@@ -869,7 +869,7 @@ async fn docblock_param_variable_insert_text_always_includes_dollar() {
 #[tokio::test]
 async fn docblock_param_variable_insert_text_includes_dollar_when_not_typed() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_param_var_insert_no_dollar.php").unwrap();
+    let uri = Uri::parse("file:///docblock_param_var_insert_no_dollar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -887,7 +887,7 @@ async fn docblock_param_variable_insert_text_includes_dollar_when_not_typed() {
     assert!(name_item.is_some(), "Should have a $name completion item");
     let item = name_item.unwrap();
     match &item.text_edit {
-        Some(CompletionTextEdit::Edit(te)) => {
+        Some(CompletionItemTextEdit::TextEdit(te)) => {
             assert_eq!(
                 te.new_text, "$name",
                 "text_edit new_text should include the $ prefix"
@@ -905,7 +905,7 @@ async fn docblock_param_variable_insert_text_includes_dollar_when_not_typed() {
 #[tokio::test]
 async fn docblock_param_suggests_scalar_types() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_scalar_param.php").unwrap();
+    let uri = Uri::parse("file:///docblock_scalar_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -931,7 +931,7 @@ async fn docblock_param_suggests_scalar_types() {
 #[tokio::test]
 async fn docblock_return_suggests_scalar_types() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_scalar_return.php").unwrap();
+    let uri = Uri::parse("file:///docblock_scalar_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -957,7 +957,7 @@ async fn docblock_return_suggests_scalar_types() {
 #[tokio::test]
 async fn docblock_param_suggests_int_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_scalar_int.php").unwrap();
+    let uri = Uri::parse("file:///docblock_scalar_int.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -983,7 +983,7 @@ async fn docblock_param_suggests_int_type() {
 #[tokio::test]
 async fn docblock_type_empty_partial_suggests_scalars_and_classes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_scalar_all.php").unwrap();
+    let uri = Uri::parse("file:///docblock_scalar_all.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -1022,7 +1022,7 @@ async fn docblock_type_empty_partial_suggests_scalars_and_classes() {
 #[tokio::test]
 async fn docblock_scalar_type_has_keyword_kind() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_scalar_kind.php").unwrap();
+    let uri = Uri::parse("file:///docblock_scalar_kind.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1039,7 +1039,7 @@ async fn docblock_scalar_type_has_keyword_kind() {
     assert!(string_item.is_some(), "Should have a 'string' item");
     assert_eq!(
         string_item.unwrap().kind,
-        Some(CompletionItemKind::KEYWORD),
+        Some(CompletionItemKind::Keyword),
         "Scalar types should have KEYWORD kind"
     );
 }
@@ -1047,7 +1047,7 @@ async fn docblock_scalar_type_has_keyword_kind() {
 #[tokio::test]
 async fn docblock_var_suggests_scalar_types() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_scalar_var.php").unwrap();
+    let uri = Uri::parse("file:///docblock_scalar_var.php").unwrap();
     let text = concat!("<?php\n", "/**\n", " * @var bo\n", " */\n",);
 
     let result = complete_at_raw(&backend, &uri, text, 2, 10).await;
@@ -1064,7 +1064,7 @@ async fn docblock_var_suggests_scalar_types() {
 #[tokio::test]
 async fn docblock_throws_suggests_scalar_types_and_classes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///docblock_throws_scalar.php").unwrap();
+    let uri = Uri::parse("file:///docblock_throws_scalar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class RuntimeException extends \\Exception {}\n",

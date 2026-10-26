@@ -1,14 +1,15 @@
 use crate::common::{
     class_items, complete_at, create_psr4_workspace, create_test_backend_with_full_stubs,
     create_test_backend_with_function_stubs, create_test_backend_with_stubs, items_of_kind, labels,
+    open_php,
 };
 use phpantom_lsp::Backend;
 use phpantom_lsp::composer::parse_autoload_classmap;
 use phpantom_lsp::types::DefineInfo;
 use std::collections::HashMap;
 use std::fs;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -26,11 +27,11 @@ fn fqns<'a>(items: &'a [&'a CompletionItem]) -> Vec<&'a str> {
 }
 
 fn function_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items_of_kind(items, CompletionItemKind::FUNCTION)
+    items_of_kind(items, CompletionItemKind::Function)
 }
 
 fn constant_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items_of_kind(items, CompletionItemKind::CONSTANT)
+    items_of_kind(items, CompletionItemKind::Constant)
 }
 
 #[tokio::test]
@@ -110,7 +111,7 @@ async fn test_class_name_completion_prioritizes_project_core_explicit_then_trans
     // are non-imported (source '2').  This isolates origin_tier ordering
     // for non-imported classes.  (Without a namespace the global core
     // RuntimeException would be same-namespace and sort first.)
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = "<?php\nnamespace App;\nnew RuntimeE\n";
     let items = complete_at(&backend, &uri, text, 2, 12).await;
     let classes = class_items(&items);
@@ -188,7 +189,7 @@ async fn test_composer_change_refreshes_completion_provenance() {
     *backend.workspace_root().write() = Some(dir.path().to_path_buf());
     backend.initialized(InitializedParams {}).await;
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = "<?php\nnew Ex\n";
     let dep_pos = |fqns: &[&str], fqn: &str| fqns.iter().position(|f| *f == fqn);
 
@@ -212,8 +213,8 @@ async fn test_composer_change_refreshes_completion_provenance() {
     backend
         .did_change_watched_files(DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
-                uri: Url::from_file_path(&composer_path).unwrap(),
-                typ: FileChangeType::CHANGED,
+                uri: Uri::from_file_path(&composer_path).unwrap(),
+                kind: FileChangeType::Changed,
             }],
         })
         .await;
@@ -232,17 +233,13 @@ async fn test_composer_change_refreshes_completion_provenance() {
 #[tokio::test]
 async fn test_function_completion_prioritizes_project_core_explicit_then_transitive() {
     let backend = create_test_backend_with_full_stubs();
-    let helper_uri = Url::parse("file:///workspace/src/helpers.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: helper_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nnamespace App;\nfunction runtime_helper() {}\n".to_string(),
-            },
-        })
-        .await;
+    let helper_uri = Uri::parse("file:///workspace/src/helpers.php").unwrap();
+    open_php(
+        &backend,
+        &helper_uri,
+        "<?php\nnamespace App;\nfunction runtime_helper() {}\n",
+    )
+    .await;
 
     backend
         .stub_function_index_mut()
@@ -265,7 +262,7 @@ async fn test_function_completion_prioritizes_project_core_explicit_then_transit
         phpantom_lsp::ClassCompletionOrigin::VendorTransitive,
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = "<?php\nruntime_h\n";
     let items = complete_at(&backend, &uri, text, 1, 9).await;
     let funcs = function_items(&items);
@@ -315,7 +312,7 @@ async fn test_constant_completion_prioritizes_project_core_explicit_then_transit
         phpantom_lsp::ClassCompletionOrigin::VendorTransitive,
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = "<?php\nAPP_RUNTIME_FLAG\n";
     let items = complete_at(&backend, &uri, text, 1, 16).await;
     let consts = constant_items(&items);
@@ -460,7 +457,7 @@ fn test_extract_partial_class_name_with_leading_backslash() {
 #[tokio::test]
 async fn test_class_name_completion_with_leading_backslash() {
     let backend = create_test_backend_with_stubs();
-    let uri = Url::parse("file:///backslash.php").unwrap();
+    let uri = Uri::parse("file:///backslash.php").unwrap();
     // Use a type-hint context (Any) so the interface stub isn't filtered.
     let text = concat!("<?php\n", "function foo(\\Unit $x) {}\n",);
 
@@ -480,7 +477,7 @@ async fn test_class_name_completion_with_leading_backslash() {
 #[tokio::test]
 async fn test_class_name_completion_backslash_backed() {
     let backend = create_test_backend_with_stubs();
-    let uri = Url::parse("file:///backslash2.php").unwrap();
+    let uri = Uri::parse("file:///backslash2.php").unwrap();
     // Use a type-hint context (Any) so the interface stub isn't filtered.
     let text = concat!("<?php\n", "function foo(\\Backed $x) {}\n",);
 
@@ -519,26 +516,17 @@ async fn test_class_name_completion_fqn_prefix() {
         )],
     );
 
-    let uri = Url::parse("file:///fqn_test.php").unwrap();
+    let uri = Uri::parse("file:///fqn_test.php").unwrap();
     let text = concat!("<?php\n", "new \\Us\n",);
 
     // Open the User file so it's in ast_map
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
     let items = complete_at(&backend, &uri, text, 1, 7).await;
     let classes = class_items(&items);
@@ -564,7 +552,7 @@ async fn test_class_name_completion_fqn_prefix() {
 async fn test_class_name_completion_includes_stubs() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
 
     // Use instanceof context so interface stubs pass through.
     // Check UnitEnum is found when typing "Unit"
@@ -600,7 +588,7 @@ async fn test_class_name_completion_includes_stubs() {
 async fn test_class_name_completion_not_triggered_for_variables() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!("<?php\n", "$unit\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 5).await;
@@ -640,20 +628,11 @@ async fn test_class_name_completion_includes_use_imports() {
 
     // Open the Service file so it populates fqn_uri_index
     let service_path = _dir.path().join("src/Service.php");
-    let service_uri = Url::parse(&format!("file://{}", service_path.display())).unwrap();
+    let service_uri = Uri::parse(&format!("file://{}", service_path.display())).unwrap();
     let service_content = std::fs::read_to_string(&service_path).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: service_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: service_content,
-            },
-        })
-        .await;
+    open_php(&backend, &service_uri, &service_content).await;
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!("<?php\n", "use Acme\\Service;\n", "new Ser\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 7).await;
@@ -697,20 +676,11 @@ async fn test_class_name_completion_use_import_has_higher_sort_priority() {
 
     // Open the Widget file so it populates fqn_uri_index
     let widget_path = _dir.path().join("src/Widget.php");
-    let widget_uri = Url::parse(&format!("file://{}", widget_path.display())).unwrap();
+    let widget_uri = Uri::parse(&format!("file://{}", widget_path.display())).unwrap();
     let widget_content = std::fs::read_to_string(&widget_path).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: widget_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: widget_content,
-            },
-        })
-        .await;
+    open_php(&backend, &widget_uri, &widget_content).await;
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!("<?php\n", "use Acme\\Widget;\n", "new Wid\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 7).await;
@@ -767,27 +737,22 @@ async fn test_class_name_completion_same_namespace() {
     );
 
     // Open the UserService file first so it gets into the ast_map
-    let service_uri = Url::parse("file:///service.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: service_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!(
-                    "<?php\n",
-                    "namespace App;\n",
-                    "class UserService {\n",
-                    "    public function find(): void {}\n",
-                    "}\n",
-                )
-                .to_string(),
-            },
-        })
-        .await;
+    let service_uri = Uri::parse("file:///service.php").unwrap();
+    open_php(
+        &backend,
+        &service_uri,
+        concat!(
+            "<?php\n",
+            "namespace App;\n",
+            "class UserService {\n",
+            "    public function find(): void {}\n",
+            "}\n",
+        ),
+    )
+    .await;
 
     // Open the Controller file — same namespace "App"
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -857,11 +822,11 @@ async fn test_class_name_completion_from_classmap() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
 
     // Check Collection matches prefix "Coll"
     let text = concat!("<?php\n", "new Coll\n",);
@@ -926,7 +891,7 @@ async fn test_class_name_completion_from_class_index() {
         );
     }
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
 
     // Check User matches prefix "Us"
     let text = concat!("<?php\n", "new Us\n",);
@@ -987,7 +952,7 @@ async fn test_class_name_completion_deduplicates_by_fqn() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
@@ -1000,7 +965,7 @@ async fn test_class_name_completion_deduplicates_by_fqn() {
         );
     }
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!("<?php\n", "new Dup\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 7).await;
@@ -1024,7 +989,7 @@ async fn test_class_name_completion_deduplicates_by_fqn() {
 async fn test_class_name_completion_after_new_keyword() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     // Use a locally-defined class since `new` context correctly
     // filters out interfaces (BackedEnum, UnitEnum).
     let text = concat!(
@@ -1057,7 +1022,7 @@ async fn test_class_name_completion_after_new_keyword() {
 async fn test_class_name_completion_in_type_hint() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!("<?php\n", "function process(Unit $x) {}\n",);
 
     // Cursor after "Unit" at character 21
@@ -1076,7 +1041,7 @@ async fn test_class_name_completion_in_type_hint() {
 async fn test_class_name_completion_in_extends_clause() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     // BackedEnum is an interface, so it belongs in `interface extends`,
     // not `class extends`.
     let text = concat!("<?php\n", "interface MyEnum extends Back\n",);
@@ -1099,7 +1064,7 @@ async fn test_class_name_completion_not_after_arrow() {
     let backend = create_test_backend_with_stubs();
 
     // Open a file where `->` triggers member completion
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1126,7 +1091,7 @@ async fn test_class_name_completion_not_after_arrow() {
 async fn test_class_name_completion_items_have_class_kind() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     // Use instanceof context so the interface stub passes the filter.
     let text = concat!("<?php\n", "$x instanceof Uni\n",);
 
@@ -1141,7 +1106,7 @@ async fn test_class_name_completion_items_have_class_kind() {
     for item in &classes {
         assert_eq!(
             item.kind,
-            Some(CompletionItemKind::CLASS),
+            Some(CompletionItemKind::Class),
             "All class name completions should have kind=CLASS, item '{}' has kind={:?}",
             item.label,
             item.kind
@@ -1188,7 +1153,7 @@ async fn test_class_name_completion_combines_all_sources() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
@@ -1205,7 +1170,7 @@ async fn test_class_name_completion_combines_all_sources() {
     // classes from all three sources.  All test class names end with
     // "Class", so the prefix "Cl" only matches "ClassmapClass".
     // Instead we use separate checks per source.
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
 
     // Check stubs: "Stub" matches "StubClass"
     let text_stub = concat!("<?php\n", "use App\\IndexedClass;\n", "new Stub\n",);
@@ -1272,11 +1237,11 @@ async fn test_class_name_completion_insert_text_is_short_name() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!("<?php\n", "new My\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 6).await;
@@ -1291,7 +1256,7 @@ async fn test_class_name_completion_insert_text_is_short_name() {
     );
     assert_eq!(
         my_class.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "insert_text_format should be Snippet in `new` context"
     );
     assert_eq!(
@@ -1332,11 +1297,11 @@ async fn test_auto_import_classmap_class_adds_use_statement() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -1385,7 +1350,7 @@ async fn test_auto_import_class_index_adds_use_statement() {
         );
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Controllers;\n",
@@ -1426,7 +1391,7 @@ async fn test_no_auto_import_for_non_namespaced_class() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!("<?php\n", "new DateT\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 9).await;
@@ -1471,11 +1436,11 @@ async fn test_no_auto_import_for_already_imported_class() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use Illuminate\\Support\\Collection;\n",
@@ -1509,7 +1474,7 @@ async fn test_auto_import_inserts_after_php_open_tag() {
         );
     }
 
-    let uri = Url::parse("file:///bare.php").unwrap();
+    let uri = Uri::parse("file:///bare.php").unwrap();
     let text = concat!("<?php\n", "\n", "new Wid\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 7).await;
@@ -1549,7 +1514,7 @@ async fn test_auto_import_not_confused_by_trait_use_in_class_body() {
         );
     }
 
-    let uri = Url::parse("file:///showcase.php").unwrap();
+    let uri = Uri::parse("file:///showcase.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // line 0
         "\n",                                               // line 1
@@ -1606,7 +1571,7 @@ async fn test_auto_import_global_class_when_file_has_namespace() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",              // line 0
         "\n",                   // line 1
@@ -1649,7 +1614,7 @@ async fn test_auto_import_inside_a_namespace_block_written_on_one_line() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Db { function f() { new PD; } }\n"
@@ -1691,7 +1656,7 @@ async fn test_no_auto_import_global_class_when_file_has_no_namespace() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!("<?php\n", "new PD\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 6).await;
@@ -1718,7 +1683,7 @@ async fn test_auto_import_global_class_inserts_after_existing_use_statements() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",                                // line 0
         "\n",                                     // line 1
@@ -1759,7 +1724,7 @@ async fn test_auto_import_global_class_inserts_after_existing_use_statements() {
 #[tokio::test]
 async fn test_new_context_excludes_constants_and_functions() {
     let backend = create_test_backend_with_function_stubs();
-    let uri = Url::parse("file:///test_new_no_const_func.php").unwrap();
+    let uri = Uri::parse("file:///test_new_no_const_func.php").unwrap();
     let text = concat!("<?php\n", "new Date\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 8).await;
@@ -1767,13 +1732,13 @@ async fn test_new_context_excludes_constants_and_functions() {
     // Should find DateTime (a class stub).
     let has_class = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::CLASS));
+        .any(|i| i.kind == Some(CompletionItemKind::Class));
     assert!(has_class, "Should include class completions after `new`");
 
     // Should NOT find any constants.
     let constants: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .filter(|i| i.kind == Some(CompletionItemKind::Constant))
         .map(|i| i.label.as_str())
         .collect();
     assert!(
@@ -1785,7 +1750,7 @@ async fn test_new_context_excludes_constants_and_functions() {
     // Should NOT find any functions.
     let functions: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .map(|i| i.label.as_str())
         .collect();
     assert!(
@@ -1799,7 +1764,7 @@ async fn test_new_context_excludes_constants_and_functions() {
 #[tokio::test]
 async fn test_non_new_context_includes_constants_and_functions() {
     let backend = create_test_backend_with_function_stubs();
-    let uri = Url::parse("file:///test_no_new.php").unwrap();
+    let uri = Uri::parse("file:///test_no_new.php").unwrap();
     // Bare identifier context — no `new` keyword.
     let text = concat!("<?php\n", "PHP_\n",);
 
@@ -1807,7 +1772,7 @@ async fn test_non_new_context_includes_constants_and_functions() {
 
     let constants: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .filter(|i| i.kind == Some(CompletionItemKind::Constant))
         .map(|i| i.label.as_str())
         .collect();
     assert!(
@@ -1821,7 +1786,7 @@ async fn test_non_new_context_includes_constants_and_functions() {
 #[tokio::test]
 async fn test_new_context_excludes_loaded_abstract_class() {
     let backend = create_test_backend_with_stubs();
-    let uri = Url::parse("file:///test_new_abstract.php").unwrap();
+    let uri = Uri::parse("file:///test_new_abstract.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -1850,7 +1815,7 @@ async fn test_new_context_excludes_loaded_abstract_class() {
 #[tokio::test]
 async fn test_new_context_excludes_loaded_interface() {
     let backend = create_test_backend_with_stubs();
-    let uri = Url::parse("file:///test_new_iface.php").unwrap();
+    let uri = Uri::parse("file:///test_new_iface.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -1879,7 +1844,7 @@ async fn test_new_context_excludes_loaded_interface() {
 #[tokio::test]
 async fn test_new_context_excludes_loaded_trait() {
     let backend = create_test_backend_with_stubs();
-    let uri = Url::parse("file:///test_new_trait.php").unwrap();
+    let uri = Uri::parse("file:///test_new_trait.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -1908,7 +1873,7 @@ async fn test_new_context_excludes_loaded_trait() {
 #[tokio::test]
 async fn test_new_context_excludes_loaded_enum() {
     let backend = create_test_backend_with_stubs();
-    let uri = Url::parse("file:///test_new_enum.php").unwrap();
+    let uri = Uri::parse("file:///test_new_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -1983,11 +1948,11 @@ async fn test_new_context_demotes_likely_non_instantiable_classmap() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
-    let uri = Url::parse("file:///test_new_demote.php").unwrap();
+    let uri = Uri::parse("file:///test_new_demote.php").unwrap();
     let text = concat!("<?php\n", "new Handler\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 11).await;
@@ -2095,7 +2060,7 @@ async fn test_new_context_excludes_abstract_stubs() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_new_demote_stubs.php").unwrap();
+    let uri = Uri::parse("file:///test_new_demote_stubs.php").unwrap();
     let text = concat!("<?php\n", "new Service\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 11).await;
@@ -2135,31 +2100,18 @@ async fn test_new_context_excludes_use_imported_interface() {
     );
 
     // Open both files so they are loaded into the ast_map.
-    let iface_uri = Url::parse("file:///iface.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: iface_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nnamespace App\\Contracts;\ninterface Cacheable {\n    public function cacheKey(): string;\n}\n".to_string(),
-            },
-        })
-        .await;
+    let iface_uri = Uri::parse("file:///iface.php").unwrap();
+    open_php(&backend, &iface_uri, "<?php\nnamespace App\\Contracts;\ninterface Cacheable {\n    public function cacheKey(): string;\n}\n").await;
 
-    let class_uri = Url::parse("file:///cls.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: class_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nnamespace App\\Models;\nclass CacheStore {}\n".to_string(),
-            },
-        })
-        .await;
+    let class_uri = Uri::parse("file:///cls.php").unwrap();
+    open_php(
+        &backend,
+        &class_uri,
+        "<?php\nnamespace App\\Models;\nclass CacheStore {}\n",
+    )
+    .await;
 
-    let uri = Url::parse("file:///test_new_use_iface.php").unwrap();
+    let uri = Uri::parse("file:///test_new_use_iface.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Contracts\\Cacheable;\n",
@@ -2190,17 +2142,13 @@ async fn test_new_context_excludes_class_index_abstract() {
     let backend = create_test_backend_with_stubs();
 
     // Load an abstract class into the ast_map.
-    let abs_uri = Url::parse("file:///app/AbstractRepo.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: abs_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nnamespace App;\nabstract class AbstractRepo {}\n".to_string(),
-            },
-        })
-        .await;
+    let abs_uri = Uri::parse("file:///app/AbstractRepo.php").unwrap();
+    open_php(
+        &backend,
+        &abs_uri,
+        "<?php\nnamespace App;\nabstract class AbstractRepo {}\n",
+    )
+    .await;
 
     // Also put it in the class_index.
     {
@@ -2208,7 +2156,7 @@ async fn test_new_context_excludes_class_index_abstract() {
         idx.insert("App\\AbstractRepo".to_string(), abs_uri.to_string());
     }
 
-    let uri = Url::parse("file:///test_new_idx_abs.php").unwrap();
+    let uri = Uri::parse("file:///test_new_idx_abs.php").unwrap();
     let text = concat!("<?php\n", "new AbstractR\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 13).await;
@@ -2251,24 +2199,15 @@ async fn test_fqn_prefix_matches_by_namespace() {
     );
 
     // Open the User file so it's in ast_map
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
-    let uri = Url::parse("file:///fqn_prefix.php").unwrap();
+    let uri = Uri::parse("file:///fqn_prefix.php").unwrap();
     // Cursor after `App\Models\U` (12 chars on line 1, 0-indexed col 16)
     let text = concat!("<?php\n", "new App\\Models\\U\n",);
 
@@ -2312,24 +2251,15 @@ async fn test_fqn_prefix_with_leading_backslash() {
         )],
     );
 
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
-    let uri = Url::parse("file:///fqn_leading.php").unwrap();
+    let uri = Uri::parse("file:///fqn_leading.php").unwrap();
     let text = concat!("<?php\n", "new \\App\\Models\\U\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 17).await;
@@ -2367,24 +2297,15 @@ async fn test_fqn_prefix_skips_auto_import() {
         )],
     );
 
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
-    let uri = Url::parse("file:///fqn_noimport.php").unwrap();
+    let uri = Uri::parse("file:///fqn_noimport.php").unwrap();
     let text = concat!("<?php\n", "namespace Other;\n", "new App\\Models\\U\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 16).await;
@@ -2415,25 +2336,20 @@ async fn test_fqn_prefix_skips_auto_import() {
 async fn test_filter_text_uses_short_name_in_non_fqn_mode() {
     let backend = create_test_backend_with_stubs();
 
-    let scaffolding_uri = Url::parse("file:///filter_scaffold.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: scaffolding_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!(
-                    "<?php\n",
-                    "namespace Vendor\\Package;\n",
-                    "class Widget {}\n",
-                )
-                .to_string(),
-            },
-        })
-        .await;
+    let scaffolding_uri = Uri::parse("file:///filter_scaffold.php").unwrap();
+    open_php(
+        &backend,
+        &scaffolding_uri,
+        concat!(
+            "<?php\n",
+            "namespace Vendor\\Package;\n",
+            "class Widget {}\n",
+        ),
+    )
+    .await;
 
     // ── Non-FQN mode: filter_text = short name ─────────────────
-    let uri = Url::parse("file:///filter_test.php").unwrap();
+    let uri = Uri::parse("file:///filter_test.php").unwrap();
     let text = concat!("<?php\n", "new Wid\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 7).await;
@@ -2450,7 +2366,7 @@ async fn test_filter_text_uses_short_name_in_non_fqn_mode() {
     );
 
     // ── FQN mode: filter_text = full path ──────────────────────
-    let uri_fqn = Url::parse("file:///filter_fqn_test.php").unwrap();
+    let uri_fqn = Uri::parse("file:///filter_fqn_test.php").unwrap();
     let text_fqn = concat!("<?php\n", "new Vendor\\Pack\n",);
 
     let items_fqn = complete_at(&backend, &uri_fqn, text_fqn, 1, 15).await;
@@ -2476,24 +2392,19 @@ async fn test_filter_text_uses_short_name_in_non_fqn_mode() {
 async fn test_fqn_prefix_text_edit_replaces_full_prefix() {
     let backend = create_test_backend_with_stubs();
 
-    let scaffolding_uri = Url::parse("file:///textedit_scaffold.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: scaffolding_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!(
-                    "<?php\n",
-                    "namespace http\\Exception;\n",
-                    "class BadUrlException {}\n",
-                )
-                .to_string(),
-            },
-        })
-        .await;
+    let scaffolding_uri = Uri::parse("file:///textedit_scaffold.php").unwrap();
+    open_php(
+        &backend,
+        &scaffolding_uri,
+        concat!(
+            "<?php\n",
+            "namespace http\\Exception;\n",
+            "class BadUrlException {}\n",
+        ),
+    )
+    .await;
 
-    let uri = Url::parse("file:///textedit_test.php").unwrap();
+    let uri = Uri::parse("file:///textedit_test.php").unwrap();
     // User typed `http\Ex` (7 chars) starting at col 22
     let text = concat!("<?php\n", "if ($user instanceof http\\Ex) {}\n",);
 
@@ -2512,7 +2423,7 @@ async fn test_fqn_prefix_text_edit_replaces_full_prefix() {
         .expect("FQN-prefix completions must have a text_edit");
 
     match te {
-        CompletionTextEdit::Edit(edit) => {
+        CompletionItemTextEdit::TextEdit(edit) => {
             // The prefix `http\Ex` is 7 characters, starting at col 21.
             assert_eq!(
                 edit.range.start,
@@ -2536,7 +2447,7 @@ async fn test_fqn_prefix_text_edit_replaces_full_prefix() {
                 edit.new_text
             );
         }
-        _ => panic!("Expected CompletionTextEdit::Edit"),
+        _ => panic!("Expected CompletionItemTextEdit::TextEdit"),
     }
 }
 
@@ -2560,24 +2471,15 @@ async fn test_fqn_prefix_same_namespace_simplifies_to_short_name() {
     );
 
     // Open the Box file so it's in ast_map.
-    let box_uri = Url::parse(&format!(
+    let box_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Box.php").display()
     ))
     .unwrap();
     let box_content = std::fs::read_to_string(_dir.path().join("src/Box.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: box_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: box_content,
-            },
-        })
-        .await;
+    open_php(&backend, &box_uri, &box_content).await;
 
-    let uri = Url::parse("file:///fqn_same_ns.php").unwrap();
+    let uri = Uri::parse("file:///fqn_same_ns.php").unwrap();
     // We are in namespace Demo, typing `\Demo\` (6 chars, col 25).
     let text = concat!(
         "<?php\n",
@@ -2602,13 +2504,13 @@ async fn test_fqn_prefix_same_namespace_simplifies_to_short_name() {
         .as_ref()
         .expect("FQN-prefix completions should have a text_edit");
     match te {
-        CompletionTextEdit::Edit(edit) => {
+        CompletionItemTextEdit::TextEdit(edit) => {
             assert_eq!(
                 edit.new_text, "Box",
                 "text_edit should insert 'Box', not the full FQN"
             );
         }
-        _ => panic!("Expected CompletionTextEdit::Edit"),
+        _ => panic!("Expected CompletionItemTextEdit::TextEdit"),
     }
 }
 
@@ -2630,24 +2532,15 @@ async fn test_fqn_prefix_different_namespace_keeps_fqn() {
         )],
     );
 
-    let foo_uri = Url::parse(&format!(
+    let foo_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Foo.php").display()
     ))
     .unwrap();
     let foo_content = std::fs::read_to_string(_dir.path().join("src/Foo.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: foo_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: foo_content,
-            },
-        })
-        .await;
+    open_php(&backend, &foo_uri, &foo_content).await;
 
-    let uri = Url::parse("file:///fqn_diff_ns.php").unwrap();
+    let uri = Uri::parse("file:///fqn_diff_ns.php").unwrap();
     // We are in namespace Demo, typing `\Other\` (7 chars).
     let text = concat!(
         "<?php\n",
@@ -2674,14 +2567,14 @@ async fn test_fqn_prefix_different_namespace_keeps_fqn() {
         .as_ref()
         .expect("FQN-prefix completions should have a text_edit");
     match te {
-        CompletionTextEdit::Edit(edit) => {
+        CompletionItemTextEdit::TextEdit(edit) => {
             assert!(
                 edit.new_text.contains("\\Other\\Foo"),
                 "text_edit should insert the full FQN with leading backslash, got: {:?}",
                 edit.new_text
             );
         }
-        _ => panic!("Expected CompletionTextEdit::Edit"),
+        _ => panic!("Expected CompletionItemTextEdit::TextEdit"),
     }
 }
 
@@ -2713,24 +2606,15 @@ async fn test_namespace_declaration_suggests_namespaces() {
     );
 
     // Open one file so its namespace appears in namespace_map.
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
-    let uri = Url::parse("file:///ns_decl.php").unwrap();
+    let uri = Uri::parse("file:///ns_decl.php").unwrap();
     let text = concat!("<?php\n", "namespace App\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 13).await;
@@ -2761,7 +2645,7 @@ async fn test_namespace_declaration_suggests_namespaces() {
     for item in &items {
         assert_eq!(
             item.kind,
-            Some(CompletionItemKind::MODULE),
+            Some(CompletionItemKind::Module),
             "Namespace items should have MODULE kind, got {:?} for {:?}",
             item.kind,
             item.label
@@ -2798,7 +2682,7 @@ async fn test_namespace_declaration_discovers_cached_sub_namespaces() {
     );
 
     // Open the Concerns file so its namespace enters namespace_map.
-    let concerns_uri = Url::parse(&format!(
+    let concerns_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path()
             .join("src/Models/Concerns/HasUuids.php")
@@ -2807,18 +2691,9 @@ async fn test_namespace_declaration_discovers_cached_sub_namespaces() {
     .unwrap();
     let concerns_content =
         std::fs::read_to_string(_dir.path().join("src/Models/Concerns/HasUuids.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: concerns_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: concerns_content,
-            },
-        })
-        .await;
+    open_php(&backend, &concerns_uri, &concerns_content).await;
 
-    let uri = Url::parse("file:///ns_subdir.php").unwrap();
+    let uri = Uri::parse("file:///ns_subdir.php").unwrap();
     let text = concat!("<?php\n", "namespace App\\Models\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 20).await;
@@ -2838,7 +2713,7 @@ async fn test_namespace_declaration_discovers_cached_sub_namespaces() {
 async fn test_namespace_context_not_inside_class_body() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///ns_in_body.php").unwrap();
+    let uri = Uri::parse("file:///ns_in_body.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -2856,7 +2731,7 @@ async fn test_namespace_context_not_inside_class_body() {
     // have a different kind (CLASS, FUNCTION, etc.).
     let has_non_module = items
         .iter()
-        .any(|i| i.kind != Some(CompletionItemKind::MODULE));
+        .any(|i| i.kind != Some(CompletionItemKind::Module));
     assert!(
         items.is_empty() || has_non_module,
         "`namespace` inside a class body should NOT produce only MODULE completions"
@@ -2883,24 +2758,15 @@ async fn test_fqn_leading_backslash_single_segment_same_namespace() {
         )],
     );
 
-    let box_uri = Url::parse(&format!(
+    let box_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Box.php").display()
     ))
     .unwrap();
     let box_content = std::fs::read_to_string(_dir.path().join("src/Box.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: box_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: box_content,
-            },
-        })
-        .await;
+    open_php(&backend, &box_uri, &box_content).await;
 
-    let uri = Url::parse("file:///fqn_backslash_single.php").unwrap();
+    let uri = Uri::parse("file:///fqn_backslash_single.php").unwrap();
     // In namespace Demo, typing `\Demo` (5 chars starting at col 21).
     let text = concat!(
         "<?php\n",
@@ -2922,13 +2788,13 @@ async fn test_fqn_leading_backslash_single_segment_same_namespace() {
         .as_ref()
         .expect("Leading-backslash completions should have a text_edit");
     match te {
-        CompletionTextEdit::Edit(edit) => {
+        CompletionItemTextEdit::TextEdit(edit) => {
             assert_eq!(
                 edit.new_text, "Box",
                 "text_edit should insert 'Box' (same namespace), not '\\Box' or '\\Demo\\Box'"
             );
         }
-        _ => panic!("Expected CompletionTextEdit::Edit"),
+        _ => panic!("Expected CompletionItemTextEdit::TextEdit"),
     }
 }
 
@@ -2938,14 +2804,14 @@ async fn test_fqn_leading_backslash_single_segment_same_namespace() {
 async fn test_use_function_no_parentheses() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///use_func_parens.php").unwrap();
+    let uri = Uri::parse("file:///use_func_parens.php").unwrap();
     let text = concat!("<?php\n", "use function array_ma\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 21).await;
 
     let func_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .collect();
 
     assert!(
@@ -2968,7 +2834,7 @@ async fn test_use_function_no_parentheses() {
             item.label
         );
         assert!(
-            item.insert_text_format != Some(InsertTextFormat::SNIPPET),
+            item.insert_text_format != Some(InsertTextFormat::Snippet),
             "use function completions should be plain text, not snippets, for {:?}",
             item.label
         );
@@ -2992,14 +2858,14 @@ async fn test_use_const_semicolon_termination() {
         );
     }
 
-    let uri = Url::parse("file:///use_const_semi.php").unwrap();
+    let uri = Uri::parse("file:///use_const_semi.php").unwrap();
     let text = concat!("<?php\n", "use const MY_C\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 14).await;
 
     let const_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .filter(|i| i.kind == Some(CompletionItemKind::Constant))
         .collect();
 
     assert!(
@@ -3025,26 +2891,22 @@ async fn test_use_class_import_semicolon_termination() {
     let backend = create_test_backend_with_stubs();
 
     // Register a class so that `use DateT` has something to complete.
-    let scaffold_uri = Url::parse("file:///scaffold_datetime.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: scaffold_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: "<?php\nnamespace App;\nclass DateTransformer {}\n".to_string(),
-            },
-        })
-        .await;
+    let scaffold_uri = Uri::parse("file:///scaffold_datetime.php").unwrap();
+    open_php(
+        &backend,
+        &scaffold_uri,
+        "<?php\nnamespace App;\nclass DateTransformer {}\n",
+    )
+    .await;
 
-    let uri = Url::parse("file:///use_class_semi.php").unwrap();
+    let uri = Uri::parse("file:///use_class_semi.php").unwrap();
     let text = concat!("<?php\n", "use DateT\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 9).await;
 
     let class_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .filter(|i| i.kind == Some(CompletionItemKind::Class))
         .collect();
 
     assert!(
@@ -3067,7 +2929,7 @@ async fn test_use_class_import_semicolon_termination() {
     // because they continue the statement (e.g. `use function `).
     let keyword_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Keyword))
         .collect();
     for item in &keyword_items {
         let insert = item.insert_text.as_deref().unwrap_or(&item.label);
@@ -3099,22 +2961,13 @@ async fn test_namespace_declaration_excludes_non_psr4_namespaces() {
     );
 
     // Open User so its namespace enters namespace_map.
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = std::fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
     // Also inject a class_index entry for a non-PSR-4 namespace.
     {
@@ -3125,7 +2978,7 @@ async fn test_namespace_declaration_excludes_non_psr4_namespaces() {
         );
     }
 
-    let uri = Url::parse("file:///ns_filter.php").unwrap();
+    let uri = Uri::parse("file:///ns_filter.php").unwrap();
     let text = concat!("<?php\n", "namespace My\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 12).await;
@@ -3166,22 +3019,13 @@ async fn test_namespace_declaration_psr4_and_cached_only() {
     );
 
     // Open the USD file so its namespace is cached.
-    let usd_uri = Url::parse(&format!(
+    let usd_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Money/USD.php").display()
     ))
     .unwrap();
     let usd_content = std::fs::read_to_string(_dir.path().join("src/Money/USD.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: usd_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: usd_content,
-            },
-        })
-        .await;
+    open_php(&backend, &usd_uri, &usd_content).await;
 
     // Also inject a class_index entry for a class outside PSR-4.
     {
@@ -3192,7 +3036,7 @@ async fn test_namespace_declaration_psr4_and_cached_only() {
         );
     }
 
-    let uri = Url::parse("file:///ns_psr4.php").unwrap();
+    let uri = Uri::parse("file:///ns_psr4.php").unwrap();
     let text = concat!("<?php\n", "namespace J\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 11).await;
@@ -3257,7 +3101,7 @@ async fn test_namespace_declaration_replaces_full_prefix() {
     );
 
     // Open the file so its namespace enters namespace_map / ast_map.
-    let file_uri = Url::parse(&format!(
+    let file_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path()
             .join("tests/Feature/Domain/SomeTest.php")
@@ -3266,18 +3110,9 @@ async fn test_namespace_declaration_replaces_full_prefix() {
     .unwrap();
     let file_content =
         std::fs::read_to_string(_dir.path().join("tests/Feature/Domain/SomeTest.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: file_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: file_content,
-            },
-        })
-        .await;
+    open_php(&backend, &file_uri, &file_content).await;
 
-    let uri = Url::parse("file:///ns_replace.php").unwrap();
+    let uri = Uri::parse("file:///ns_replace.php").unwrap();
     // Typing `namespace Tests\Feature\D` — cursor at col 27.
     let text = concat!("<?php\n", "namespace Tests\\Feature\\D\n",);
 
@@ -3294,7 +3129,7 @@ async fn test_namespace_declaration_replaces_full_prefix() {
         .as_ref()
         .expect("Namespace completions with backslash should have a text_edit");
     match te {
-        CompletionTextEdit::Edit(edit) => {
+        CompletionItemTextEdit::TextEdit(edit) => {
             assert_eq!(
                 edit.new_text, "Tests\\Feature\\Domain",
                 "text_edit should insert the full namespace"
@@ -3318,7 +3153,7 @@ async fn test_namespace_declaration_replaces_full_prefix() {
                 "replacement range should end at the cursor"
             );
         }
-        _ => panic!("Expected CompletionTextEdit::Edit"),
+        _ => panic!("Expected CompletionItemTextEdit::TextEdit"),
     }
 }
 
@@ -3339,7 +3174,7 @@ async fn test_fqn_shortened_via_use_map_prefix() {
         );
     }
 
-    let uri = Url::parse("file:///shorten_prefix.php").unwrap();
+    let uri = Uri::parse("file:///shorten_prefix.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use Cassandra\\Exception;\n",
@@ -3367,13 +3202,13 @@ async fn test_fqn_shortened_via_use_map_prefix() {
         .as_ref()
         .expect("FQN completions should have a text_edit");
     match te {
-        CompletionTextEdit::Edit(edit) => {
+        CompletionItemTextEdit::TextEdit(edit) => {
             assert_eq!(
                 edit.new_text, "Exception\\AlreadyExistsException",
                 "text_edit should insert the shortened form"
             );
         }
-        _ => panic!("Expected CompletionTextEdit::Edit"),
+        _ => panic!("Expected CompletionItemTextEdit::TextEdit"),
     }
 
     // No additional use statement should be generated.
@@ -3399,7 +3234,7 @@ async fn test_fqn_shortened_via_use_map_exact_match_leading_backslash() {
         );
     }
 
-    let uri = Url::parse("file:///shorten_exact.php").unwrap();
+    let uri = Uri::parse("file:///shorten_exact.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use Cassandra\\Exception\\AlreadyExistsException;\n",
@@ -3427,13 +3262,13 @@ async fn test_fqn_shortened_via_use_map_exact_match_leading_backslash() {
         .as_ref()
         .expect("FQN completions should have a text_edit");
     match te {
-        CompletionTextEdit::Edit(edit) => {
+        CompletionItemTextEdit::TextEdit(edit) => {
             assert_eq!(
                 edit.new_text, "AlreadyExistsException",
                 "text_edit should insert the short imported name, not the FQN"
             );
         }
-        _ => panic!("Expected CompletionTextEdit::Edit"),
+        _ => panic!("Expected CompletionItemTextEdit::TextEdit"),
     }
 }
 
@@ -3451,7 +3286,7 @@ async fn test_use_import_context_does_not_shorten() {
         );
     }
 
-    let uri = Url::parse("file:///use_no_shorten.php").unwrap();
+    let uri = Uri::parse("file:///use_no_shorten.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use Cassandra\\Exception;\n",
@@ -3495,7 +3330,7 @@ async fn test_namespace_alias_import_not_shown_as_class() {
     }
 
     // Use prefix "LCE" which matches the alias for the namespace import.
-    let uri = Url::parse("file:///ns_alias.php").unwrap();
+    let uri = Uri::parse("file:///ns_alias.php").unwrap();
     let text = concat!("<?php\n", "use Acme\\Core\\Enums as LCE;\n", "new LCE\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 7).await;
@@ -3527,7 +3362,7 @@ async fn test_classes_under_namespace_alias_still_available() {
         );
     }
 
-    let uri = Url::parse("file:///ns_alias_child.php").unwrap();
+    let uri = Uri::parse("file:///ns_alias_child.php").unwrap();
     let text = concat!("<?php\n", "use Acme\\Core\\Enums as LCE;\n", "new Stat\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 8).await;
@@ -3557,7 +3392,7 @@ async fn test_undiscovered_use_import_still_shown() {
         );
     }
 
-    let uri = Url::parse("file:///undiscovered.php").unwrap();
+    let uri = Uri::parse("file:///undiscovered.php").unwrap();
     let text = concat!("<?php\n", "use Vendor\\SomeLibrary\\Widget;\n", "new Wid\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 7).await;
@@ -3590,7 +3425,7 @@ async fn test_conflicting_use_import_class_index_falls_back_to_fqn() {
         );
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Controllers;\n",
@@ -3650,11 +3485,11 @@ async fn test_conflicting_use_import_classmap_falls_back_to_fqn() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Controllers;\n",
@@ -3692,7 +3527,7 @@ async fn test_conflicting_use_import_stub_falls_back_to_fqn() {
     stubs.insert("Exception", "<?php\nclass Exception {}\n");
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Controllers;\n",
@@ -3744,7 +3579,7 @@ async fn test_no_conflict_auto_import_still_works() {
         );
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Controllers;\n",
@@ -3782,7 +3617,7 @@ async fn test_conflicting_use_import_with_new_keyword_inserts_fqn_snippet() {
         );
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Controllers;\n",
@@ -3827,7 +3662,7 @@ async fn test_same_fqn_already_imported_is_not_a_conflict() {
         );
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Controllers;\n",
@@ -3870,7 +3705,7 @@ async fn test_multiple_conflicting_classes_all_use_fqn() {
         );
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Controllers;\n",
@@ -3918,7 +3753,7 @@ async fn test_fqn_mode_leading_segment_alias_collision() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     // `use Exception as pq;` — the alias `pq` collides with the
     // first segment of `pq\Exception`.
     let text = concat!(
@@ -3951,7 +3786,7 @@ async fn test_fqn_mode_leading_segment_alias_collision() {
         .as_ref()
         .expect("FQN mode should produce a text_edit");
     match edit {
-        CompletionTextEdit::Edit(te) => {
+        CompletionItemTextEdit::TextEdit(te) => {
             let replaced_len = te.range.end.character - te.range.start.character;
             assert_eq!(
                 replaced_len,
@@ -3965,7 +3800,7 @@ async fn test_fqn_mode_leading_segment_alias_collision() {
                 te.new_text
             );
         }
-        _ => panic!("Expected CompletionTextEdit::Edit"),
+        _ => panic!("Expected CompletionItemTextEdit::TextEdit"),
     }
 }
 
@@ -3980,7 +3815,7 @@ async fn test_fqn_mode_no_alias_collision_keeps_bare_fqn() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     // `use Exception;` — alias is `Exception`, not `pq`, so no
     // leading-segment collision.
     let text = concat!(
@@ -4020,7 +3855,7 @@ async fn test_fqn_mode_user_typed_leading_backslash_unaffected() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo;\n",
@@ -4053,7 +3888,7 @@ async fn test_fqn_mode_user_typed_leading_backslash_unaffected() {
 
 /// Helper: extract MODULE-kind items from a completion list.
 fn module_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items_of_kind(items, CompletionItemKind::MODULE)
+    items_of_kind(items, CompletionItemKind::Module)
 }
 
 #[tokio::test]
@@ -4093,21 +3928,12 @@ async fn test_namespace_segments_in_use_import() {
         "src/Services/AuthService.php",
     ] {
         let file_uri =
-            Url::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: file_uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: content,
-                },
-            })
-            .await;
+        open_php(&backend, &file_uri, &content).await;
     }
 
-    let uri = Url::parse("file:///use_ns_segment.php").unwrap();
+    let uri = Uri::parse("file:///use_ns_segment.php").unwrap();
     // Typing `use App\` — cursor at column 8.
     let text = concat!("<?php\n", "use App\\\n",);
 
@@ -4128,7 +3954,7 @@ async fn test_namespace_segments_in_use_import() {
 
     // Segments should have MODULE kind.
     for item in &modules {
-        assert_eq!(item.kind, Some(CompletionItemKind::MODULE));
+        assert_eq!(item.kind, Some(CompletionItemKind::Module));
     }
 
     // Segments should have detail like "namespace App\Models".
@@ -4169,27 +3995,18 @@ async fn test_namespace_segments_sort_above_classes() {
 
     for relpath in &["src/Models/User.php", "src/Helper.php"] {
         let file_uri =
-            Url::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: file_uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: content,
-                },
-            })
-            .await;
+        open_php(&backend, &file_uri, &content).await;
     }
 
-    let uri = Url::parse("file:///sort_test.php").unwrap();
+    let uri = Uri::parse("file:///sort_test.php").unwrap();
     let text = concat!("<?php\n", "use App\\\n",);
     let items = complete_at(&backend, &uri, text, 1, 8).await;
 
     let models_segment = items
         .iter()
-        .find(|i| i.label == "App\\Models" && i.kind == Some(CompletionItemKind::MODULE))
+        .find(|i| i.label == "App\\Models" && i.kind == Some(CompletionItemKind::Module))
         .expect("Should have App\\Models segment");
 
     let helper_class = items
@@ -4222,24 +4039,15 @@ async fn test_namespace_segments_no_semicolon_in_use_context() {
         )],
     );
 
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
-    let uri = Url::parse("file:///use_ns_semi.php").unwrap();
+    let uri = Uri::parse("file:///use_ns_semi.php").unwrap();
     let text = concat!("<?php\n", "use App\\\n",);
     let items = complete_at(&backend, &uri, text, 1, 8).await;
 
@@ -4294,21 +4102,12 @@ async fn test_namespace_segments_with_leading_backslash() {
 
     for relpath in &["src/Models/User.php", "src/Services/Auth.php"] {
         let file_uri =
-            Url::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: file_uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: content,
-                },
-            })
-            .await;
+        open_php(&backend, &file_uri, &content).await;
     }
 
-    let uri = Url::parse("file:///leading_bs.php").unwrap();
+    let uri = Uri::parse("file:///leading_bs.php").unwrap();
     // `\App\` — cursor at column 9 (`new \App\`).
     let text = concat!("<?php\n", "new \\App\\\n",);
     let items = complete_at(&backend, &uri, text, 1, 9).await;
@@ -4347,24 +4146,15 @@ async fn test_namespace_segments_in_type_hint() {
         )],
     );
 
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
-    let uri = Url::parse("file:///typehint_ns.php").unwrap();
+    let uri = Uri::parse("file:///typehint_ns.php").unwrap();
     // Type hint context: `function foo(\App\`
     let text = concat!("<?php\n", "function foo(\\App\\\n",);
     let items = complete_at(&backend, &uri, text, 1, 18).await;
@@ -4403,21 +4193,12 @@ async fn test_namespace_segments_filtered_by_partial() {
 
     for relpath in &["src/Models/User.php", "src/Services/Auth.php"] {
         let file_uri =
-            Url::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: file_uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: content,
-                },
-            })
-            .await;
+        open_php(&backend, &file_uri, &content).await;
     }
 
-    let uri = Url::parse("file:///filter_ns.php").unwrap();
+    let uri = Uri::parse("file:///filter_ns.php").unwrap();
     // `use App\M` — partial "M" should filter to Models, not Services.
     let text = concat!("<?php\n", "use App\\M\n",);
     let items = complete_at(&backend, &uri, text, 1, 9).await;
@@ -4481,22 +4262,13 @@ async fn test_namespace_segments_deep_nesting() {
         "src/Http/Middleware/AuthMiddleware.php",
     ] {
         let file_uri =
-            Url::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: file_uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: content,
-                },
-            })
-            .await;
+        open_php(&backend, &file_uri, &content).await;
     }
 
     // First level: `use App\` should show `App\Http`.
-    let uri = Url::parse("file:///deep_ns1.php").unwrap();
+    let uri = Uri::parse("file:///deep_ns1.php").unwrap();
     let text = concat!("<?php\n", "use App\\\n",);
     let items = complete_at(&backend, &uri, text, 1, 8).await;
     let modules = module_items(&items);
@@ -4508,7 +4280,7 @@ async fn test_namespace_segments_deep_nesting() {
     );
 
     // Second level: `use App\Http\` should show Controllers and Middleware.
-    let uri2 = Url::parse("file:///deep_ns2.php").unwrap();
+    let uri2 = Uri::parse("file:///deep_ns2.php").unwrap();
     let text2 = concat!("<?php\n", "use App\\Http\\\n",);
     let items2 = complete_at(&backend, &uri2, text2, 1, 13).await;
     let modules2 = module_items(&items2);
@@ -4525,7 +4297,7 @@ async fn test_namespace_segments_deep_nesting() {
     );
 
     // Third level: `use App\Http\Controllers\` should show Admin and Api.
-    let uri3 = Url::parse("file:///deep_ns3.php").unwrap();
+    let uri3 = Uri::parse("file:///deep_ns3.php").unwrap();
     let text3 = concat!("<?php\n", "use App\\Http\\Controllers\\\n",);
     let items3 = complete_at(&backend, &uri3, text3, 1, 25).await;
     let modules3 = module_items(&items3);
@@ -4558,26 +4330,17 @@ async fn test_namespace_segments_same_namespace_simplifies() {
         )],
     );
 
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
     // The cursor file is in the `App` namespace, so `App\Models` should
     // be simplified to just `Models`.
-    let uri = Url::parse("file:///same_ns_segment.php").unwrap();
+    let uri = Uri::parse("file:///same_ns_segment.php").unwrap();
     let text = concat!("<?php\n", "namespace App;\n", "new App\\M\n",);
     let items = complete_at(&backend, &uri, text, 2, 9).await;
 
@@ -4614,7 +4377,7 @@ async fn test_namespace_segments_from_stubs() {
     stubs.insert("Ds\\Set", "<?php\nnamespace Ds;\nclass Set {}\n");
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///stub_ns.php").unwrap();
+    let uri = Uri::parse("file:///stub_ns.php").unwrap();
     let text = concat!("<?php\n", "use Ds\\\n",);
     let items = complete_at(&backend, &uri, text, 1, 7).await;
 
@@ -4656,7 +4419,7 @@ async fn test_namespace_segments_from_stubs_with_nesting() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///stub_nested_ns.php").unwrap();
+    let uri = Uri::parse("file:///stub_nested_ns.php").unwrap();
     let text = concat!("<?php\n", "use Cassandra\\\n",);
     let items = complete_at(&backend, &uri, text, 1, 14).await;
 
@@ -4686,24 +4449,15 @@ async fn test_namespace_segments_text_edit_replaces_full_prefix() {
         )],
     );
 
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
-    let uri = Url::parse("file:///textedit_ns.php").unwrap();
+    let uri = Uri::parse("file:///textedit_ns.php").unwrap();
     // `use App\M` — 9 characters on line 1
     let text = concat!("<?php\n", "use App\\M\n",);
     let items = complete_at(&backend, &uri, text, 1, 9).await;
@@ -4715,7 +4469,7 @@ async fn test_namespace_segments_text_edit_replaces_full_prefix() {
         .expect("Should have App\\Models segment");
 
     // The text_edit should replace the full `App\M` prefix.
-    if let Some(CompletionTextEdit::Edit(ref edit)) = models_item.text_edit {
+    if let Some(CompletionItemTextEdit::TextEdit(ref edit)) = models_item.text_edit {
         assert_eq!(edit.range.start.line, 1);
         assert_eq!(
             edit.range.start.character, 4,
@@ -4736,7 +4490,7 @@ async fn test_namespace_segments_text_edit_replaces_full_prefix() {
 async fn test_namespace_segments_not_injected_for_bare_name() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///bare_name.php").unwrap();
+    let uri = Uri::parse("file:///bare_name.php").unwrap();
     // Typing `use DateT` — no backslash in the typed prefix.
     // Even though UseImport forces is_fqn_prefix, no segments
     // should appear because there's no namespace to browse.
@@ -4767,24 +4521,15 @@ async fn test_namespace_segments_in_new_context() {
         )],
     );
 
-    let user_uri = Url::parse(&format!(
+    let user_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/User.php").display()
     ))
     .unwrap();
     let user_content = fs::read_to_string(_dir.path().join("src/Models/User.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: user_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: user_content,
-            },
-        })
-        .await;
+    open_php(&backend, &user_uri, &user_content).await;
 
-    let uri = Url::parse("file:///new_ns.php").unwrap();
+    let uri = Uri::parse("file:///new_ns.php").unwrap();
     let text = concat!("<?php\n", "new App\\\n",);
     let items = complete_at(&backend, &uri, text, 1, 8).await;
 
@@ -4801,7 +4546,7 @@ async fn test_namespace_segments_in_new_context() {
     let models_item = modules.iter().find(|i| i.label == "App\\Models").unwrap();
     assert!(
         models_item.insert_text_format.is_none()
-            || models_item.insert_text_format == Some(InsertTextFormat::PLAIN_TEXT),
+            || models_item.insert_text_format == Some(InsertTextFormat::PlainText),
         "Namespace segments should not have snippet format"
     );
 }
@@ -4838,21 +4583,12 @@ async fn test_namespace_segments_deduplicated() {
         "src/Models/Comment.php",
     ] {
         let file_uri =
-            Url::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
+            Uri::parse(&format!("file://{}", _dir.path().join(relpath).display())).unwrap();
         let content = fs::read_to_string(_dir.path().join(relpath)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: file_uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: content,
-                },
-            })
-            .await;
+        open_php(&backend, &file_uri, &content).await;
     }
 
-    let uri = Url::parse("file:///dedup_ns.php").unwrap();
+    let uri = Uri::parse("file:///dedup_ns.php").unwrap();
     let text = concat!("<?php\n", "use App\\\n",);
     let items = complete_at(&backend, &uri, text, 1, 8).await;
 
@@ -4893,24 +4629,15 @@ async fn test_class_name_completion_label_is_short_name_in_method_body() {
     );
 
     // Open the Order file so it's in ast_map
-    let order_uri = Url::parse(&format!(
+    let order_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/Order.php").display()
     ))
     .unwrap();
     let order_content = std::fs::read_to_string(_dir.path().join("src/Models/Order.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: order_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: order_content,
-            },
-        })
-        .await;
+    open_php(&backend, &order_uri, &order_content).await;
 
-    let uri = Url::parse("file:///test_label_details.php").unwrap();
+    let uri = Uri::parse("file:///test_label_details.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Http\\Controllers;\n",
@@ -4956,24 +4683,15 @@ async fn test_class_name_completion_label_is_fqn_in_use_import() {
     );
 
     // Open the Order file so it's in ast_map
-    let order_uri = Url::parse(&format!(
+    let order_uri = Uri::parse(&format!(
         "file://{}",
         _dir.path().join("src/Models/Order.php").display()
     ))
     .unwrap();
     let order_content = std::fs::read_to_string(_dir.path().join("src/Models/Order.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: order_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: order_content,
-            },
-        })
-        .await;
+    open_php(&backend, &order_uri, &order_content).await;
 
-    let uri = Url::parse("file:///test_use_ld.php").unwrap();
+    let uri = Uri::parse("file:///test_use_ld.php").unwrap();
     let text = concat!("<?php\n", "use App\\Models\\Orde\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 19).await;
@@ -4992,7 +4710,7 @@ async fn test_class_name_completion_label_is_fqn_in_use_import() {
 async fn test_class_name_completion_label_is_short_name_for_global() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///test_global_ld.php").unwrap();
+    let uri = Uri::parse("file:///test_global_ld.php").unwrap();
     let text = concat!("<?php\n", "class MyLocalClass {}\n", "new MyLocal\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 11).await;
@@ -5037,11 +4755,11 @@ async fn test_class_name_completion_classmap_label_is_short_name() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
-    let uri = Url::parse("file:///test_cm_ld.php").unwrap();
+    let uri = Uri::parse("file:///test_cm_ld.php").unwrap();
     let text = concat!("<?php\n", "new Invoic\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 10).await;
@@ -5074,7 +4792,7 @@ async fn test_class_name_completion_class_index_label_is_short_name() {
         );
     }
 
-    let uri = Url::parse("file:///test_idx_ld.php").unwrap();
+    let uri = Uri::parse("file:///test_idx_ld.php").unwrap();
     let text = concat!("<?php\n", "new Receip\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 10).await;
@@ -5118,7 +4836,7 @@ async fn test_namespace_alias_prefix_matches_classes_underneath() {
         );
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use OpenApi\\Attributes as OA;\n",
@@ -5162,7 +4880,7 @@ async fn test_namespace_alias_prefix_insert_text_uses_alias() {
         );
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use OpenApi\\Attributes as OA;\n",
@@ -5201,7 +4919,7 @@ async fn test_namespace_alias_prefix_shows_segments() {
         );
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!("<?php\n", "use OpenApi\\Attributes as OA;\n", "new OA\\C\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 8).await;
@@ -5233,7 +4951,7 @@ async fn test_namespace_alias_prefix_bare_backslash_lists_all() {
         );
     }
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!("<?php\n", "use OpenApi\\Attributes as OA;\n", "new OA\\\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 7).await;
@@ -5272,7 +4990,7 @@ async fn test_namespace_inferred_from_file_path_basic() {
     // Create the directory so the file URI is valid.
     std::fs::create_dir_all(dir.path().join("src/Models")).unwrap();
 
-    let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
     let text = concat!("<?php\n", "namespace \n",);
 
     let items = complete_at(&backend, &uri, text, 1, 10).await;
@@ -5322,7 +5040,7 @@ async fn test_namespace_inferred_multiple_matches_longest_first() {
 
     std::fs::create_dir_all(dir.path().join("tests/Support/Helpers")).unwrap();
 
-    let uri = Url::from_file_path(dir.path().join("tests/Support/Helpers/TestHelper.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("tests/Support/Helpers/TestHelper.php")).unwrap();
     let text = concat!("<?php\n", "namespace \n",);
 
     let items = complete_at(&backend, &uri, text, 1, 10).await;
@@ -5370,7 +5088,7 @@ async fn test_namespace_inferred_multi_mapping_real_world() {
 
     std::fs::create_dir_all(dir.path().join("src/core/Brands/Services")).unwrap();
 
-    let uri = Url::from_file_path(dir.path().join("src/core/Brands/Services/Fred.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/core/Brands/Services/Fred.php")).unwrap();
     let text = concat!("<?php\n", "namespace \n",);
 
     let items = complete_at(&backend, &uri, text, 1, 10).await;
@@ -5413,7 +5131,7 @@ async fn test_namespace_inferred_at_source_root() {
 
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
 
-    let uri = Url::from_file_path(dir.path().join("src/Kernel.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Kernel.php")).unwrap();
     let text = concat!("<?php\n", "namespace \n",);
 
     let items = complete_at(&backend, &uri, text, 1, 10).await;
@@ -5443,7 +5161,7 @@ async fn test_namespace_no_inference_outside_psr4() {
 
     std::fs::create_dir_all(dir.path().join("config")).unwrap();
 
-    let uri = Url::from_file_path(dir.path().join("config/app.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("config/app.php")).unwrap();
     let text = concat!("<?php\n", "namespace \n",);
 
     let items = complete_at(&backend, &uri, text, 1, 10).await;
@@ -5477,7 +5195,7 @@ async fn test_namespace_inferred_with_partial_prefix() {
 
     std::fs::create_dir_all(dir.path().join("src/Models")).unwrap();
 
-    let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
     let text = concat!("<?php\n", "namespace App\n",);
 
     // Cursor at end of "App" (col 13).
@@ -5512,7 +5230,7 @@ async fn test_namespace_non_inferred_items_not_preselected() {
 
     std::fs::create_dir_all(dir.path().join("src/Models")).unwrap();
 
-    let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
     let text = concat!("<?php\n", "namespace \n",);
 
     let items = complete_at(&backend, &uri, text, 1, 10).await;

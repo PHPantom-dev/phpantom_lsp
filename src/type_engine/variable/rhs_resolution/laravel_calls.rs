@@ -1,6 +1,6 @@
 //! Laravel calls whose arguments decide more than the declared return
-//! type says: helper functions (`app()`, `now()`, `view()`, `config()`,
-//! `trans()`), configuration and translation lookups through their
+//! type says: helper functions (`app()`, `now()`, `view()`, `response()`,
+//! `config()`, `trans()`), configuration and translation lookups through their
 //! facades, validated request input, and request and console accessors.
 
 use std::sync::Arc;
@@ -9,6 +9,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
 use crate::virtual_members::laravel::validated_shape;
@@ -20,8 +21,9 @@ use super::{resolve_rhs_expression, resolve_var_types};
 
 /// What the Laravel helper function `name` returns when its arguments
 /// decide more than its declared return type: the class a container
-/// binding names, the configured date class, the concrete view, a
-/// configuration value, or a translation.
+/// binding names, the configured date class, the concrete view, the
+/// response `response($content)` builds, a configuration value, or a
+/// translation.
 pub(super) fn laravel_helper_call(
     name: &str,
     argument_list: &ArgumentList<'_>,
@@ -36,10 +38,10 @@ pub(super) fn laravel_helper_call(
     // call_resolution.rs so the binding survives being assigned to a
     // variable instead of being chained off the call directly.
     if matches!(normalized_func, "app" | "resolve") {
-        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.content);
+        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         if let Some(first_arg) = arg_texts.first()
             && let Some(alias) = crate::util::unescape_php_string_literal(first_arg.trim())
-            && let Some(cls) = (ctx.class_loader)(&alias)
+            && let Some(cls) = (ctx.file.class_loader)(Fqn::new(&alias))
         {
             return Some(ResolvedType::from_classes(vec![cls]));
         }
@@ -63,9 +65,9 @@ pub(super) fn laravel_helper_call(
     if matches!(
         normalized_func,
         "now" | "today" | "Illuminate\\Support\\now" | "Illuminate\\Support\\today"
-    ) && let Some(cls) =
-        (ctx.class_loader)(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
-    {
+    ) && let Some(cls) = (ctx.file.class_loader)(Fqn::new(
+        crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN,
+    )) {
         return Some(ResolvedType::from_classes(vec![cls]));
     }
 
@@ -74,14 +76,26 @@ pub(super) fn laravel_helper_call(
     // the factory always builds the concrete view object.  Mirrors the
     // `view()` stub the Laravel PHPStan extensions ship.
     if normalized_func == "view" {
-        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.content);
+        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         if crate::virtual_members::laravel::view_helper_returns_view(
             normalized_func,
             arg_texts.first().map(String::as_str).unwrap_or(""),
-        ) && let Some(cls) = (ctx.class_loader)(crate::virtual_members::laravel::VIEW_FQN)
+        ) && let Some(cls) =
+            (ctx.file.class_loader)(Fqn::new(crate::virtual_members::laravel::VIEW_FQN))
         {
             return Some(ResolvedType::from_classes(vec![cls]));
         }
+    }
+
+    // ── response($content) → Illuminate\Http\Response ──
+    // The helper's docblock keys the factory branch on `$content is null`,
+    // but the body keys it on whether an argument was passed at all.
+    if normalized_func == "response"
+        && !argument_list.arguments.is_empty()
+        && let Some(cls) =
+            (ctx.file.class_loader)(Fqn::new(crate::virtual_members::laravel::RESPONSE_FQN))
+    {
+        return Some(ResolvedType::from_classes(vec![cls]));
     }
 
     // ── config() return type inference ───────
@@ -100,7 +114,7 @@ pub(super) fn laravel_helper_call(
     if matches!(normalized_func, "trans" | "__")
         && let Some(resolver) = ctx.loaders.trans_resolver
     {
-        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.content);
+        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         match arg_texts.first() {
             Some(first_arg) => {
                 let ty = translation_type(first_arg, resolver);
@@ -127,7 +141,7 @@ fn config_value_type(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let resolver = ctx.loaders.config_resolver?;
-    let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.content);
+    let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
     let key = crate::util::unescape_php_string_literal(arg_texts.first()?.trim())?;
     if key.is_empty() || key.contains('$') {
         return None;
@@ -201,7 +215,7 @@ pub(super) fn try_resolve_trans_method_type(
         return None;
     }
     let resolver = ctx.loaders.trans_resolver?;
-    let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.content);
+    let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
     let ty = translation_type(arg_texts.first()?, resolver);
     Some(vec![ResolvedType::from_type_string(ty)])
 }
@@ -223,10 +237,10 @@ pub(super) fn try_resolve_validated_shape(
         call,
         arg_refs,
         &|| safe_source_owner(object, ctx),
-        ctx.content,
+        ctx.file.content,
         object.span().end.offset,
-        ctx.as_resolution_ctx().class_loader,
-        ctx.backend,
+        ctx.as_resolution_ctx().file.class_loader,
+        ctx.file.backend,
     )
 }
 
@@ -248,7 +262,7 @@ fn safe_source_owner(
         // `$safe->only(…)` — trace the assignment that produced `$safe`.
         Expression::Variable(Variable::Direct(dv)) => {
             crate::virtual_members::laravel::safe_source_variable(
-                ctx.content,
+                ctx.file.content,
                 object.span().end.offset as usize,
                 bytes_to_str(dv.name),
             )?
@@ -278,10 +292,10 @@ pub(super) fn try_resolve_request_accessor_type(
     // receiver is usually an app's own `FormRequest` subclass that never
     // redeclares it, so its parameters have to be found by walking the
     // parent chain rather than reading `owner`'s own members.
-    let (method, _) = crate::type_engine::types::narrowing::find_method_in_chain_where(
+    let (method, _) = crate::type_engine::type_ops::condition_facts::find_method_in_chain_where(
         owner,
         method_name,
-        ctx.class_loader,
+        ctx.file.class_loader,
         &|_| true,
         &mut Vec::new(),
         0,
@@ -303,10 +317,10 @@ pub(super) fn try_resolve_request_accessor_type(
             key: bound_text.first().and_then(|k| k.as_deref()),
             default_type: &default_type,
         },
-        ctx.content,
+        ctx.file.content,
         ctx.cursor_offset,
-        ctx.class_loader,
-        ctx.backend,
+        ctx.file.class_loader,
+        ctx.file.backend,
     )?;
     // The whole union travels on one entry, carrying the class of its
     // object half: splitting it into an entry per member would leave the
@@ -315,8 +329,8 @@ pub(super) fn try_resolve_request_accessor_type(
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &ty,
         &owner.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     Some(vec![match classes.first() {
         Some(class) => ResolvedType::from_both_arc(ty, Arc::clone(class)),
@@ -341,7 +355,7 @@ pub(super) fn try_resolve_command_accessor_type(
     }
     let arg_texts = crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
         argument_list,
-        ctx.content,
+        ctx.file.content,
     );
     let key = match arg_texts.first() {
         // A key built at runtime names no parameter we can look up.
@@ -352,8 +366,8 @@ pub(super) fn try_resolve_command_accessor_type(
         class,
         method_name,
         key.as_deref(),
-        ctx.class_loader,
-        ctx.backend,
+        ctx.file.class_loader,
+        ctx.file.backend,
     )?;
     Some(vec![ResolvedType::from_type_string(ty)])
 }

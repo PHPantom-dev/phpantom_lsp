@@ -82,10 +82,10 @@ impl<T: Clone> SharedVec<T> {
         Self::default()
     }
 
-    /// Wrap an existing `Vec<T>`.
+    /// Wrap an existing `Vec<T>`, releasing its spare capacity.
     #[inline]
     pub fn from_vec(v: Vec<T>) -> Self {
-        SharedVec(Arc::new(v))
+        v.into()
     }
 
     /// Borrow the contents as a slice.
@@ -155,14 +155,95 @@ impl<T> SharedVec<T> {
 
 impl<T> From<Vec<T>> for SharedVec<T> {
     #[inline]
-    fn from(v: Vec<T>) -> Self {
+    fn from(mut v: Vec<T>) -> Self {
+        // Shared lists are almost always read-only once built, and the
+        // parsed ones live in the index for the whole session, so spare
+        // growth capacity would stay allocated with nothing to fill it.
+        v.shrink_to_fit();
         SharedVec(Arc::new(v))
     }
+}
+
+/// Wrap each record in an `Arc`, in a list allocated at its final size.
+///
+/// `values.into_iter().map(Arc::new).collect()` reuses the allocation of
+/// `values` for the pointer list. A record is many times wider than a
+/// pointer, so nearly all of that allocation would stay unused, and it
+/// lives as long as the parsed class.
+pub(crate) fn into_arcs<T>(values: Vec<T>) -> Vec<Arc<T>> {
+    let mut shared = Vec::with_capacity(values.len());
+    shared.extend(values.into_iter().map(Arc::new));
+    shared
 }
 
 impl<T> FromIterator<T> for SharedVec<T> {
     #[inline]
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         SharedVec(Arc::new(iter.into_iter().collect()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_vec_releases_build_capacity_and_preserves_copy_on_write() {
+        let mut values = Vec::with_capacity(4096);
+        values.extend([1, 2, 3]);
+        let shared: SharedVec<_> = values.into();
+        assert_eq!(shared.0.capacity(), shared.len());
+        let mut changed = shared.clone();
+        assert!(Arc::ptr_eq(&shared.0, &changed.0));
+        changed.push(4);
+        assert_eq!(shared.as_slice(), [1, 2, 3]);
+        assert_eq!(changed.into_vec(), [1, 2, 3, 4]);
+
+        let empty = SharedVec::<u8>::from_vec(Vec::with_capacity(4096));
+        assert_eq!(empty.0.capacity(), 0);
+    }
+
+    #[test]
+    fn into_arcs_retains_only_pointer_storage_for_wide_records() {
+        let records = vec![[7u64; 64]; 128];
+        let shared = into_arcs(records);
+        assert_eq!(shared.capacity(), shared.len());
+        assert_eq!(shared.len(), 128);
+        assert!(shared.iter().all(|record| **record == [7; 64]));
+        let empty = into_arcs(Vec::<[u64; 64]>::with_capacity(128));
+        assert_eq!(empty.capacity(), 0);
+    }
+
+    #[test]
+    fn parsed_member_lists_do_not_retain_record_sized_buffers() {
+        let classes = crate::Backend::parse_php_versioned(
+            "<?php
+            /** @method string virtualName() */
+            class Example {
+                public string $name;
+                public const LABEL = 'example';
+                public function name(string $fallback): string { return $fallback; }
+                public function make() {
+                    return new class { public string $name; public function name() {} };
+                }
+            }
+            interface Named { public function name(string $fallback): string; }
+            trait HasName { public string $name; public function name() {} }
+            enum Label: string { case Example = 'example'; public function name() {} }
+            ",
+            None,
+        );
+        assert_eq!(classes.len(), 5);
+        for class in classes {
+            assert_eq!(class.methods.0.capacity(), class.methods.len());
+            assert_eq!(class.properties.0.capacity(), class.properties.len());
+            assert_eq!(class.constants.0.capacity(), class.constants.len());
+            for method in &class.methods {
+                assert_eq!(method.parameters.0.capacity(), method.parameters.len());
+            }
+            if let Some(doc) = &class.doc_members {
+                assert_eq!(doc.methods.capacity(), doc.methods.len());
+            }
+        }
     }
 }

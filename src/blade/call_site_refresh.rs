@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::symbol_map::{LaravelStringKind, SymbolKind};
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 use crate::virtual_members::laravel::canonical_view_name;
 
 use super::call_site_inference::{BladeCallerSnapshot, BladeScope, ViewCallerSnapshot};
@@ -24,7 +24,7 @@ impl Backend {
     /// up call sites discovered since they were preprocessed.  Cheap
     /// for templates whose inference is unchanged (no re-parse).
     pub(crate) fn refresh_blade_injected_vars(&self) {
-        let blade_uris: Vec<String> = self.blade_virtual_content.read().keys().cloned().collect();
+        let blade_uris = self.lowered_template_uris();
         if blade_uris.is_empty() {
             return;
         }
@@ -159,15 +159,13 @@ impl Backend {
         anonymous: &[crate::blade::component_names::AnonymousNamespace],
     ) -> Vec<String> {
         let mut names: Vec<String> = self
-            .symbol_maps
-            .read()
-            .get(uri)
+            .symbol_map_for(uri)
             .map(|map| {
                 map.spans
                     .iter()
                     .filter_map(|span| match &span.kind {
-                        SymbolKind::LaravelStringKey {
-                            kind: LaravelStringKind::View,
+                        SymbolKind::StringKey {
+                            kind: StringKeyKind::View,
                             key,
                             ..
                         } => Some(key.clone()),
@@ -222,14 +220,15 @@ impl Backend {
         shared_blade: Option<&BladeCallerSnapshot>,
     ) -> bool {
         let fresh = self.compute_blade_injected_vars(uri, content, shared, shared_blade);
-        let unchanged = match self.blade_injected_vars.read().get(uri) {
+        let unchanged = match self.blade.injected_vars.read().get(uri) {
             Some(prev) => *prev == fresh,
             None => fresh == BladeScope::default(),
         };
         if unchanged {
             return false;
         }
-        self.blade_injected_vars
+        self.blade
+            .injected_vars
             .write()
             .insert(uri.to_string(), fresh);
         self.update_ast(uri, content);
@@ -249,17 +248,17 @@ impl Backend {
             self.refresh_blade_layout_children(caller_uri);
             return;
         }
-        let Some(map) = self.symbol_maps.read().get(caller_uri).cloned() else {
+        let Some(map) = self.symbol_map_for(caller_uri) else {
             return;
         };
-        let extra = self.typed_receiver_view_spans_for(caller_uri, &map);
+        let extra = self.typed_receiver_spans_for(caller_uri, &map);
         let mut names: Vec<&str> = map
             .spans
             .iter()
             .chain(extra.iter())
             .filter_map(|span| match &span.kind {
-                SymbolKind::LaravelStringKey {
-                    kind: LaravelStringKind::View,
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::View,
                     key,
                     ..
                 } => Some(key.as_str()),
@@ -276,16 +275,12 @@ impl Backend {
         for name in names {
             for location in crate::virtual_members::laravel::resolve_laravel_string_key(
                 self,
-                &LaravelStringKind::View,
+                &StringKeyKind::View,
                 name,
                 caller_uri,
             ) {
                 let template_uri = location.uri.to_string();
-                if !self
-                    .blade_virtual_content
-                    .read()
-                    .contains_key(&template_uri)
-                {
+                if self.blade_virtual_php_arc(&template_uri).is_none() {
                     continue;
                 }
                 let Some(content) = self.get_file_content(&template_uri) else {
@@ -323,7 +318,7 @@ impl Backend {
             for name in self.blade_rendered_view_names(&caller_uri, &anonymous) {
                 for location in crate::virtual_members::laravel::resolve_laravel_string_key(
                     self,
-                    &LaravelStringKind::View,
+                    &StringKeyKind::View,
                     &name,
                     &caller_uri,
                 ) {
@@ -331,11 +326,7 @@ impl Backend {
                     if !visited.insert(template_uri.clone()) {
                         continue;
                     }
-                    if !self
-                        .blade_virtual_content
-                        .read()
-                        .contains_key(&template_uri)
-                    {
+                    if self.blade_virtual_php_arc(&template_uri).is_none() {
                         continue;
                     }
                     let Some(template_content) = self.get_file_content(&template_uri) else {

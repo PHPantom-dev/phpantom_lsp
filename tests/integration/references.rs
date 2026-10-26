@@ -2,15 +2,15 @@ use crate::common::{
     block_on, create_test_backend, create_test_backend_with_full_stubs, find_references, open_php,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::{Location, Position, Uri};
 
 use std::sync::Arc;
 
 /// Helper: send a find-references request and return the locations.
 async fn references_at(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
     include_declaration: bool,
@@ -25,51 +25,51 @@ async fn references_at(
 }
 
 /// Verify that `format!("file://{}", path.display())` and
-/// `Url::from_file_path(path).to_string()` produce the same URI for
+/// `Uri::from_file_path(path).to_string()` produce the same URI for
 /// simple paths.  A mismatch here would cause `ensure_workspace_indexed`
 /// to index the same file twice under different URI keys, producing
 /// duplicate entries in Find References results.
 #[test]
 fn uri_format_consistency_simple_path() {
-    use tower_lsp::lsp_types::Url;
+    use tower_lsp_server::gen_lsp_types::Uri;
 
     let path = std::path::Path::new("/home/user/project/src/Foo.php");
     let from_format = format!("file://{}", path.display());
-    let from_url = Url::from_file_path(path).unwrap().to_string();
+    let from_url = Uri::from_file_path(path).unwrap().to_string();
     eprintln!("format!: {}", from_format);
-    eprintln!("Url:     {}", from_url);
+    eprintln!("Uri:     {}", from_url);
     assert_eq!(
         from_format, from_url,
         "URI format mismatch for simple path — this would cause double entries in Find References"
     );
 }
 
-/// Paths with spaces: `Url::from_file_path` percent-encodes them but
+/// Paths with spaces: `Uri::from_file_path` percent-encodes them but
 /// `format!("file://{}",…)` does not.  If any code path uses the raw
-/// format for a path containing spaces while another uses the Url type,
+/// format for a path containing spaces while another uses the Uri type,
 /// the same file ends up in `symbol_maps` under two different keys.
 #[test]
 fn uri_format_consistency_path_with_spaces() {
-    use tower_lsp::lsp_types::Url;
+    use tower_lsp_server::gen_lsp_types::Uri;
 
     let path = std::path::Path::new("/home/user/My Project/src/Foo.php");
     let from_format = format!("file://{}", path.display());
-    let from_url = Url::from_file_path(path).unwrap().to_string();
+    let from_url = Uri::from_file_path(path).unwrap().to_string();
     eprintln!("format! (spaces): {}", from_format);
-    eprintln!("Url     (spaces): {}", from_url);
-    // This is expected to DIFFER — Url encodes the space as %20.
+    eprintln!("Uri     (spaces): {}", from_url);
+    // This is expected to DIFFER — Uri encodes the space as %20.
     // The point of this test is to document the divergence so that
     // any code producing URIs via format! is aware of the risk.
     if from_format != from_url {
         eprintln!(
-            "WARNING: URI mismatch for path with spaces!\n  format!: {}\n  Url:     {}",
+            "WARNING: URI mismatch for path with spaces!\n  format!: {}\n  Uri:     {}",
             from_format, from_url
         );
     }
-    // Url produces percent-encoded form.
+    // Uri produces percent-encoded form.
     assert!(
         from_url.contains("My%20Project"),
-        "Url should percent-encode spaces: {}",
+        "Uri should percent-encode spaces: {}",
         from_url
     );
     // format! does NOT encode.
@@ -80,37 +80,37 @@ fn uri_format_consistency_path_with_spaces() {
     );
 }
 
-/// Paths with special characters that Url percent-encodes.
+/// Paths with special characters that Uri percent-encodes.
 #[test]
 fn uri_format_consistency_path_with_special_chars() {
-    use tower_lsp::lsp_types::Url;
+    use tower_lsp_server::gen_lsp_types::Uri;
 
     let path = std::path::Path::new("/home/user/project[1]/src/Foo.php");
     let from_format = format!("file://{}", path.display());
-    let from_url = Url::from_file_path(path).unwrap().to_string();
+    let from_url = Uri::from_file_path(path).unwrap().to_string();
     eprintln!("format! (brackets): {}", from_format);
-    eprintln!("Url     (brackets): {}", from_url);
+    eprintln!("Uri     (brackets): {}", from_url);
     if from_format != from_url {
         eprintln!(
-            "WARNING: URI mismatch for path with brackets!\n  format!: {}\n  Url:     {}",
+            "WARNING: URI mismatch for path with brackets!\n  format!: {}\n  Uri:     {}",
             from_format, from_url
         );
     }
 }
 
-/// Paths with hash characters — Url treats `#` as a fragment delimiter.
+/// Paths with hash characters — Uri treats `#` as a fragment delimiter.
 #[test]
 fn uri_format_consistency_path_with_hash() {
-    use tower_lsp::lsp_types::Url;
+    use tower_lsp_server::gen_lsp_types::Uri;
 
     let path = std::path::Path::new("/home/user/project#2/src/Foo.php");
     let from_format = format!("file://{}", path.display());
-    let from_url = Url::from_file_path(path).unwrap().to_string();
+    let from_url = Uri::from_file_path(path).unwrap().to_string();
     eprintln!("format! (hash): {}", from_format);
-    eprintln!("Url     (hash): {}", from_url);
+    eprintln!("Uri     (hash): {}", from_url);
     if from_format != from_url {
         eprintln!(
-            "WARNING: URI mismatch for path with hash!\n  format!: {}\n  Url:     {}",
+            "WARNING: URI mismatch for path with hash!\n  format!: {}\n  Uri:     {}",
             from_format, from_url
         );
     }
@@ -127,7 +127,7 @@ fn open_file(backend: &phpantom_lsp::Backend, uri: &str, content: &str) {
 }
 
 /// Helper to assert no duplicate locations exist in the results.
-fn assert_no_duplicates(results: &[tower_lsp::lsp_types::Location], label: &str) {
+fn assert_no_duplicates(results: &[tower_lsp_server::gen_lsp_types::Location], label: &str) {
     let mut seen = std::collections::HashSet::new();
     for loc in results {
         let key = format!(
@@ -589,6 +589,132 @@ class SomeService {
         .find(|loc| loc.range.start.line == 8)
         .expect("should include the $this->someField access site");
     assert_eq!(access.range.start.character, 22);
+}
+
+const EMAIL_PROPERTY_AND_METHOD: &str = r#"<?php
+
+class User {
+    public function __construct(private string $email) {}
+
+    public function email(): string {
+        return $this->email;
+    }
+}
+
+function show(User $user): string {
+    return $user->email();
+}
+"#;
+
+fn reference_lines(results: &[Location]) -> Vec<u32> {
+    let mut lines: Vec<u32> = results.iter().map(|loc| loc.range.start.line).collect();
+    lines.sort_unstable();
+    lines
+}
+
+#[test]
+fn static_property_references_include_differently_cased_inline_see() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_inline_see_cased.php";
+    let content = r#"<?php
+namespace Psy\Util;
+
+class Docblock {
+    public static $vectors = [];
+
+    /**
+     * The array has keys which are the tag names (excluding the @) and values.
+     *
+     * In the case where the tag name is defined in {@see DocBlock::$vectors} the
+     * value within the tag-value array is described by {@see DocBlock::$vectors}.
+     *
+     * @var array
+     */
+    public $tags;
+}
+"#;
+    open_file(&backend, uri, content);
+
+    let results = backend
+        .find_references(uri, content, Position::new(4, 20), true)
+        .expect("should find references");
+    assert_eq!(
+        reference_lines(&results),
+        vec![4, 9, 10],
+        "both inline `{{@see}}` tags reference the property: {results:#?}"
+    );
+}
+
+#[test]
+fn static_property_references_include_differently_cased_class_name() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_static_prop_cased.php";
+    let content = r#"<?php
+namespace App;
+
+class Widget {
+    public static $count = 0;
+}
+
+function bump(): void {
+    WIDGET::$count++;
+    \APP\widget::$count++;
+}
+"#;
+    open_file(&backend, uri, content);
+
+    let results = backend
+        .find_references(uri, content, Position::new(4, 20), true)
+        .expect("should find references");
+    assert_eq!(reference_lines(&results), vec![4, 8, 9], "{results:#?}");
+}
+
+#[test]
+fn property_references_skip_the_method_of_the_same_name() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_property_vs_method.php";
+    let content = EMAIL_PROPERTY_AND_METHOD;
+    open_file(&backend, uri, content);
+
+    // From the promoted property declaration.
+    let results = backend
+        .find_references(uri, content, Position::new(3, 48), true)
+        .expect("should find references");
+    assert_eq!(
+        reference_lines(&results),
+        vec![3, 6],
+        "the property's references are its declaration and `$this->email`: {results:#?}"
+    );
+
+    // From the property access.
+    let results = backend
+        .find_references(uri, content, Position::new(6, 23), true)
+        .expect("should find references");
+    assert_eq!(reference_lines(&results), vec![3, 6], "{results:#?}");
+}
+
+#[test]
+fn method_references_skip_the_property_of_the_same_name() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_method_vs_property.php";
+    let content = EMAIL_PROPERTY_AND_METHOD;
+    open_file(&backend, uri, content);
+
+    // From the method declaration.
+    let results = backend
+        .find_references(uri, content, Position::new(5, 22), true)
+        .expect("should find references");
+    assert_eq!(
+        reference_lines(&results),
+        vec![5, 11],
+        "the method's references are its declaration and `$user->email()`: {results:#?}"
+    );
+
+    // From the call.
+    let results = backend
+        .find_references(uri, content, Position::new(11, 19), true)
+        .expect("should find references");
+    assert_eq!(reference_lines(&results), vec![5, 11], "{results:#?}");
 }
 
 // ─── Variable references ────────────────────────────────────────────────────
@@ -1371,11 +1497,10 @@ class Baz {
 
 #[tokio::test]
 async fn async_did_open_class_references_no_duplicates() {
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::{DidOpenTextDocumentParams, TextDocumentItem, Url};
+    use tower_lsp_server::gen_lsp_types::Uri;
 
     let backend = create_test_backend();
-    let uri = Url::parse("file:///tmp/test_async_refs.php").unwrap();
+    let uri = Uri::parse("file:///tmp/test_async_refs.php").unwrap();
     let content = r#"<?php
 
 class Foo {
@@ -1391,16 +1516,7 @@ class Baz {
 }
 "#;
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, content).await;
 
     let uri_str = uri.to_string();
 
@@ -1449,8 +1565,7 @@ class Baz {
 
 #[tokio::test]
 async fn async_did_open_cross_file_no_duplicates() {
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::{DidOpenTextDocumentParams, TextDocumentItem, Url};
+    use tower_lsp_server::gen_lsp_types::Uri;
 
     let (backend, dir) = crate::common::create_psr4_workspace(
         r#"{
@@ -1492,33 +1607,15 @@ class Basket {
     let product_path = dir.path().join("src/Product.php");
     let basket_path = dir.path().join("src/Basket.php");
 
-    let product_uri = Url::from_file_path(&product_path).unwrap();
-    let basket_uri = Url::from_file_path(&basket_path).unwrap();
+    let product_uri = Uri::from_file_path(&product_path).unwrap();
+    let basket_uri = Uri::from_file_path(&basket_path).unwrap();
 
     let product_content = std::fs::read_to_string(&product_path).unwrap();
     let basket_content = std::fs::read_to_string(&basket_path).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: product_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: product_content.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &product_uri, &product_content).await;
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: basket_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: basket_content.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &basket_uri, &basket_content).await;
 
     let product_uri_str = product_uri.to_string();
 
@@ -1576,8 +1673,7 @@ class Basket {
 /// production scenario where URI format mismatches could occur.
 #[tokio::test]
 async fn async_did_open_one_file_workspace_discovers_other() {
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::{DidOpenTextDocumentParams, TextDocumentItem, Url};
+    use tower_lsp_server::gen_lsp_types::Uri;
 
     let (backend, dir) = crate::common::create_psr4_workspace(
         r#"{
@@ -1620,19 +1716,10 @@ class Dashboard {
     // Only open Widget.php via did_open. Dashboard.php should be
     // discovered by ensure_workspace_indexed when find_references runs.
     let widget_path = dir.path().join("src/Widget.php");
-    let widget_uri = Url::from_file_path(&widget_path).unwrap();
+    let widget_uri = Uri::from_file_path(&widget_path).unwrap();
     let widget_content = std::fs::read_to_string(&widget_path).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: widget_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: widget_content.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &widget_uri, &widget_content).await;
 
     let widget_uri_str = widget_uri.to_string();
 
@@ -2034,7 +2121,7 @@ class Item {}
 
     open_file(&backend, &item_uri, &item_content);
 
-    let item_url = Url::parse(&item_uri).unwrap();
+    let item_url = Uri::parse(&item_uri).unwrap();
     let initial_results = references_at(&backend, &item_url, 3, 6, true).await;
     assert!(
         !initial_results.is_empty(),
@@ -2225,7 +2312,7 @@ class Service {
 // ─── Constructor reference tests ────────────────────────────────────────────
 
 /// Whether any returned location starts on the given zero-based line.
-fn has_location_on_line(results: &[tower_lsp::lsp_types::Location], line: u32) -> bool {
+fn has_location_on_line(results: &[tower_lsp_server::gen_lsp_types::Location], line: u32) -> bool {
     results.iter().any(|loc| loc.range.start.line == line)
 }
 
@@ -2589,7 +2676,7 @@ function probe(Configuration $config): void {
 #[tokio::test]
 async fn test_variable_references_same_scope() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                      // L0
         "function demo(): void {\n",    // L1
@@ -2617,7 +2704,7 @@ async fn test_variable_references_same_scope() {
 #[tokio::test]
 async fn test_variable_references_excludes_other_scope() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                    // L0
         "function alpha(): void {\n", // L1
@@ -2646,7 +2733,7 @@ async fn test_variable_references_excludes_other_scope() {
 #[tokio::test]
 async fn test_variable_references_exclude_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                   // L0
         "function demo(): void {\n", // L1
@@ -2673,7 +2760,7 @@ async fn test_variable_references_exclude_declaration() {
 #[tokio::test]
 async fn test_variable_references_include_compact_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): array {\n",
@@ -2698,7 +2785,7 @@ async fn test_variable_references_include_compact_string() {
 #[tokio::test]
 async fn test_variable_references_include_compact_array_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): array {\n",
@@ -2725,7 +2812,7 @@ async fn test_variable_references_include_compact_array_string() {
 #[tokio::test]
 async fn test_class_references_same_file() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // L0
         "class Logger {\n",                             // L1
@@ -2753,7 +2840,7 @@ async fn test_class_references_same_file() {
 #[tokio::test]
 async fn test_class_references_exclude_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                   // L0
         "class Foo {}\n",                            // L1
@@ -2788,7 +2875,7 @@ async fn test_class_references_exclude_declaration() {
 #[tokio::test]
 async fn test_class_declaration_finds_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                     // L0
         "class Widget {}\n",           // L1
@@ -2813,7 +2900,7 @@ async fn test_class_declaration_finds_references() {
 #[tokio::test]
 async fn test_method_references_same_file() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // L0
         "class Repo {\n",                               // L1
@@ -2842,7 +2929,7 @@ async fn test_method_references_same_file() {
 #[tokio::test]
 async fn test_method_references_include_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                               // L0
         "class Repo {\n",                        // L1
@@ -2867,7 +2954,7 @@ async fn test_method_references_include_declaration() {
 #[tokio::test]
 async fn test_static_method_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                        // L0
         "class Factory {\n",                              // L1
@@ -2893,7 +2980,7 @@ async fn test_static_method_references() {
 #[tokio::test]
 async fn test_property_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                            // L0
         "class Config {\n",                   // L1
@@ -2921,7 +3008,7 @@ async fn test_property_references() {
 #[tokio::test]
 async fn test_function_call_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                      // L0
         "function helper(): void {}\n", // L1
@@ -2945,7 +3032,7 @@ async fn test_function_call_references() {
 #[tokio::test]
 async fn test_function_references_include_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                // L0
         "function myFunc(): int { return 1; }\n", // L1
@@ -2970,7 +3057,7 @@ async fn test_function_references_include_declaration() {
 #[tokio::test]
 async fn test_constant_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                    // L0
         "class Status {\n",           // L1
@@ -2996,7 +3083,7 @@ async fn test_constant_references() {
 #[tokio::test]
 async fn test_define_constant_references_use_reference_index_snapshot() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///constants.php").unwrap();
+    let uri = Uri::parse("file:///constants.php").unwrap();
     let text = concat!(
         "<?php\n",                        // L0
         "define('APP_FLAG', true);\n",    // L1
@@ -3017,7 +3104,7 @@ async fn test_define_constant_references_use_reference_index_snapshot() {
 #[tokio::test]
 async fn test_self_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // L0
         "class Item {\n",                                // L1
@@ -3046,8 +3133,8 @@ async fn test_self_references() {
 #[tokio::test]
 async fn test_class_references_cross_file() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",           // L0
@@ -3086,8 +3173,8 @@ async fn test_class_references_cross_file() {
 #[tokio::test]
 async fn test_member_references_cross_file() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",                                // L0
@@ -3129,8 +3216,8 @@ async fn test_member_references_cross_file() {
 #[tokio::test]
 async fn test_namespaced_class_references() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",                  // L0
@@ -3164,7 +3251,7 @@ async fn test_namespaced_class_references() {
 #[tokio::test]
 async fn test_braced_namespace_resolves_receiver_against_its_own_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multi_ns.php").unwrap();
+    let uri = Uri::parse("file:///multi_ns.php").unwrap();
 
     let text = concat!(
         "<?php\n",                                    // L0
@@ -3199,7 +3286,7 @@ async fn test_braced_namespace_resolves_receiver_against_its_own_block() {
 #[tokio::test]
 async fn test_no_references_on_whitespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",        // L0
         "\n",             // L1
@@ -3218,7 +3305,7 @@ async fn test_no_references_on_whitespace() {
 #[tokio::test]
 async fn test_variable_parameter_reference() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // L0
         "function greet(string $name): string {\n", // L1
@@ -3240,7 +3327,7 @@ async fn test_variable_parameter_reference() {
 #[tokio::test]
 async fn test_results_sorted_by_position() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                   // L0
         "class X {}\n",                              // L1
@@ -3268,7 +3355,7 @@ async fn test_results_sorted_by_position() {
 #[tokio::test]
 async fn test_class_extends_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                           // L0
         "class Base {}\n",                   // L1
@@ -3290,7 +3377,7 @@ async fn test_class_extends_references() {
 #[tokio::test]
 async fn test_interface_implements_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                   // L0
         "interface Loggable {}\n",                   // L1
@@ -3311,7 +3398,7 @@ async fn test_interface_implements_references() {
 #[tokio::test]
 async fn test_foreach_variable_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                           // L0
         "function demo(): void {\n",         // L1
@@ -3337,7 +3424,7 @@ async fn test_foreach_variable_references() {
 #[tokio::test]
 async fn test_static_property_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // L0
         "class Counter {\n",                                // L1
@@ -3365,7 +3452,7 @@ async fn test_static_property_references() {
 #[tokio::test]
 async fn test_this_property_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // L0
         "class Person {\n",                                      // L1
@@ -3393,8 +3480,8 @@ async fn test_this_property_references() {
 #[tokio::test]
 async fn test_multiple_files_function_references() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///helpers.php").unwrap();
-    let uri_b = Url::parse("file:///main.php").unwrap();
+    let uri_a = Uri::parse("file:///helpers.php").unwrap();
+    let uri_b = Uri::parse("file:///main.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",                                        // L0
@@ -3427,8 +3514,8 @@ async fn test_multiple_files_function_references() {
 #[tokio::test]
 async fn test_this_is_file_local_not_cross_file() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",                             // L0
@@ -3465,7 +3552,7 @@ async fn test_this_is_file_local_not_cross_file() {
 #[tokio::test]
 async fn test_this_references_within_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // L0
         "class Account {\n",                                // L1
@@ -3500,7 +3587,7 @@ async fn test_this_references_within_class() {
 #[tokio::test]
 async fn test_this_scoped_to_enclosing_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                            // L0
         "class Alpha {\n",                    // L1
@@ -3535,7 +3622,7 @@ async fn test_this_scoped_to_enclosing_class() {
 #[tokio::test]
 async fn test_method_declaration_triggers_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                              // L0
         "class Converter {\n",                                                  // L1
@@ -3568,7 +3655,7 @@ async fn test_method_declaration_triggers_references() {
 #[tokio::test]
 async fn test_property_declaration_triggers_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                              // L0
         "class Box {\n",                        // L1
@@ -3597,7 +3684,7 @@ async fn test_property_declaration_triggers_references() {
 #[tokio::test]
 async fn test_constant_declaration_triggers_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                               // L0
         "class Limit {\n",                       // L1
@@ -3626,8 +3713,8 @@ async fn test_constant_declaration_triggers_references() {
 #[tokio::test]
 async fn test_method_declaration_cross_file() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",                                         // L0
@@ -3665,7 +3752,7 @@ async fn test_unrelated_class_same_method_excluded() {
     // Two unrelated classes with the same method name.  Find References
     // on one should NOT return results from the other.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                            // L0
         "class MyClass {\n",                                  // L1
@@ -3703,8 +3790,8 @@ async fn test_unrelated_class_same_method_excluded() {
 async fn test_unrelated_class_same_method_excluded_cross_file() {
     // Cross-file: two unrelated classes with the same method name.
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",                               // L0
@@ -3774,8 +3861,8 @@ async fn method_references_type_receivers_without_walking_unrelated_bodies() {
     // bodies around it must neither contribute their own `$item` to the
     // answer nor be needed for it.
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",                               // L0
@@ -3840,7 +3927,7 @@ async fn test_inherited_method_references_included() {
     // A child class inherits a method from its parent.  Find References
     // on the parent's method should include calls via the child.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // L0
         "class Base {\n",                             // L1
@@ -3876,7 +3963,7 @@ async fn test_interface_method_references_included() {
     // A class implements an interface.  Find References on the interface's
     // method should include calls via the implementing class.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                         // L0
         "interface Saveable {\n",                          // L1
@@ -3913,7 +4000,7 @@ async fn test_interface_method_references_included() {
 async fn test_static_method_unrelated_class_excluded() {
     // Two unrelated classes with the same static method name.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                        // L0
         "class Alpha {\n",                                // L1
@@ -3950,7 +4037,7 @@ async fn test_static_method_unrelated_class_excluded() {
 async fn test_self_static_method_references_scoped() {
     // self:: and static:: calls should be scoped to the enclosing class.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // L0
         "class Foo {\n",                                 // L1
@@ -3992,7 +4079,7 @@ async fn test_unresolvable_variable_excluded_when_member_scope_known() {
     // projects, common methods such as `find` otherwise match unrelated
     // untyped services and repositories.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // L0
         "class MyClass {\n",                             // L1
@@ -4025,7 +4112,7 @@ async fn test_unresolvable_variable_excluded_when_member_scope_known() {
 #[tokio::test]
 async fn test_overridden_find_excludes_base_repository_and_unresolved_calls() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                          // L0
         "class ServiceEntityRepository {\n",                                // L1
@@ -4097,7 +4184,7 @@ async fn test_overridden_find_excludes_base_repository_and_unresolved_calls() {
 #[tokio::test]
 async fn test_concrete_method_references_include_interface_typed_calls() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                           // L0
         "namespace App;\n",                                                  // L1
@@ -4165,7 +4252,7 @@ async fn test_this_method_references_excludes_unrelated() {
     // reference search is cross-file.  This test checks the member
     // name filtering when triggered from a $this-> call site.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // L0
         "class Dog {\n",                              // L1
@@ -4229,7 +4316,7 @@ async fn test_this_method_references_excludes_unrelated() {
 #[tokio::test]
 async fn test_phpdoc_property_references_from_usage() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                              // L0
         "/**\n",                                // L1
@@ -4279,7 +4366,7 @@ async fn test_phpdoc_property_references_from_usage() {
 #[tokio::test]
 async fn test_phpdoc_property_references_from_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                              // L0
         "/**\n",                                // L1
@@ -4310,7 +4397,7 @@ async fn test_phpdoc_property_references_from_declaration() {
 #[tokio::test]
 async fn test_phpdoc_method_references_from_usage() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                        // L0
         "/**\n",                          // L1
@@ -4343,7 +4430,7 @@ async fn test_phpdoc_method_references_from_usage() {
 #[tokio::test]
 async fn test_phpdoc_property_references_exclude_unrelated_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                      // L0
         "/**\n",                        // L1
@@ -4386,7 +4473,7 @@ async fn test_phpdoc_property_references_exclude_unrelated_class() {
 #[tokio::test]
 async fn test_phpdoc_property_multiple_properties() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                      // L0
         "/**\n",                        // L1
@@ -4430,7 +4517,7 @@ async fn test_phpdoc_property_multiple_properties() {
 #[tokio::test]
 async fn test_phpdoc_property_read_write_variants() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                          // L0
         "/**\n",                            // L1
@@ -4463,7 +4550,7 @@ async fn test_phpdoc_property_read_write_variants() {
 #[tokio::test]
 async fn test_phpdoc_method_references_from_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                        // L0
         "/**\n",                          // L1
@@ -4493,7 +4580,7 @@ async fn test_phpdoc_method_references_from_declaration() {
 #[tokio::test]
 async fn test_phpdoc_method_no_return_type_references() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                 // L0
         "/**\n",                   // L1
@@ -4527,7 +4614,7 @@ async fn test_phpdoc_method_no_return_type_references() {
 #[tokio::test]
 async fn test_constructor_references_finds_instantiations() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ctor.php").unwrap();
+    let uri = Uri::parse("file:///ctor.php").unwrap();
     let text = concat!(
         "<?php\n",                                // L0
         "class Service {\n",                      // L1
@@ -4555,7 +4642,7 @@ async fn test_constructor_references_finds_instantiations() {
 #[tokio::test]
 async fn test_constructor_references_includes_inheriting_subclass() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ctor_inherit.php").unwrap();
+    let uri = Uri::parse("file:///ctor_inherit.php").unwrap();
     let text = concat!(
         "<?php\n",                                // L0
         "class Base {\n",                         // L1
@@ -4584,7 +4671,7 @@ async fn test_constructor_references_includes_inheriting_subclass() {
 #[tokio::test]
 async fn test_constructor_references_excludes_overriding_subclass() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ctor_override.php").unwrap();
+    let uri = Uri::parse("file:///ctor_override.php").unwrap();
     let text = concat!(
         "<?php\n",                                // L0
         "class Base {\n",                         // L1
@@ -4616,7 +4703,7 @@ async fn test_constructor_references_excludes_overriding_subclass() {
 #[tokio::test]
 async fn test_constructor_references_finds_attribute_usage() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ctor_attr.php").unwrap();
+    let uri = Uri::parse("file:///ctor_attr.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // L0
         "#[\\Attribute]\n",                                 // L1
@@ -4652,14 +4739,14 @@ async fn test_constructor_references_finds_attribute_usage() {
 /// runs on its own thread and is collected through a `recv_timeout`.
 #[test]
 fn constructor_references_survive_a_parse_during_the_hierarchy_walk() {
-    let base_uri = Url::parse("file:///Base.php").unwrap();
+    let base_uri = Uri::parse("file:///Base.php").unwrap();
     let base_text = concat!(
         "<?php\n",                                // L0
         "class Base {\n",                         // L1
         "    public function __construct() {}\n", // L2
         "}\n",                                    // L3
     );
-    let child_uri = Url::parse("file:///Child.php").unwrap();
+    let child_uri = Uri::parse("file:///Child.php").unwrap();
     let child_text = concat!(
         "<?php\n",                               // L0
         "class Child extends Base {\n",          // L1
@@ -4711,8 +4798,8 @@ fn constructor_references_survive_a_parse_during_the_hierarchy_walk() {
 #[tokio::test]
 async fn test_member_references_through_property_receivers() {
     let backend = create_test_backend();
-    let uri_ctx = Url::parse("file:///Context.php").unwrap();
-    let uri_use = Url::parse("file:///users.php").unwrap();
+    let uri_ctx = Uri::parse("file:///Context.php").unwrap();
+    let uri_use = Uri::parse("file:///users.php").unwrap();
 
     let text_ctx = concat!(
         "<?php\n",                                 // L0
@@ -4788,9 +4875,9 @@ async fn test_member_references_through_property_receivers() {
 #[tokio::test]
 async fn test_const_reference_through_a_reflected_property_read() {
     let backend = create_test_backend_with_full_stubs();
-    let uri_shell = Url::parse("file:///Shell.php").unwrap();
-    let uri_config = Url::parse("file:///Configuration.php").unwrap();
-    let uri_use = Url::parse("file:///probe.php").unwrap();
+    let uri_shell = Uri::parse("file:///Shell.php").unwrap();
+    let uri_config = Uri::parse("file:///Configuration.php").unwrap();
+    let uri_use = Uri::parse("file:///probe.php").unwrap();
 
     let text_shell = concat!(
         "<?php\n",                     // L0
@@ -4835,8 +4922,8 @@ async fn test_const_reference_through_a_reflected_property_read() {
 #[tokio::test]
 async fn function_references_match_a_call_spelled_in_another_case() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///helpers.php").unwrap();
-    let uri_b = Url::parse("file:///main.php").unwrap();
+    let uri_a = Uri::parse("file:///helpers.php").unwrap();
+    let uri_b = Uri::parse("file:///main.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",                      // L0
@@ -4866,8 +4953,8 @@ async fn function_references_match_a_call_spelled_in_another_case() {
 #[tokio::test]
 async fn function_references_from_a_use_function_import_reach_its_call_sites() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///helpers.php").unwrap();
-    let uri_b = Url::parse("file:///main.php").unwrap();
+    let uri_a = Uri::parse("file:///helpers.php").unwrap();
+    let uri_b = Uri::parse("file:///main.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",                     // L0
@@ -4975,15 +5062,15 @@ class Consumer
     // The vendor scan files the package's classes under their paths without
     // parsing them, the way a dependency is known before anything needs it.
     backend
-        .initialized(tower_lsp::lsp_types::InitializedParams {})
+        .initialized(tower_lsp_server::gen_lsp_types::InitializedParams {})
         .await;
 
     let declaration_path = dir.path().join("src/AppService.php");
-    let declaration_uri = Url::from_file_path(&declaration_path).unwrap().to_string();
+    let declaration_uri = Uri::from_file_path(&declaration_path).unwrap().to_string();
     let declaration_content = std::fs::read_to_string(&declaration_path).unwrap();
     open_file(&backend, &declaration_uri, &declaration_content);
 
-    let consumer_uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+    let consumer_uri = Uri::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     // `handle` in `public function handle(): void {}`.
     let results = backend
@@ -5102,5 +5189,32 @@ fn references_on_crlf_file_with_multibyte_prefix_use_utf16_columns() {
             .collect::<Vec<_>>(),
         vec![(5, expected_column, expected_column + 3)],
         "the usage range must be in UTF-16 units on its own line, got: {results:#?}"
+    );
+}
+
+// ─── Declarations in files that access nothing ───────────────────────────────
+
+/// A file is a candidate for declaring the member as much as for accessing
+/// it, and the access narrowing must not take the declaration with it.
+#[tokio::test]
+async fn find_references_still_reports_a_declaration_in_a_file_that_accesses_nothing() {
+    let backend = create_test_backend();
+    let base_uri = Uri::parse("file:///Base.php").unwrap();
+    let child_uri = Uri::parse("file:///Child.php").unwrap();
+    let base_text = "<?php\nclass Base {\n    public function save(): void {}\n}\n";
+    let child_text = "<?php\nclass Child extends Base {\n    public function store(): void {\n        $this->save();\n    }\n}\n";
+    open_php(&backend, &base_uri, base_text).await;
+    open_php(&backend, &child_uri, child_text).await;
+
+    let (line, character) = crate::common::line_char_of(child_text, "save();");
+    let locations = references_at(&backend, &child_uri, line, character, true).await;
+
+    assert!(
+        locations.iter().any(|loc| loc.uri == base_uri),
+        "the declaration in Base.php has to be reported: {locations:?}"
+    );
+    assert!(
+        locations.iter().any(|loc| loc.uri == child_uri),
+        "the call in Child.php has to be reported: {locations:?}"
     );
 }

@@ -1,5 +1,8 @@
 use super::*;
 
+use super::enum_cases::{narrow_to_enum_cases, subtract_enum_cases};
+use crate::class_lookup::Fqn;
+
 /// Apply `array_key_exists('k', $arr)` narrowing to an array shape's
 /// optional key.
 ///
@@ -27,7 +30,10 @@ pub(crate) fn apply_array_key_exists_narrowing<'b>(
     inverted: bool,
 ) {
     for operand in collect_and_chain_operands(condition) {
-        let Some((base_key, key_expr, negated)) = array_key_exists_target(operand) else {
+        let Some((array_expr, key_expr, negated)) = array_key_exists_target(operand) else {
+            continue;
+        };
+        let Some(base_key) = condition_facts::expr_to_subject_key(array_expr) else {
             continue;
         };
         narrow_key_existence(&base_key, key_expr, negated == inverted, scope, ctx);
@@ -44,7 +50,7 @@ pub(crate) fn apply_array_key_assertion(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    if let Some(base_key) = narrowing::expr_to_subject_key(array_expr) {
+    if let Some(base_key) = condition_facts::expr_to_subject_key(array_expr) {
         narrow_key_existence(&base_key, key_expr, present, scope, ctx);
     }
     if present {
@@ -100,12 +106,12 @@ pub(crate) fn apply_in_array_narrowing<'b>(
     let scope_resolver = scope.snapshot_resolver();
 
     // Unwrap parentheses and detect negation.
-    let (inner, negated) = narrowing::unwrap_condition_negation(condition);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(condition);
 
     // Check every variable the condition names as the potential needle.
     let var_names = scope_keys_named_by(condition, scope);
     for var_name in &var_names {
-        if let Some(haystack_expr) = narrowing::try_extract_in_array(inner, var_name) {
+        if let Some(haystack_expr) = condition_facts::try_extract_in_array(inner, var_name) {
             let Some(haystack) = resolve_in_array_haystack_type_fw(haystack_expr, scope, ctx)
             else {
                 continue;
@@ -121,7 +127,17 @@ pub(crate) fn apply_in_array_narrowing<'b>(
             let mut results = scope.get(var_name).to_vec();
 
             if should_exclude {
-                let held = values_held_by(&haystack);
+                let (cases, held): (Vec<PhpType>, Vec<PhpType>) = values_held_by(&haystack)
+                    .into_iter()
+                    .partition(|value| value.as_enum_case().is_some());
+                // An enum case is ruled out the way `!==` rules it out, which
+                // also breaks a whole-enum needle into the cases left.
+                if !cases.is_empty()
+                    && let Some(cases) = enum_case_values(&cases, ctx)
+                {
+                    subtract_enum_cases(var_name, &cases, scope, ctx);
+                    results = scope.get(var_name).to_vec();
+                }
                 if held.is_empty() {
                     continue;
                 }
@@ -145,6 +161,12 @@ pub(crate) fn apply_in_array_narrowing<'b>(
                 let Some(element_type) = haystack.iterable_element_type() else {
                     continue;
                 };
+                // A haystack of enum cases narrows the needle to those cases,
+                // the way `===` against each of them would.
+                if let Some(cases) = enum_case_values(element_type.union_members(), ctx) {
+                    narrow_to_enum_cases(var_name, cases, scope, ctx);
+                    continue;
+                }
                 // An element that could be anything could be an object of
                 // any class, so it proves nothing about the class layer
                 // either: `narrow_value_by_element` draws the same line for
@@ -159,7 +181,8 @@ pub(crate) fn apply_in_array_narrowing<'b>(
                 let every_object_element_loads =
                     element_type.union_members().into_iter().all(|member| {
                         !member.is_object_like()
-                            || !narrowing::resolve_narrowing_target(member, &var_ctx).is_empty()
+                            || !condition_facts::resolve_narrowing_target(member, &var_ctx)
+                                .is_empty()
                     });
                 if every_object_element_loads {
                     // The class layer concludes the needle is one of the
@@ -176,7 +199,7 @@ pub(crate) fn apply_in_array_narrowing<'b>(
                     classless.retain(|rt| !rt.type_string.is_mixed());
                     if !classed.is_empty() || had_mixed {
                         ResolvedType::apply_narrowing(&mut classed, |classes| {
-                            narrowing::apply_instanceof_inclusion(
+                            condition_facts::apply_instanceof_inclusion(
                                 &element_type,
                                 false,
                                 &var_ctx,
@@ -229,6 +252,22 @@ pub(crate) fn apply_in_array_narrowing<'b>(
             }
         }
     }
+}
+
+/// Each of `values` as an enum case with its enum's class, or `None` when
+/// one of them is not a case of an enum that loads.
+fn enum_case_values<'t>(
+    values: impl IntoIterator<Item = &'t PhpType>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    values
+        .into_iter()
+        .map(|member| {
+            let (enum_name, _) = member.as_enum_case()?;
+            let enum_class = (ctx.file.class_loader)(Fqn::new(enum_name))?;
+            Some(ResolvedType::from_both_arc(member.clone(), enum_class))
+        })
+        .collect()
 }
 
 /// The needle's type once a strict `in_array` has proved it equals one of

@@ -1,0 +1,25 @@
+// test: a nested conditional return type decides its inner condition against what the outer condition left of the argument
+// feature: hover
+// expect: $found = User|null
+// expect_absent: Bag
+---
+<?php
+
+interface Arrayable {}
+class Model {}
+class User extends Model {}
+
+/** @template TModel */
+class Bag implements Arrayable
+{
+    /**
+     * @return ($key is Model ? TModel|null : ($key is Arrayable ? static : TModel|null))
+     */
+    public function find(mixed $key): mixed {}
+}
+
+/** @param Bag<User> $bag */
+function f(Bag $bag, ?User $user): void {
+    $found = $bag->find($user);
+    $fo<>und;
+}

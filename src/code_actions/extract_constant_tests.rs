@@ -429,7 +429,7 @@ class Foo {
 
     let extract = out
             .iter()
-            .find(|a| matches!(a, CodeActionOrCommand::CodeAction(ca) if ca.title.contains("Extract constant")));
+            .find(|a| matches!(a, CodeActionResponse::CodeAction(ca) if ca.title.contains("Extract constant")));
     assert!(
         extract.is_some(),
         "should offer extract constant for string literal in method body"
@@ -475,7 +475,7 @@ class Foo {
 
     let extract = out
             .iter()
-            .find(|a| matches!(a, CodeActionOrCommand::CodeAction(ca) if ca.title.contains("Extract constant")));
+            .find(|a| matches!(a, CodeActionResponse::CodeAction(ca) if ca.title.contains("Extract constant")));
     assert!(
         extract.is_none(),
         "should not offer extract constant for empty selection"
@@ -523,7 +523,7 @@ function foo() {
 
     let extract = out
             .iter()
-            .find(|a| matches!(a, CodeActionOrCommand::CodeAction(ca) if ca.title.contains("Extract constant")));
+            .find(|a| matches!(a, CodeActionResponse::CodeAction(ca) if ca.title.contains("Extract constant")));
     assert!(
         extract.is_none(),
         "should not offer extract constant outside a class"
@@ -571,7 +571,7 @@ class Foo {
 
     let extract = out
             .iter()
-            .find(|a| matches!(a, CodeActionOrCommand::CodeAction(ca) if ca.title.contains("Extract constant")));
+            .find(|a| matches!(a, CodeActionResponse::CodeAction(ca) if ca.title.contains("Extract constant")));
     assert!(
         extract.is_none(),
         "should not offer extract constant for a value already in a constant declaration"
@@ -621,7 +621,7 @@ class Foo {
 
     let extract = out
             .iter()
-            .find(|a| matches!(a, CodeActionOrCommand::CodeAction(ca) if ca.title.contains("Extract constant")));
+            .find(|a| matches!(a, CodeActionResponse::CodeAction(ca) if ca.title.contains("Extract constant")));
     assert!(
         extract.is_none(),
         "should not offer extract constant for a method call expression"
@@ -673,7 +673,7 @@ class Foo {
     let titles: Vec<String> = out
         .iter()
         .filter_map(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) if ca.title.contains("Extract constant") => {
+            CodeActionResponse::CodeAction(ca) if ca.title.contains("Extract constant") => {
                 Some(ca.title.clone())
             }
             _ => None,
@@ -1278,7 +1278,7 @@ class Foo {
 
     let extract = out
             .iter()
-            .find(|a| matches!(a, CodeActionOrCommand::CodeAction(ca) if ca.title.contains("Extract constant")));
+            .find(|a| matches!(a, CodeActionResponse::CodeAction(ca) if ca.title.contains("Extract constant")));
     assert!(
         extract.is_some(),
         "should offer extract constant for property default value"
@@ -1328,7 +1328,7 @@ class Foo {
 
     let extract = out
             .iter()
-            .find(|a| matches!(a, CodeActionOrCommand::CodeAction(ca) if ca.title.contains("Extract constant")));
+            .find(|a| matches!(a, CodeActionResponse::CodeAction(ca) if ca.title.contains("Extract constant")));
     assert!(
         extract.is_some(),
         "should offer extract constant for integer literal"

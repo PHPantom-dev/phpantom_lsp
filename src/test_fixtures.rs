@@ -108,6 +108,23 @@ pub fn make_param(name: &str, type_hint: Option<&str>, is_required: bool) -> Par
 /// A class loader that always returns `None`.
 ///
 /// Useful for tests that don't need cross-class resolution.
-pub fn no_loader(_name: &str) -> Option<Arc<ClassInfo>> {
+pub fn no_loader(_name: crate::class_lookup::Fqn<'_>) -> Option<Arc<ClassInfo>> {
     None
+}
+
+/// [`no_loader`] for names as written in source.
+pub fn no_source_loader(_name: &str) -> Option<Arc<ClassInfo>> {
+    None
+}
+
+/// A loader for names as written that reads every name as fully qualified
+/// through `loader`, for tests whose names are all written that way.
+///
+/// Leaked, so a helper can hand it out inside the context it builds.
+pub fn fqn_source_loader<'a>(
+    loader: &'a crate::class_lookup::ResolvedClassLoader<'a>,
+) -> &'a crate::class_lookup::SourceClassLoader<'a> {
+    Box::leak(Box::new(move |name: &str| {
+        loader(crate::class_lookup::Fqn::new(name))
+    }))
 }

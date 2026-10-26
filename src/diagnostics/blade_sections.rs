@@ -14,7 +14,7 @@
 //! `@yield` could be in, so the template is left alone rather than
 //! reported against a set of names known to be incomplete.
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::Backend;
 use crate::blade::blocks::{self, BlockKind, BlockRole};
@@ -34,7 +34,7 @@ impl Backend {
         let Some(source) = self.get_file_content_arc(uri) else {
             return;
         };
-        let own = blocks::analyse(&source, &self.blade_directives.read());
+        let own = blocks::analyse(&source, &self.blade.directives.read());
         if own.extends.is_empty() || !own.blocks.iter().any(|block| block.role == BlockRole::Fill) {
             // A template that names no layout is rendered by something
             // this cannot see — a controller, an `@include` from anywhere —
@@ -64,7 +64,7 @@ impl Backend {
                     block.name_span.start,
                     block.name_span.end,
                 ),
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 code,
                 format!(
                     "Nothing renders the {} '{}': no {renders}('{}') in the layouts this template extends",

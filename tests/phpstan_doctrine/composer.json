@@ -1,0 +1,11 @@
+{
+    "name": "phpantom/phpstan-doctrine-fixtures",
+    "description": "The project PHPStan's Doctrine extension type fixtures run in",
+    "type": "project",
+    "require": {
+        "doctrine/collections": "^2.2",
+        "doctrine/dbal": "^4.2",
+        "doctrine/orm": "^3.3",
+        "doctrine/persistence": "^4.0"
+    }
+}

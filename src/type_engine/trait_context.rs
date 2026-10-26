@@ -18,6 +18,7 @@
 use std::sync::Arc;
 
 use crate::atom::{Atom, atom};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::types::{ClassInfo, ClassLikeKind, ResolvedType};
 
 /// How many using classes are worth reading before the shared-ancestor
@@ -49,7 +50,7 @@ const MAX_TRAIT_USERS: usize = 24;
 pub(crate) fn trait_this_bounds(
     trait_cls: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
 ) -> Vec<Arc<ClassInfo>> {
     if trait_cls.kind != ClassLikeKind::Trait {
@@ -59,7 +60,7 @@ pub(crate) fn trait_this_bounds(
     let load = |name: &str| -> Option<Arc<ClassInfo>> {
         crate::class_lookup::find_class_by_name(all_classes, name)
             .map(Arc::clone)
-            .or_else(|| class_loader(name))
+            .or_else(|| class_loader(Fqn::new(name)))
     };
 
     let mut bounds: Vec<Arc<ClassInfo>> = Vec::new();
@@ -99,7 +100,7 @@ pub(crate) fn trait_this_bounds(
 pub(crate) fn trait_host_classes(
     trait_cls: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
 ) -> Vec<Arc<ClassInfo>> {
     if trait_cls.kind != ClassLikeKind::Trait {
@@ -109,7 +110,7 @@ pub(crate) fn trait_host_classes(
     for name in trait_users(trait_cls, all_classes, class_loader, backend) {
         let loaded = crate::class_lookup::find_class_by_name(all_classes, &name)
             .map(Arc::clone)
-            .or_else(|| class_loader(&name));
+            .or_else(|| class_loader(Fqn::new(&name)));
         // A host we cannot read leaves the union describing fewer classes
         // than it should, which would rule out members the missing one
         // declares.  Answering with nothing keeps the caller on the
@@ -132,7 +133,7 @@ pub(crate) fn trait_host_classes(
 fn shared_user_ancestors(
     trait_cls: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
 ) -> Vec<String> {
     let users = trait_users(trait_cls, all_classes, class_loader, backend);
@@ -142,7 +143,7 @@ fn shared_user_ancestors(
 
     let mut shared: Option<Vec<String>> = None;
     for user in &users {
-        let Some(cls) = class_loader(user) else {
+        let Some(cls) = class_loader(Fqn::new(user)) else {
             // A user we cannot read could be an instance of anything, so
             // there is nothing the whole set is guaranteed to share.
             return Vec::new();
@@ -164,10 +165,7 @@ fn shared_user_ancestors(
 
 /// Every class and interface FQN that an instance of `cls` also is, `cls`
 /// itself included.
-fn instance_of(
-    cls: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Vec<String> {
+fn instance_of(cls: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> Vec<String> {
     if cls.kind == ClassLikeKind::Trait {
         return Vec::new();
     }
@@ -192,7 +190,7 @@ fn instance_of(
 fn trait_users(
     trait_cls: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
 ) -> Vec<String> {
     let mut users: Vec<String> = Vec::new();
@@ -222,7 +220,7 @@ fn trait_users(
         }
 
         for candidate in candidates {
-            let is_trait = class_loader(&candidate)
+            let is_trait = class_loader(Fqn::new(&candidate))
                 .is_some_and(|cls| cls.kind == ClassLikeKind::Trait)
                 || all_classes.iter().any(|c| {
                     c.kind == ClassLikeKind::Trait && c.fqn().eq_ignore_ascii_case(&candidate)
@@ -257,7 +255,7 @@ pub(crate) fn extend_this_with_trait_bounds(
     this_types: &mut Vec<ResolvedType>,
     trait_cls: &ClassInfo,
     all_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&crate::Backend>,
 ) {
     if trait_cls.kind != ClassLikeKind::Trait {

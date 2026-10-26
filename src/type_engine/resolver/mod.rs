@@ -17,8 +17,8 @@
 //!   expression parsing, array access segment walking).
 //! - [`super::variable::resolution`]: Variable type resolution via
 //!   assignment scanning and parameter type hints.
-//! - [`super::types::narrowing`]: instanceof / assert / custom type guard
-//!   narrowing.
+//! - [`super::type_ops::condition_facts`]: what instanceof / assert / custom
+//!   type guard conditions say about a variable.
 //! - [`super::variable::closure_resolution`]: Closure and arrow-function
 //!   parameter resolution.
 //! - [`crate::inheritance`]: Class inheritance merging (traits, mixins,
@@ -35,7 +35,7 @@
 //! classification of a subject that resolved to no class in
 //! [`subject_outcome`].
 
-mod array_access;
+mod array_access_subject;
 mod chain_keys;
 mod context;
 mod subject_outcome;
@@ -44,18 +44,20 @@ mod written_names;
 
 pub(crate) use chain_keys::is_narrowable_call;
 pub(crate) use context::{
-    CtxLoaders, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders, ResolutionCtx,
-    ScopeVarResolverFn, SourceImports, VarResolutionCtx, with_chain_resolution_cache,
-    with_isolated_chain_cache,
+    ChainCacheGuard, CtxLoaders, FileCtx, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders,
+    ResolutionCtx, ScopeVarResolverFn, SourceImports, VarResolutionCtx,
+    with_chain_resolution_cache, with_isolated_chain_cache,
 };
-pub(crate) use subject_outcome::{SubjectOutcome, resolve_subject_outcome};
+pub(crate) use subject_outcome::{
+    SubjectOutcome, UnionBranch, UnionBranches, resolve_subject_outcome,
+};
 pub(crate) use variable_subjects::resolve_dynamic_member_name;
 pub(in crate::type_engine) use written_names::WrittenNames;
 
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::class_lookup::{find_class_by_name, is_self_or_static, resolve_class_keyword};
+use crate::class_lookup::{Fqn, find_class_by_name, is_self_or_static, resolve_class_keyword};
 use crate::inheritance::resolve_property_type_hint;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
@@ -213,8 +215,8 @@ fn resolve_target_classes_expr_inner(
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let current_class = ctx.current_class;
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     match expr {
         // ── Keywords that always mean "current class" ────────────
@@ -261,16 +263,39 @@ fn resolve_target_classes_expr_inner(
             resolve_static_access_subject(class, member, ctx)
         }
 
+        // ── `new $class` builds the class the variable names ────
+        SubjectExpr::NewExpr { class_name } if class_name.starts_with('$') => {
+            let operand = resolve_variable_fallback(class_name, AccessKind::Arrow, ctx);
+            let owning_class = current_class.map(|cc| cc.fqn());
+            crate::type_engine::variable::class_string_resolution::instances_built_by_new(
+                &operand,
+                owning_class.as_ref().map_or("", |fqn| fqn.as_str()),
+                all_classes,
+                class_loader,
+            )
+        }
+
         // ── A bare class name, and `new ClassName` without trailing
         //    call parens, are the same reference written two ways ──
         SubjectExpr::ClassName(name) | SubjectExpr::NewExpr { class_name: name } => {
             // Both are source-level references: PHP resolves an
             // unqualified name through the imports, else the current
             // namespace, never a global class of the same short name.
-            class_loader(&ctx.written_names().resolve_class(name))
+            class_loader(Fqn::new(&ctx.written_names().resolve_class(name)))
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()
+        }
+
+        // ── Closure literal: a `Closure` with its own signature ─
+        SubjectExpr::Closure(text) => {
+            let Some(ty) = Backend::resolve_arg_text_to_type(text, ctx) else {
+                return vec![];
+            };
+            match class_loader(Fqn::new("Closure")) {
+                Some(closure) => vec![ResolvedType::from_both_arc(ty, closure)],
+                None => vec![ResolvedType::from_type_string(ty)],
+            }
         }
 
         // ── Call expression ─────────────────────────────────────
@@ -285,7 +310,13 @@ fn resolve_target_classes_expr_inner(
 
         // ── Array access on variable or call expression ─────────
         SubjectExpr::ArrayAccess { base, segments } => {
-            array_access::resolve_array_access_subject(expr, base, segments, access_kind, ctx)
+            array_access_subject::resolve_array_access_subject(
+                expr,
+                base,
+                segments,
+                access_kind,
+                ctx,
+            )
         }
 
         // ── Bare variable ───────────────────────────────────────
@@ -302,7 +333,7 @@ fn resolve_target_classes_expr_inner(
             if let Some(cls) = find_class_by_name(all_classes, &text) {
                 return vec![ResolvedType::from_arc(Arc::clone(cls))];
             }
-            class_loader(&text)
+            class_loader(Fqn::new(&text))
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()
@@ -318,8 +349,8 @@ fn resolve_static_access_subject(
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let current_class = ctx.current_class;
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     // Handle self/static/parent keywords — SubjectExpr::parse
     // produces StaticAccess for "self::MONTH", "static::FOO",
@@ -337,7 +368,7 @@ fn resolve_static_access_subject(
         // `Foo::` is a source-level reference: PHP resolves an
         // unqualified name through the imports, else the current
         // namespace, never a global class of the same short name.
-        class_loader(&ctx.written_names().resolve_class(class))
+        class_loader(Fqn::new(&ctx.written_names().resolve_class(class)))
             .into_iter()
             .collect()
     };
@@ -441,12 +472,19 @@ fn resolve_call_subject(
     // branch, `Foo&MockInterface`) is used unconditionally: without
     // it, `classes` is a flat, untagged list of the intersection's
     // members, which `types_joined` cannot tell apart from a union
-    // of alternatives.
+    // of alternatives.  The same holds for an intersection inside a
+    // union (`(A&I)|B`).
     if let Some(h) = hint {
         let hint_names_a_class = matches!(h.kind(), TypeKind::Generic(g) if classes
             .iter()
             .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()));
-        let is_intersection = matches!(h.kind(), TypeKind::Intersection(_));
+        let is_intersection = match h.kind() {
+            TypeKind::Intersection(_) => true,
+            TypeKind::Union(members) => members
+                .iter()
+                .any(|m| matches!(m.kind(), TypeKind::Intersection(_))),
+            _ => false,
+        };
         if is_intersection
             || classes.iter().any(|c| !c.template_params.is_empty())
             || hint_names_a_class
@@ -475,8 +513,8 @@ fn resolve_property_chain_subject(
     receiver: Option<Vec<ResolvedType>>,
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     // A type the forward walker narrowed this exact property path
     // to has already been consulted by the spine walk in
@@ -491,6 +529,11 @@ fn resolve_property_chain_subject(
     // only its base name, so each is given its generic spelling
     // back below.
     let mut generic_hints: Vec<PhpType> = Vec::new();
+    // The intersections in the property's hint, e.g. `Foo&MockObject`.
+    // Their classes resolve as flat entries, which would read as the
+    // alternatives `Foo|MockObject`, so each is tagged with the whole
+    // intersection below the way a call's return type is.
+    let mut intersection_hints: Vec<PhpType> = Vec::new();
     for cls in &base_arcs {
         let Some(hint) = resolve_property_type_hint(cls, property, class_loader) else {
             continue;
@@ -506,6 +549,13 @@ fn resolve_property_chain_subject(
                 .union_members()
                 .into_iter()
                 .filter(|member| matches!(member.kind(), TypeKind::Generic(_)))
+                .cloned(),
+        );
+        intersection_hints.extend(
+            hint.unwrap_nullable()
+                .union_members()
+                .into_iter()
+                .filter(|member| matches!(member.kind(), TypeKind::Intersection(_)))
                 .cloned(),
         );
 
@@ -529,17 +579,22 @@ fn resolve_property_chain_subject(
         }
     }
 
-    // The generic spelling of each class the hint named.
+    // The generic spelling of each class the hint named, or the
+    // intersection it is part of.
     let mut resolved = ResolvedType::from_classes(arc_results);
     for rt in &mut resolved {
         let Some(class) = &rt.class_info else {
             continue;
         };
         let fqn = class.fqn();
-        if let Some(hint) = generic_hints.iter().find(|hint| {
-            hint.base_name()
+        let names_class = |ty: &PhpType| {
+            ty.base_name()
                 .is_some_and(|base| base == fqn.as_str() || crate::util::short_name(&fqn) == base)
-        }) {
+        };
+        let intersection = intersection_hints.iter().find(|hint| {
+            matches!(hint.kind(), TypeKind::Intersection(parts) if parts.iter().any(names_class))
+        });
+        if let Some(hint) = intersection.or_else(|| generic_hints.iter().find(|h| names_class(h))) {
             rt.type_string = hint.clone();
         }
     }
@@ -563,7 +618,8 @@ fn resolve_self_static_class(ctx: &ResolutionCtx<'_>) -> Option<Arc<ClassInfo>> 
         // The enclosing class is normally one of the file's own, already
         // behind an `Arc`.
         Some(
-            ctx.all_classes
+            ctx.file
+                .all_classes
                 .iter()
                 .find(|cls| std::ptr::eq(cls.as_ref(), current))
                 .cloned()
@@ -585,10 +641,10 @@ pub(in crate::type_engine) fn resolve_static_owner_class(
         resolve_self_static_class(rctx)
     } else if let Some(resolved_name) = resolve_class_keyword(class, rctx.current_class) {
         // parent — load via class_loader so we get the full parent ClassInfo
-        (rctx.class_loader)(&resolved_name)
+        (rctx.file.class_loader)(Fqn::new(&resolved_name))
     } else {
         let fqn = rctx.written_names().resolve_class(class);
-        (rctx.class_loader)(&fqn).or_else(|| {
+        (rctx.file.class_loader)(Fqn::new(&fqn)).or_else(|| {
             resolved_to_arcs(resolve_target_classes(
                 class,
                 crate::AccessKind::DoubleColon,

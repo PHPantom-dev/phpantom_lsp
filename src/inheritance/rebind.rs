@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use crate::atom::{Atom, atom};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 
@@ -19,7 +20,7 @@ use super::resolve_class_with_inheritance;
 pub(crate) fn is_extends_only_generic_rebindable(
     class: &ClassInfo,
     new_arg_count: usize,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     rebindable_parent(class, new_arg_count, class_loader).is_some()
 }
@@ -56,7 +57,7 @@ struct RebindTarget {
 fn rebindable_parent(
     class: &ClassInfo,
     new_arg_count: usize,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<RebindTarget> {
     if !class.template_params.is_empty() {
         return None;
@@ -70,7 +71,7 @@ fn rebindable_parent(
             let mut intermediates: Vec<Atom> = Vec::new();
             let mut ancestor = atom(class.parent_class.as_deref()?);
             loop {
-                let parent = class_loader(&ancestor)?;
+                let parent = class_loader(Fqn::new(&ancestor))?;
                 if parent.template_params.len() == new_arg_count {
                     return Some(RebindTarget {
                         ancestor,
@@ -125,7 +126,7 @@ fn rebindable_parent(
 /// them from the parent instead of the override replacing them outright.
 pub(crate) fn rebind_extends_only_generics(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     new_args: &[PhpType],
 ) -> Option<(ClassInfo, ClassInfo)> {
     let RebindTarget {
@@ -133,7 +134,8 @@ pub(crate) fn rebind_extends_only_generics(
         intermediates,
     } = rebindable_parent(class, new_args.len(), class_loader)?;
     let fqn = class.fqn();
-    let raw = class_loader(fqn.as_str()).filter(|raw| raw.fqn().eq_ignore_ascii_case(fqn.as_str()));
+    let raw = class_loader(Fqn::new(fqn.as_str()))
+        .filter(|raw| raw.fqn().eq_ignore_ascii_case(fqn.as_str()));
     let mut overridden = raw.as_deref().unwrap_or(class).clone();
     overridden.extends_generics = vec![(ancestor, new_args.to_vec())];
 
@@ -145,12 +147,11 @@ pub(crate) fn rebind_extends_only_generics(
         // ancestor further up is never seen at the level it belongs to.
         // Each intermediate is loaded carrying the same binding, which is
         // what the generic-free stand-in it is means anyway.
-        let carry_binding = |name: &str| -> Option<Arc<ClassInfo>> {
-            let loaded = class_loader(name)?;
-            let fqn = name.strip_prefix('\\').unwrap_or(name);
+        let carry_binding = |fqn: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let loaded = class_loader(fqn)?;
             if !intermediates
                 .iter()
-                .any(|between| between.eq_ignore_ascii_case(fqn))
+                .any(|between| between.eq_ignore_ascii_case(&fqn))
             {
                 return Some(loaded);
             }

@@ -1,8 +1,8 @@
 use crate::common::{
-    complete_at, create_psr4_workspace, create_test_backend, method_names, property_names,
+    complete_at, completion_response, create_psr4_workspace, create_test_backend, method_names,
+    open_php, property_names,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Arrow function: callable param inference from generic collection ───────
 
@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::*;
 #[tokio::test]
 async fn test_arrow_fn_param_inferred_from_generic_map() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_infer_map.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_infer_map.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -63,7 +63,7 @@ async fn test_arrow_fn_param_inferred_from_generic_map() {
 #[tokio::test]
 async fn test_closure_param_inferred_from_generic_each() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_infer_each.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_infer_each.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -116,7 +116,7 @@ async fn test_closure_param_inferred_from_generic_each() {
 #[tokio::test]
 async fn test_explicit_type_hint_takes_precedence() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_explicit_wins.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_explicit_wins.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -167,7 +167,7 @@ async fn test_explicit_type_hint_takes_precedence() {
 #[tokio::test]
 async fn test_no_inference_for_non_callable_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_no_infer.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_no_infer.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -201,7 +201,7 @@ async fn test_no_inference_for_non_callable_param() {
 #[tokio::test]
 async fn test_concrete_callable_param_inference() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_concrete_callable.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_concrete_callable.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -247,7 +247,7 @@ async fn test_concrete_callable_param_inference() {
 #[tokio::test]
 async fn test_inferred_type_resolves_properties() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_infer_props.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_infer_props.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -306,7 +306,7 @@ async fn test_inferred_type_resolves_properties() {
 #[tokio::test]
 async fn test_static_method_callable_param_inference() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_static_infer.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_static_infer.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -350,7 +350,7 @@ async fn test_static_method_callable_param_inference() {
 #[tokio::test]
 async fn test_static_method_callable_param_inference_on_a_value() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_static_value_infer.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_static_value_infer.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -395,7 +395,7 @@ async fn test_static_method_callable_param_inference_on_a_value() {
 #[tokio::test]
 async fn test_callable_at_non_zero_position() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_second_arg.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_second_arg.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -442,7 +442,7 @@ async fn test_callable_at_non_zero_position() {
 #[tokio::test]
 async fn test_closure_type_syntax_inference() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_type_syntax.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_type_syntax.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -487,7 +487,7 @@ async fn test_closure_type_syntax_inference() {
 #[tokio::test]
 async fn test_inference_on_this_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_call.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_call.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -532,7 +532,7 @@ async fn test_inference_on_this_method_call() {
 #[tokio::test]
 async fn test_this_in_callable_param_resolves_to_receiver() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_receiver.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_receiver.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -577,7 +577,7 @@ async fn test_this_in_callable_param_resolves_to_receiver() {
 #[tokio::test]
 async fn test_static_in_callable_param_resolves_to_receiver() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_static_receiver.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_static_receiver.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -624,7 +624,7 @@ async fn test_static_in_callable_param_resolves_to_receiver() {
 #[tokio::test]
 async fn test_laravel_where_closure_param_resolves_to_receiver() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_laravel_where.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_laravel_where.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -667,7 +667,7 @@ async fn test_laravel_where_closure_param_resolves_to_receiver() {
 #[tokio::test]
 async fn test_this_in_callable_param_static_call_resolves_to_receiver() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_static_call.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_static_call.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -708,7 +708,7 @@ async fn test_this_in_callable_param_static_call_resolves_to_receiver() {
 #[tokio::test]
 async fn test_this_in_callable_param_arrow_fn() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_arrow.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_arrow.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -754,7 +754,7 @@ async fn test_this_in_callable_param_arrow_fn() {
 #[tokio::test]
 async fn test_explicit_bare_hint_uses_inferred_generics_for_foreach() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_explicit_generic_foreach.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_explicit_generic_foreach.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -818,7 +818,7 @@ async fn test_explicit_bare_hint_uses_inferred_generics_for_foreach() {
 #[tokio::test]
 async fn test_explicit_hint_with_same_short_name_is_not_replaced() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_same_short_name.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_same_short_name.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -859,7 +859,7 @@ async fn test_explicit_hint_with_same_short_name_is_not_replaced() {
 #[tokio::test]
 async fn test_static_call_chain_closure_param_direct() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_static_chain_direct.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_static_chain_direct.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -930,7 +930,7 @@ async fn test_static_call_chain_closure_param_direct() {
 #[tokio::test]
 async fn test_explicit_bare_hint_via_static_call_chain_for_foreach() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_static_chain_foreach.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_static_chain_foreach.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1008,7 +1008,7 @@ async fn test_explicit_bare_hint_via_static_call_chain_for_foreach() {
 #[tokio::test]
 async fn test_inline_stubs_chunk_closure_foreach_resolution() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inline_stubs_chunk_foreach.php").unwrap();
+    let uri = Uri::parse("file:///test/inline_stubs_chunk_foreach.php").unwrap();
 
     // Mimics example.php: model in a Demo namespace, Illuminate stubs in
     // separate namespace blocks in the same file.
@@ -1153,7 +1153,7 @@ async fn test_inline_stubs_chunk_closure_foreach_resolution() {
 #[tokio::test]
 async fn test_example_php_exact_layout_chunk_foreach() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/example_php_layout.php").unwrap();
+    let uri = Uri::parse("file:///test/example_php_layout.php").unwrap();
 
     let src = concat!(
         "<?php\n",                                                            // 0
@@ -1294,7 +1294,7 @@ async fn test_example_php_exact_layout_chunk_foreach() {
 #[tokio::test]
 async fn test_closure_param_inference_toplevel_no_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_toplevel_no_ns.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_toplevel_no_ns.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1340,7 +1340,7 @@ async fn test_closure_param_inference_toplevel_no_namespace() {
 #[tokio::test]
 async fn test_chained_static_call_closure_param_inference_no_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/chained_static_closure_no_ns.php").unwrap();
+    let uri = Uri::parse("file:///test/chained_static_closure_no_ns.php").unwrap();
 
     // Line 0:  <?php
     // Line 1:  class Model {
@@ -1400,7 +1400,7 @@ async fn test_chained_static_call_closure_param_inference_no_namespace() {
 #[tokio::test]
 async fn test_chained_static_call_closure_param_inference_with_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/chained_static_closure_ns.php").unwrap();
+    let uri = Uri::parse("file:///test/chained_static_closure_ns.php").unwrap();
 
     // Line 0:  <?php
     // Line 1:  namespace Acme\Core\Database\Model\Products\Filters;
@@ -1456,7 +1456,7 @@ async fn test_chained_static_call_closure_param_inference_with_namespace() {
 #[tokio::test]
 async fn test_split_chain_closure_param_inference_with_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/split_chain_closure_ns.php").unwrap();
+    let uri = Uri::parse("file:///test/split_chain_closure_ns.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1500,7 +1500,7 @@ async fn test_split_chain_closure_param_inference_with_namespace() {
 #[tokio::test]
 async fn test_closure_param_inference_toplevel_with_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_toplevel_with_ns.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_toplevel_with_ns.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1542,7 +1542,7 @@ async fn test_closure_param_inference_toplevel_with_namespace() {
 #[tokio::test]
 async fn test_closure_param_inference_in_method_with_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_method_with_ns.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_method_with_ns.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1592,7 +1592,7 @@ async fn test_closure_param_inference_in_method_with_namespace() {
 #[tokio::test]
 async fn test_closure_param_inference_child_class_static_chain_with_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_child_static_ns.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_child_static_ns.php").unwrap();
 
     // Line 0:  <?php
     // Line 1:  namespace Acme\Core\Database\Model;
@@ -1656,7 +1656,7 @@ async fn test_closure_param_inference_child_class_static_chain_with_namespace() 
 #[tokio::test]
 async fn test_closure_param_inference_child_class_static_chain_no_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_child_static_no_ns.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_child_static_no_ns.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1702,7 +1702,7 @@ async fn test_closure_param_inference_child_class_static_chain_no_namespace() {
 #[tokio::test]
 async fn test_closure_param_inference_with_use_clause() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_use_clause.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_use_clause.php").unwrap();
 
     // Line 0:  <?php
     // Line 1:  class QueryBuilder {
@@ -1757,7 +1757,7 @@ async fn test_closure_param_inference_with_use_clause() {
 #[tokio::test]
 async fn test_closure_param_inference_with_use_clause_and_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_use_clause_ns.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_use_clause_ns.php").unwrap();
 
     // Line 0:  <?php
     // Line 1:  namespace App\Models;
@@ -1867,34 +1867,13 @@ async fn test_cross_file_closure_param_inference_with_namespace() {
         ],
     );
 
-    let uri = Url::from_file_path(dir.path().join("src/Script/run.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Script/run.php")).unwrap();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: script_file.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, script_file).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 8,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let items = match backend.completion(completion_params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+    let items = match completion_response(&backend, &uri, 5, 8, None).await {
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
 
@@ -1966,34 +1945,13 @@ async fn test_cross_file_closure_param_inference_without_namespace() {
         ],
     );
 
-    let uri = Url::from_file_path(dir.path().join("src/Script/run.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Script/run.php")).unwrap();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: script_file.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, script_file).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 4,
-                character: 8,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let items = match backend.completion(completion_params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+    let items = match completion_response(&backend, &uri, 4, 8, None).await {
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
 
@@ -2141,34 +2099,13 @@ async fn test_cross_file_laravel_eloquent_builder_closure_param_inference() {
         ],
     );
 
-    let uri = Url::from_file_path(dir.path().join("src/Http/Controllers/script.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Http/Controllers/script.php")).unwrap();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: script_file.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, script_file).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 8,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let items = match backend.completion(completion_params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+    let items = match completion_response(&backend, &uri, 5, 8, None).await {
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
 
@@ -2202,7 +2139,7 @@ async fn test_cross_file_laravel_eloquent_builder_closure_param_inference() {
 #[tokio::test]
 async fn test_inferred_subclass_wins_over_explicit_parent_type_hint() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_inferred_subclass.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_inferred_subclass.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2265,7 +2202,7 @@ async fn test_inferred_subclass_wins_over_explicit_parent_type_hint() {
 #[tokio::test]
 async fn test_explicit_subclass_still_wins_over_inferred_parent() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_explicit_subclass.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_explicit_subclass.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2316,7 +2253,7 @@ async fn test_explicit_subclass_still_wins_over_inferred_parent() {
 #[tokio::test]
 async fn test_closure_with_type_hint_nested_inside_arrow_fn() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_nested_in_arrow.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_nested_in_arrow.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2366,7 +2303,7 @@ async fn test_closure_with_type_hint_nested_inside_arrow_fn() {
 #[tokio::test]
 async fn test_arrow_fn_with_explicit_hint_inside_switch_case() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_in_switch.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_in_switch.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2431,7 +2368,7 @@ async fn test_arrow_fn_with_explicit_hint_inside_switch_case() {
 #[tokio::test]
 async fn test_arrow_fn_with_explicit_hint_inside_if_condition() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_in_if_cond.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_in_if_cond.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2474,7 +2411,7 @@ async fn test_arrow_fn_with_explicit_hint_inside_if_condition() {
 #[tokio::test]
 async fn test_arrow_fn_in_if_condition_inside_switch_case() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_if_in_switch.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_if_in_switch.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2539,7 +2476,7 @@ async fn test_arrow_fn_in_if_condition_inside_switch_case() {
 #[tokio::test]
 async fn test_arrow_fn_untyped_param_inferred_from_function_template_simple() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///template_callable_simple.php").unwrap();
+    let uri = Uri::parse("file:///template_callable_simple.php").unwrap();
 
     let src = concat!(
         "<?php\n",                                                                        // 0
@@ -2588,7 +2525,7 @@ async fn test_arrow_fn_untyped_param_inferred_from_function_template_simple() {
 #[tokio::test]
 async fn test_arrow_fn_untyped_param_inferred_from_function_template() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///template_callable_infer.php").unwrap();
+    let uri = Uri::parse("file:///template_callable_infer.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2658,7 +2595,7 @@ async fn test_arrow_fn_untyped_param_inferred_from_function_template() {
 #[tokio::test]
 async fn test_static_return_preserves_generic_type_string_in_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/static_generic_chain.php").unwrap();
+    let uri = Uri::parse("file:///test/static_generic_chain.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2728,7 +2665,7 @@ async fn test_static_return_preserves_generic_type_string_in_chain() {
 #[tokio::test]
 async fn test_multiple_static_returns_preserve_generic_type_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/multi_static_chain.php").unwrap();
+    let uri = Uri::parse("file:///test/multi_static_chain.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2809,7 +2746,7 @@ async fn test_multiple_static_returns_preserve_generic_type_string() {
 #[tokio::test]
 async fn test_function_template_binding_via_named_args_out_of_order() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/named_args_template_binding.php").unwrap();
+    let uri = Uri::parse("file:///test/named_args_template_binding.php").unwrap();
 
     let src = concat!(
         "<?php\n",                                                              // 0
@@ -2848,7 +2785,7 @@ async fn test_function_template_binding_via_named_args_out_of_order() {
 #[tokio::test]
 async fn test_method_callable_param_inference_via_named_args_out_of_order() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/method_named_args_reordered.php").unwrap();
+    let uri = Uri::parse("file:///test/method_named_args_reordered.php").unwrap();
 
     let src = concat!(
         "<?php\n",

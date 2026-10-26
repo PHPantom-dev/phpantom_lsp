@@ -1,0 +1,14 @@
+// test: Query builders with dynamic conditions
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testDynamicWhere.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/query-builder-dynamic.php
+// expect_diagnostic: 40: Could not analyse QueryBuilder with dynamic arguments. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 45: Could not analyse QueryBuilder with dynamic arguments. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 51: Could not analyse QueryBuilder with dynamic arguments. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 56: Could not analyse QueryBuilder with dynamic arguments. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 61: Could not analyse QueryBuilder with dynamic arguments. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 66: Could not analyse QueryBuilder with dynamic arguments. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 71: Could not analyse QueryBuilder with dynamic arguments. // SKIP: DQL and query builder strings are not checked
+---

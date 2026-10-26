@@ -35,8 +35,8 @@ class FooClass
 
 	public function doFoo(Foo $foo): void
 	{
-		assertType('Foo', Foo::ONE);
-		assertType('Foo', Foo::TWO);
+		assertType(Foo::class . '::ONE', Foo::ONE);
+		assertType(Foo::class . '::TWO', Foo::TWO);
 	}
 
 }
@@ -46,8 +46,8 @@ class BarClass
 
 	public function doFoo(string $s, Bar $bar): void
 	{
-		assertType('Bar', Bar::ONE);
-		assertType('Bar', Bar::TWO);
+		assertType(Bar::class . '::ONE', Bar::ONE);
+		assertType(Bar::class . '::TWO', Bar::TWO);
 		assertType('\'two\'', Bar::TWO->value);
 
 		assertType('EnumTypeAssertions\Bar', Bar::from($s));
@@ -63,8 +63,8 @@ class BazClass
 
 	public function doFoo(int $i, Baz $baz): void
 	{
-		assertType('Baz', Baz::ONE);
-		assertType('Baz', Baz::TWO);
+		assertType(Baz::class . '::ONE', Baz::ONE);
+		assertType(Baz::class . '::TWO', Baz::TWO);
 		assertType('2', Baz::TWO->value);
 
 		assertType('EnumTypeAssertions\Baz', Baz::from($i));
@@ -136,11 +136,11 @@ class Lorem
 	public function doFoo(Foo $foo): void
 	{
 		if ($foo === Foo::ONE) {
-			assertType('Foo', $foo);
+			assertType(Foo::class . '::ONE', $foo);
 			return;
 		}
 
-		assertType('Foo', $foo);
+		assertType(Foo::class . '::TWO', $foo);
 	}
 
 }

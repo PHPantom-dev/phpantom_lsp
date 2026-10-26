@@ -47,7 +47,7 @@ use std::time::Duration;
 
 use tempfile::NamedTempFile;
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
+use tower_lsp_server::gen_lsp_types::{Code, Diagnostic, DiagnosticSeverity, Position, Range};
 
 use crate::config::PhpStanConfig;
 use crate::process::{auto_detect_binary, paths_match};
@@ -427,11 +427,11 @@ fn parse_phpstan_json(json_str: &str, file_path: &Path) -> Result<Vec<Diagnostic
                             character: 0,
                         },
                     },
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: Some(NumberOrString::String("phpstan".to_string())),
+                    severity: Some(DiagnosticSeverity::Error),
+                    code: Some(Code::String("phpstan".to_string())),
                     code_description: None,
                     source: Some("phpstan".to_string()),
-                    message: error_str.to_string(),
+                    message: error_str.to_string().into(),
                     related_information: None,
                     tags: None,
                     data: None,
@@ -481,11 +481,11 @@ fn parse_phpstan_message(msg: &serde_json::Value) -> Option<Diagnostic> {
 
     Some(Diagnostic {
         range: crate::process::full_line_range(lsp_line),
-        severity: Some(DiagnosticSeverity::ERROR),
-        code: Some(NumberOrString::String(identifier.to_string())),
+        severity: Some(DiagnosticSeverity::Error),
+        code: Some(Code::String(identifier.to_string())),
         code_description: None,
         source: Some("phpstan".to_string()),
-        message: full_message,
+        message: full_message.into(),
         related_information: None,
         tags: None,
         data,
@@ -576,7 +576,7 @@ mod tests {
 
         let a = &map[Path::new("/proj/src/A.php")];
         assert_eq!(a.len(), 1);
-        assert_eq!(a[0].message, "Error A");
+        assert_eq!(crate::util::message_text(&a[0].message), "Error A");
         assert_eq!(a[0].range.start.line, 4);
 
         // Relative paths resolve against the workspace root.
@@ -656,13 +656,13 @@ mod tests {
 
         // First diagnostic
         assert_eq!(diags[0].range.start.line, 9); // 10 - 1
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
         assert_eq!(diags[0].source.as_deref(), Some("phpstan"));
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("argument.type".to_string()))
+            Some(Code::String("argument.type".to_string()))
         );
-        assert!(diags[0].message.contains("Parameter #1"));
+        assert!(crate::util::message_text(&diags[0].message).contains("Parameter #1"));
         // ignorable: true is stored in data
         assert_eq!(
             diags[0].data,
@@ -671,10 +671,7 @@ mod tests {
 
         // Second diagnostic
         assert_eq!(diags[1].range.start.line, 24); // 25 - 1
-        assert_eq!(
-            diags[1].code,
-            Some(NumberOrString::String("return.type".to_string()))
-        );
+        assert_eq!(diags[1].code, Some(Code::String("return.type".to_string())));
         assert_eq!(
             diags[1].data,
             Some(serde_json::json!({ "ignorable": true }))
@@ -748,7 +745,7 @@ mod tests {
         let diags = parse_phpstan_json(json, path).unwrap();
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].range.start.line, 0);
-        assert!(diags[0].message.contains("PHP >= 7.2.0"));
+        assert!(crate::util::message_text(&diags[0].message).contains("PHP >= 7.2.0"));
     }
 
     #[test]
@@ -774,10 +771,14 @@ mod tests {
         let path = Path::new("/project/src/Foo.php");
         let diags = parse_phpstan_json(json, path).unwrap();
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Call to an undefined method"));
-        assert!(diags[0].message.contains("Use --level 5 to see this."));
+        assert!(
+            crate::util::message_text(&diags[0].message).contains("Call to an undefined method")
+        );
+        assert!(
+            crate::util::message_text(&diags[0].message).contains("Use --level 5 to see this.")
+        );
         // Verify the ANSI tags were stripped
-        assert!(!diags[0].message.contains("<fg=cyan>"));
+        assert!(!crate::util::message_text(&diags[0].message).contains("<fg=cyan>"));
     }
 
     #[test]
@@ -801,10 +802,7 @@ mod tests {
         let path = Path::new("/project/src/Foo.php");
         let diags = parse_phpstan_json(json, path).unwrap();
         assert_eq!(diags.len(), 1);
-        assert_eq!(
-            diags[0].code,
-            Some(NumberOrString::String("phpstan".to_string()))
-        );
+        assert_eq!(diags[0].code, Some(Code::String("phpstan".to_string())));
     }
 
     #[test]

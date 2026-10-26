@@ -1,5 +1,5 @@
 use crate::common::create_test_backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -12,7 +12,7 @@ fn collect(php: &str) -> Vec<Diagnostic> {
     out.retain(|d| {
         d.code
             .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unreachable_code"))
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "unreachable_code"))
     });
     out
 }
@@ -740,18 +740,18 @@ function f(): void {
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(
         diagnostics[0].severity,
-        Some(DiagnosticSeverity::HINT),
+        Some(DiagnosticSeverity::Hint),
         "dead code is tidying, not a defect"
     );
     assert_eq!(
         diagnostics[0].tags,
-        Some(vec![DiagnosticTag::UNNECESSARY]),
+        Some(vec![DiagnosticTag::Unnecessary]),
         "the tag is what makes editors grey the text out"
     );
     assert_eq!(diagnostics[0].source.as_deref(), Some("phpantom"));
     assert!(matches!(
         diagnostics[0].code,
-        Some(NumberOrString::String(ref s)) if s == "unreachable_code"
+        Some(Code::String(ref s)) if s == "unreachable_code"
     ));
 }
 
@@ -762,7 +762,7 @@ function f(): void {
 #[tokio::test]
 async fn a_blade_break_with_a_condition_does_not_kill_the_loop_body() {
     use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document};
-    use tower_lsp::LanguageServer;
+    use tower_lsp_server::LanguageServer;
 
     let template = "<ul>\n\
                     @foreach ($rows as $row)\n\
@@ -774,7 +774,7 @@ async fn a_blade_break_with_a_condition_does_not_kill_the_loop_body() {
     let relative = "resources/views/page.blade.php";
     let (backend, dir) = create_psr4_workspace(LARAVEL_APP_COMPOSER, &[(relative, template)]);
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join(relative)).unwrap();
+    let uri = Uri::from_file_path(dir.path().join(relative)).unwrap();
     open_document(&backend, &uri, "blade", template).await;
 
     let effective = backend.blade_virtual_php(uri.as_str()).unwrap();

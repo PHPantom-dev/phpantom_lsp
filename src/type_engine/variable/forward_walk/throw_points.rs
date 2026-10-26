@@ -15,6 +15,7 @@ use mago_syntax::walker::Walker;
 
 use super::{ForwardWalkCtx, ScopeState};
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ClassLikeKind};
@@ -123,7 +124,7 @@ impl ThrowPoints {
 /// either side could be implemented by a subclass of the other, and a class
 /// that cannot be loaded is unknown, so both count as a possible match.
 fn may_catch(catch_name: &str, thrown: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
-    let Some(catch_class) = (ctx.class_loader)(catch_name) else {
+    let Some(catch_class) = (ctx.file.class_loader)(Fqn::new(catch_name)) else {
         return true;
     };
     let Some(thrown_class) = load_fqn(thrown, ctx) else {
@@ -133,8 +134,12 @@ fn may_catch(catch_name: &str, thrown: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
     {
         return true;
     }
-    crate::class_lookup::is_subtype_of(&thrown_class, &catch_class.fqn(), ctx.class_loader)
-        || crate::class_lookup::is_subtype_of(&catch_class, &thrown_class.fqn(), ctx.class_loader)
+    crate::class_lookup::is_subtype_of(&thrown_class, &catch_class.fqn(), ctx.file.class_loader)
+        || crate::class_lookup::is_subtype_of(
+            &catch_class,
+            &thrown_class.fqn(),
+            ctx.file.class_loader,
+        )
 }
 
 /// Load a class by the canonical name a `@throws` tag was resolved to.
@@ -142,7 +147,7 @@ fn may_catch(catch_name: &str, thrown: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
 /// A backslash-free name there is a global class, so it must not go
 /// through the current file's `use` map the way a name typed in source does.
 fn load_fqn(name: &str, ctx: &ForwardWalkCtx<'_>) -> Option<Arc<ClassInfo>> {
-    crate::class_lookup::load_resolved_name(name, ctx.class_loader)
+    (ctx.file.class_loader)(Fqn::new(name))
 }
 
 struct Collect<'c, 'w> {
@@ -205,10 +210,10 @@ impl Collect<'_, '_> {
     }
 
     fn merged_class(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
-        let cls = (self.ctx.class_loader)(class_name)?;
+        let cls = (self.ctx.file.class_loader)(Fqn::new(class_name))?;
         Some(crate::virtual_members::resolve_class_fully_maybe_cached(
             &cls,
-            self.ctx.class_loader,
+            self.ctx.file.class_loader,
             self.ctx.resolved_class_cache,
         ))
     }
@@ -217,9 +222,9 @@ impl Collect<'_, '_> {
         crate::class_lookup::class_expression_name(
             expr,
             self.ctx.current_class,
-            self.ctx.all_classes,
-            self.ctx.source_class_loader,
-            self.ctx.source_imports,
+            self.ctx.file.all_classes,
+            self.ctx.file.source_class_loader,
+            self.ctx.file.source_imports,
         )
     }
 }
@@ -305,7 +310,7 @@ impl<'ast, 'arena> ThrowSiteSink<'ast, 'arena> for Collect<'_, '_> {
         // An exception's constructor only stores its arguments, which is
         // what lets `throw new Foo()` throw just `Foo`.
         if constructor.throws().is_empty()
-            && crate::class_lookup::is_subtype_of(&merged, "Throwable", self.ctx.class_loader)
+            && crate::class_lookup::is_subtype_of(&merged, "Throwable", self.ctx.file.class_loader)
         {
             return;
         }
@@ -320,7 +325,7 @@ impl<'ast, 'arena> ThrowSiteSink<'ast, 'arena> for Collect<'_, '_> {
         match classes {
             Some(classes) => {
                 for name in classes {
-                    match (self.ctx.class_loader)(&name) {
+                    match (self.ctx.file.class_loader)(Fqn::new(&name)) {
                         Some(cls) => self.points.add_class(cls.fqn().to_string()),
                         None => self.points.implicit = true,
                     }

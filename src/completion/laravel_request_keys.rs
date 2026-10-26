@@ -10,7 +10,7 @@
 //! [`crate::virtual_members::laravel::request_fields`], which go-to-definition
 //! shares.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::completion::source::code_context::CodeContext;
@@ -50,11 +50,11 @@ impl Backend {
             .enumerate()
             .map(|(i, field)| CompletionItem {
                 label: field.name.clone(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: (!field.rules.is_empty()).then(|| field.rules.clone()),
                 sort_text: Some(format!("{:05}", i)),
                 filter_text: Some(field.name.clone()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range: edit_range,
                     new_text: field.name,
                 })),
@@ -65,7 +65,7 @@ impl Backend {
         if items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::Array(items))
+            Some(CompletionResponse::CompletionItemList(items))
         }
     }
 }

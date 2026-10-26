@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::util::short_name;
@@ -151,7 +151,7 @@ pub(crate) fn build_catch_completions(
 
         items.push(CompletionItem {
             label: fqn.clone(),
-            kind: Some(CompletionItemKind::CLASS),
+            kind: Some(CompletionItemKind::Class),
             detail: Some("Exception thrown in try block".to_string()),
             sort_text: Some(sort_text),
             filter_text: Some(fqn),

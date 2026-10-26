@@ -12,7 +12,8 @@
 //!
 //! - The subject type cannot be resolved (we can't know what members it has).
 //! - Any resolved class in a union type has the member (the member is
-//!   valid for at least one branch of the union).
+//!   valid for at least one branch of the union).  The opt-in
+//!   `partial-union-members` setting reports the branches that lack it.
 //! - Any resolved class has `__call` / `__callStatic` (for method calls)
 //!   or `__get` (for property access) magic methods — these accept
 //!   arbitrary member names at runtime.
@@ -73,17 +74,16 @@ mod chains;
 mod member_check;
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::parser::with_parse_cache;
 use crate::resolution::FileLoaders;
 use crate::type_engine::resolver::{
     ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
 };
-use crate::types::ClassInfo;
 
 use super::existence_guards::{compute_existence_guards, compute_isset_empty_argument_ranges};
 use super::helpers::{FileDiagnosticContext, make_diagnostic};
@@ -96,6 +96,10 @@ use chains::BrokenChains;
 /// Diagnostic code used for unknown-member diagnostics so that code
 /// actions can match on it.
 pub(crate) const UNKNOWN_MEMBER_CODE: &str = "unknown_member";
+
+/// Diagnostic code for a member that some classes of a union declare and
+/// others do not.  Opt-in through `partial-union-members`.
+pub(crate) const PARTIAL_UNION_MEMBER_CODE: &str = "partial_union_member";
 
 /// Diagnostic code used when member access is attempted on a scalar
 /// type (int, string, bool, float, null, void, never, array).  This
@@ -135,6 +139,8 @@ struct UnknownMemberPass<'a> {
     report_magic: bool,
     /// Whether the opt-in `unresolved-member-access` diagnostic is on.
     report_unresolved: bool,
+    /// Whether the opt-in `partial-union-members` diagnostic is on.
+    report_partial_union: bool,
 }
 
 impl Backend {
@@ -148,9 +154,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
-            return;
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
         self.collect_unknown_member_diagnostics_with_context(&ctx, uri, content, out);
     }
 
@@ -178,6 +182,7 @@ impl Backend {
             loaders: self.file_loaders(&ctx.file),
             report_magic: config.diagnostics.report_magic_properties_enabled(),
             report_unresolved: config.diagnostics.unresolved_member_access_enabled(),
+            report_partial_union: config.diagnostics.partial_union_members_enabled(),
         };
         let filters = AccessFilters {
             source,
@@ -221,8 +226,7 @@ impl Backend {
             let scope = cache_key.scope();
             let outcome = subject_cache
                 .entry(cache_key)
-                .or_insert_with(|| pass.resolve_subject(&access))
-                .clone();
+                .or_insert_with(|| pass.resolve_subject(&access));
 
             // ── Chain error propagation: suppress downstream links ──────
             if broken_chains.is_downstream(access.subject_text, scope) {
@@ -233,7 +237,7 @@ impl Backend {
             // `__call`/`__callStatic` exists, the diagnostic is emitted
             // but the chain continues because the magic method's return
             // type recovers the type.
-            if pass.report(&access, &outcome, out) == MemberCheckResult::Break {
+            if pass.report(&access, outcome, out) == MemberCheckResult::Break {
                 broken_chains.record(scope, &access);
             }
         }
@@ -241,7 +245,7 @@ impl Backend {
 }
 
 impl UnknownMemberPass<'_> {
-    fn class_loader(&self) -> &dyn Fn(&str) -> Option<Arc<ClassInfo>> {
+    fn class_loader(&self) -> &ResolvedClassLoader<'_> {
         self.loaders.resolved_class_loader()
     }
 
@@ -281,7 +285,7 @@ impl UnknownMemberPass<'_> {
             }
             SubjectOutcome::Scalar(scalar) => self.push_chain_break(
                 access,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 SCALAR_MEMBER_ACCESS_CODE,
                 format!(
                     "Cannot access {} '{}' on type '{}'",
@@ -301,7 +305,7 @@ impl UnknownMemberPass<'_> {
                 }
                 self.push_chain_break(
                     access,
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     UNKNOWN_MEMBER_CODE,
                     format!(
                         "Cannot verify {} '{}' — subject type '{}' could not be resolved",
@@ -344,14 +348,14 @@ impl UnknownMemberPass<'_> {
                 };
                 self.push_chain_break(
                     access,
-                    DiagnosticSeverity::HINT,
+                    DiagnosticSeverity::Hint,
                     UNRESOLVED_MEMBER_ACCESS_CODE,
                     message,
                     out,
                 )
             }
-            SubjectOutcome::Resolved(base_classes) => {
-                self.report_on_resolved(access, base_classes, out)
+            SubjectOutcome::Resolved { classes, branches } => {
+                self.report_on_resolved(access, classes, branches, out)
             }
         }
     }

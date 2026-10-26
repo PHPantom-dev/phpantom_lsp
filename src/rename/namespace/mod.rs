@@ -7,9 +7,8 @@
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{document_changes_edit, multi_file_edit};
@@ -88,7 +87,7 @@ impl Backend {
             return Err(conflict);
         }
 
-        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
 
         // Scan all known files. The live per-file maps only contain files
         // that have been fully parsed through update_ast, but workspace
@@ -100,9 +99,7 @@ impl Backend {
             // holding them for the walk would block every parse of an edit
             // for as long as the workspace takes to list.
             let mut uris: std::collections::HashSet<String> = std::collections::HashSet::new();
-            uris.extend(self.file_namespaces.read().keys().cloned());
-            uris.extend(self.file_imports.read().keys().cloned());
-            uris.extend(self.symbol_maps.read().keys().cloned());
+            uris.extend(self.files.read().keys().cloned());
             uris.extend(self.symbols.uri_classes_index.read().keys().cloned());
             uris.extend(self.open_files.read().keys().cloned());
             let workspace_root = self.workspace.workspace_root.read().clone();
@@ -115,7 +112,7 @@ impl Backend {
                     &self.index_filters(),
                     Some(self.followed_links()),
                 ) {
-                    if let Ok(uri) = Url::from_file_path(&path) {
+                    if let Some(uri) = crate::util::path_to_url(&path) {
                         uris.insert(uri.to_string());
                     }
                 }
@@ -131,6 +128,13 @@ impl Backend {
                 .iter()
                 .any(|p| file_uri.starts_with(p.as_str()))
             {
+                continue;
+            }
+            // A YAML/XML occurrence may be spelled the escaped `App\\Foo`
+            // way its quoting requires, which no PHP-shaped edit fits.  The
+            // framework resource edits below rewrite those in their own
+            // spelling.
+            if self.is_resource_uri(file_uri) {
                 continue;
             }
 
@@ -205,18 +209,28 @@ impl Backend {
             }
         }
 
+        self.collect_framework_namespace_edits(old_prefix, new_prefix, &mut changes);
+
+        // The directory only moves when the client can rename files, so the
+        // resource paths that point into it are rewritten only then.
+        let psr4_rename_ops = self
+            .caps()
+            .file_rename
+            .then(|| self.build_namespace_psr4_rename_ops(old_prefix, new_prefix))
+            .flatten()
+            .unwrap_or_default();
+        self.collect_framework_path_edits_for_directory_renames(&psr4_rename_ops, &mut changes);
+
         if changes.is_empty() {
             return Ok(None);
         }
 
         // PSR-4 directory rename: if a mapping exists, emit RenameFile
         // operations to move the directory.
-        if let Some(ops) = self.build_namespace_psr4_rename_ops(old_prefix, new_prefix)
-            && !ops.is_empty()
-            && self.supports_file_rename.load(Ordering::Acquire)
-        {
+        if !psr4_rename_ops.is_empty() {
+            let ops = psr4_rename_ops;
             let renames = ops.iter().map(|(old_uri, new_uri)| {
-                ResourceOp::Rename(RenameFile {
+                DocumentChange::RenameFile(RenameFile {
                     old_uri: old_uri.clone(),
                     new_uri: new_uri.clone(),
                     options: None,
@@ -239,7 +253,7 @@ impl Backend {
                         if !rest.is_empty() && !rest.starts_with('/') {
                             return None;
                         }
-                        Url::parse(&format!("{}{}", new_u.as_str(), rest)).ok()
+                        crate::util::parse_url(&format!("{}{}", new_u.as_str(), rest))
                     })
                     .unwrap_or(uri);
                 (target_uri, edits)
@@ -337,11 +351,10 @@ impl Backend {
         new_prefix: &str,
         edits: &mut Vec<TextEdit>,
     ) -> bool {
-        let symbol_map = match self.symbol_maps.read().get(file_uri) {
-            Some(sm) => sm.clone(),
+        let Some(symbol_map) = self.symbol_map_for(file_uri) else {
             // No map means no offsets to mistrust: this file's namespace
             // and use-statement edits come from scanning `content`.
-            None => return true,
+            return true;
         };
 
         if !symbol_map.matches_source(content) {

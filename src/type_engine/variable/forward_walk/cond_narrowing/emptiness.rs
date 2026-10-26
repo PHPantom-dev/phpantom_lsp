@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::type_engine::type_ops::int_interval::IntInterval;
+
 /// Extract the subject of a `count()`/`sizeof()` or `strlen()` comparison
 /// against an integer literal, which empty value the call measures, and
 /// whether the condition holds exactly when the subject is not that value.
@@ -22,7 +24,7 @@ use super::*;
 pub(super) fn extract_count_emptiness_check(
     expr: &Expression<'_>,
 ) -> Option<(String, EmptyValue, bool, bool)> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(expr);
     let Expression::Binary(bin) = inner else {
         return None;
     };
@@ -319,8 +321,12 @@ fn strip_array_literal_from_shape(ty: &PhpType, excluded: &PhpType) -> Option<Op
 }
 
 /// Whether `ty` holds exactly one value: a scalar literal, `null`, `true`,
-/// `false`, or a sealed shape whose every entry is one of those.
+/// `false`, an enum case, or a sealed shape whose every entry is one of
+/// those.
 pub(super) fn is_single_value(ty: &PhpType) -> bool {
+    if ty.as_enum_case().is_some() {
+        return true;
+    }
     match ty.kind() {
         TypeKind::Literal(_) => true,
         TypeKind::Named(name) => ["null", "true", "false"]
@@ -383,10 +389,10 @@ pub(crate) fn apply_switch_arm_narrowing(
 
     // `switch ($x['type'])` discriminates the shapes `$x` can be, which is
     // only visible once the offset has a type of its own to narrow.
-    if narrowing::split_trailing_bracket(&var_name).is_some() {
+    if condition_facts::split_trailing_bracket(&var_name).is_some() {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
     }
-    retain_literals_in_scope(&var_name, scope, &keep);
+    retain_literals_in_scope(&var_name, scope, &keep, None);
 }
 
 /// Narrow a subject whose alternatives include number literals by an
@@ -402,7 +408,7 @@ pub(super) fn apply_literal_order_narrowing(
     ctx: &ForwardWalkCtx<'_>,
     truthy: bool,
 ) {
-    let (inner, negated) = narrowing::unwrap_condition_negation(condition);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(condition);
     let Expression::Binary(bin) = inner else {
         return;
     };
@@ -438,8 +444,23 @@ pub(super) fn apply_literal_order_narrowing(
         };
         comparison.admits(ordering) == holds
     };
+    // An integer bound also cuts the integer types down to the side of it
+    // the branch sees: `int` is `int<1, max>` inside `if ($x > 0)`.
+    let admitted = match bound {
+        LiteralValue::Int(_) => bound.parse_i64().and_then(|bound| {
+            let (less, or_equal) = match (comparison, holds) {
+                (Comparison::Less, true) | (Comparison::GreaterOrEqual, false) => (true, false),
+                (Comparison::LessOrEqual, true) | (Comparison::Greater, false) => (true, true),
+                (Comparison::Greater, true) | (Comparison::LessOrEqual, false) => (false, false),
+                (Comparison::GreaterOrEqual, true) | (Comparison::Less, false) => (false, true),
+                _ => return None,
+            };
+            IntInterval::ordered_against(bound, less, or_equal)
+        }),
+        _ => None,
+    };
     seed_synthetic_key_if_needed(&var_name, scope, ctx);
-    retain_literals_in_scope(&var_name, scope, &keep);
+    retain_literals_in_scope(&var_name, scope, &keep, admitted);
 }
 
 /// How two number literals order, comparing two integers exactly and
@@ -457,17 +478,19 @@ fn compare_numbers(a: &LiteralValue, b: &LiteralValue) -> Option<std::cmp::Order
 }
 
 /// Drop the literal alternatives `keep` rejects from a subject's types,
-/// exhausting it when nothing is left.
+/// and cut its integer types down to `ints`, exhausting it when nothing is
+/// left.
 fn retain_literals_in_scope(
     var_name: &str,
     scope: &mut ScopeState,
     keep: &impl Fn(&LiteralValue) -> bool,
+    ints: Option<IntInterval>,
 ) {
     let types = scope.get(var_name);
     let mut changed = false;
     let mut narrowed = Vec::with_capacity(types.len());
     for rt in types {
-        match filter_literal_members(&rt.type_string, keep) {
+        match filter_literal_members(&rt.type_string, keep, ints) {
             Some(ty) if ty == rt.type_string => narrowed.push(rt.clone()),
             Some(ty) => {
                 changed = true;
@@ -491,20 +514,35 @@ fn retain_literals_in_scope(
     }
 }
 
-/// `ty` with the literal alternatives `keep` rejects removed, or `None`
-/// when that leaves nothing.
-fn filter_literal_members(ty: &PhpType, keep: &impl Fn(&LiteralValue) -> bool) -> Option<PhpType> {
+/// `ty` with the literal alternatives `keep` rejects removed and its
+/// integer types cut down to `ints`, or `None` when that leaves nothing.
+fn filter_literal_members(
+    ty: &PhpType,
+    keep: &impl Fn(&LiteralValue) -> bool,
+    ints: Option<IntInterval>,
+) -> Option<PhpType> {
     match ty.kind() {
         TypeKind::Union(members) => {
-            refine_union_members(members, |member| filter_literal_members(member, keep))
+            refine_union_members(members, |member| filter_literal_members(member, keep, ints))
         }
-        TypeKind::Nullable(inner) => Some(match filter_literal_members(inner, keep) {
+        TypeKind::Nullable(inner) => Some(match filter_literal_members(inner, keep, ints) {
             Some(kept) => PhpType::nullable(kept),
             None => PhpType::null(),
         }),
         _ => match ty.as_literal() {
             Some(literal) if !keep(literal) => None,
-            _ => Some(ty.clone()),
+            Some(_) => Some(ty.clone()),
+            None => match ints.zip(IntInterval::of_int(ty)) {
+                Some((admitted, held)) => {
+                    let narrowed = held.intersect(admitted)?;
+                    Some(if narrowed == held {
+                        ty.clone()
+                    } else {
+                        narrowed.into_type()
+                    })
+                }
+                None => Some(ty.clone()),
+            },
         },
     }
 }
@@ -514,6 +552,11 @@ fn filter_literal_members(ty: &PhpType, keep: &impl Fn(&LiteralValue) -> bool) -
 pub(super) fn refine_non_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<PhpType> {
     if let TypeKind::Union(members) = ty.kind() {
         return refine_union_members(members, |member| refine_non_empty_type(member, empty));
+    }
+    if let TypeKind::Nullable(inner) = ty.kind() {
+        return Some(
+            refine_non_empty_type(inner, empty).map_or_else(PhpType::null, PhpType::nullable),
+        );
     }
 
     match empty {
@@ -526,12 +569,16 @@ pub(super) fn refine_non_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<P
             {
                 return None;
             }
-            match ty.kind() {
-                TypeKind::Named(name) if name == "string" => {
-                    Some(PhpType::named(atom("non-empty-string")))
-                }
-                _ => Some(ty.clone()),
-            }
+            let TypeKind::Named(name) = ty.kind() else {
+                return Some(ty.clone());
+            };
+            Some(match name.as_str() {
+                "string" => PhpType::non_empty_string(),
+                "lowercase-string" => PhpType::non_empty_lowercase_string(),
+                "uppercase-string" => PhpType::non_empty_uppercase_string(),
+                "literal-string" => PhpType::non_empty_literal_string(),
+                _ => ty.clone(),
+            })
         }
         EmptyValue::Array => match ty.kind() {
             TypeKind::ArrayShape(entries) if entries.is_empty() => None,
@@ -545,6 +592,9 @@ pub(super) fn refine_non_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<P
 pub(super) fn refine_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<PhpType> {
     if let TypeKind::Union(members) = ty.kind() {
         return refine_union_members(members, |member| refine_empty_type(member, empty));
+    }
+    if let TypeKind::Nullable(inner) = ty.kind() {
+        return Some(refine_empty_type(inner, empty).map_or_else(PhpType::null, PhpType::nullable));
     }
 
     match empty {

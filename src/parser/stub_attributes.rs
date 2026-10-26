@@ -607,6 +607,32 @@ fn is_known_deprecated_attr(name: &Identifier<'_>, ctx: &DocblockCtx<'_>) -> boo
     DEPRECATED_FQNS.contains(&fqn.as_str())
 }
 
+/// Whether an element carries PHP 8.5's native `#[\NoDiscard]` attribute.
+///
+/// The name is read through the file's imports and namespace like any
+/// attribute class name, and compared case-insensitively as PHP compares
+/// class names.  Without a [`DocblockCtx`] only the name as written is
+/// available, which is taken to be global.
+pub(crate) fn has_no_discard_attribute(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    ctx: Option<&DocblockCtx<'_>>,
+) -> bool {
+    attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+        .any(|attr| {
+            let raw = bytes_to_str(attr.name.value());
+            match ctx {
+                Some(ctx) => crate::names::resolve_to_fqn(raw, &ctx.use_map, &ctx.namespace)
+                    .eq_ignore_ascii_case("NoDiscard"),
+                None => raw
+                    .strip_prefix('\\')
+                    .unwrap_or(raw)
+                    .eq_ignore_ascii_case("NoDiscard"),
+            }
+        })
+}
+
 /// Extract the string value from a literal string expression by reading
 /// the source text between the expression's span and stripping quotes.
 fn extract_string_literal_value(

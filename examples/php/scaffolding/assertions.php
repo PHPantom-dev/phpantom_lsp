@@ -955,6 +955,17 @@ function runDemoAssertions(): void
     assert($typedArrow instanceof \Closure, 'Arrow function must be Closure');
 
     // ── Enum methods and properties ─────────────────────────────────────
+    foreach (Scaffolding\Status::cases() as $case) {
+        if ($case === Scaffolding\Status::Active) {
+            continue;
+        }
+        assert(in_array($case, [Scaffolding\Status::Inactive, Scaffolding\Status::Pending], true), 'A Scaffolding\Status that is not Active must be Inactive or Pending');
+        assert(in_array($case->value, ['inactive', 'pending'], true), 'A Scaffolding\Status that is not Active must have the value "inactive" or "pending"');
+        if ($case !== Scaffolding\Status::Inactive) {
+            assert($case->name === 'Pending', 'A Scaffolding\Status that is neither Active nor Inactive must be Pending');
+        }
+    }
+
     $activeStatus = Scaffolding\Status::Active;
     assert($activeStatus instanceof Scaffolding\Status, 'Scaffolding\Status::Active must be Scaffolding\Status');
     assert($activeStatus->name === 'Active', 'Scaffolding\Status::Active->name must be "Active"');
@@ -2119,6 +2130,20 @@ function runDemoAssertions(): void
     assert($branchVault->getProperty('ledger')->isPrivate(), '$ledger is private to the subclass that declares it');
     assert($branchVault->isSubclassOf(Scaffolding\ScaffoldingVault::class), 'the branch vault descends from the vault');
     assert(!$branchVault->hasProperty('pin') || $branchVault->getProperty('pin')->getDeclaringClass()->getName() === Scaffolding\ScaffoldingVault::class, 'a private parent property is not inherited into the subclass scope');
+
+    $named = new DynamicMemberNameDemo();
+    $label = new Scaffolding\ScaffoldingFieldLabel();
+    assert($named->{$label} === 'demo', 'a Stringable label names the $title property');
+
+    $coordinate = new Scaffolding\ScaffoldingCoordinate(1, 2);
+    $copy = clone($coordinate, ['label' => 'copy']);
+    assert($copy instanceof Scaffolding\ScaffoldingCoordinate && $copy->label === 'copy', 'clone() writes $label on the copy');
+    assert($coordinate->label === '', 'clone() leaves the original alone');
+    try {
+        clone($coordinate, ['x' => 10]);
+        assert(false, 'clone() cannot write a readonly property from outside its class');
+    } catch (\Error) {
+    }
 
     echo "All assertions passed.\n";
 }

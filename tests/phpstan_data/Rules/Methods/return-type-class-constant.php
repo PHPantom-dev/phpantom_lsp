@@ -13,19 +13,19 @@ enum Foo
 
 	public function returnStatic(): static
 	{
-		assertType('ReturnTypeClassConstant\Foo::A', self::FOO); // SKIP: there is no type for a single enum case
+		assertType('ReturnTypeClassConstant\Foo::A', self::FOO);
 		return self::FOO;
 	}
 
 	public function returnStatic2(self $self): static
 	{
-		assertType('ReturnTypeClassConstant\Foo::A', $self::FOO); // SKIP: there is no type for a single enum case
+		assertType('ReturnTypeClassConstant\Foo::A', $self::FOO);
 		return $self::FOO;
 	}
 
 }
 
 function (Foo $foo): void {
-	assertType('ReturnTypeClassConstant\Foo::A', Foo::FOO); // SKIP: there is no type for a single enum case
-	assertType('ReturnTypeClassConstant\Foo::A', $foo::FOO); // SKIP: there is no type for a single enum case
+	assertType('ReturnTypeClassConstant\Foo::A', Foo::FOO);
+	assertType('ReturnTypeClassConstant\Foo::A', $foo::FOO);
 };

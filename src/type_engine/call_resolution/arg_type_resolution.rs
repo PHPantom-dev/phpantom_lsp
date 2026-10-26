@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
@@ -109,6 +110,12 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             .is_some_and(|arg| arg.trim_start().starts_with("..."))
     }
 
+    fn is_named(&self, index: usize) -> bool {
+        self.args
+            .get(index)
+            .is_some_and(|arg| crate::call_args::text_arg_is_named(arg))
+    }
+
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
         let text = self.arg_text(index)?;
         crate::completion::source::helpers::extract_closure_return_type_from_text(text)
@@ -158,20 +165,20 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             self.arg_text(index)?,
             param_index,
             subject,
-            Some(&self.ctx.class_loader),
+            Some(&self.ctx.file.class_loader),
             &self.ctx.written_names(),
         )
     }
 
     fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
-        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
+        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.file.class_loader)
     }
 
     fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
-        crate::type_engine::types::narrowing::split_type_by_guard_name(
+        crate::type_engine::type_ops::condition_facts::split_type_by_guard_name(
             guard,
             subject,
-            Some(&self.ctx.class_loader),
+            Some(&self.ctx.file.class_loader),
         )
     }
 }
@@ -214,7 +221,7 @@ impl Backend {
             key: arg_text.to_string(),
         };
 
-        let class_loader = ctx.class_loader;
+        let class_loader = ctx.file.class_loader;
 
         // ── Plain variable: `$customers` ────────────────────────────────
         if arg_text.starts_with('$')
@@ -284,7 +291,7 @@ impl Backend {
                     }
                 }
                 SubjectExpr::StaticMethodCall { class, method } => {
-                    let owner = class_loader(&ctx.written_names().resolve_class(class));
+                    let owner = class_loader(Fqn::new(&ctx.written_names().resolve_class(class)));
                     if let Some(ref cls) = owner
                         && let Some(rt) = crate::inheritance::resolve_method_return_type(
                             cls,

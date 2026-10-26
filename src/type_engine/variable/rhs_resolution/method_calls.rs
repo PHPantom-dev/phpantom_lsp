@@ -22,6 +22,7 @@ use super::laravel_calls::{
 };
 use super::owner_method_call::resolve_owner_method_call;
 use super::scope_reads::narrowed_subject_from_scope;
+use super::symfony_calls::{try_resolve_container_lookup_type, try_resolve_handle_trait_type};
 use super::{resolve_rhs_expression, resolve_var_types};
 
 /// A method call's receiver, already resolved: the candidate owner classes
@@ -53,12 +54,13 @@ pub(super) fn resolve_method_receiver<'b>(
         // to the class the call runs on.
         let classes = match narrowed_subject_from_scope("$this", object, ctx) {
             Some(narrowed) => ResolvedType::into_arced_classes(narrowed),
-            None => {
-                crate::class_lookup::find_class_by_fqn(ctx.all_classes, &ctx.current_class.fqn())
-                    .map(Arc::clone)
-                    .into_iter()
-                    .collect()
-            }
+            None => crate::class_lookup::find_class_by_fqn(
+                ctx.file.all_classes,
+                &ctx.current_class.fqn(),
+            )
+            .map(Arc::clone)
+            .into_iter()
+            .collect(),
         };
         return (classes, vec![]);
     }
@@ -145,7 +147,7 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
         .map(|list| {
             crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
                 list,
-                ctx.content,
+                ctx.file.content,
             )
         })
         .unwrap_or_default();
@@ -178,8 +180,8 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
         let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &ty,
             "",
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         return if classes.is_empty() {
             vec![ResolvedType::from_type_string(ty)]
@@ -197,7 +199,7 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
     // wherever it is written; every other form asks the scope for them and is
     // a no-op without the server state that reads them.
     let shape_call = validated_shape::shape_bearing_method(&method_name)
-        .filter(|call| *call == validated_shape::ShapeCall::Validate || ctx.backend.is_some());
+        .filter(|call| *call == validated_shape::ShapeCall::Validate || ctx.file.backend.is_some());
 
     // Laravel request input: `header('X', '')`, `query()`, `file('photo')`
     // and the rest declare one union spanning every way of calling them,
@@ -222,6 +224,16 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             }
             if let Some(result) =
                 try_resolve_command_accessor_type(owner, &method_name, argument_list, ctx)
+            {
+                return result;
+            }
+            if let Some(result) =
+                try_resolve_container_lookup_type(owner, &method_name, argument_list, ctx)
+            {
+                return result;
+            }
+            if let Some(result) =
+                try_resolve_handle_trait_type(owner, &method_name, argument_list, ctx)
             {
                 return result;
             }
@@ -256,7 +268,7 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
         object,
         &method_name,
         &receiver_resolved,
-        ctx.content,
+        ctx.file.content,
         &rctx,
     ) {
         return vec![match classes.first() {
@@ -532,7 +544,7 @@ pub(super) fn expand_union_generic_owners(
             TypeKind::Generic(g) if is_same_base(&g.name) => {
                 let arc = crate::virtual_members::resolve_class_fully_with_type_args(
                     base_cls,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                     ctx.resolved_class_cache,
                     &g.args,
                 );

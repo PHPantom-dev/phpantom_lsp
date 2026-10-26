@@ -1,7 +1,7 @@
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_syntax::cst::{Expression, Literal};
-use tower_lsp::lsp_types::Location;
+use tower_lsp_server::gen_lsp_types::Location;
 
 use crate::Backend;
 use crate::php_type::PhpType;

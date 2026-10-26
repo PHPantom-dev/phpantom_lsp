@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use mago_allocator::LocalArena;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{DocumentLink, Range, Url};
+use tower_lsp_server::gen_lsp_types::{DocumentLink, Range};
 
 use crate::Backend;
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
@@ -31,7 +31,7 @@ impl Backend {
     ///
     /// Parses the file and walks the AST for include/require expressions.
     pub fn handle_document_link(&self, uri: &str, content: &str) -> Option<Vec<DocumentLink>> {
-        let file_path = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok());
+        let file_path = crate::util::uri_to_path(uri);
         let file_dir = file_path.as_deref().and_then(|p| p.parent());
 
         let arena = LocalArena::new();
@@ -46,7 +46,7 @@ impl Backend {
                 collect_include_links_from_statement(stmt, dir, &mut include_links);
             }
             for il in include_links {
-                if let Ok(target_url) = Url::from_file_path(&il.resolved_path) {
+                if let Some(target_url) = crate::util::path_to_url(&il.resolved_path) {
                     let start = offset_to_position(content, il.start_offset);
                     let end = offset_to_position(content, il.end_offset);
                     links.push(DocumentLink {
@@ -62,7 +62,7 @@ impl Backend {
         for (start, end, target) in
             crate::virtual_members::laravel::collect_path_helper_links(self, content, program)
         {
-            if let Ok(target_url) = Url::from_file_path(&target) {
+            if let Some(target_url) = crate::util::path_to_url(&target) {
                 links.push(DocumentLink {
                     range: Range {
                         start: offset_to_position(content, start),

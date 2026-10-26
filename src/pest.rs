@@ -26,7 +26,6 @@ use mago_database::file::FileId;
 use mago_names::resolver::NameResolver;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
-use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
@@ -126,7 +125,7 @@ impl PestConfig {
     /// live under it, so the nearest one above a test file is it.
     fn load(backend: &Backend, dir_uri: &str) -> Option<Self> {
         let content = backend.get_file_content(&format!("{dir_uri}Pest.php"))?;
-        let tests_dir = Url::parse(dir_uri).ok()?.to_file_path().ok()?;
+        let tests_dir = crate::util::uri_to_path(dir_uri)?;
         Some(Self {
             bindings: parse_bindings(&content, &tests_dir),
         })
@@ -138,7 +137,7 @@ impl PestConfig {
         if self.bindings.is_empty() {
             return;
         }
-        let Some(path) = Url::parse(uri).ok().and_then(|url| url.to_file_path().ok()) else {
+        let Some(path) = crate::util::uri_to_path(uri) else {
             return;
         };
         out.extend(
@@ -155,7 +154,11 @@ impl Backend {
     /// `uses()` and by its test directory's `Pest.php`, or `None` when
     /// nothing is.
     pub(crate) fn pest_uses_for(&self, uri: &str) -> Option<Arc<[String]>> {
-        let own = self.file_pest_uses.read().get(uri).cloned();
+        let own = self
+            .files
+            .read()
+            .get(uri)
+            .and_then(|state| state.pest_uses.clone());
         let Some(config) = self.pest_config_for(uri) else {
             return own;
         };
@@ -198,6 +201,28 @@ impl Backend {
     /// none, so the next lookup reads them again.
     pub(crate) fn invalidate_pest_config(&self) {
         *self.pest_configs.write() = None;
+    }
+
+    /// The directory of the `Pest.php` at `uri` when a lookup has looked
+    /// there, so a change to it on disk has a cached answer to forget.
+    pub(crate) fn looked_up_pest_dir<'a>(&self, uri: &'a str) -> Option<&'a str> {
+        let dir = uri.strip_suffix("Pest.php")?;
+        if !dir.ends_with('/') {
+            return None;
+        }
+        let configs = self.pest_configs.read();
+        configs
+            .as_ref()
+            .is_some_and(|configs| configs.dirs.contains_key(dir))
+            .then_some(dir)
+    }
+
+    /// Forget what the directory at `dir` was found to have, so the next
+    /// lookup through it reads its `Pest.php` again.
+    pub(crate) fn forget_pest_dir(&self, dir: &str) {
+        if let Some(configs) = self.pest_configs.write().as_mut() {
+            configs.dirs.remove(dir);
+        }
     }
 
     /// Point the `@param-closure-this` of Pest's test functions at the

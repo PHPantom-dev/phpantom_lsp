@@ -2,11 +2,9 @@
 //! leaves in the caller's variable, including a PHPStan conditional keyed
 //! on what the caller passed.
 
-use tower_lsp::lsp_types::Url;
+use tower_lsp_server::gen_lsp_types::Uri;
 
-use crate::common::{
-    create_test_backend, hover_at, hover_text, line_char_of, markup_hover_at, open_php,
-};
+use crate::common::{create_test_backend, hover_last, line_char_of, markup_hover_at, open_php};
 
 const OUT_PARAM_CLASSES: &str = r#"
 class A {}
@@ -35,18 +33,6 @@ class Testing
 }
 "#;
 
-/// Hover on the last occurrence of `needle` in `content`.
-fn hover_last(content: &str, needle: &str) -> String {
-    let backend = create_test_backend();
-    let offset = content.rfind(needle).expect("needle present");
-    let before = &content[..offset];
-    let line = before.matches('\n').count() as u32;
-    let character = (offset - before.rfind('\n').map_or(0, |i| i + 1)) as u32;
-    let hover =
-        hover_at(&backend, "file:///test.php", content, line, character).expect("expected hover");
-    hover_text(&hover).to_string()
-}
-
 /// A `null` handed to the out-parameter takes the conditional's `is null`
 /// branch.
 #[test]
@@ -61,7 +47,7 @@ function f(): void {{
 }}
 "#
     );
-    let text = hover_last(&content, "$b;");
+    let text = hover_last(&create_test_backend(), &content, "$b;");
     assert!(
         text.contains("A&I"),
         "expected $b to read as A&I after passing null, got: {text}"
@@ -80,7 +66,7 @@ function f(A $a): void {{
 }}
 "#
     );
-    let text = hover_last(&content, "$a;");
+    let text = hover_last(&create_test_backend(), &content, "$a;");
     assert!(
         !text.contains("A&I") && text.contains('A'),
         "expected $a to read as plain A after passing an A, got: {text}"
@@ -100,10 +86,62 @@ function f(): void {{
 }}
 "#
     );
-    let text = hover_last(&content, "$n;");
+    let text = hover_last(&create_test_backend(), &content, "$n;");
     assert!(
         text.contains("int") && !text.contains("string"),
         "expected $n to read as int after count(), got: {text}"
+    );
+}
+
+/// A `@param-out` wider than the argument replaces the argument's type
+/// rather than keeping its shape, since it says what the callee writes.
+#[test]
+fn wider_param_out_replaces_argument_shape() {
+    let content = r#"<?php
+/** @param-out array $x */
+function fill(array &$x): void {}
+
+function f(): void {
+    $values = [1 => 'a'];
+    fill($values);
+    $values;
+}
+"#;
+    let text = hover_last(&create_test_backend(), content, "$values;");
+    assert!(
+        text.contains("array") && !text.contains("array{"),
+        "expected $values to read as array after fill(), got: {text}"
+    );
+}
+
+/// A `@param-out` naming the class's template, declared on an interface,
+/// reads back as the type the implementing class binds it to.
+#[test]
+fn inherited_param_out_substitutes_class_template() {
+    let content = r#"<?php
+class Apple {}
+
+/** @template T */
+interface Filler {
+    /** @param-out T $x */
+    public function fill(mixed &$x): void;
+}
+
+/** @implements Filler<Apple> */
+class AppleFiller implements Filler {
+    public function fill(mixed &$x): void {}
+}
+
+function f(AppleFiller $filler): void {
+    $value = 'x';
+    $filler->fill($value);
+    $value;
+}
+"#;
+    let text = hover_last(&create_test_backend(), content, "$value;");
+    assert!(
+        text.contains("Apple") && !text.contains("string"),
+        "expected $value to read as Apple after fill(), got: {text}"
     );
 }
 
@@ -135,7 +173,7 @@ function f(): void {
     // The body is read back from the open document, so it has to be opened
     // rather than only parsed.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, content).await;
     let (line, character) = line_char_of(content, "$a;");
     let text = markup_hover_at(&backend, &uri, line, character).await;

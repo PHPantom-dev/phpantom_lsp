@@ -15,6 +15,7 @@
 
 use std::sync::Arc;
 
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance::{ancestors, apply_substitution_to_conditional};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo, Visibility};
@@ -29,7 +30,7 @@ use super::ELOQUENT_BUILDER_FQN;
 /// the builder but apply to every subclass.
 pub(crate) fn custom_builder_fqn(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<String> {
     let declared = |candidate: &ClassInfo| {
         candidate
@@ -47,10 +48,10 @@ pub(crate) fn custom_builder_fqn(
 /// fails to load falls back to Eloquent's builder, as static forwarding does.
 pub(crate) fn model_builder_type(
     model: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
     let name = custom_builder_fqn(model, class_loader)
-        .and_then(|fqn| class_loader(&fqn))
+        .and_then(|fqn| class_loader(Fqn::new(&fqn)))
         .map_or_else(
             || crate::atom::atom(ELOQUENT_BUILDER_FQN),
             |builder| builder.fqn(),
@@ -63,18 +64,18 @@ pub(crate) fn model_builder_type(
 /// return-type mapping.
 pub(super) fn build_builder_forwarded_methods(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> Vec<Arc<MethodInfo>> {
     let requested_builder_fqn =
         custom_builder_fqn(class, class_loader).unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
 
     // Load the Eloquent Builder class (or custom builder).
-    let (builder_class, builder_fqn) = match class_loader(&requested_builder_fqn) {
+    let (builder_class, builder_fqn) = match class_loader(Fqn::new(&requested_builder_fqn)) {
         Some(c) => (c, requested_builder_fqn),
         // Fallback to standard builder if custom builder fails to load.
         None if requested_builder_fqn != ELOQUENT_BUILDER_FQN => {
-            match class_loader(ELOQUENT_BUILDER_FQN) {
+            match class_loader(Fqn::new(ELOQUENT_BUILDER_FQN)) {
                 Some(c) => (c, ELOQUENT_BUILDER_FQN.to_string()),
                 None => return Vec::new(),
             }
@@ -248,7 +249,7 @@ pub(super) fn build_builder_forwarded_methods(
 fn builder_methods_with_unsubstituted_parent_templates(
     builder_class: &ClassInfo,
     resolved_builder: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> Vec<Arc<MethodInfo>> {
     let mut methods: Vec<Arc<MethodInfo>> = resolved_builder.methods.iter().cloned().collect();
@@ -256,7 +257,7 @@ fn builder_methods_with_unsubstituted_parent_templates(
         return methods;
     }
 
-    let Some(base_builder) = class_loader(ELOQUENT_BUILDER_FQN) else {
+    let Some(base_builder) = class_loader(Fqn::new(ELOQUENT_BUILDER_FQN)) else {
         return methods;
     };
     let resolved_base = crate::virtual_members::resolve_class_fully_maybe_cached(
@@ -286,7 +287,7 @@ fn builder_methods_with_unsubstituted_parent_templates(
 fn custom_builder_chain_declares_method(
     builder_class: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     use crate::inheritance::ClassRef;
 
@@ -323,7 +324,7 @@ fn custom_builder_chain_declares_method(
             return false;
         }
 
-        let Some(parent_class) = class_loader(parent) else {
+        let Some(parent_class) = class_loader(Fqn::new(parent)) else {
             return false;
         };
         current = ClassRef::Owned(parent_class);
@@ -335,7 +336,7 @@ fn insert_builder_template_substitutions(
     builder_class: &ClassInfo,
     model_class: &ClassInfo,
     builder_fqn: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     let model_type = PhpType::named(model_class.fqn());
     for param in &builder_class.template_params {
@@ -343,7 +344,7 @@ fn insert_builder_template_substitutions(
     }
 
     if builder_fqn != ELOQUENT_BUILDER_FQN
-        && let Some(base_builder) = class_loader(ELOQUENT_BUILDER_FQN)
+        && let Some(base_builder) = class_loader(Fqn::new(ELOQUENT_BUILDER_FQN))
     {
         for param in &base_builder.template_params {
             subs.entry(param.to_string())

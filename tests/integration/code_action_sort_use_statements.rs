@@ -8,7 +8,7 @@ use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_in_range,
     get_code_actions_on_line, resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 fn whole_document(content: &str) -> Range {
     Range::new(
@@ -27,7 +27,7 @@ fn offers_sort_action_when_block_is_unsorted() {
     let actions = get_code_actions_on_line(&backend, uri, content, 1);
     let action = find_action(&actions, "Sort use statements").expect("should offer sort action");
 
-    assert_eq!(action.kind, Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS));
+    assert_eq!(action.kind, Some(CodeActionKind::SourceOrganizeImports));
     assert!(action.edit.is_none(), "the edit is computed on resolve");
 
     let resolved = resolve_action(&backend, uri, content, action);

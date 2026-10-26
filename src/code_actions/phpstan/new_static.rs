@@ -30,14 +30,14 @@ use mago_span::HasSpan;
 use mago_syntax::cst::ModifierSequenceExt;
 use mago_syntax::cst::Node;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::code_actions::cursor_context::innermost_at;
 use crate::code_actions::docblock_edit::ClassDocblock;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 use crate::text_position::{line_start_byte_offset, offset_to_position};
 
 /// The PHPStan identifier we match on.
@@ -65,7 +65,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -97,22 +97,17 @@ impl Backend {
             {
                 let title = format!("Add @phpstan-consistent-constructor to {}", class_name);
                 let extra = serde_json::json!({
-                    "diagnostic_message": diag.message,
-                    "diagnostic_line": diag.range.start.line,
-                    "diagnostic_code": NEW_STATIC_ID,
                     "sub_action": ACTION_ADD_TAG,
                 });
-                let data = make_code_action_data(ACTION_ADD_TAG, uri, &params.range, extra);
-                out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                out.push(deferred_quickfix(
                     title,
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: Some(vec![diag.clone()]),
-                    edit: None,
-                    command: None,
-                    is_preferred: Some(true),
-                    disabled: None,
-                    data: Some(data),
-                }));
+                    ACTION_ADD_TAG,
+                    uri,
+                    &params.range,
+                    vec![diag.clone()],
+                    true,
+                    extra,
+                ));
             }
 
             // ── Action 2: Add `final` to class ─────────────────────────
@@ -120,45 +115,34 @@ impl Backend {
             if !class_info.is_abstract {
                 let title = format!("Add final to class {}", class_name);
                 let extra = serde_json::json!({
-                    "diagnostic_message": diag.message,
-                    "diagnostic_line": diag.range.start.line,
-                    "diagnostic_code": NEW_STATIC_ID,
                     "sub_action": ACTION_FINAL_CLASS,
                 });
-                let data = make_code_action_data(ACTION_FINAL_CLASS, uri, &params.range, extra);
-                out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                out.push(deferred_quickfix(
                     title,
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: Some(vec![diag.clone()]),
-                    edit: None,
-                    command: None,
-                    is_preferred: Some(false),
-                    disabled: None,
-                    data: Some(data),
-                }));
+                    ACTION_FINAL_CLASS,
+                    uri,
+                    &params.range,
+                    vec![diag.clone()],
+                    false,
+                    extra,
+                ));
             }
 
             // ── Action 3: Add `final` to constructor ────────────────────
             if class_info.constructor.is_some() {
                 let title = format!("Add final to {}::__construct", class_name);
                 let extra = serde_json::json!({
-                    "diagnostic_message": diag.message,
-                    "diagnostic_line": diag.range.start.line,
-                    "diagnostic_code": NEW_STATIC_ID,
                     "sub_action": ACTION_FINAL_CONSTRUCTOR,
                 });
-                let data =
-                    make_code_action_data(ACTION_FINAL_CONSTRUCTOR, uri, &params.range, extra);
-                out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                out.push(deferred_quickfix(
                     title,
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: Some(vec![diag.clone()]),
-                    edit: None,
-                    command: None,
-                    is_preferred: Some(false),
-                    disabled: None,
-                    data: Some(data),
-                }));
+                    ACTION_FINAL_CONSTRUCTOR,
+                    uri,
+                    &params.range,
+                    vec![diag.clone()],
+                    false,
+                    extra,
+                ));
             }
         }
     }
@@ -193,7 +177,7 @@ impl Backend {
 
         let edits = edits?;
 
-        let doc_uri: Url = uri.parse().ok()?;
+        let doc_uri: Uri = uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }

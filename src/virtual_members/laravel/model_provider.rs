@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::atom::{AtomSet, ascii_lowercase_atom, atom};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::types::{
     AttributeDefaultSource, ClassInfo, DatabaseColumnSource, LaravelMetadata, MethodInfo,
@@ -161,11 +162,7 @@ fn accessor_property(
 
 impl VirtualMemberProvider for LaravelModelProvider {
     /// Returns `true` if the class extends `Illuminate\Database\Eloquent\Model`.
-    fn applies_to(
-        &self,
-        class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> bool {
+    fn applies_to(&self, class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
         extends_eloquent_model(class, class_loader)
     }
 
@@ -176,7 +173,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
     fn provide(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: Option<&ResolvedClassCache>,
     ) -> VirtualMembers {
         let mut members = ModelMembers::new(class, class_loader, cache);
@@ -204,7 +201,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
 /// the names already added.
 struct ModelMembers<'a> {
     class: &'a ClassInfo,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
     schema_table: Option<SchemaTable>,
     /// Method names declared by the base Eloquent Model, lowercased.
     base_model_methods: AtomSet,
@@ -218,7 +215,7 @@ struct ModelMembers<'a> {
 impl<'a> ModelMembers<'a> {
     fn new(
         class: &'a ClassInfo,
-        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &'a ResolvedClassLoader<'a>,
         cache: Option<&ResolvedClassCache>,
     ) -> Self {
         // Method names declared by the base Eloquent Model, resolved with
@@ -234,7 +231,7 @@ impl<'a> ModelMembers<'a> {
         // would be a linear scan over ~500 framework methods, once per
         // method of every model.  Keys are lowercased because PHP method
         // names are case-insensitive.
-        let base_model_methods: AtomSet = class_loader(ELOQUENT_MODEL_FQN)
+        let base_model_methods: AtomSet = class_loader(Fqn::new(ELOQUENT_MODEL_FQN))
             .map(|base| {
                 resolve_class_base_cached(&base, class_loader)
                     .methods

@@ -17,7 +17,7 @@ use crate::common::{
     create_test_backend, extract_edit_text, find_action_titled, find_actions_containing,
     get_code_actions_in_range, position_of,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── Which actions are offered ───────────────────────────────────────────────
 
@@ -136,6 +136,23 @@ fn get_hook_edit_contains_correct_php() {
             "should start with property declaration, got: {new_text}"
         );
     }
+}
+
+#[test]
+fn get_hook_follows_two_space_indentation() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\nclass Foo {\n  public string $name;\n}";
+
+    let position = position_of(content, "public string");
+    let actions = get_code_actions_in_range(&backend, uri, content, Range::new(position, position));
+    let ca = find_action_titled(&actions, "Generate get hook")
+        .expect("should have a 'Generate get hook' action");
+
+    assert_eq!(
+        extract_edit_text(ca),
+        "public string $name {\n    get => $this->name;\n  }"
+    );
 }
 
 #[test]

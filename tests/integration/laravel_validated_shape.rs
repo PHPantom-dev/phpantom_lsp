@@ -9,7 +9,7 @@ use crate::common::{
     FORM_REQUEST_STUB, complete_labels_at_opened, create_psr4_workspace, hover_text_at,
     open_php_at, split_cursor,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Shared stubs ───────────────────────────────────────────────────────────
 
@@ -257,7 +257,7 @@ async fn complete_labels(content: &str) -> Vec<String> {
 
 async fn open_at_cursor(
     content: &str,
-) -> (phpantom_lsp::Backend, tempfile::TempDir, Url, Position) {
+) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri, Position) {
     let (stripped, position) = split_cursor(content);
 
     let mut files = base_files();

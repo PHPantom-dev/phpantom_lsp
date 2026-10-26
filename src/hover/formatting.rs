@@ -4,7 +4,7 @@
 //! `Hover` values.  These have no dependency on `Backend` and are used
 //! by the dispatch/resolution code in `hover/mod.rs`.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::docblock::parser::{DocblockInfo, parse_docblock_for_tags};
 use crate::php_type::{PhpType, TypeKind};
@@ -23,7 +23,7 @@ pub(super) fn symbol_span_to_range(content: &str, symbol: &SymbolSpan) -> Range 
 /// Create a `Hover` with Markdown content.
 pub(super) fn make_hover(contents: String) -> Hover {
     Hover {
-        contents: HoverContents::Markup(MarkupContent {
+        contents: Contents::MarkupContent(MarkupContent {
             kind: MarkupKind::Markdown,
             value: contents,
         }),
@@ -396,8 +396,8 @@ pub(crate) fn hover_for_function(
         let unresolved: Vec<ResolvedSeeRef> = func
             .see_refs
             .iter()
-            .map(|raw| ResolvedSeeRef {
-                raw: raw.clone(),
+            .map(|see| ResolvedSeeRef {
+                raw: see.text.clone(),
                 location_uri: None,
             })
             .collect();

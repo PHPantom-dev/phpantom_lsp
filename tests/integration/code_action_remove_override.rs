@@ -12,7 +12,7 @@ use crate::common::{
     create_test_backend, extract_edits, find_action_containing, find_actions, get_code_actions_at,
     inject_phpstan_diag, resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 #[test]
 fn offers_remove_override_action_for_method() {
@@ -43,7 +43,7 @@ class Foo {
     );
 
     let action = remove_action.unwrap();
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
     assert!(
         action.title.contains("bar"),
@@ -142,7 +142,7 @@ class Foo {
     // the property name, the title should still be generic when
     // it's the only diagnostic.
     assert_eq!(action.title, "Remove #[Override]");
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
 
     // Phase 2: resolve the action.

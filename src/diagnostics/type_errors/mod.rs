@@ -12,9 +12,6 @@
 //! [`CallSite`]: crate::symbol_map::CallSite
 
 mod arguments;
-pub(super) mod compatibility;
-
-pub(super) use compatibility::is_type_compatible;
 
 use mago_syntax::cst::Program;
 use mago_syntax::cst::expression::Expression;
@@ -22,6 +19,7 @@ use mago_syntax::cst::literal::Literal;
 use mago_syntax::cst::statement::Statement;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::ResolvedClassLoader;
 
 /// Diagnostic code used for argument type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_ARGUMENT_CODE: &str = "type_mismatch_argument";
@@ -46,4 +44,27 @@ pub(super) fn has_strict_types(program: &Program<'_>) -> bool {
         }
     }
     false
+}
+
+/// Whether `arg_type` can be passed where `param_type` is declared, with
+/// the Laravel model-type operators (`builder-of<Model>`, …) on either side
+/// expanded to the classes they name first.
+///
+/// See [`crate::class_lookup::is_type_compatible`].
+pub(super) fn is_type_compatible(
+    arg_type: &crate::php_type::PhpType,
+    param_type: &crate::php_type::PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+    strict_types: bool,
+) -> bool {
+    use crate::virtual_members::laravel::{expand_model_type, has_model_type_operator};
+    if has_model_type_operator(arg_type) || has_model_type_operator(param_type) {
+        return crate::class_lookup::is_type_compatible(
+            &expand_model_type(arg_type, class_loader),
+            &expand_model_type(param_type, class_loader),
+            class_loader,
+            strict_types,
+        );
+    }
+    crate::class_lookup::is_type_compatible(arg_type, param_type, class_loader, strict_types)
 }

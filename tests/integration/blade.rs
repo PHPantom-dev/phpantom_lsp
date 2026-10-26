@@ -1,47 +1,37 @@
 #[cfg(test)]
 mod tests {
+    use crate::common::message_text;
     use crate::common::{
-        create_test_backend, hover_text_at, open_document, open_php, workspace_uri,
+        completion_response, create_test_backend, goto_definition_at, hover_text_at, open_document,
+        open_php, references_response, workspace_uri,
     };
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+
+    use tower_lsp_server::gen_lsp_types::*;
 
     #[tokio::test]
     async fn test_goto_definition_in_blade_file() {
         let backend = create_test_backend();
 
         // 1. Define a class in a PHP file
-        let php_uri = Url::parse("file:///Logger.php").unwrap();
+        let php_uri = Uri::parse("file:///Logger.php").unwrap();
         let php_text = "<?php class Logger { public function info() {} }";
         open_php(&backend, &php_uri, php_text).await;
 
         // 2. Try to use it in a Blade file
-        let blade_uri = Url::parse("file:///view.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///view.blade.php").unwrap();
         let blade_text = "@php $logger = new Logger(); @endphp\n{{ $logger->info() }}";
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         // 3. Click on "info" in the Blade file
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 13, // $logger->in|fo()
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
 
-        let result = backend.goto_definition(params).await.unwrap();
+        // $logger->in|fo()
+        let result = goto_definition_at(&backend, &blade_uri, 1, 13).await;
 
         assert!(result.is_some(), "Should resolve definition in Blade file");
 
         match result.unwrap() {
-            GotoDefinitionResponse::Scalar(location) => {
+            DefinitionResponse::Definition(Definition::Location(location)) => {
                 assert_eq!(location.uri, php_uri);
                 // Logger::info is on line 0
                 assert_eq!(location.range.start.line, 0);
@@ -54,37 +44,24 @@ mod tests {
     async fn test_inline_php_directive_assignment_updates_scope() {
         let backend = create_test_backend();
 
-        let php_uri = Url::parse("file:///Logger.php").unwrap();
+        let php_uri = Uri::parse("file:///Logger.php").unwrap();
         let php_text = "<?php class Logger { public function info() {} }";
         open_php(&backend, &php_uri, php_text).await;
 
-        let blade_uri = Url::parse("file:///inline.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///inline.blade.php").unwrap();
         let blade_text = "@php($logger = new Logger())\n{{ $logger->info() }}";
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 13, // $logger->in|fo()
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        // $logger->in|fo()
+        let result = goto_definition_at(&backend, &blade_uri, 1, 13).await;
 
         assert!(
             result.is_some(),
             "Inline @php(...) assignment should update the template scope"
         );
         match result.unwrap() {
-            GotoDefinitionResponse::Scalar(location) => {
+            DefinitionResponse::Definition(Definition::Location(location)) => {
                 assert_eq!(location.uri, php_uri);
                 assert_eq!(location.range.start.line, 0);
             }
@@ -98,32 +75,19 @@ mod tests {
     async fn test_inline_php_directive_assignment_after_var_block() {
         let backend = create_test_backend();
 
-        let php_uri = Url::parse("file:///Logger.php").unwrap();
+        let php_uri = Uri::parse("file:///Logger.php").unwrap();
         let php_text = "<?php class Logger { public function info() {} \
                         public function self_(): Logger { return $this; } }";
         open_php(&backend, &php_uri, php_text).await;
 
-        let blade_uri = Url::parse("file:///inline_var.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///inline_var.blade.php").unwrap();
         let blade_text = "@php\n/** @var \\Logger $base */\n@endphp\n\
                           @php($logger = $base->self_())\n{{ $logger->info() }}";
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 4,
-                    character: 13, // $logger->in|fo()
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        // $logger->in|fo()
+        let result = goto_definition_at(&backend, &blade_uri, 4, 13).await;
 
         assert!(
             result.is_some(),
@@ -135,28 +99,16 @@ mod tests {
     async fn test_blade_if_endif_parsing() {
         let backend = create_test_backend();
 
-        let blade_uri = Url::parse("file:///test.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///test.blade.php").unwrap();
         let blade_text = "@if(true)\n    {{ config('app.name') }}\n@endif";
 
         // This should not produce any syntax errors now.
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         // We check if it can resolve "config" inside the @if block.
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 7, // con|fig
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
 
-        let result = backend.goto_definition(params).await.unwrap();
+        // con|fig
+        let result = goto_definition_at(&backend, &blade_uri, 1, 7).await;
         // Even if config is not resolved (depends on stubs),
         // the important thing is that the server didn't crash or return error due to @endif.
         let _ = result;
@@ -166,27 +118,13 @@ mod tests {
     async fn test_blade_if_with_leading_space() {
         let backend = create_test_backend();
 
-        let blade_uri = Url::parse("file:///test.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///test.blade.php").unwrap();
         // Test user's specific example with leading space
         let blade_text = " @if(true)\n    {{ config('app.name') }}\n @endif";
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 10,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        let result = goto_definition_at(&backend, &blade_uri, 1, 10).await;
         let _ = result;
     }
 
@@ -194,7 +132,7 @@ mod tests {
     async fn test_complex_blade_nesting_and_syntax() {
         let backend = create_test_backend();
 
-        let blade_uri = Url::parse("file:///complex.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///complex.blade.php").unwrap();
         let blade_text = r#"
 <ul>
     @foreach ($items as $item)
@@ -212,21 +150,8 @@ mod tests {
         // (Note: Backend::new_test might not automatically publish diagnostics to a list we can check easily here,
         // but we can check if it parses correctly by trying to resolve something inside).
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 4,
-                    character: 31, // $item->u|rl
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        // $item->u|rl
+        let result = goto_definition_at(&backend, &blade_uri, 4, 31).await;
         // The fact that it doesn't return a JSON-RPC error means it parsed.
         let _ = result;
     }
@@ -235,33 +160,17 @@ mod tests {
     async fn test_blade_references() {
         let backend = create_test_backend();
 
-        let php_uri = Url::parse("file:///Logger.php").unwrap();
+        let php_uri = Uri::parse("file:///Logger.php").unwrap();
         let php_text = "<?php class Logger { public function info() {} }";
         open_php(&backend, &php_uri, php_text).await;
 
-        let blade_uri = Url::parse("file:///view.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///view.blade.php").unwrap();
         let blade_text = "@php $l = new Logger(); @endphp\n{{ $l->info() }}";
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
-        let params = ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: php_uri.clone(),
-                },
-                position: Position {
-                    line: 0,
-                    character: 37, // info
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration: true,
-            },
-        };
-
-        let result = backend.references(params).await.unwrap();
+        // info
+        let result = references_response(&backend, &php_uri, Position::new(0, 37), true).await;
         assert!(result.is_some());
         let locations = result.unwrap();
 
@@ -275,7 +184,7 @@ mod tests {
     async fn test_blade_layout_directives() {
         let backend = create_test_backend();
 
-        let blade_uri = Url::parse("file:///layout.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///layout.blade.php").unwrap();
         let blade_text = r#"
 @extends('layouts.app')
 
@@ -291,21 +200,7 @@ mod tests {
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         // If it parses successfully without crashing or returning syntax errors, we are good.
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 2,
-                    character: 1,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        let result = goto_definition_at(&backend, &blade_uri, 2, 1).await;
         let _ = result;
     }
 
@@ -313,41 +208,34 @@ mod tests {
     async fn test_blade_variable_completion_in_echo() {
         let backend = create_test_backend();
 
-        let php_uri = Url::parse("file:///Item.php").unwrap();
+        let php_uri = Uri::parse("file:///Item.php").unwrap();
         let php_text = "<?php class Item { public string $name; public int $price; }";
         open_php(&backend, &php_uri, php_text).await;
 
-        let blade_uri = Url::parse("file:///shop.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///shop.blade.php").unwrap();
         // Line 0: @php $item = new Item(); @endphp
         // Line 1: {{ $item-> }}
         let blade_text = "@php $item = new Item(); @endphp\n{{ $item-> }}";
 
         open_document(&backend, &blade_uri, "blade", blade_text).await;
 
-        let params = CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 10, // after "$item->"
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: Some(CompletionContext {
-                trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+        // after "$item->"
+        let result = completion_response(
+            &backend,
+            &blade_uri,
+            1,
+            10,
+            Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::TriggerCharacter,
                 trigger_character: Some(">".to_string()),
             }),
-        };
-
-        let result = backend.completion(params).await.unwrap();
+        )
+        .await;
         assert!(result.is_some(), "Should return completions for $item->");
 
         let items = match result.unwrap() {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
 
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
@@ -375,7 +263,7 @@ mod tests {
     fn component_workspace(
         view_path: &str,
         view_body: &str,
-    ) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+    ) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
         let (backend, dir) = crate::common::create_psr4_workspace(
             COMPONENT_COMPOSER,
             &[
@@ -394,7 +282,7 @@ mod tests {
         (backend, dir, uri)
     }
 
-    async fn undefined_variables(backend: &phpantom_lsp::Backend, uri: &Url) -> Vec<String> {
+    async fn undefined_variables(backend: &phpantom_lsp::Backend, uri: &Uri) -> Vec<String> {
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
             .expect("blade virtual content");
@@ -402,8 +290,8 @@ mod tests {
         backend.collect_undefined_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
         diags
             .into_iter()
-            .filter(|d| d.message.contains("Undefined variable"))
-            .map(|d| d.message)
+            .filter(|d| message_text(&d.message).contains("Undefined variable"))
+            .map(|d| message_text(&d.message).to_string())
             .collect()
     }
 
@@ -515,11 +403,11 @@ mod tests {
     async fn test_var_docblock_survives_line_comment_and_sibling_blocks() {
         let backend = create_test_backend();
 
-        let php_uri = Url::parse("file:///ShowViewModel.php").unwrap();
+        let php_uri = Uri::parse("file:///ShowViewModel.php").unwrap();
         let php_text = "<?php\nclass ShowViewModel {\n    public ?string $rawImageUrl = null;\n    public int $ratingCount = 0;\n    public float $ratingScore = 0.0;\n}\n";
         open_php(&backend, &php_uri, php_text).await;
 
-        let uri = Url::parse("file:///show.blade.php").unwrap();
+        let uri = Uri::parse("file:///show.blade.php").unwrap();
         let body = "@php\n    /**\n     * @var ShowViewModel $model\n     */\n@endphp\n<?php\n// short\n$schema = [];\n\nif ($model->rawImageUrl !== null) {\n    $schema['image'] = $model->rawImageUrl;\n}\n\nif ($model->ratingCount > 0) {\n    $schema['aggregateRating'] = [\n        'ratingValue' => $model->ratingScore,\n    ];\n}\n?>\n";
         open_document(&backend, &uri, "blade", body).await;
 
@@ -549,11 +437,11 @@ mod tests {
     async fn test_var_docblock_with_generic_args_narrows_echo_call() {
         let backend = create_test_backend();
 
-        let php_uri = Url::parse("file:///Collection.php").unwrap();
+        let php_uri = Uri::parse("file:///Collection.php").unwrap();
         let php_text = "<?php\nnamespace App\\Models;\nclass Loaf {}\n/**\n * @template TKey of array-key\n * @template TValue\n */\nclass Collection {\n    /** @param TKey|null $key */\n    public function get($key) {}\n}\n";
         open_php(&backend, &php_uri, php_text).await;
 
-        let uri = Url::parse("file:///byname.blade.php").unwrap();
+        let uri = Uri::parse("file:///byname.blade.php").unwrap();
         let body = "@php\n/** @var \\App\\Models\\Collection<string, \\App\\Models\\Loaf> $byName */\n@endphp\n{{ $byName->get([1]) }}\n";
         open_document(&backend, &uri, "blade", body).await;
 
@@ -562,7 +450,10 @@ mod tests {
             .expect("blade virtual content");
         let mut diags = Vec::new();
         backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        let messages: Vec<String> = diags.into_iter().map(|d| d.message).collect();
+        let messages: Vec<String> = diags
+            .into_iter()
+            .map(|d| message_text(&d.message).to_string())
+            .collect();
 
         assert!(
             messages.iter().any(|m| m.contains("expects string|null")),
@@ -587,7 +478,10 @@ mod tests {
             .expect("blade virtual content");
         let mut diags = Vec::new();
         backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        let messages: Vec<String> = diags.into_iter().map(|d| d.message).collect();
+        let messages: Vec<String> = diags
+            .into_iter()
+            .map(|d| message_text(&d.message).to_string())
+            .collect();
 
         assert!(
             !messages.iter().any(|m| m.contains("got null")),
@@ -652,7 +546,10 @@ mod tests {
             .expect("blade virtual content");
         let mut diags = Vec::new();
         backend.collect_unused_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        let messages: Vec<String> = diags.into_iter().map(|d| d.message).collect();
+        let messages: Vec<String> = diags
+            .into_iter()
+            .map(|d| message_text(&d.message).to_string())
+            .collect();
 
         assert!(
             messages.is_empty(),
@@ -675,7 +572,10 @@ mod tests {
             .expect("blade virtual content");
         let mut diags = Vec::new();
         backend.collect_unused_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-        let messages: Vec<String> = diags.into_iter().map(|d| d.message).collect();
+        let messages: Vec<String> = diags
+            .into_iter()
+            .map(|d| message_text(&d.message).to_string())
+            .collect();
 
         assert!(
             messages.is_empty(),
@@ -698,7 +598,10 @@ mod tests {
                 .expect("blade virtual content");
             let mut diags = Vec::new();
             backend.collect_unused_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-            diags.into_iter().map(|d| d.message).collect::<Vec<_>>()
+            diags
+                .into_iter()
+                .map(|d| message_text(&d.message).to_string())
+                .collect::<Vec<_>>()
         };
 
         for body in [
@@ -729,11 +632,11 @@ mod tests {
     async fn test_unless_a_negated_condition_narrows_its_body() {
         let backend = create_test_backend();
 
-        let php_uri = Url::parse("file:///User.php").unwrap();
+        let php_uri = Uri::parse("file:///User.php").unwrap();
         let php_text = "<?php\nclass User {\n    public string $name = '';\n}\n";
         open_php(&backend, &php_uri, php_text).await;
 
-        let uri = Url::parse("file:///greeting.blade.php").unwrap();
+        let uri = Uri::parse("file:///greeting.blade.php").unwrap();
         let body = "@php\n/** @var ?User $user */\n@endphp\n@unless (!$user)\n    {{ $user->name }}\n@endunless\n";
         open_document(&backend, &uri, "blade", body).await;
 
@@ -752,8 +655,8 @@ mod tests {
     async fn test_lowering_declarations_are_not_workspace_symbols() {
         let backend = create_test_backend();
 
-        let first = Url::parse("file:///page.blade.php").unwrap();
-        let second = Url::parse("file:///other.blade.php").unwrap();
+        let first = Uri::parse("file:///page.blade.php").unwrap();
+        let second = Uri::parse("file:///other.blade.php").unwrap();
         let body = "@can('update', $post)\n    <p>ok</p>\n@endcan\n@section('content')\n@endsection\n@stack('scripts')\n";
         open_document(&backend, &first, "blade", body).await;
         open_document(&backend, &second, "blade", body).await;
@@ -765,8 +668,8 @@ mod tests {
         backend.collect_slow_diagnostics(first.as_str(), &virtual_php, &mut diags);
         let unknown: Vec<String> = diags
             .into_iter()
-            .filter(|d| matches!(&d.code, Some(NumberOrString::String(code)) if code == "unknown_function"))
-            .map(|d| d.message)
+            .filter(|d| matches!(&d.code, Some(Code::String(code)) if code == "unknown_function"))
+            .map(|d| message_text(&d.message).to_string())
             .collect();
         assert!(
             unknown.is_empty(),
@@ -781,7 +684,7 @@ mod tests {
             .handle_workspace_symbol("blade")
             .unwrap_or_default()
             .into_iter()
-            .map(|symbol| symbol.name)
+            .map(|symbol| symbol.base_symbol_information.name)
             .filter(|name| name.contains("blade_") || name.contains("__blade"))
             .collect();
         assert!(
@@ -792,27 +695,15 @@ mod tests {
 
         // Nor are they something to complete: a PHP file typing `blade`
         // is not reaching for the lowering's own functions.
-        let php_uri = Url::parse("file:///helpers.php").unwrap();
+        let php_uri = Uri::parse("file:///helpers.php").unwrap();
         let php = "<?php\nblade\n";
         open_php(&backend, &php_uri, php).await;
-        let completions = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: php_uri },
-                    position: Position {
-                        line: 1,
-                        character: 5,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: None,
-            })
-            .await
-            .unwrap();
+        let completions = completion_response(&backend, &php_uri, 1, 5, None).await;
         let offered: Vec<String> = match completions {
-            Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-            Some(CompletionResponse::List(list)) => {
+            Some(CompletionResponse::CompletionItemList(items)) => {
+                items.into_iter().map(|i| i.label).collect()
+            }
+            Some(CompletionResponse::CompletionList(list)) => {
                 list.items.into_iter().map(|i| i.label).collect()
             }
             None => Vec::new(),

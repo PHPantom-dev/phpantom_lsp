@@ -8,9 +8,10 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::common::message_text;
     use crate::common::{USER_MODEL_STUB, create_psr4_workspace, open_document};
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     const COMPOSER: &str = r#"{
         "require": { "laravel/framework": "^11.0" },
@@ -65,7 +66,7 @@ class ViewServiceProvider
         backend.initialized(InitializedParams {}).await;
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         open_document(backend, &uri, language_id, &text).await;
 
         // A Blade file is analysed through its virtual PHP, which is what
@@ -77,11 +78,11 @@ class ViewServiceProvider
         diags
             .into_iter()
             .filter_map(|d| match &d.code {
-                Some(NumberOrString::String(code))
+                Some(Code::String(code))
                     if code.ends_with("_view_variable")
                         || code == "type_mismatch_view_variable" =>
                 {
-                    Some((code.clone(), d.message))
+                    Some((code.clone(), message_text(&d.message).to_string()))
                 }
                 _ => None,
             })

@@ -10,9 +10,11 @@
 //! fallback for older clients; it deliberately does not send the same native
 //! diagnostics through both channels for the same client.
 //!
+//! The `diagnostic_provider` capability is advertised to every client, but
+//! the delivery model follows the client's own declaration.
+//!
 //! - **Pull model** (preferred) — when the client advertises
-//!   `textDocument.diagnostic` support, the server registers a
-//!   `diagnostic_provider` capability.  The editor requests diagnostics
+//!   `textDocument.diagnostic` support.  The editor requests diagnostics
 //!   via `textDocument/diagnostic` for visible files and
 //!   `workspace/diagnostic` for all open files.  Cross-file invalidation
 //!   (e.g. a class signature change) sends `workspace/diagnostic/refresh`
@@ -25,25 +27,22 @@
 //!   server pushes diagnostics via `textDocument/publishDiagnostics`
 //!   from a debounced background worker.  Each `did_change` bumps a
 //!   version counter; the worker waits for a quiet period before
-//!   publishing.
+//!   publishing.  Each published set is also cached with a `resultId`,
+//!   so a pull from such a client answers with what was last published.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tower_lsp::LanguageServer;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::request::{
-    GotoImplementationParams, GotoImplementationResponse, GotoTypeDefinitionParams,
-    GotoTypeDefinitionResponse,
-};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
+use tower_lsp_server::jsonrpc::Result;
 
 use crate::Backend;
 use crate::formatting;
 
 /// Run `f` on a blocking thread in a way that survives `$/cancelRequest`.
 ///
-/// tower-lsp 0.20 wedges its serve loop if a request handler future is
+/// The tower-lsp serve loop wedges if a request handler future is
 /// dropped (which is how it implements cancellation) while that future is
 /// directly awaiting a `spawn_blocking` JoinHandle: dropping the await
 /// detaches the handle, and when the orphaned blocking task later finishes it
@@ -98,6 +97,17 @@ where
 }
 
 impl Backend {
+    /// Whether `uri` is a resource document (a Twig template, a YAML or XML
+    /// file), which the client serves with another extension.  PHPantom
+    /// answers there only for the names it reads (completion, hover,
+    /// definition, references, rename, and the code actions on a string
+    /// key); every other request answers nothing, so the editor keeps that
+    /// extension's formatter, highlighting, outline, and folding rather
+    /// than having PHPantom's PHP features displace them.
+    fn is_foreign_document(&self, uri: &Uri) -> bool {
+        self.is_resource_uri(uri.as_str())
+    }
+
     /// Run a position-based request handler on the blocking pool.
     ///
     /// Wires up the `Backend` clone, URI clone, and cancel-safe dispatch
@@ -125,20 +135,72 @@ impl Backend {
             .unwrap_or(Ok(None))
     }
 
+    /// Run `body` on the blocking pool behind a work-done progress report.
+    ///
+    /// Reports through the client's `token`, or one created under `name`
+    /// when the client sent none, and polls the [`ScanProgress`] the backend
+    /// clone handed to `body` reports into. Running off the async runtime is
+    /// what leaves it free to flush those notifications while `body` works.
+    ///
+    /// [`ScanProgress`]: crate::progress::ScanProgress
+    async fn run_with_progress<R, F>(
+        &self,
+        name: &'static str,
+        title: &str,
+        message: &str,
+        token: Option<ProgressToken>,
+        body: F,
+    ) -> Option<R>
+    where
+        R: Send + 'static,
+        F: FnOnce(&Backend) -> R + Send + 'static,
+    {
+        let token = match token {
+            Some(t) => Some(t),
+            None => self.progress_create(name).await,
+        };
+
+        if let Some(ref tok) = token {
+            self.progress_begin(tok, title, Some(message.to_string()))
+                .await;
+        }
+
+        let mut backend = self.clone_for_blocking();
+        let poller = token.as_ref().map(|tok| {
+            let state = crate::progress::ScanProgress::new();
+            backend.request_progress = Some(Arc::clone(&state));
+            self.spawn_progress_poller(tok.clone(), state)
+        });
+        let result = run_blocking_cancel_safe(name, move || body(&backend)).await;
+
+        if let Some(poller) = poller {
+            poller.finish().await;
+        }
+        if let Some(ref tok) = token {
+            self.progress_end(tok, Some("Done".to_string())).await;
+        }
+
+        result
+    }
+
     /// Format a document, or with `range` only the lines it selects.
     ///
-    /// Every formatter works on a whole file, so a range request formats
-    /// the whole document and keeps the edits that touch the range.
+    /// The built-in formatter formats the construct enclosing the range;
+    /// the other formatters work on a whole file.  Either way only the
+    /// edits that touch the range are kept.
     async fn format_document(
         &self,
-        uri: &Url,
+        uri: &Uri,
         options: &FormattingOptions,
         range: Option<Range>,
     ) -> Result<Option<Vec<TextEdit>>> {
+        if self.is_foreign_document(uri) {
+            return Ok(None);
+        }
         let uri = uri.to_string();
 
         // External tools discover their config from the file's real path.
-        let Some(file_path) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
+        let Some(file_path) = crate::util::uri_to_path(&uri) else {
             return Ok(None);
         };
         let Some(content) = self.get_file_content(&uri) else {
@@ -146,8 +208,8 @@ impl Backend {
         };
 
         // Blade markup isn't PHP, so a template resolves its own strategy:
-        // Pint when the project formats Blade with it, the built-in
-        // reindenter otherwise.
+        // Pint or blade-formatter when the project formats Blade with one,
+        // the built-in reindenter otherwise.
         let is_blade = self.is_blade_file(&uri);
         let blade_options = formatting::blade::options_from_lsp(options);
 
@@ -166,7 +228,12 @@ impl Backend {
                 )
             } else {
                 let strategy = backend.resolve_formatting_strategy();
-                backend.format_content(&strategy, &file_path, &content, &backend.shutdown_flag)
+                let cancelled = &backend.shutdown_flag;
+                match range {
+                    Some(range) => backend
+                        .format_range_content(&strategy, &file_path, &content, range, cancelled),
+                    None => backend.format_content(&strategy, &file_path, &content, cancelled),
+                }
             };
             formatted.map(|formatted| {
                 formatted.map(|text| match range {
@@ -180,19 +247,19 @@ impl Backend {
         match result {
             Some(Ok(edits)) => Ok(edits),
             Some(Err(e)) => {
-                self.log(MessageType::ERROR, format!("Formatting failed: {}", e))
+                self.log(MessageType::Error, format!("Formatting failed: {}", e))
                     .await;
-                Err(tower_lsp::jsonrpc::Error {
-                    code: tower_lsp::jsonrpc::ErrorCode::InternalError,
+                Err(tower_lsp_server::jsonrpc::Error {
+                    code: tower_lsp_server::jsonrpc::ErrorCode::InternalError,
                     message: format!("Formatting failed: {}", e).into(),
                     data: None,
                 })
             }
             None => {
                 let msg = "Formatting task panicked".to_string();
-                self.log(MessageType::ERROR, msg.clone()).await;
-                Err(tower_lsp::jsonrpc::Error {
-                    code: tower_lsp::jsonrpc::ErrorCode::InternalError,
+                self.log(MessageType::Error, msg.clone()).await;
+                Err(tower_lsp_server::jsonrpc::Error {
+                    code: tower_lsp_server::jsonrpc::ErrorCode::InternalError,
                     message: msg.into(),
                     data: None,
                 })
@@ -201,7 +268,6 @@ impl Backend {
     }
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         self.on_initialize(params).await
@@ -247,18 +313,21 @@ impl LanguageServer for Backend {
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         // Clients re-push settings for reasons of their own, so a
-        // notification that carries no file filters is not a request to
-        // drop the ones already in force, and one that repeats the
-        // current filters is not a change.
-        let Some(options) =
-            crate::config::ClientIndexingOptions::from_client_settings(&params.settings)
-        else {
+        // notification that carries no file filters or stub directory is
+        // not a request to drop the ones already in force, and one that
+        // repeats the current settings is not a change.
+        let indexing = crate::config::ClientIndexingOptions::from_client_settings(&params.settings);
+        let stubs = crate::config::ClientStubOptions::from_client_settings(&params.settings);
+        if indexing.is_none() && stubs.is_none() {
             return;
-        };
+        }
         // Captured before the change, so the reconciliation below can
-        // tell which way the filters moved.
+        // tell which way the inputs moved.
         let previous_inputs = self.discovery_inputs();
-        if !self.set_client_indexing_options(options) {
+        let filters_changed =
+            indexing.is_some_and(|options| self.set_client_indexing_options(options));
+        let stubs_changed = stubs.is_some_and(|options| self.set_client_stub_options(options));
+        if !filters_changed && !stubs_changed {
             return;
         }
 
@@ -266,11 +335,13 @@ impl LanguageServer for Backend {
         // never reports events for those files and the index keeps
         // serving the last full scan. Same follow-up a live
         // `.phpantom.toml` edit performs.
-        self.reregister_watched_files_if_changed();
+        if filters_changed {
+            self.reregister_watched_files_if_changed();
+        }
 
-        // The index was built under the filters the user just changed
-        // away from: drop what they now exclude, and walk for what they
-        // now admit.
+        // The index was built under the settings the user just changed
+        // away from: drop what the filters now exclude, walk for what they
+        // now admit, and rebuild the stub index if its paths moved.
         self.reconcile_index_for_input_change(&previous_inputs);
 
         // A narrowed exclude list makes classes resolvable that were
@@ -285,10 +356,14 @@ impl LanguageServer for Backend {
         self.on_did_change_watched_files(params).await
     }
 
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        self.on_did_change_workspace_folders(params).await
+    }
+
     async fn goto_definition(
         &self,
-        params: GotoDefinitionParams,
-    ) -> Result<Option<GotoDefinitionResponse>> {
+        params: DefinitionParams,
+    ) -> Result<Option<DefinitionResponse>> {
         let uri = params
             .text_document_position_params
             .text_document
@@ -304,17 +379,19 @@ impl LanguageServer for Backend {
                 // YAML and XML may name PHP classes under any schema. Resolve
                 // fully-qualified class and Class::member tokens before entering
                 // the PHP-only symbol-map path below.
-                if crate::resource_navigation::is_resource_document(uri) {
-                    let location = backend.get_file_content(uri).and_then(|content| {
-                        crate::util::catch_panic_unwind_safe(
-                            "goto_definition",
-                            uri,
-                            Some(position),
-                            || backend.resolve_resource_definition(&content, position),
-                        )
-                        .flatten()
-                    });
-                    return Ok(location.map(GotoDefinitionResponse::Scalar));
+                if backend.is_resource_uri(uri) {
+                    let locations = backend
+                        .get_file_content(uri)
+                        .and_then(|content| {
+                            crate::util::catch_panic_unwind_safe(
+                                "goto_definition",
+                                uri,
+                                Some(position),
+                                || backend.resolve_resource_definition(uri, &content, position),
+                            )
+                        })
+                        .unwrap_or_default();
+                    return Ok(wrap_locations(locations).map(DefinitionResponse::Definition));
                 }
 
                 // A component tag is HTML, so it has no position in the virtual
@@ -329,7 +406,9 @@ impl LanguageServer for Backend {
                     )
                     .flatten()
                 {
-                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                    return Ok(Some(DefinitionResponse::Definition(Definition::Location(
+                        location,
+                    ))));
                 }
                 // For Blade files, check if the cursor is on an echo delimiter
                 // (`{{`/`}}` or `{!!`/`!!}`) first, so go-to-definition agrees
@@ -341,23 +420,17 @@ impl LanguageServer for Backend {
                     && let Some(delimiter_result) =
                         backend.blade_echo_delimiter_definition(uri, position)
                 {
-                    return Ok(delimiter_result.map(GotoDefinitionResponse::Scalar));
+                    return Ok(delimiter_result.map(|location| {
+                        DefinitionResponse::Definition(Definition::Location(location))
+                    }));
                 }
                 backend.handle_with_position("goto_definition", uri, position, |content, pos| {
-                    let locs = backend.resolve_definition(uri, content, pos);
-                    if locs.is_empty() {
-                        None
-                    } else if locs.len() == 1 {
-                        Some(GotoDefinitionResponse::Scalar(
-                            backend.translate_location(locs[0].clone()),
-                        ))
-                    } else {
-                        Some(GotoDefinitionResponse::Array(
-                            locs.into_iter()
-                                .map(|l| backend.translate_location(l))
-                                .collect(),
-                        ))
-                    }
+                    let locs = backend
+                        .resolve_definition(uri, content, pos)
+                        .into_iter()
+                        .map(|l| backend.translate_location(l))
+                        .collect();
+                    wrap_locations(locs).map(DefinitionResponse::Definition)
                 })
             },
         )
@@ -366,67 +439,52 @@ impl LanguageServer for Backend {
 
     async fn goto_implementation(
         &self,
-        params: GotoImplementationParams,
-    ) -> Result<Option<GotoImplementationResponse>> {
+        params: ImplementationParams,
+    ) -> Result<Option<ImplementationResponse>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
             .uri
             .to_string();
         let position = params.text_document_position_params.position;
-        let token = match params.work_done_progress_params.work_done_token {
-            Some(t) => Some(t),
-            None => self.progress_create("goto_implementation").await,
-        };
-
-        if let Some(ref tok) = token {
-            self.progress_begin(tok, "Go to Implementation", Some("Resolving…".to_string()))
-                .await;
-        }
-
-        // Run on a blocking thread so the async runtime stays free to
-        // flush progress notifications to the client.
-        let mut backend = self.clone_for_blocking();
-        let poller = token.as_ref().map(|tok| {
-            let state = crate::progress::ScanProgress::new();
-            backend.request_progress = Some(Arc::clone(&state));
-            self.spawn_progress_poller(tok.clone(), state)
-        });
-        let uri_clone = uri.clone();
-        let result = run_blocking_cancel_safe("goto_implementation", move || {
-            backend.handle_with_position(
-                "goto_implementation",
-                &uri_clone,
-                position,
-                |content, pos| {
-                    backend
-                        .resolve_implementation(&uri_clone, content, pos)
-                        .map(|locs| {
-                            locs.into_iter()
-                                .map(|l| backend.translate_location(l))
-                                .collect()
-                        })
-                        .and_then(wrap_locations)
-                },
-            )
-        })
+        self.run_with_progress(
+            "goto_implementation",
+            "Go to Implementation",
+            "Resolving…",
+            params.work_done_progress_params.work_done_token,
+            move |backend| {
+                backend.handle_with_position(
+                    "goto_implementation",
+                    &uri,
+                    position,
+                    |content, pos| {
+                        backend
+                            .resolve_implementation(&uri, content, pos)
+                            .map(|locs| {
+                                locs.into_iter()
+                                    .map(|l| backend.translate_location(l))
+                                    .collect()
+                            })
+                            .and_then(wrap_locations)
+                            .map(ImplementationResponse::Definition)
+                    },
+                )
+            },
+        )
         .await
-        .unwrap_or(Ok(None));
-
-        if let Some(poller) = poller {
-            poller.finish().await;
-        }
-        if let Some(ref tok) = token {
-            self.progress_end(tok, Some("Done".to_string())).await;
-        }
-
-        result
+        .unwrap_or(Ok(None))
     }
 
     async fn goto_type_definition(
         &self,
-        params: GotoTypeDefinitionParams,
-    ) -> Result<Option<GotoTypeDefinitionResponse>> {
+        params: TypeDefinitionParams,
+    ) -> Result<Option<TypeDefinitionResponse>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -452,6 +510,7 @@ impl LanguageServer for Backend {
                                     .collect()
                             })
                             .and_then(wrap_locations)
+                            .map(TypeDefinitionResponse::Definition)
                     },
                 )
             },
@@ -509,8 +568,8 @@ impl LanguageServer for Backend {
 
         let elapsed = started.elapsed();
         let item_count = match &result {
-            Ok(Some(CompletionResponse::Array(items))) => items.len(),
-            Ok(Some(CompletionResponse::List(list))) => list.items.len(),
+            Ok(Some(CompletionResponse::CompletionItemList(items))) => items.len(),
+            Ok(Some(CompletionResponse::CompletionList(list))) => list.items.len(),
             _ => 0,
         };
         tracing::debug!(
@@ -538,56 +597,41 @@ impl LanguageServer for Backend {
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let uri = params.text_document_position.text_document.uri.to_string();
-        let position = params.text_document_position.position;
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
         let include_declaration = params.context.include_declaration;
-        let token = match params.work_done_progress_params.work_done_token {
-            Some(t) => Some(t),
-            None => self.progress_create("find_references").await,
-        };
-
-        if let Some(ref tok) = token {
-            self.progress_begin(tok, "Find References", Some("Scanning…".to_string()))
-                .await;
-        }
-
-        // Run on a blocking thread so the async runtime stays free to
-        // flush progress notifications to the client.
-        let mut backend = self.clone_for_blocking();
-        let poller = token.as_ref().map(|tok| {
-            let state = crate::progress::ScanProgress::new();
-            backend.request_progress = Some(Arc::clone(&state));
-            self.spawn_progress_poller(tok.clone(), state)
-        });
-        let uri_clone = uri.clone();
-        let result = run_blocking_cancel_safe("references", move || {
-            // Ahead of reading the file: a refresh that parses new files can
-            // rewrite a template's virtual PHP (see `Backend::find_references`).
-            backend.ensure_workspace_indexed_for_request();
-            backend.handle_with_position("references", &uri_clone, position, |content, pos| {
-                backend
-                    .find_references(&uri_clone, content, pos, include_declaration)
-                    .map(|locs| {
-                        locs.into_iter()
-                            .filter_map(|l| backend.try_translate_location(l))
-                            .collect()
-                    })
-            })
-        })
+        self.run_with_progress(
+            "find_references",
+            "Find References",
+            "Scanning…",
+            params.work_done_progress_params.work_done_token,
+            move |backend| {
+                // Ahead of reading the file: a refresh that parses new files can
+                // rewrite a template's virtual PHP (see `Backend::find_references`).
+                backend.ensure_workspace_indexed_for_request();
+                backend.handle_with_position("references", &uri, position, |content, pos| {
+                    backend
+                        .find_references(&uri, content, pos, include_declaration)
+                        .map(|locs| {
+                            locs.into_iter()
+                                .filter_map(|l| backend.try_translate_location(l))
+                                .collect()
+                        })
+                })
+            },
+        )
         .await
-        .unwrap_or(Ok(None));
-
-        if let Some(poller) = poller {
-            poller.finish().await;
-        }
-        if let Some(ref tok) = token {
-            self.progress_end(tok, Some("Done".to_string())).await;
-        }
-
-        result
+        .unwrap_or(Ok(None))
     }
 
-    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> Result<Option<Vec<CodeActionResponse>>> {
         let uri = params.text_document.uri.to_string();
 
         // Code actions are not yet Blade-aware (edits target virtual PHP
@@ -637,6 +681,9 @@ impl LanguageServer for Backend {
     }
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -656,6 +703,9 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentHighlightParams,
     ) -> Result<Option<Vec<DocumentHighlight>>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -689,7 +739,7 @@ impl LanguageServer for Backend {
     async fn prepare_rename(
         &self,
         params: TextDocumentPositionParams,
-    ) -> Result<Option<PrepareRenameResponse>> {
+    ) -> Result<Option<PrepareRenameResult>> {
         let uri = params.text_document.uri.to_string();
         let position = params.position;
 
@@ -698,16 +748,21 @@ impl LanguageServer for Backend {
                 backend
                     .handle_prepare_rename(uri, content, pos)
                     .and_then(|res| match res {
-                        PrepareRenameResponse::Range(r) => backend
+                        PrepareRenameResult::Range(r) => backend
                             .try_translate_blade_range(uri, r)
-                            .map(PrepareRenameResponse::Range),
-                        PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
-                            backend.try_translate_blade_range(uri, range).map(|range| {
-                                PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }
-                            })
-                        }
-                        PrepareRenameResponse::DefaultBehavior { default_behavior } => {
-                            Some(PrepareRenameResponse::DefaultBehavior { default_behavior })
+                            .map(PrepareRenameResult::Range),
+                        PrepareRenameResult::PrepareRenamePlaceholder(p) => backend
+                            .try_translate_blade_range(uri, p.range)
+                            .map(|range| {
+                                PrepareRenameResult::PrepareRenamePlaceholder(
+                                    PrepareRenamePlaceholder {
+                                        range,
+                                        placeholder: p.placeholder,
+                                    },
+                                )
+                            }),
+                        default @ PrepareRenameResult::PrepareRenameDefaultBehavior(_) => {
+                            Some(default)
                         }
                     })
             })
@@ -716,8 +771,12 @@ impl LanguageServer for Backend {
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
-        let uri = params.text_document_position.text_document.uri.to_string();
-        let position = params.text_document_position.position;
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
         let new_name = params.new_name.clone();
 
         let backend = self.clone_for_blocking();
@@ -752,9 +811,9 @@ impl LanguageServer for Backend {
         // of the rename protocol an editor shows them.
         match outcome {
             Some(Err(message)) => {
-                self.log(MessageType::WARNING, message.clone()).await;
-                Err(tower_lsp::jsonrpc::Error {
-                    code: tower_lsp::jsonrpc::ErrorCode::InvalidRequest,
+                self.log(MessageType::Warning, message.clone()).await;
+                Err(tower_lsp_server::jsonrpc::Error {
+                    code: tower_lsp_server::jsonrpc::ErrorCode::InvalidRequest,
                     message: message.into(),
                     data: None,
                 })
@@ -768,6 +827,9 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -783,7 +845,7 @@ impl LanguageServer for Backend {
     async fn symbol(
         &self,
         params: WorkspaceSymbolParams,
-    ) -> Result<Option<Vec<SymbolInformation>>> {
+    ) -> Result<Option<WorkspaceSymbolResponse>> {
         // The query is matched against every symbol of every parsed file, so
         // this walks the whole workspace index.
         let backend = self.clone_for_blocking();
@@ -791,10 +853,14 @@ impl LanguageServer for Backend {
             backend.handle_workspace_symbol(&params.query)
         })
         .await
-        .flatten())
+        .flatten()
+        .map(WorkspaceSymbolResponse::SymbolInformationList))
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -807,6 +873,9 @@ impl LanguageServer for Backend {
     }
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -836,8 +905,8 @@ impl LanguageServer for Backend {
         params: ExecuteCommandParams,
     ) -> Result<Option<serde_json::Value>> {
         if params.command == "phpantom.navigateToPrototype"
-            && let [uri_val, pos_val] = params.arguments.as_slice()
-            && let Ok(uri) = serde_json::from_value::<Url>(uri_val.clone())
+            && let Some([uri_val, pos_val]) = params.arguments.as_deref()
+            && let Ok(uri) = serde_json::from_value::<Uri>(uri_val.clone())
             && let Ok(position) = serde_json::from_value::<Position>(pos_val.clone())
             && let Some(ref client) = self.client
         {
@@ -868,6 +937,9 @@ impl LanguageServer for Backend {
     }
 
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -883,6 +955,9 @@ impl LanguageServer for Backend {
         &self,
         params: SelectionRangeParams,
     ) -> Result<Option<Vec<SelectionRange>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let positions = params.positions;
         // Each request re-parses the whole file. Not coalesced like the other
@@ -902,7 +977,10 @@ impl LanguageServer for Backend {
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
-    ) -> Result<Option<SemanticTokensResult>> {
+    ) -> Result<Option<SemanticTokens>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         // Highlighting is requested on every keystroke, re-serializes the whole
         // token array, and is one of the most expensive whole-file requests.
@@ -919,6 +997,9 @@ impl LanguageServer for Backend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         self.inlay_hint_request(params).await
     }
 
@@ -926,6 +1007,9 @@ impl LanguageServer for Backend {
         &self,
         params: CallHierarchyPrepareParams,
     ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -982,6 +1066,9 @@ impl LanguageServer for Backend {
         &self,
         params: TypeHierarchyPrepareParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -1037,35 +1124,17 @@ impl LanguageServer for Backend {
         &self,
         params: TypeHierarchySubtypesParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
-        let mut backend = self.clone_for_blocking();
         let item = params.item;
-        let token = match params.work_done_progress_params.work_done_token {
-            Some(t) => Some(t),
-            None => self.progress_create("type_hierarchy_subtypes").await,
-        };
-
-        if let Some(ref tok) = token {
-            self.progress_begin(tok, "Type Hierarchy", Some("Scanning…".to_string()))
-                .await;
-        }
-        let poller = token.as_ref().map(|tok| {
-            let state = crate::progress::ScanProgress::new();
-            backend.request_progress = Some(Arc::clone(&state));
-            self.spawn_progress_poller(tok.clone(), state)
-        });
-
-        let result = run_blocking_cancel_safe("subtypes", move || backend.subtypes_impl(&item))
+        Ok(self
+            .run_with_progress(
+                "type_hierarchy_subtypes",
+                "Type Hierarchy",
+                "Scanning…",
+                params.work_done_progress_params.work_done_token,
+                move |backend| backend.subtypes_impl(&item),
+            )
             .await
-            .flatten();
-
-        if let Some(poller) = poller {
-            poller.finish().await;
-        }
-        if let Some(ref tok) = token {
-            self.progress_end(tok, Some("Done".to_string())).await;
-        }
-
-        Ok(result)
+            .flatten())
     }
 
     async fn on_type_formatting(
@@ -1073,12 +1142,12 @@ impl LanguageServer for Backend {
         params: DocumentOnTypeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         // Only handle Enter ("\n") for PHPDoc block generation.
-        if params.ch != "\n" {
+        if params.ch != "\n" || self.is_foreign_document(&params.text_document.uri) {
             return Ok(None);
         }
 
-        let uri = params.text_document_position.text_document.uri.to_string();
-        let position = params.text_document_position.position;
+        let uri = params.text_document.uri.to_string();
+        let position = params.position;
 
         let content = match self.get_file_content(&uri) {
             Some(c) => c,
@@ -1093,6 +1162,7 @@ impl LanguageServer for Backend {
             let offset = crate::text_position::position_to_offset(&content, position);
             let ctx = backend.file_context_at(&u, offset);
             let class_loader = backend.class_loader(&ctx);
+            let resolved_class_loader = backend.resolved_class_loader(&ctx);
             let function_loader = backend.function_loader(&ctx);
 
             crate::completion::phpdoc::generation::try_generate_docblock_on_enter(
@@ -1102,6 +1172,7 @@ impl LanguageServer for Backend {
                 &ctx.namespace,
                 &ctx.classes,
                 &class_loader,
+                &resolved_class_loader,
                 Some(&backend),
                 Some(&function_loader),
                 &u,
@@ -1131,14 +1202,14 @@ impl LanguageServer for Backend {
     async fn diagnostic(
         &self,
         params: DocumentDiagnosticParams,
-    ) -> Result<DocumentDiagnosticReportResult> {
+    ) -> Result<DocumentDiagnosticReport> {
         self.document_pull_diagnostic(params)
     }
 
     async fn workspace_diagnostic(
         &self,
         params: WorkspaceDiagnosticParams,
-    ) -> Result<WorkspaceDiagnosticReportResult> {
+    ) -> Result<WorkspaceDiagnosticReport> {
         self.workspace_pull_diagnostic(params)
     }
 }
@@ -1150,11 +1221,13 @@ pub(crate) fn type_hierarchy_registration() -> Registration {
         register_options: Some(
             serde_json::to_value(TypeHierarchyRegistrationOptions {
                 text_document_registration_options: TextDocumentRegistrationOptions {
-                    document_selector: Some(vec![DocumentFilter {
-                        language: Some("php".to_string()),
-                        scheme: None,
-                        pattern: None,
-                    }]),
+                    document_selector: Some(vec![DocumentFilter::TextDocumentFilter(
+                        TextDocumentFilter::Language(TextDocumentFilterLanguage {
+                            language: "php".to_string(),
+                            scheme: None,
+                            pattern: None,
+                        }),
+                    )]),
                 },
                 type_hierarchy_options: TypeHierarchyOptions::default(),
                 static_registration_options: StaticRegistrationOptions::default(),
@@ -1164,18 +1237,16 @@ pub(crate) fn type_hierarchy_registration() -> Registration {
     }
 }
 
-/// Convert a `Vec<Location>` into a `GotoDefinitionResponse`.
+/// Convert a `Vec<Location>` into a `Definition`, the payload shared by
+/// the definition, implementation and type-definition responses.
 ///
-/// Returns `Scalar` for a single location, `Array` for multiple, and
-/// `None` for an empty vec.  This is used by `goto_implementation` and
-/// `goto_type_definition` which both share this pattern.
-fn wrap_locations(locations: Vec<Location>) -> Option<GotoDefinitionResponse> {
+/// Returns a single `Location` for one location, a list for several, and
+/// `None` for an empty vec.
+fn wrap_locations(mut locations: Vec<Location>) -> Option<Definition> {
     match locations.len() {
         0 => None,
-        1 => Some(GotoDefinitionResponse::Scalar(
-            locations.into_iter().next().unwrap(),
-        )),
-        _ => Some(GotoDefinitionResponse::Array(locations)),
+        1 => locations.pop().map(Definition::Location),
+        _ => Some(Definition::LocationList(locations)),
     }
 }
 
@@ -1196,168 +1267,5 @@ mod tests {
         assert_eq!(options["documentSelector"][0]["language"], "php");
         assert!(options["documentSelector"][0].get("scheme").is_none());
         assert!(options["documentSelector"][0].get("pattern").is_none());
-    }
-
-    /// `initialize` params carrying a workspace root and whatever the
-    /// client chose to send as its initialization options.
-    fn init_params(
-        root: &std::path::Path,
-        initialization_options: Option<serde_json::Value>,
-    ) -> InitializeParams {
-        #[allow(deprecated)]
-        InitializeParams {
-            root_uri: Some(Url::from_file_path(root).unwrap()),
-            initialization_options,
-            ..Default::default()
-        }
-    }
-
-    /// The filters have to be live before anything scans, so the first
-    /// discovery pass already honours them instead of indexing excluded
-    /// trees and dropping them afterwards.
-    #[tokio::test]
-    async fn initialize_applies_client_supplied_file_filters() {
-        let dir = tempfile::tempdir().unwrap();
-        let backend = Backend::new_test();
-
-        backend
-            .initialize(init_params(
-                dir.path(),
-                Some(serde_json::json!({
-                    "indexing": { "exclude": ["generated"], "extensions": ["module"] }
-                })),
-            ))
-            .await
-            .unwrap();
-
-        let filters = backend.index_filters();
-        assert!(filters.is_excluded_entry(&dir.path().join("generated"), true));
-        assert!(filters.is_php_file(&dir.path().join("a.module")));
-    }
-
-    /// Most clients send nothing, and one that does may send a shape
-    /// meant for something else entirely. Neither may switch filtering on.
-    #[tokio::test]
-    async fn initialize_without_client_filters_leaves_discovery_unfiltered() {
-        let dir = tempfile::tempdir().unwrap();
-
-        for options in [None, Some(serde_json::json!({ "unrelated": true }))] {
-            let backend = Backend::new_test();
-            backend
-                .initialize(init_params(dir.path(), options))
-                .await
-                .unwrap();
-
-            let filters = backend.index_filters();
-            assert!(!filters.is_excluded_entry(&dir.path().join("generated"), true));
-            assert!(!filters.is_php_file(&dir.path().join("a.module")));
-        }
-    }
-
-    /// Editing the editor's own settings mid-session has to take effect
-    /// without a restart, the same way a live `.phpantom.toml` edit does.
-    #[tokio::test]
-    async fn did_change_configuration_recompiles_the_filters() {
-        let dir = tempfile::tempdir().unwrap();
-        let backend = Backend::new_test();
-        backend
-            .initialize(init_params(dir.path(), None))
-            .await
-            .unwrap();
-
-        backend
-            .did_change_configuration(DidChangeConfigurationParams {
-                settings: serde_json::json!({
-                    "phpantom": { "indexing": { "exclude": ["generated"] } }
-                }),
-            })
-            .await;
-
-        assert!(
-            backend
-                .index_filters()
-                .is_excluded_entry(&dir.path().join("generated"), true)
-        );
-
-        // Removing the entry again has to restore the unfiltered walk,
-        // not merely stop adding to the exclude list.
-        backend
-            .did_change_configuration(DidChangeConfigurationParams {
-                settings: serde_json::json!({ "phpantom": { "indexing": {} } }),
-            })
-            .await;
-
-        assert!(
-            !backend
-                .index_filters()
-                .is_excluded_entry(&dir.path().join("generated"), true)
-        );
-    }
-
-    /// Recompiling the filters only governs the next scan. The
-    /// notification also has to reconcile the index that was built under
-    /// the old ones, or a class in a folder the user just hid keeps
-    /// answering completion and workspace symbol search until restart.
-    #[tokio::test]
-    async fn did_change_configuration_evicts_newly_excluded_classes() {
-        let dir = tempfile::tempdir().unwrap();
-        let backend = Backend::new_test();
-        backend
-            .initialize(init_params(dir.path(), None))
-            .await
-            .unwrap();
-
-        let hidden = dir.path().join("generated/Hidden.php");
-        std::fs::create_dir_all(hidden.parent().unwrap()).unwrap();
-        std::fs::write(&hidden, "<?php\nclass Hidden {}\n").unwrap();
-        let uri = crate::util::path_to_uri(&hidden);
-        backend
-            .symbols
-            .with_class_declarations(|decls| decls.note_discovered("Hidden", uri));
-
-        backend
-            .did_change_configuration(DidChangeConfigurationParams {
-                settings: serde_json::json!({
-                    "phpantom": { "indexing": { "exclude": ["generated"] } }
-                }),
-            })
-            .await;
-
-        assert!(
-            backend.symbols.fqn_uri_index.read().get("Hidden").is_none(),
-            "a class under a newly excluded folder must leave the index"
-        );
-    }
-
-    /// VS Code's client syncs the whole `phpantom` settings section on
-    /// every change to any key in it. That notification says nothing
-    /// about file filters, so it must leave the ones the extension
-    /// forwarded at startup alone rather than reading as "cleared".
-    #[tokio::test]
-    async fn a_settings_push_without_filters_leaves_them_in_force() {
-        let dir = tempfile::tempdir().unwrap();
-        let backend = Backend::new_test();
-        backend
-            .initialize(init_params(
-                dir.path(),
-                Some(serde_json::json!({ "indexing": { "exclude": ["generated"] } })),
-            ))
-            .await
-            .unwrap();
-
-        backend
-            .did_change_configuration(DidChangeConfigurationParams {
-                settings: serde_json::json!({
-                    "phpantom": { "trace": { "server": "verbose" } }
-                }),
-            })
-            .await;
-
-        assert!(
-            backend
-                .index_filters()
-                .is_excluded_entry(&dir.path().join("generated"), true),
-            "an unrelated settings push must not discard the client's filters"
-        );
     }
 }

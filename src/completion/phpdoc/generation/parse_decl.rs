@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use crate::completion::phpdoc::context::{DocblockContext, SymbolInfo};
 use crate::completion::phpdoc::helpers::{find_keyword_pos, find_matching_paren, split_params};

@@ -1,18 +1,19 @@
 //! Per-file content and context accessors on [`Backend`].
 //!
-//! These read (and, for `clear_file_maps`, clear) the per-URI maps that
-//! back every feature's "what do we know about this file?" query:
-//! open-file content, the class index, the import table, and the
-//! namespace map. Centralising them here removes the repeated
+//! These read (and, for `clear_file_maps`, clear) the per-URI state that
+//! backs every feature's "what do we know about this file?" query:
+//! open-file content, the class index, and the [`FileState`] each parse
+//! publishes (symbol map, imports, namespaces). Centralising them here removes the repeated
 //! lock-and-unwrap boilerplate that used to be duplicated across the
 //! completion handler, definition resolver, and other consumers.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Position, Url};
+use tower_lsp_server::gen_lsp_types::Position;
 
 use crate::Backend;
+use crate::file_state::FileState;
 use crate::types::{ClassInfo, FileContext, NamespaceSpan};
 
 impl Backend {
@@ -39,35 +40,13 @@ impl Backend {
         None
     }
 
-    /// Get the content of a file by URI, trying open files first then disk.
+    /// Get the content of a file by URI, trying open files first, then the
+    /// embedded stubs, then disk.
     ///
-    /// This replaces the repeated pattern of locking `open_files`, looking
-    /// up the URI, and falling back to reading from disk via
-    /// `Url::to_file_path` + `std::fs::read_to_string`.  Three call sites
-    /// in the definition modules used this exact sequence.
+    /// An owned copy of [`get_file_content_arc`](Self::get_file_content_arc)'s
+    /// answer, for callers that need a `String`.
     pub(crate) fn get_file_content(&self, uri: &str) -> Option<String> {
-        if let Some(content) = self.open_files.read().get(uri) {
-            return Some(String::clone(content));
-        }
-
-        // Embedded class stubs live under synthetic `phpantom-stub://`
-        // URIs and have no on-disk file.  Retrieve the raw source from
-        // the stub_index keyed by the class short name (the URI path).
-        if let Some(class_name) = uri.strip_prefix("phpantom-stub://") {
-            let stub_idx = self.stub_index.read();
-            return stub_idx.get(class_name).map(|s| s.to_string());
-        }
-
-        // Embedded function stubs use `phpantom-stub-fn://` URIs.
-        // The path component is the function name used as key in
-        // stub_function_index.
-        if let Some(func_name) = uri.strip_prefix("phpantom-stub-fn://") {
-            let stub_fn_idx = self.stub_function_index.read();
-            return stub_fn_idx.get(func_name).map(|s| s.to_string());
-        }
-
-        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
-        std::fs::read_to_string(path).ok()
+        self.get_file_content_arc(uri).map(Arc::unwrap_or_clone)
     }
 
     /// The text a request against `uri` analyses: the virtual PHP a
@@ -124,21 +103,20 @@ impl Backend {
             return Some(Arc::clone(content));
         }
 
-        // Embedded class stubs live under synthetic `phpantom-stub://`
-        // URIs and have no on-disk file.
-        if let Some(class_name) = uri.strip_prefix("phpantom-stub://") {
+        // Embedded stubs have no on-disk file.  A class stub's URI path is
+        // the key of its source in `stub_index`, and a function stub's the
+        // key in `stub_function_index`.
+        if let Some(class_name) = uri.strip_prefix(crate::stubs::STUB_URI_PREFIX) {
             let stub_idx = self.stub_index.read();
             return stub_idx.get(class_name).map(|s| Arc::new(s.to_string()));
         }
-
-        // Embedded function stubs use `phpantom-stub-fn://` URIs.
-        if let Some(func_name) = uri.strip_prefix("phpantom-stub-fn://") {
+        if let Some(func_name) = uri.strip_prefix(crate::stubs::STUB_FUNCTION_URI_PREFIX) {
             let stub_fn_idx = self.stub_function_index.read();
             return stub_fn_idx.get(func_name).map(|s| Arc::new(s.to_string()));
         }
 
-        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
-        std::fs::read_to_string(path).ok().map(Arc::new)
+        let path = crate::util::uri_to_path(uri)?;
+        crate::util::read_php_source(&path).map(Arc::new)
     }
 
     /// Public helper for tests: get the uri_classes_index entry for a given URI.
@@ -213,15 +191,9 @@ impl Backend {
     }
 
     /// Gather the per-file context (classes, use-map, namespace) in one call.
-    ///
-    /// This replaces the repeated lock-and-unwrap boilerplate that was
-    /// duplicated across the completion handler, definition resolver,
-    /// implementation resolver, and variable definition modules.  Each of
-    /// those sites used to have three nearly-identical blocks acquiring
-    /// `uri_classes_index`, `file_imports`, and `file_namespaces` locks
-    /// and extracting the entry for a given URI.
     pub(crate) fn file_context(&self, uri: &str) -> FileContext {
         let classes = self.linked_classes_for_uri(uri);
+        let state = self.file_state(uri);
 
         // The legacy use_map (short name → FQN from `use` statements)
         // remains the canonical import table.  `resolved_names` is a
@@ -231,26 +203,29 @@ impl Backend {
         // *referenced* in the code, not all *declared* imports.
         // The unused-imports diagnostic relies on seeing declared-but-
         // unreferenced imports.
-        let use_map = self
-            .file_imports
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let symbol_imports = self.symbol_imports_for(uri);
-
-        let (namespace, namespace_spans) = self.namespace_and_spans(uri);
-        let resolved_names = self.resolved_names.read().get(uri).cloned();
-
+        let Some(state) = state else {
+            return FileContext {
+                classes,
+                pest_uses: self.pest_uses_for(uri),
+                ..FileContext::default()
+            };
+        };
+        let (namespace, namespace_spans) = namespace_and_spans(&state.namespaces);
         FileContext {
             classes,
-            use_map,
-            symbol_imports,
+            use_map: state.use_map.clone(),
+            symbol_imports: state.symbol_imports.clone(),
             namespace,
             namespace_spans,
-            resolved_names,
+            resolved_names: state.resolved_names.clone(),
             pest_uses: self.pest_uses_for(uri),
         }
+    }
+
+    /// What the last parse of `uri` published, or `None` when it has never
+    /// been parsed.
+    pub(crate) fn file_state(&self, uri: &str) -> Option<Arc<FileState>> {
+        self.files.read().get(uri).cloned()
     }
 
     /// Like [`file_context`](Self::file_context) but resolves the namespace
@@ -277,42 +252,17 @@ impl Backend {
         uri: &str,
         byte_offset: u32,
     ) -> (HashMap<String, String>, Option<String>) {
-        {
-            let nmap = self.file_namespaces.read();
-            if let Some(spans) = nmap.get(uri)
-                && spans.len() > 1
-                && let Some(span) = NamespaceSpan::containing(spans, byte_offset)
-            {
-                return (span.use_map.clone(), span.namespace.clone());
-            }
-        }
-        let use_map = self
-            .file_imports
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let namespace = self.namespace_at_offset(uri, byte_offset);
-        (use_map, namespace)
-    }
-
-    /// Return a file's first namespace plus, for files that declare more
-    /// than one `namespace` block, every block's span.
-    ///
-    /// The span list stays `None` for the single-namespace case so that
-    /// building a [`FileContext`] costs no extra allocation there; see
-    /// [`FileContext::namespace_spans`].
-    fn namespace_and_spans(&self, uri: &str) -> (Option<String>, Option<Vec<NamespaceSpan>>) {
-        let nmap = self.file_namespaces.read();
-        let Some(spans) = nmap.get(uri) else {
-            return (None, None);
+        let files = self.files.read();
+        let Some(state) = files.get(uri) else {
+            return (HashMap::new(), None);
         };
-        let first = spans.first().and_then(|s| s.namespace.clone());
-        if spans.len() > 1 {
-            (first, Some(spans.clone()))
-        } else {
-            (first, None)
+        if state.namespaces.len() > 1
+            && let Some(span) = NamespaceSpan::containing(&state.namespaces, byte_offset)
+        {
+            return (span.use_map.clone(), span.namespace.clone());
         }
+        let namespace = namespace_in_spans(&state.namespaces, byte_offset).map(str::to_string);
+        (state.use_map.clone(), namespace)
     }
 
     /// Return the namespace that contains the given byte offset in a file.
@@ -322,18 +272,18 @@ impl Backend {
     /// block whose byte range contains `byte_offset`.  Returns `None` when
     /// the offset is in the global namespace or the file has no namespace.
     pub(crate) fn namespace_at_offset(&self, uri: &str, byte_offset: u32) -> Option<String> {
-        let nmap = self.file_namespaces.read();
-        namespace_in_spans(nmap.get(uri)?, byte_offset).map(str::to_string)
+        let files = self.files.read();
+        namespace_in_spans(&files.get(uri)?.namespaces, byte_offset).map(str::to_string)
     }
 
     /// A copy of a file's namespace blocks, for callers that resolve many
     /// offsets against the same file and would otherwise take the
-    /// `file_namespaces` lock once per offset.
+    /// file-state lock once per offset.
     pub(crate) fn namespace_spans_for_uri(&self, uri: &str) -> Vec<NamespaceSpan> {
-        self.file_namespaces
+        self.files
             .read()
             .get(uri)
-            .cloned()
+            .map(|state| state.namespaces.clone())
             .unwrap_or_default()
     }
 
@@ -345,10 +295,11 @@ impl Backend {
     /// [`namespace_at_offset`](Self::namespace_at_offset) when a cursor
     /// position is available.
     pub(crate) fn first_file_namespace(&self, uri: &str) -> Option<String> {
-        self.file_namespaces
+        self.files
             .read()
-            .get(uri)
-            .and_then(|spans| spans.first())
+            .get(uri)?
+            .namespaces
+            .first()
             .and_then(|s| s.namespace.clone())
     }
 
@@ -361,11 +312,11 @@ impl Backend {
     /// the file-wide import table and no range.
     pub(crate) fn import_blocks(&self, uri: &str) -> Vec<ImportBlock> {
         {
-            let nmap = self.file_namespaces.read();
-            if let Some(spans) = nmap.get(uri)
-                && spans.len() > 1
+            let files = self.files.read();
+            if let Some(state) = files.get(uri)
+                && state.namespaces.len() > 1
             {
-                return spans.iter().map(ImportBlock::of_span).collect();
+                return state.namespaces.iter().map(ImportBlock::of_span).collect();
             }
         }
         vec![self.whole_file_import_block(uri)]
@@ -375,10 +326,10 @@ impl Backend {
     /// containing `offset`.
     pub(crate) fn import_block_at(&self, uri: &str, offset: usize) -> ImportBlock {
         {
-            let nmap = self.file_namespaces.read();
-            if let Some(spans) = nmap.get(uri)
-                && spans.len() > 1
-                && let Some(span) = NamespaceSpan::containing(spans, offset as u32)
+            let files = self.files.read();
+            if let Some(state) = files.get(uri)
+                && state.namespaces.len() > 1
+                && let Some(span) = NamespaceSpan::containing(&state.namespaces, offset as u32)
             {
                 return ImportBlock::of_span(span);
             }
@@ -401,8 +352,11 @@ impl Backend {
     /// [`import_block_at`](Self::import_block_at) would report it, without
     /// copying any import table.
     pub(crate) fn import_block_range_at(&self, uri: &str, offset: usize) -> Option<(usize, usize)> {
-        let nmap = self.file_namespaces.read();
-        let spans = nmap.get(uri).filter(|spans| spans.len() > 1)?;
+        let files = self.files.read();
+        let spans = &files.get(uri)?.namespaces;
+        if spans.len() <= 1 {
+            return None;
+        }
         NamespaceSpan::containing(spans, offset as u32)
             .map(|span| (span.start as usize, span.end as usize))
     }
@@ -418,19 +372,19 @@ impl Backend {
     /// For consumers that can resolve names by byte offset, prefer
     /// querying `resolved_names` directly via [`file_context`] instead.
     pub(crate) fn file_use_map(&self, uri: &str) -> std::collections::HashMap<String, String> {
-        self.file_imports
+        self.files
             .read()
             .get(uri)
-            .cloned()
+            .map(|state| state.use_map.clone())
             .unwrap_or_default()
     }
 
     /// The `use function` and `use const` imports of a file.
     pub(crate) fn symbol_imports_for(&self, uri: &str) -> crate::types::SymbolImports {
-        self.file_symbol_imports
+        self.files
             .read()
             .get(uri)
-            .cloned()
+            .map(|state| state.symbol_imports.clone())
             .unwrap_or_default()
     }
 
@@ -442,7 +396,17 @@ impl Backend {
     /// boilerplate that used to be duplicated at the top of every
     /// diagnostic collector.
     pub(crate) fn symbol_map_for(&self, uri: &str) -> Option<Arc<crate::symbol_map::SymbolMap>> {
-        self.symbol_maps.read().get(uri).cloned()
+        self.files.read().get(uri)?.symbol_map.clone()
+    }
+
+    /// The URIs of every file a parse has published a symbol map for.
+    pub(crate) fn uris_with_symbol_maps(&self) -> Vec<String> {
+        self.files
+            .read()
+            .iter()
+            .filter(|(_, state)| state.symbol_map.is_some())
+            .map(|(uri, _)| uri.clone())
+            .collect()
     }
 
     /// Pair a file's cached symbol map with `content`, for a caller that
@@ -456,51 +420,52 @@ impl Backend {
         uri: &str,
         content: &'a str,
     ) -> Option<crate::symbol_map::MappedSource<'a>> {
-        self.symbol_maps.read().get(uri)?.source(content)
+        self.files
+            .read()
+            .get(uri)?
+            .symbol_map
+            .as_ref()?
+            .source(content)
     }
 
-    /// Remove a file's entries from every per-URI map populated while it
-    /// was open (`uri_classes_index`, `symbol_maps`, `file_imports`,
-    /// `resolved_names`, `file_namespaces`, `parse_errors`), plus the
-    /// reference index.
+    /// Remove what is recorded about a file: its [`FileState`], its
+    /// classes in `uri_classes_index`, its reference-index entries, and the
+    /// caches and indexes derived from it.
     ///
     /// Called from `did_close` to clean up state when a file the workspace
     /// index does not cover is closed.
     pub(crate) fn clear_file_maps(&self, uri: &str) {
-        self.laravel_string_key_cache
+        self.laravel
+            .string_key_cache
             .write()
             .invalidate_for_uri(uri, "");
         // uri_classes_index is redundant with fqn_class_index once indexing
         // is complete — GTD falls back to fqn_uri_index + parse_and_cache_file
         // when the uri_classes_index entry is missing.
         self.symbols.uri_classes_index.write().remove(uri);
-        self.symbol_maps.write().remove(uri);
-        self.evict_typed_receiver_view_spans(uri);
-        self.morph_column_spans_cache.write().clear();
-        self.evict_reference_index_uri(uri);
-        self.file_imports.write().remove(uri);
-        self.file_symbol_imports.write().remove(uri);
-        self.resolved_names.write().remove(uri);
-        self.file_pest_uses.write().remove(uri);
-        self.file_namespaces.write().remove(uri);
-        // Parse errors are stored per file during update_ast and consumed
-        // by the syntax-error diagnostic. Without this removal the last
-        // parse-error vector for every file ever opened (or deleted from
-        // disk) stays resident for the whole session.
-        self.parse_errors.write().remove(uri);
-        // A template's lowered PHP, source map, and injected variables are
-        // recorded for every indexed template, not just open ones, so a
-        // deleted or renamed template has to give them up here rather than
-        // only when the editor closes it.  Left behind, they stay in the
+        // The symbol map, imports, namespaces, resolved names, Pest
+        // bindings, parse errors, and a template's lowered PHP and source
+        // map.  Parse errors in particular are otherwise kept for every
+        // file ever opened (or deleted from disk) for the whole session,
+        // and a template's lowering is recorded for every indexed template,
+        // not just open ones, so a deleted or renamed one would stay in the
         // template lists the Blade refresh passes enumerate.
-        self.blade_virtual_content.write().remove(uri);
-        self.blade_source_maps.write().remove(uri);
-        self.blade_uris.write().remove(uri);
-        self.blade_injected_vars.write().remove(uri);
+        self.files.write().remove(uri);
+        self.evict_typed_receiver_spans(uri);
+        // Another file's entry is stamped with the class-lookup generation,
+        // which a class this file withdraws bumps, so only this file's own
+        // entry goes stale here.
+        self.evict_morph_column_spans(uri);
+        self.evict_reference_index_uri(uri);
+        self.remove_framework_uri(uri);
+        self.forget_symfony_declarations(uri);
+        // Likewise a template's injected variables.
+        self.blade.uris.write().remove(uri);
+        self.blade.injected_vars.write().remove(uri);
         // The config keys a file declares at runtime (`Config::set(...)`)
         // are otherwise only refreshed when the file is re-parsed, which a
         // deleted file never is.
-        self.laravel_runtime_config_keys.write().remove(uri);
+        self.laravel.runtime_config_keys.write().remove(uri);
         // What the file declared is gone for every other file's diagnostics.
         self.diag.epoch.note_change();
         // NOTE: We intentionally keep fqn_uri_index and fqn_class_index intact.
@@ -538,7 +503,7 @@ impl Backend {
     /// or not it is open, and the completed workspace index is never walked
     /// again to put it back.
     pub(crate) fn workspace_index_path(&self, uri: &str) -> Option<std::path::PathBuf> {
-        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        let path = crate::util::uri_to_path(uri)?;
         let root = self.workspace.workspace_root.read().clone()?;
         if !path.starts_with(&root) {
             return None;
@@ -619,5 +584,20 @@ impl ImportBlock {
             .iter()
             .position(|block| block.range.is_none_or(|(s, e)| offset >= s && offset <= e))
             .unwrap_or(blocks.len().saturating_sub(1))
+    }
+}
+
+/// A file's first namespace plus, for files that declare more than one
+/// `namespace` block, every block's span.
+///
+/// The span list stays `None` for the single-namespace case so that
+/// building a [`FileContext`] costs no extra allocation there; see
+/// [`FileContext::namespace_spans`].
+fn namespace_and_spans(spans: &[NamespaceSpan]) -> (Option<String>, Option<Vec<NamespaceSpan>>) {
+    let first = spans.first().and_then(|s| s.namespace.clone());
+    if spans.len() > 1 {
+        (first, Some(spans.to_vec()))
+    } else {
+        (first, None)
     }
 }

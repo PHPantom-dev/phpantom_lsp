@@ -194,7 +194,7 @@ fn test_preprocess_with_vars_injects_declarations() {
     assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 4);
 
     // Round trip: blade (0,0) → php and back lands on the same line.
-    let php_pos = map.blade_to_php(tower_lsp::lsp_types::Position {
+    let php_pos = map.blade_to_php(tower_lsp_server::gen_lsp_types::Position {
         line: 0,
         character: 3,
     });
@@ -1965,7 +1965,7 @@ fn test_preprocess_use_directive_function_modifier() {
 /// position in the template would map that many lines off.
 #[test]
 fn test_preprocess_wrapped_use_directive_keeps_positions_aligned() {
-    use tower_lsp::lsp_types::Position;
+    use tower_lsp_server::gen_lsp_types::Position;
 
     let content = "@use('App\\Models\\{\n    Post,\n    Comment,\n}')\n<p>{{ $title }}</p>\n";
     let (php, map) = preprocess(content);
@@ -2226,6 +2226,22 @@ fn test_declared_signature_wins_over_a_props_default() {
     assert!(
         !php.contains("$options = [];"),
         "the props default must not shadow the declared type: {}",
+        php
+    );
+}
+
+/// A `null` default marks an optional prop the caller supplies, so it is
+/// declared `mixed` like a prop without a default rather than typed
+/// `null`, which would make `match ($type) { 'success' => … }` unreachable.
+#[test]
+fn test_preprocess_props_null_default_is_mixed() {
+    let content = "@props(['type' => null, 'message' => NULL])\n{{ $type }}\n";
+    let (php, _) = preprocess(content);
+    let prologue = prologue_of(&php);
+    assert!(
+        prologue.contains("/** @var mixed $type */")
+            && prologue.contains("/** @var mixed $message */"),
+        "a null-defaulted prop should be declared mixed: {}",
         php
     );
 }

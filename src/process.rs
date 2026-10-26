@@ -228,14 +228,17 @@ pub fn workspace_run_result<F>(
     success_parses: bool,
     parse: F,
 ) -> Result<
-    std::collections::HashMap<std::path::PathBuf, Vec<tower_lsp::lsp_types::Diagnostic>>,
+    std::collections::HashMap<std::path::PathBuf, Vec<tower_lsp_server::gen_lsp_types::Diagnostic>>,
     String,
 >
 where
     F: Fn(
         &str,
     ) -> Result<
-        std::collections::HashMap<std::path::PathBuf, Vec<tower_lsp::lsp_types::Diagnostic>>,
+        std::collections::HashMap<
+            std::path::PathBuf,
+            Vec<tower_lsp_server::gen_lsp_types::Diagnostic>,
+        >,
         String,
     >,
 {
@@ -267,10 +270,10 @@ where
 /// column, so there is no reliable way to derive a precise range. Both
 /// underline the full line instead; the editor clamps the end column to
 /// the line's real length.
-pub fn full_line_range(line: u32) -> tower_lsp::lsp_types::Range {
-    tower_lsp::lsp_types::Range {
-        start: tower_lsp::lsp_types::Position { line, character: 0 },
-        end: tower_lsp::lsp_types::Position {
+pub fn full_line_range(line: u32) -> tower_lsp_server::gen_lsp_types::Range {
+    tower_lsp_server::gen_lsp_types::Range {
+        start: tower_lsp_server::gen_lsp_types::Position { line, character: 0 },
+        end: tower_lsp_server::gen_lsp_types::Position {
             line,
             character: u32::MAX,
         },

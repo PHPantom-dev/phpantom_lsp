@@ -21,15 +21,15 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::property::Property;
 use mago_syntax::cst::modifier::Modifier;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::cursor_context::{
     ClassLikeContextKind, CursorContext, MemberContext, find_cursor_context,
 };
-use super::detect_indent_from_members;
+use super::{detect_indent_from_members, indent_unit};
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::text_position::offset_to_position;
+use crate::text_position::byte_range_to_lsp_range;
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -37,6 +37,10 @@ use crate::text_position::offset_to_position;
 struct HookableProperty {
     /// Property name without the `$` prefix.
     name: String,
+    /// Leading whitespace of the class's members.
+    indent: String,
+    /// The file's indentation unit, added to `indent` for each hook.
+    unit: &'static str,
 }
 
 // ── Which hooks already exist ───────────────────────────────────────────────
@@ -78,13 +82,13 @@ fn has_static<'a>(modifiers: impl Iterator<Item = &'a Modifier<'a>>) -> bool {
 fn build_hooked_property_text(
     prop: &HookableProperty,
     original_text: &str,
-    indent: &str,
     gen_get: bool,
     gen_set: bool,
     is_interface: bool,
     existing_hooks_text: Option<&str>,
 ) -> String {
     let mut result = String::new();
+    let indent = prop.indent.as_str();
 
     if let Some(existing) = existing_hooks_text {
         // We're adding hooks to an already-hooked property.
@@ -95,10 +99,10 @@ fn build_hooked_property_text(
         if let Some(pos) = close_brace_pos {
             result.push_str(&trimmed[..pos]);
             if gen_get {
-                result.push_str(&build_single_hook("get", prop, indent, is_interface));
+                result.push_str(&build_single_hook("get", prop, is_interface));
             }
             if gen_set {
-                result.push_str(&build_single_hook("set", prop, indent, is_interface));
+                result.push_str(&build_single_hook("set", prop, is_interface));
             }
             result.push_str(indent);
             result.push('}');
@@ -115,10 +119,10 @@ fn build_hooked_property_text(
         result.push_str(" {\n");
 
         if gen_get {
-            result.push_str(&build_single_hook("get", prop, indent, is_interface));
+            result.push_str(&build_single_hook("get", prop, is_interface));
         }
         if gen_set {
-            result.push_str(&build_single_hook("set", prop, indent, is_interface));
+            result.push_str(&build_single_hook("set", prop, is_interface));
         }
 
         result.push_str(indent);
@@ -129,17 +133,9 @@ fn build_hooked_property_text(
 }
 
 /// Build a single hook body (`get` or `set`).
-fn build_single_hook(
-    kind: &str,
-    prop: &HookableProperty,
-    indent: &str,
-    is_interface: bool,
-) -> String {
+fn build_single_hook(kind: &str, prop: &HookableProperty, is_interface: bool) -> String {
     let mut s = String::new();
-    let hook_indent = format!(
-        "{indent}{indent_unit}",
-        indent_unit = detect_indent_unit(indent)
-    );
+    let hook_indent = format!("{}{}", prop.indent, prop.unit);
 
     if is_interface {
         // Abstract hook: just the signature with a semicolon.
@@ -169,14 +165,6 @@ fn build_single_hook(
     s
 }
 
-/// Detect the indent unit from the member indent string.
-///
-/// If the indent is tabs, return a single tab.  Otherwise return four
-/// spaces (matching the most common convention).
-fn detect_indent_unit(indent: &str) -> &str {
-    if indent.contains('\t') { "\t" } else { "    " }
-}
-
 // ── Public API ──────────────────────────────────────────────────────────────
 
 impl Backend {
@@ -187,9 +175,9 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
-        let doc_uri: Url = match uri.parse() {
+        let doc_uri: Uri = match uri.parse() {
             Ok(u) => u,
             Err(_) => return,
         };
@@ -200,132 +188,121 @@ impl Backend {
         // build the hook edits.  The borrowed AST does not escape the
         // closure, so we capture whether the property is already hooked
         // (`is_hooked`) and recompute the source slice from offsets below.
-        let Some((
-            can_get,
-            can_set,
-            prop_info,
-            indent,
-            prop_start,
-            prop_end,
-            is_interface,
-            is_hooked,
-        )) = crate::parser::with_parsed_program(
-            content,
-            "generate_property_hooks",
-            |program, content| {
-                let ctx = find_cursor_context(&program.statements, cursor_offset);
+        let Some((can_get, can_set, prop_info, prop_start, prop_end, is_interface, is_hooked)) =
+            crate::parser::with_parsed_program(
+                content,
+                "generate_property_hooks",
+                |program, content| {
+                    let ctx = find_cursor_context(&program.statements, cursor_offset);
 
-                let (property, all_members, class_kind, class_readonly) = match &ctx {
-                    CursorContext::InClassLike {
-                        kind,
-                        class_readonly,
-                        member: MemberContext::Property(prop),
-                        all_members,
-                    } => (*prop, *all_members, *kind, *class_readonly),
-                    _ => return None,
-                };
+                    let (property, all_members, class_kind, class_readonly) = match &ctx {
+                        CursorContext::InClassLike {
+                            kind,
+                            class_readonly,
+                            member: MemberContext::Property(prop),
+                            all_members,
+                        } => (*prop, *all_members, *kind, *class_readonly),
+                        _ => return None,
+                    };
 
-                // Enums cannot have properties (only backed enum cases), and
-                // PHP 8.4 does not support hooks on enum properties anyway.
-                if class_kind == ClassLikeContextKind::Enum {
-                    return None;
-                }
+                    // Enums cannot have properties (only backed enum cases), and
+                    // PHP 8.4 does not support hooks on enum properties anyway.
+                    if class_kind == ClassLikeContextKind::Enum {
+                        return None;
+                    }
 
-                let is_interface = class_kind == ClassLikeContextKind::Interface;
+                    let is_interface = class_kind == ClassLikeContextKind::Interface;
 
-                // Hooks are not supported on static properties.
-                let is_static = match property {
-                    Property::Plain(plain) => has_static(plain.modifiers.iter()),
-                    Property::Hooked(hooked) => has_static(hooked.modifiers.iter()),
-                };
-                if is_static {
-                    return None;
-                }
+                    // Hooks are not supported on static properties.
+                    let is_static = match property {
+                        Property::Plain(plain) => has_static(plain.modifiers.iter()),
+                        Property::Hooked(hooked) => has_static(hooked.modifiers.iter()),
+                    };
+                    if is_static {
+                        return None;
+                    }
 
-                let prop_readonly = match property {
-                    Property::Plain(plain) => has_readonly(plain.modifiers.iter()),
-                    Property::Hooked(hooked) => has_readonly(hooked.modifiers.iter()),
-                };
-                // PHP 8.4 does not allow hooks on readonly properties at all.
-                // A `readonly class` makes every property readonly implicitly.
-                if prop_readonly || class_readonly {
-                    return None;
-                }
+                    let prop_readonly = match property {
+                        Property::Plain(plain) => has_readonly(plain.modifiers.iter()),
+                        Property::Hooked(hooked) => has_readonly(hooked.modifiers.iter()),
+                    };
+                    // PHP 8.4 does not allow hooks on readonly properties at all.
+                    // A `readonly class` makes every property readonly implicitly.
+                    if prop_readonly || class_readonly {
+                        return None;
+                    }
 
-                // Get the property name.
-                let prop_name = match property {
-                    Property::Plain(plain) => {
-                        // For multi-variable declarations like
-                        // `public int $a, $b;`, use the first variable name.
-                        // Multi-variable declarations can't have hooks anyway.
-                        {
-                            let first_item = plain.items.first()?;
-                            let var = first_item.variable();
+                    // Get the property name.
+                    let prop_name = match property {
+                        Property::Plain(plain) => {
+                            // For multi-variable declarations like
+                            // `public int $a, $b;`, use the first variable name.
+                            // Multi-variable declarations can't have hooks anyway.
+                            {
+                                let first_item = plain.items.first()?;
+                                let var = first_item.variable();
+                                bytes_to_str(var.name)
+                                    .strip_prefix('$')
+                                    .unwrap_or(bytes_to_str(var.name))
+                                    .to_string()
+                            }
+                        }
+                        Property::Hooked(hooked) => {
+                            let var = hooked.item.variable();
                             bytes_to_str(var.name)
                                 .strip_prefix('$')
                                 .unwrap_or(bytes_to_str(var.name))
                                 .to_string()
                         }
+                    };
+
+                    // For plain properties with multiple variables, hooks cannot
+                    // be generated (PHP does not support hooks on multi-variable
+                    // declarations).
+                    if let Property::Plain(plain) = property
+                        && plain.items.len() > 1
+                    {
+                        return None;
                     }
-                    Property::Hooked(hooked) => {
-                        let var = hooked.item.variable();
-                        bytes_to_str(var.name)
-                            .strip_prefix('$')
-                            .unwrap_or(bytes_to_str(var.name))
-                            .to_string()
+
+                    let (has_get, has_set) = existing_hook_names(property);
+                    let can_get = !has_get;
+                    let can_set = !has_set;
+                    if !can_get && !can_set {
+                        return None;
                     }
-                };
 
-                // For plain properties with multiple variables, hooks cannot
-                // be generated (PHP does not support hooks on multi-variable
-                // declarations).
-                if let Property::Plain(plain) = property
-                    && plain.items.len() > 1
-                {
-                    return None;
-                }
+                    let prop_info = HookableProperty {
+                        name: prop_name,
+                        indent: detect_indent_from_members(all_members, content),
+                        unit: indent_unit(content),
+                    };
 
-                let (has_get, has_set) = existing_hook_names(property);
-                let can_get = !has_get;
-                let can_set = !has_set;
-                if !can_get && !can_set {
-                    return None;
-                }
+                    // The property's full span so we can replace it.
+                    let prop_span = property.span();
+                    let prop_start = prop_span.start.offset as usize;
+                    let prop_end = prop_span.end.offset as usize;
 
-                let prop_info = HookableProperty { name: prop_name };
-                let indent = detect_indent_from_members(all_members, content);
+                    let is_hooked = matches!(property, Property::Hooked(_));
 
-                // The property's full span so we can replace it.
-                let prop_span = property.span();
-                let prop_start = prop_span.start.offset as usize;
-                let prop_end = prop_span.end.offset as usize;
-
-                let is_hooked = matches!(property, Property::Hooked(_));
-
-                Some((
-                    can_get,
-                    can_set,
-                    prop_info,
-                    indent,
-                    prop_start,
-                    prop_end,
-                    is_interface,
-                    is_hooked,
-                ))
-            },
-        )
+                    Some((
+                        can_get,
+                        can_set,
+                        prop_info,
+                        prop_start,
+                        prop_end,
+                        is_interface,
+                        is_hooked,
+                    ))
+                },
+            )
         else {
             return;
         };
 
         let original_text = &content[prop_start..prop_end];
 
-        let start_pos = offset_to_position(content, prop_start);
-        let end_pos = offset_to_position(content, prop_end);
-        let replace_range = Range {
-            start: start_pos,
-            end: end_pos,
-        };
+        let replace_range = byte_range_to_lsp_range(content, prop_start, prop_end);
 
         // Hooked properties carry their existing hooks forward.
         let existing_hooks_text = if is_hooked { Some(original_text) } else { None };
@@ -335,7 +312,6 @@ impl Backend {
             let new_text = build_hooked_property_text(
                 &prop_info,
                 original_text,
-                &indent,
                 true,
                 false,
                 is_interface,
@@ -347,9 +323,9 @@ impl Backend {
                 new_text,
             };
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: "Generate get hook".to_string(),
-                kind: Some(CodeActionKind::REFACTOR),
+                kind: Some(CodeActionKind::Refactor),
                 diagnostics: None,
                 edit: Some(crate::code_actions::single_file_edit(
                     doc_uri.clone(),
@@ -359,6 +335,7 @@ impl Backend {
                 is_preferred: Some(false),
                 disabled: None,
                 data: None,
+                tags: None,
             }));
         }
 
@@ -367,7 +344,6 @@ impl Backend {
             let new_text = build_hooked_property_text(
                 &prop_info,
                 original_text,
-                &indent,
                 false,
                 true,
                 is_interface,
@@ -379,9 +355,9 @@ impl Backend {
                 new_text,
             };
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: "Generate set hook".to_string(),
-                kind: Some(CodeActionKind::REFACTOR),
+                kind: Some(CodeActionKind::Refactor),
                 diagnostics: None,
                 edit: Some(crate::code_actions::single_file_edit(
                     doc_uri.clone(),
@@ -391,6 +367,7 @@ impl Backend {
                 is_preferred: Some(false),
                 disabled: None,
                 data: None,
+                tags: None,
             }));
         }
 
@@ -399,7 +376,6 @@ impl Backend {
             let new_text = build_hooked_property_text(
                 &prop_info,
                 original_text,
-                &indent,
                 true,
                 true,
                 is_interface,
@@ -411,15 +387,16 @@ impl Backend {
                 new_text,
             };
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: "Generate get and set hooks".to_string(),
-                kind: Some(CodeActionKind::REFACTOR),
+                kind: Some(CodeActionKind::Refactor),
                 diagnostics: None,
                 edit: Some(crate::code_actions::single_file_edit(doc_uri, vec![edit])),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
                 data: None,
+                tags: None,
             }));
         }
     }
@@ -433,17 +410,19 @@ mod tests {
 
     // ── Unit tests for hook text builders ────────────────────────────────
 
-    fn make_prop(name: &str) -> HookableProperty {
+    fn make_prop(name: &str, indent: &str, unit: &'static str) -> HookableProperty {
         HookableProperty {
             name: name.to_string(),
+            indent: indent.to_string(),
+            unit,
         }
     }
 
     #[test]
     fn builds_get_hook_for_plain_property() {
-        let prop = make_prop("name");
+        let prop = make_prop("name", "    ", "    ");
         let original = "public string $name;";
-        let result = build_hooked_property_text(&prop, original, "    ", true, false, false, None);
+        let result = build_hooked_property_text(&prop, original, true, false, false, None);
         assert!(result.contains("get => $this->name;"), "got: {result}");
         assert!(!result.contains("set"), "got: {result}");
         assert!(result.starts_with("public string $name {"), "got: {result}");
@@ -452,9 +431,9 @@ mod tests {
 
     #[test]
     fn builds_set_hook_for_plain_property() {
-        let prop = make_prop("name");
+        let prop = make_prop("name", "    ", "    ");
         let original = "public string $name;";
-        let result = build_hooked_property_text(&prop, original, "    ", false, true, false, None);
+        let result = build_hooked_property_text(&prop, original, false, true, false, None);
         assert!(
             result.contains("set => $this->name = $value;"),
             "got: {result}"
@@ -464,9 +443,9 @@ mod tests {
 
     #[test]
     fn builds_both_hooks_for_plain_property() {
-        let prop = make_prop("name");
+        let prop = make_prop("name", "    ", "    ");
         let original = "public string $name;";
-        let result = build_hooked_property_text(&prop, original, "    ", true, true, false, None);
+        let result = build_hooked_property_text(&prop, original, true, true, false, None);
         assert!(result.contains("get => $this->name;"), "got: {result}");
         assert!(
             result.contains("set => $this->name = $value;"),
@@ -476,9 +455,9 @@ mod tests {
 
     #[test]
     fn builds_abstract_hooks_for_interface() {
-        let prop = make_prop("name");
+        let prop = make_prop("name", "    ", "    ");
         let original = "public string $name;";
-        let result = build_hooked_property_text(&prop, original, "    ", true, true, true, None);
+        let result = build_hooked_property_text(&prop, original, true, true, true, None);
         assert!(result.contains("get;"), "got: {result}");
         assert!(result.contains("set;"), "got: {result}");
         assert!(!result.contains("=>"), "got: {result}");
@@ -486,9 +465,9 @@ mod tests {
 
     #[test]
     fn preserves_default_value() {
-        let prop = make_prop("name");
+        let prop = make_prop("name", "    ", "    ");
         let original = "public string $name = 'default';";
-        let result = build_hooked_property_text(&prop, original, "    ", true, false, false, None);
+        let result = build_hooked_property_text(&prop, original, true, false, false, None);
         assert!(
             result.contains("$name = 'default'"),
             "default value should be preserved, got: {result}"
@@ -498,10 +477,10 @@ mod tests {
 
     #[test]
     fn adds_hook_to_existing_hooked_property() {
-        let prop = make_prop("name");
+        let prop = make_prop("name", "    ", "    ");
         let existing = "public string $name {\n        get => $this->name;\n    }";
         let result =
-            build_hooked_property_text(&prop, existing, "    ", false, true, false, Some(existing));
+            build_hooked_property_text(&prop, existing, false, true, false, Some(existing));
         assert!(result.contains("get => $this->name;"), "got: {result}");
         assert!(
             result.contains("set => $this->name = $value;"),
@@ -511,19 +490,9 @@ mod tests {
 
     #[test]
     fn tab_indentation() {
-        let prop = make_prop("name");
+        let prop = make_prop("name", "\t", "\t");
         let original = "public string $name;";
-        let result = build_hooked_property_text(&prop, original, "\t", true, false, false, None);
+        let result = build_hooked_property_text(&prop, original, true, false, false, None);
         assert!(result.contains("\t\tget =>"), "got: {result}");
-    }
-
-    #[test]
-    fn detect_indent_unit_spaces() {
-        assert_eq!(detect_indent_unit("    "), "    ");
-    }
-
-    #[test]
-    fn detect_indent_unit_tabs() {
-        assert_eq!(detect_indent_unit("\t"), "\t");
     }
 }

@@ -30,13 +30,13 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
 use crate::php_type::PhpType;
-use crate::text_position::position_to_offset;
-use crate::type_engine::resolver::Loaders;
+use crate::text_position::{position_to_offset, utf16_col_to_char_index};
+use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FileContext, ResolvedType};
 
@@ -141,7 +141,7 @@ pub(crate) fn detect_array_key_context(
 
     let line = lines[line_idx];
     let chars: Vec<char> = line.chars().collect();
-    let col = (position.character as usize).min(chars.len());
+    let col = utf16_col_to_char_index(line, position.character);
 
     if col == 0 {
         return None;
@@ -172,7 +172,10 @@ pub(crate) fn detect_array_key_context(
     }
     i -= 1; // skip `[`
 
-    let key_start_col = partial_start as u32;
+    let key_start_col: u32 = chars[..partial_start]
+        .iter()
+        .map(|c| c.len_utf16() as u32)
+        .sum();
 
     // 4. Try to collect chained `['key']` access segments before the
     //    current `[`.  Walk backward through zero or more `]['key']`
@@ -363,7 +366,7 @@ impl Backend {
         // Expand type aliases before parsing as an array shape.
         // The raw type might be an alias name like `UserData` that
         // resolves to `array{name: string, email: string}`.
-        let parsed = crate::type_engine::types::aliases::resolve_type_alias_typed(
+        let parsed = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &effective_type,
             "",
             effective_classes,
@@ -412,10 +415,13 @@ impl Backend {
 
             items.push(CompletionItem {
                 label: key_name.to_string(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some(detail),
                 filter_text: Some(key_name.to_string()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text })),
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
+                    range,
+                    new_text,
+                })),
                 sort_text: Some(format!("{:04}", sort_idx)),
                 ..CompletionItem::default()
             });
@@ -452,10 +458,13 @@ impl Backend {
 
             items.push(CompletionItem {
                 label: key.to_string(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some(detail.to_string()),
                 filter_text: Some(key.to_string()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text })),
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
+                    range,
+                    new_text,
+                })),
                 sort_text: Some(format!("{:04}", sort_idx)),
                 ..CompletionItem::default()
             });
@@ -483,7 +492,7 @@ impl Backend {
         let trailing_count = if line_idx < lines.len() {
             let line = lines[line_idx];
             let chars: Vec<char> = line.chars().collect();
-            let cursor_col = position.character as usize;
+            let cursor_col = utf16_col_to_char_index(line, position.character);
             count_trailing_close_chars(&chars, cursor_col, ctx.quote_char)
         } else {
             0
@@ -518,7 +527,7 @@ impl Backend {
         raw_type: &PhpType,
         prefix_keys: &[String],
         all_classes: &[Arc<ClassInfo>],
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<PhpType> {
         let mut current = raw_type.clone();
         if prefix_keys.is_empty() {
@@ -526,7 +535,7 @@ impl Backend {
         }
 
         for key in prefix_keys {
-            let expanded = crate::type_engine::types::aliases::resolve_type_alias_typed(
+            let expanded = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
                 &current,
                 "",
                 all_classes,
@@ -564,21 +573,25 @@ impl Backend {
         let config_resolver = |key: &str| self.resolve_config_type(key);
         let trans_resolver = |key: &str| self.resolve_trans_type(key);
         let resolved = crate::type_engine::variable::resolution::resolve_variable_types(VarQuery {
-            var_name,
-            cursor_offset: cursor_offset as u32,
-            content,
-            current_class,
-            all_classes: &file_ctx.classes,
-            class_loader: &resolved_class_loader,
-            source_class_loader: &class_loader,
-            source_imports: Some(&file_ctx.use_map),
-            backend: Some(self),
             loaders: Loaders {
                 function_loader: Some(&function_loader),
                 config_resolver: Some(&config_resolver),
                 trans_resolver: Some(&trans_resolver),
                 ..Loaders::default()
             },
+            ..VarQuery::new(
+                var_name,
+                FileCtx::new(
+                    content,
+                    &file_ctx.classes,
+                    &resolved_class_loader,
+                    &class_loader,
+                )
+                .with_imports(Some(&file_ctx.use_map))
+                .with_backend(Some(self)),
+                current_class,
+                cursor_offset as u32,
+            )
         });
         if resolved.is_empty() {
             None

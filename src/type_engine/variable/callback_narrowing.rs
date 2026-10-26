@@ -16,7 +16,7 @@ use mago_syntax::parser::parse_file_content;
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::WrittenNames;
-use crate::type_engine::types::narrowing::{
+use crate::type_engine::type_ops::condition_facts::{
     GuardClassLoader, narrow_type_by_condition, narrow_type_by_guard_name,
 };
 

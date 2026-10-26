@@ -1,0 +1,7 @@
+// test: flush()'s exceptions are not too wide a @throws
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, TooWideMethodThrowTypeRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Exceptions/data/entity-manager-interface.php
+---

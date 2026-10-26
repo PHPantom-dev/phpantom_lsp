@@ -22,14 +22,14 @@ impl Backend {
         // Read from `composer.json` during init and not recoverable from the
         // provider scan below, so it has to survive the fresh index.
         index
-            .set_runtime_permission_package(self.laravel_gates.read().runtime_permission_package());
+            .set_runtime_permission_package(self.laravel.gates.read().runtime_permission_package());
         let scanned =
             self.scan_providers_into(providers, &mut index.files, scan_gate_registrations);
 
         index.rebuild();
         let ability_count = index.definition_names().len();
-        *self.laravel_gates.write() = index;
-        self.laravel_string_key_cache.write().gate_abilities = None;
+        *self.laravel.gates.write() = index;
+        self.laravel.string_key_cache.write().gate_abilities = None;
 
         tracing::info!(
             "PHPantom: scanned {} Laravel provider files, indexed {} gate abilities",
@@ -44,13 +44,13 @@ impl Backend {
     /// its new content mentions `Gate` or a `$policies` property.  Only runs
     /// for Laravel projects.
     pub(crate) fn refresh_laravel_gates(&self, uri: &str, content: &str) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
         let bytes = content.as_bytes();
         let has_token = memchr::memmem::find(bytes, b"Gate").is_some()
             || memchr::memmem::find(bytes, b"$policies").is_some();
-        refresh_file(&self.laravel_gates, uri, has_token, || {
+        refresh_file(&self.laravel.gates, uri, has_token, || {
             scan_gate_registrations(content)
         });
     }

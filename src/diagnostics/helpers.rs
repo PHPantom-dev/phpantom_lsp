@@ -6,9 +6,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::PhpType;
 use crate::resolution::FileLoaders;
 use crate::symbol_map::SymbolMap;
@@ -40,8 +41,7 @@ pub(crate) const SUPERGLOBALS: &[&str] = &[
 /// What a type-checking diagnostic collector reads from the file before
 /// it walks the AST.
 ///
-/// Built by [`collect_type_check`], which owns the `FileContext` and the
-/// loaders this borrows.
+/// Built by [`collect_type_check`], which owns the loaders this borrows.
 pub(crate) struct TypeCheckCtx<'a> {
     /// Classes, use-map, namespace, and resolved names for the file.
     pub(crate) file_ctx: &'a FileContext,
@@ -64,55 +64,51 @@ pub(crate) struct TypeCheckCtx<'a> {
 /// the generated prologue belongs to no line of the template.
 pub(crate) fn collect_type_check<S>(
     backend: &Backend,
+    file_ctx: &FileContext,
     uri: &str,
     content: &str,
     code: &str,
-    out: &mut Vec<Diagnostic>,
     collect: impl FnOnce(&TypeCheckCtx<'_>) -> Vec<S>,
     report: impl Fn(&S, &TypeCheckCtx<'_>) -> Option<(ByteRange, String)>,
-) {
-    let file_ctx = backend.file_context(uri);
-
+) -> Vec<Diagnostic> {
     // Activate the thread-local parse cache so every `with_parsed_program`
     // in the resolution pipeline below reuses one parsed AST.
     let _parse_guard = crate::parser::with_parse_cache(content);
 
-    let loaders = backend.file_loaders(&file_ctx);
+    let loaders = backend.file_loaders(file_ctx);
     let strict_types = crate::parser::with_parsed_program(content, "strict_types", |program, _| {
         super::type_errors::has_strict_types(program)
     });
 
     let ctx = TypeCheckCtx {
-        file_ctx: &file_ctx,
+        file_ctx,
         loaders: &loaders,
         strict_types,
     };
 
-    for site in collect(&ctx) {
-        let Some(((start, end), message)) = report(&site, &ctx) else {
-            continue;
-        };
-        let Some(range) = backend.offset_range_to_lsp_range(uri, content, start, end) else {
-            continue;
-        };
-        out.push(make_diagnostic(
-            range,
-            DiagnosticSeverity::ERROR,
-            code,
-            message,
-        ));
-    }
+    collect(&ctx)
+        .iter()
+        .filter_map(|site| {
+            let ((start, end), message) = report(site, &ctx)?;
+            let range = backend.offset_range_to_lsp_range(uri, content, start, end)?;
+            Some(make_diagnostic(
+                range,
+                DiagnosticSeverity::Error,
+                code,
+                message,
+            ))
+        })
+        .collect()
 }
 
-/// Per-file snapshot shared by the "symbol-span" diagnostic collectors
-/// (unknown class/function/member, deprecated, implementation errors,
-/// invalid class kind, unused imports).
+/// Per-file snapshot shared by every slow diagnostic collector.
 ///
 /// Bundles the file's precomputed [`SymbolMap`] with the same
 /// classes/use-map/namespace/resolved-names snapshot as [`FileContext`],
-/// so each collector reads its per-file locks once via [`Self::gather`]
-/// instead of re-acquiring `symbol_maps`, `uri_classes_index`,
-/// `file_imports`, `file_namespaces`, and `resolved_names` independently.
+/// so a diagnostic pass reads its per-file locks once via [`Self::gather`]
+/// instead of each collector re-acquiring the file's state and
+/// `uri_classes_index` itself, and every collector observes the same snapshot
+/// even if a concurrent parse updates those maps mid-pass.
 pub(crate) struct FileDiagnosticContext {
     /// The file's precomputed symbol spans.
     pub(crate) symbol_map: Arc<SymbolMap>,
@@ -123,14 +119,13 @@ pub(crate) struct FileDiagnosticContext {
 impl FileDiagnosticContext {
     /// Gather the shared per-file snapshot for `uri`.
     ///
-    /// Returns `None` when the file has no symbol map — the early-out
-    /// every collector already applies (nothing to walk).
-    pub(crate) fn gather(backend: &Backend, uri: &str) -> Option<Self> {
-        let symbol_map = backend.symbol_map_for(uri)?;
-        Some(Self {
-            symbol_map,
+    /// A file with no symbol map yet (its parse panicked) gets an empty
+    /// one, so the collectors that walk spans find nothing to report.
+    pub(crate) fn gather(backend: &Backend, uri: &str) -> Self {
+        Self {
+            symbol_map: backend.symbol_map_for(uri).unwrap_or_default(),
             file: backend.file_context(uri),
-        })
+        }
     }
 
     /// The file's own `ClassInfo` for a [`SymbolKind::ClassDeclaration`]
@@ -201,7 +196,7 @@ pub(crate) fn template_bounds(
 pub(crate) fn template_bounds_in_scope(
     class: &ClassInfo,
     method: Option<&MethodInfo>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: &crate::virtual_members::ResolvedClassCache,
 ) -> HashMap<String, PhpType> {
     let mut bounds = template_bounds(&class.template_params, &class.template_param_bounds);
@@ -327,7 +322,7 @@ fn find_method_name_in_members<'a>(
 pub(crate) fn is_position_independent_call_expression(expr: &str) -> bool {
     // An invoked value (`($this->handler)`) depends on its inner expression.
     let expr = expr.trim_start_matches('(');
-    if expr.starts_with('$') {
+    if expr.starts_with('$') || expr.starts_with("new $") {
         return false;
     }
     if expr.starts_with("self::") || expr.starts_with("static::") || expr.starts_with("parent::") {
@@ -378,6 +373,33 @@ impl<'a> CallTargetCache<'a> {
     }
 }
 
+/// The classes `new $var` builds at the context's offset, when `$var` can
+/// only hold strings spelling them (`'Foo'`, `'\\Foo'`).
+///
+/// `None` when it may hold anything else. A `class-string<Foo>` holds some
+/// class extending `Foo`, so the checks that judge the class `new` builds
+/// (its kind, its constructor) cannot judge it by `Foo`.
+pub(crate) fn classes_instantiated_by_variable(
+    var_name: &str,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+) -> Option<Vec<Arc<ClassInfo>>> {
+    let values = crate::type_engine::resolver::resolve_target_classes_expr(
+        &crate::type_engine::subject_expr::SubjectExpr::Variable(var_name.to_string()),
+        crate::types::AccessKind::Arrow,
+        rctx,
+    );
+    let mut classes = Vec::new();
+    for value in &values {
+        let spelled =
+            crate::type_engine::variable::class_string_resolution::classes_spelled_exactly_by(
+                &value.type_string,
+                rctx.file.class_loader,
+            )?;
+        ClassInfo::extend_unique_arc(&mut classes, spelled);
+    }
+    (!classes.is_empty()).then_some(classes)
+}
+
 /// Build a standard diagnostic with the common fields pre-filled.
 ///
 /// Most diagnostic collectors build `Diagnostic` values with `source`
@@ -395,8 +417,8 @@ pub(crate) fn make_diagnostic(
 /// [`make_diagnostic`], carrying a `DiagnosticTag`.
 ///
 /// The tag is what makes an editor render the range as dimmed
-/// ([`DiagnosticTag::UNNECESSARY`]) or struck through
-/// ([`DiagnosticTag::DEPRECATED`]) rather than underlining it.
+/// ([`DiagnosticTag::Unnecessary`]) or struck through
+/// ([`DiagnosticTag::Deprecated`]) rather than underlining it.
 pub(crate) fn make_tagged_diagnostic(
     range: Range,
     severity: DiagnosticSeverity,
@@ -407,10 +429,10 @@ pub(crate) fn make_tagged_diagnostic(
     Diagnostic {
         range,
         severity: Some(severity),
-        code: Some(NumberOrString::String(code.to_string())),
+        code: Some(Code::String(code.to_string())),
         code_description: None,
         source: Some("phpantom".to_string()),
-        message,
+        message: message.into(),
         related_information: None,
         tags: tag.map(|t| vec![t]),
         data: None,

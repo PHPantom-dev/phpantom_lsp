@@ -1,8 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_test_backend, hover_text_at, open_document};
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use crate::common::{
+        create_test_backend, goto_definition_at, hover_response, hover_text_at, open_document,
+    };
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     /// Open a Blade file and collect syntax-error diagnostics for it.
     fn blade_syntax_errors(uri: &str, blade_text: &str) -> Vec<Diagnostic> {
@@ -41,7 +43,7 @@ mod tests {
     #[tokio::test]
     async fn test_blade_regression_sentry() {
         let backend = create_test_backend();
-        let blade_uri = Url::parse("file:///sentry.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///sentry.blade.php").unwrap();
         let blade_text =
             std::fs::read_to_string("tests/fixtures/blade_regression_1.blade.php").unwrap();
 
@@ -49,28 +51,14 @@ mod tests {
             .did_open(DidOpenTextDocumentParams {
                 text_document: TextDocumentItem {
                     uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
+                    language_id: "blade".to_string().into(),
                     version: 1,
                     text: blade_text.to_string(),
                 },
             })
             .await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 1,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let _ = backend.goto_definition(params).await.unwrap();
+        let _ = goto_definition_at(&backend, &blade_uri, 1, 1).await;
 
         let (virtual_php, _) = phpantom_lsp::blade::preprocessor::preprocess(&blade_text);
         println!("VIRTUAL PHP SENTRY:\n{}", virtual_php);
@@ -79,7 +67,7 @@ mod tests {
     #[tokio::test]
     async fn test_blade_regression_sitemap() {
         let backend = create_test_backend();
-        let blade_uri = Url::parse("file:///sitemap.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///sitemap.blade.php").unwrap();
         let blade_text =
             std::fs::read_to_string("tests/fixtures/blade_regression_2.blade.php").unwrap();
 
@@ -87,28 +75,14 @@ mod tests {
             .did_open(DidOpenTextDocumentParams {
                 text_document: TextDocumentItem {
                     uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
+                    language_id: "blade".to_string().into(),
                     version: 1,
                     text: blade_text.to_string(),
                 },
             })
             .await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 1,
-                    character: 1,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let _ = backend.goto_definition(params).await.unwrap();
+        let _ = goto_definition_at(&backend, &blade_uri, 1, 1).await;
 
         // Print the preprocessed PHP
         let (virtual_php, _) = phpantom_lsp::blade::preprocessor::preprocess(&blade_text);
@@ -217,7 +191,7 @@ mod tests {
     #[tokio::test]
     async fn hovering_a_directive_keyword_does_not_describe_the_expression_behind_it() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///directive-hover.blade.php").unwrap();
+        let uri = Uri::parse("file:///directive-hover.blade.php").unwrap();
         let template = "@php($cond = true)\n\
                         @if($cond)\n\
                         @foreach([$cond] as $row)\n\
@@ -244,7 +218,7 @@ mod tests {
     #[tokio::test]
     async fn hovering_a_raw_echo_delimiter_describes_the_echo_not_the_expression() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///raw-echo-hover.blade.php").unwrap();
+        let uri = Uri::parse("file:///raw-echo-hover.blade.php").unwrap();
         let template = "@php($html = '<b>bold</b>')\n\
                         {!!$html!!}\n\
                         {!! $html !!}\n\
@@ -267,21 +241,10 @@ mod tests {
                     },
                 };
                 for column in start..start + 3 {
-                    let hover = backend
-                        .hover(HoverParams {
-                            text_document_position_params: TextDocumentPositionParams {
-                                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                                position: Position {
-                                    line,
-                                    character: column,
-                                },
-                            },
-                            work_done_progress_params: WorkDoneProgressParams::default(),
-                        })
+                    let hover = hover_response(&backend, &uri, line, column)
                         .await
-                        .unwrap()
                         .unwrap_or_else(|| panic!("expected a hover at {line}:{column}"));
-                    let HoverContents::Markup(markup) = hover.contents else {
+                    let Contents::MarkupContent(markup) = hover.contents else {
                         panic!("expected markup at {line}:{column}");
                     };
                     assert!(
@@ -306,7 +269,7 @@ mod tests {
     #[tokio::test]
     async fn a_raw_echo_inside_literal_braces_hovers_as_a_raw_echo() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///raw-echo-in-braces-hover.blade.php").unwrap();
+        let uri = Uri::parse("file:///raw-echo-in-braces-hover.blade.php").unwrap();
         let template = "@php($html = '<b>bold</b>')\n\
                         {{!!$html!!}}\n\
                         {{!! $html !!}}\n\
@@ -329,21 +292,10 @@ mod tests {
                     },
                 };
                 for column in start..start + 3 {
-                    let hover = backend
-                        .hover(HoverParams {
-                            text_document_position_params: TextDocumentPositionParams {
-                                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                                position: Position {
-                                    line,
-                                    character: column,
-                                },
-                            },
-                            work_done_progress_params: WorkDoneProgressParams::default(),
-                        })
+                    let hover = hover_response(&backend, &uri, line, column)
                         .await
-                        .unwrap()
                         .unwrap_or_else(|| panic!("expected a hover at {line}:{column}"));
-                    let HoverContents::Markup(markup) = hover.contents else {
+                    let Contents::MarkupContent(markup) = hover.contents else {
                         panic!("expected markup at {line}:{column}");
                     };
                     assert!(
@@ -392,7 +344,7 @@ mod tests {
     #[tokio::test]
     async fn hovering_the_expression_of_a_raw_echo_still_describes_it() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///raw-echo-expression-hover.blade.php").unwrap();
+        let uri = Uri::parse("file:///raw-echo-expression-hover.blade.php").unwrap();
         let template = "@php($html = '<b>bold</b>')\n{!!$html!!}\n{!! $html !!}\n";
         open_document(&backend, &uri, "blade", template).await;
 

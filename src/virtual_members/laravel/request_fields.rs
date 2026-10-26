@@ -14,13 +14,14 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, SourceClassLoader, find_class_at_offset};
 use crate::completion::eloquent_string::detect_string_call_context;
 use crate::completion::source::code_context::{CodeContext, code_context_at};
 use crate::text_position::position_to_offset;
+use crate::type_engine::resolver::FileCtx;
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FileContext};
 
@@ -203,6 +204,7 @@ pub(crate) fn request_fields_at_position(
         ctx.use_map_at(cursor_offset),
         ctx.namespace_at(cursor_offset),
     );
+    let resolved_class_loader = backend.resolved_class_loader_with(&ctx.classes);
     let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
 
     let loaded: Option<Arc<ClassInfo>>;
@@ -216,6 +218,7 @@ pub(crate) fn request_fields_at_position(
             content,
             cursor_offset,
             &class_loader,
+            &resolved_class_loader,
             backend,
         )?;
         // `$safe = $request->safe()` narrows the request's own rules array,
@@ -231,6 +234,7 @@ pub(crate) fn request_fields_at_position(
                 content,
                 cursor_offset,
                 &class_loader,
+                &resolved_class_loader,
                 backend,
             )
         {
@@ -240,7 +244,6 @@ pub(crate) fn request_fields_at_position(
         loaded.as_deref()?
     };
 
-    let resolved_class_loader = backend.resolved_class_loader_with(&ctx.classes);
     if !is_request_like(receiver_class, &resolved_class_loader) {
         return None;
     }
@@ -268,28 +271,26 @@ fn resolve_variable_class(
     ctx: &FileContext,
     content: &str,
     cursor_offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     backend: &Backend,
 ) -> Option<Arc<ClassInfo>> {
-    let resolved_class_loader =
-        |name: &str| crate::class_lookup::load_resolved_name(name, class_loader);
     let types = crate::type_engine::variable::resolution::resolve_variable_types(VarQuery {
-        var_name: variable,
-        cursor_offset,
-        content,
-        current_class,
-        all_classes: &ctx.classes,
-        class_loader: &resolved_class_loader,
-        source_class_loader: class_loader,
-        source_imports: Some(ctx.use_map_at(cursor_offset)),
-        backend: Some(backend),
         loaders: crate::type_engine::resolver::Loaders::default(),
+        ..VarQuery::new(
+            variable,
+            FileCtx::new(content, &ctx.classes, resolved_class_loader, class_loader)
+                .with_imports(Some(ctx.use_map_at(cursor_offset)))
+                .with_backend(Some(backend)),
+            current_class,
+            cursor_offset,
+        )
     });
     types.iter().find_map(|resolved| {
         resolved
             .type_string
             .base_name()
-            .and_then(resolved_class_loader)
+            .and_then(|name| resolved_class_loader(Fqn::new(name)))
     })
 }
 
@@ -335,7 +336,7 @@ pub(crate) fn resolve_request_field_definition(
 
     let position = crate::text_position::offset_to_position(target_content, key_start);
     Some(crate::definition::point_location(
-        Url::parse(target_uri).ok()?,
+        crate::util::parse_url(target_uri)?,
         position,
     ))
 }

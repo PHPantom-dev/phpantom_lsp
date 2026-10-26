@@ -139,16 +139,6 @@ bolted onto the current call list.
 
 **Impact: Medium · Complexity: Medium**
 
-> **Blocked:** Requires `SnippetTextEdit` support in `lsp-types`.
-> Upstream issue: [gluon-lang/lsp-types#310](https://github.com/gluon-lang/lsp-types/issues/310)
-> (open). `SnippetTextEdit` is an LSP 3.18 `@proposed` feature — it's
-> in the spec but not yet implemented in any Rust LSP-types crate,
-> including the actively maintained `tower-lsp-server`/`ls-types` fork
-> that F20 migrates to (checked directly against its `main` branch;
-> `ls-types` removed its generic 3.18 `"proposed"` feature flag in
-> 0.0.4). F20 alone does not resolve this. Revisit once the upstream
-> issue is resolved in whichever crate we depend on at the time.
-
 After an Extract Function/Method code action is applied, let the user
 immediately rename the generated name by placing a snippet tab-stop on
 it.  The contextual name (`createUsers`, `validateGuard`, …) serves as
@@ -175,10 +165,10 @@ over it without an extra rename step.
 
 2. **Check the flag in `resolve_extract_function`** (extract function
    is a deferred action, so its edit is built at resolve time).  When
-   the client supports snippet edits, build the workspace edit with
-   `DocumentChanges::Operations` containing `SnippetTextEdit` entries
-   instead of plain `TextEdit`.  The new-text for the method name
-   uses `${1:name}` syntax.
+   the client supports snippet edits, build the workspace edit's
+   `TextDocumentEdit`s with `Edit::SnippetTextEdit` entries instead of
+   `Edit::TextEdit`.  The new-text for the method name uses
+   `${1:name}` syntax.
 
 3. **Linked edit ranges (optional enhancement).**  If the client
    supports `workspace.workspaceEdit.changeAnnotationSupport` or
@@ -190,7 +180,6 @@ over it without an extra rename step.
 | Feature                          | What it contributes                                       |
 | -------------------------------- | --------------------------------------------------------- |
 | Client capability storage        | Need to know whether the client supports snippet edits    |
-| `SnippetTextEdit` in tower-lsp   | Verify tower-lsp exposes the snippet edit type            |
 | Extract Function (shipped)       | The code action that this enhances                        |
 
 ---

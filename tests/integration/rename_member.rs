@@ -5,14 +5,14 @@ use crate::common::{
     apply_edits, create_test_backend, edits_for_uri, line_char_of, open_php, prepare_rename,
     rename, rename_result,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Method Rename ──────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn rename_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -50,7 +50,7 @@ async fn rename_method() {
 #[tokio::test]
 async fn rename_static_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -84,7 +84,7 @@ async fn rename_static_method() {
 #[tokio::test]
 async fn rename_property_from_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -127,9 +127,44 @@ async fn rename_property_from_access() {
 }
 
 #[tokio::test]
+async fn rename_property_from_a_clone_with_key() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "final class Point {\n",
+        "    public function __construct(public int $x) {}\n",
+        "}\n",
+        "$p = new Point(1);\n",
+        "$copy = clone($p, ['x' => 2]);\n",
+        "echo $p->x;\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "'x'");
+    let edit = rename(&backend, &uri, line, character + 1, "left")
+        .await
+        .expect("Expected a workspace edit for property rename");
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert_eq!(
+        updated,
+        concat!(
+            "<?php\n",
+            "final class Point {\n",
+            "    public function __construct(public int $left) {}\n",
+            "}\n",
+            "$p = new Point(1);\n",
+            "$copy = clone($p, ['left' => 2]);\n",
+            "echo $p->left;\n",
+        ),
+    );
+}
+
+#[tokio::test]
 async fn rename_promoted_property_from_parameter() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SomeService {\n",
@@ -177,6 +212,65 @@ async fn rename_promoted_property_from_parameter() {
     );
 }
 
+const EMAIL_PROPERTY_AND_METHOD: &str = concat!(
+    "<?php\n",
+    "class User {\n",
+    "    public function __construct(private string $email) {}\n",
+    "    public function email(): string { return $this->email; }\n",
+    "}\n",
+    "function show(User $user): string { return $user->email(); }\n",
+);
+
+#[tokio::test]
+async fn rename_property_leaves_the_method_of_the_same_name() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let text = EMAIL_PROPERTY_AND_METHOD;
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "$email)");
+    let edit = rename(&backend, &uri, line, character + 1, "address")
+        .await
+        .expect("Expected a workspace edit for property rename");
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert_eq!(
+        updated,
+        concat!(
+            "<?php\n",
+            "class User {\n",
+            "    public function __construct(private string $address) {}\n",
+            "    public function email(): string { return $this->address; }\n",
+            "}\n",
+            "function show(User $user): string { return $user->email(); }\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn rename_method_leaves_the_property_of_the_same_name() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let text = EMAIL_PROPERTY_AND_METHOD;
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "email()");
+    let edit = rename(&backend, &uri, line, character, "address")
+        .await
+        .expect("Expected a workspace edit for method rename");
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert_eq!(
+        updated,
+        concat!(
+            "<?php\n",
+            "class User {\n",
+            "    public function __construct(private string $email) {}\n",
+            "    public function address(): string { return $this->email; }\n",
+            "}\n",
+            "function show(User $user): string { return $user->address(); }\n",
+        )
+    );
+}
+
 // ─── Class-Aware Member Rename ──────────────────────────────────────────────
 
 #[tokio::test]
@@ -184,7 +278,7 @@ async fn rename_method_does_not_leak_to_unrelated_class() {
     // Two unrelated classes with the same method name.  Renaming the
     // method on one class must not touch the other.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // L0
         "class Dog {\n",                           // L1
@@ -238,7 +332,7 @@ async fn rename_method_does_not_leak_to_unrelated_class() {
 #[tokio::test]
 async fn rename_private_method_excludes_unresolved_same_name_calls() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Listener {\n",
@@ -289,9 +383,9 @@ async fn rename_private_method_excludes_unresolved_same_name_calls() {
 #[tokio::test]
 async fn rename_listener_private_method_cross_file_stays_scoped() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///Listener.php").unwrap();
-    let uri_b = Url::parse("file:///Other.php").unwrap();
-    let uri_c = Url::parse("file:///Use.php").unwrap();
+    let uri_a = Uri::parse("file:///Listener.php").unwrap();
+    let uri_b = Uri::parse("file:///Other.php").unwrap();
+    let uri_c = Uri::parse("file:///Use.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -364,7 +458,7 @@ async fn rename_listener_private_method_cross_file_stays_scoped() {
 #[tokio::test]
 async fn rename_method_on_implementation_does_not_leak_to_sibling_implementors() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Recalculates {\n",
@@ -424,7 +518,7 @@ async fn rename_method_on_implementation_does_not_leak_to_sibling_implementors()
 #[tokio::test]
 async fn rename_interface_method_updates_implementations_and_calls() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Recalculates {\n",
@@ -490,7 +584,7 @@ async fn rename_interface_method_updates_implementations_and_calls() {
 #[tokio::test]
 async fn rename_child_override_stays_on_child_branch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class BaseListener {\n",
@@ -536,7 +630,7 @@ async fn rename_child_override_stays_on_child_branch() {
 #[tokio::test]
 async fn rename_parent_method_updates_overrides_and_subclass_calls() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class BaseJob {\n",
@@ -577,7 +671,7 @@ async fn rename_method_includes_inherited_class() {
     // Renaming a method on a parent class should also rename it on
     // accesses through a child class.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // L0
         "class Base {\n",                             // L1
@@ -615,7 +709,7 @@ async fn rename_method_includes_inherited_class() {
 #[tokio::test]
 async fn rename_static_method_does_not_leak_to_unrelated_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                        // L0
         "class Alpha {\n",                                // L1
@@ -661,7 +755,7 @@ async fn rename_static_method_does_not_leak_to_unrelated_class() {
 #[tokio::test]
 async fn prepare_rename_enum_case_at_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "enum TaskType: int {\n",                  // 1
@@ -682,20 +776,24 @@ async fn prepare_rename_enum_case_at_declaration() {
         "prepare_rename should succeed on enum case declaration"
     );
 
-    if let Some(PrepareRenameResponse::RangeWithPlaceholder { placeholder, .. }) = result {
+    if let Some(PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+        placeholder,
+        ..
+    })) = result
+    {
         assert_eq!(
             placeholder, "Issue",
             "Placeholder should be the enum case name"
         );
     } else {
-        panic!("Expected RangeWithPlaceholder, got {:?}", result);
+        panic!("Expected PrepareRenamePlaceholder, got {:?}", result);
     }
 }
 
 #[tokio::test]
 async fn prepare_rename_enum_case_at_reference() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "enum TaskType: int {\n",                  // 1
@@ -716,20 +814,24 @@ async fn prepare_rename_enum_case_at_reference() {
         "prepare_rename should succeed on enum case reference"
     );
 
-    if let Some(PrepareRenameResponse::RangeWithPlaceholder { placeholder, .. }) = result {
+    if let Some(PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+        placeholder,
+        ..
+    })) = result
+    {
         assert_eq!(
             placeholder, "Issue",
             "Placeholder should be the enum case name"
         );
     } else {
-        panic!("Expected RangeWithPlaceholder, got {:?}", result);
+        panic!("Expected PrepareRenamePlaceholder, got {:?}", result);
     }
 }
 
 #[tokio::test]
 async fn rename_enum_case_from_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "enum TaskType: int {\n",                  // 1
@@ -788,7 +890,7 @@ async fn rename_enum_case_from_declaration() {
 #[tokio::test]
 async fn rename_enum_case_from_reference() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "enum TaskType: int {\n",                  // 1
@@ -836,7 +938,7 @@ async fn rename_enum_case_from_reference() {
 #[tokio::test]
 async fn rename_enum_case_does_not_affect_other_cases() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "enum TaskType: int {\n",                  // 1
@@ -879,7 +981,7 @@ async fn rename_enum_case_does_not_affect_other_cases() {
 #[tokio::test]
 async fn rename_unit_enum_case() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                   // 0
         "enum Color {\n",            // 1
@@ -935,6 +1037,7 @@ namespace App {
     class Author extends Model {
         public function scopeActive($query): void {}
         public function getDisplayNameAttribute(): string { return ''; }
+        public function posts(): \Illuminate\Database\Eloquent\Relations\HasMany {}
     }
 }
 "#;
@@ -944,13 +1047,15 @@ namespace App;
 function show(Author $author): void {
     Author::active();
     echo $author->display_name;
+    $author->posts()->count();
+    echo count($author->posts);
 }
 "#;
 
 /// Open the model and a file that uses it, returning both URIs.
-async fn open_eloquent_files(backend: &phpantom_lsp::Backend) -> (Url, Url) {
-    let model_uri = Url::parse("file:///Author.php").unwrap();
-    let usage_uri = Url::parse("file:///usage.php").unwrap();
+async fn open_eloquent_files(backend: &phpantom_lsp::Backend) -> (Uri, Uri) {
+    let model_uri = Uri::parse("file:///Author.php").unwrap();
+    let usage_uri = Uri::parse("file:///usage.php").unwrap();
     open_php(backend, &model_uri, ELOQUENT_MODEL).await;
     open_php(backend, &usage_uri, ELOQUENT_USAGE).await;
     (model_uri, usage_uri)
@@ -990,6 +1095,22 @@ async fn renaming_an_accessor_renames_its_property_reads() {
 }
 
 #[tokio::test]
+async fn renaming_a_relationship_renames_its_calls_and_property_reads() {
+    let backend = create_test_backend();
+    let (uri, usage_uri) = open_eloquent_files(&backend).await;
+
+    let (line, character) = line_char_of(ELOQUENT_MODEL, "posts()");
+    let edit = rename(&backend, &uri, line, character + 1, "articles")
+        .await
+        .expect("expected a relationship rename");
+    let result = apply_edits(ELOQUENT_MODEL, &edits_for_uri(&edit, &uri));
+    assert!(result.contains("function articles()"), "{result}");
+    let usage = apply_edits(ELOQUENT_USAGE, &edits_for_uri(&edit, &usage_uri));
+    assert!(usage.contains("$author->articles()->count();"), "{usage}");
+    assert!(usage.contains("count($author->articles);"), "{usage}");
+}
+
+#[tokio::test]
 async fn renaming_a_scope_out_of_its_convention_is_refused() {
     let backend = create_test_backend();
     let (uri, _) = open_eloquent_files(&backend).await;
@@ -1006,7 +1127,7 @@ async fn renaming_a_scope_out_of_its_convention_is_refused() {
 #[tokio::test]
 async fn rename_method_on_crlf_file_with_multibyte_prefix_uses_utf16_columns() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///rename_crlf_utf16.php").unwrap();
+    let uri = Uri::parse("file:///rename_crlf_utf16.php").unwrap();
     let usage_prefix = "$s = '😀é'; $f->";
     let text = format!(
         "<?php\r\nclass Foo {{\r\n    public function bar(): void {{}}\r\n}}\r\n$f = new Foo();\r\n{usage_prefix}bar();\r\n"
@@ -1038,7 +1159,7 @@ async fn rename_method_on_crlf_file_with_multibyte_prefix_uses_utf16_columns() {
 #[tokio::test]
 async fn rename_data_provider_updates_the_metadata_naming_it() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use PHPUnit\\Framework\\Attributes\\DataProvider;\n",

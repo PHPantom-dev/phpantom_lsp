@@ -314,9 +314,18 @@ fn mutable_collection_merges_normalize_complete_existing_domains() {
         ),
         PhpType::parse("list<string>")
     );
+    // A key domain spelled out as literals stays one, gaining the new key.
     assert_eq!(
         merge_keyed_type(
             &PhpType::parse("array<'existing-key', 'existing-value'>"),
+            &PhpType::literal_string_raw("'new-key'"),
+            &PhpType::literal_string_raw("'new-value'"),
+        ),
+        PhpType::parse("array<'existing-key'|'new-key', string>")
+    );
+    assert_eq!(
+        merge_keyed_type(
+            &PhpType::parse("array<string, 'existing-value'>"),
             &PhpType::literal_string_raw("'new-key'"),
             &PhpType::literal_string_raw("'new-value'"),
         ),

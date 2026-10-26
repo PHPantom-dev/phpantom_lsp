@@ -4,7 +4,9 @@ use crate::common::{
     complete_at, create_psr4_workspace, item_labels, position_after, split_cursor,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, CompletionTextEdit, Range, Url};
+use tower_lsp_server::gen_lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionItemTextEdit, Range, Uri,
+};
 
 const COMPOSER: &str = r#"{
     "require": { "laravel/framework": "^12.0" },
@@ -103,7 +105,7 @@ class Post extends \Illuminate\Database\Eloquent\Model {
 }
 "#;
 
-fn workspace() -> (Backend, tempfile::TempDir, Url) {
+fn workspace() -> (Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(
         COMPOSER,
         &[
@@ -115,11 +117,11 @@ fn workspace() -> (Backend, tempfile::TempDir, Url) {
             ("app/Models/Post.php", POST),
         ],
     );
-    let uri = Url::from_file_path(dir.path().join("app/Consumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/Consumer.php")).unwrap();
     (backend, dir, uri)
 }
 
-async fn complete_statement(backend: &Backend, uri: &Url, statement: &str) -> Vec<CompletionItem> {
+async fn complete_statement(backend: &Backend, uri: &Uri, statement: &str) -> Vec<CompletionItem> {
     let (source, position) = split_cursor(&format!(
         r#"<?php
 namespace App;
@@ -325,7 +327,7 @@ async fn unfinished_attribute_keys_complete_without_an_arrow() {
             .iter()
             .find(|item| item.label == "name")
             .unwrap_or_else(|| panic!("{statement}: {items:?}"));
-        assert_eq!(item.kind, Some(CompletionItemKind::FIELD));
+        assert_eq!(item.kind, Some(CompletionItemKind::Field));
         assert_eq!(item.insert_text.as_deref(), Some("name"));
     }
 }
@@ -337,7 +339,7 @@ async fn attribute_completion_replaces_the_prefix_inside_the_quotes() {
         split_cursor("<?php\nuse App\\Models\\User;\n/* 😀 */ User::create(['na§' => 'Ada']);");
     let items = complete_at(&backend, &uri, &source, position.line, position.character).await;
     let item = items.iter().find(|item| item.label == "name").unwrap();
-    let Some(CompletionTextEdit::Edit(edit)) = &item.text_edit else {
+    let Some(CompletionItemTextEdit::TextEdit(edit)) = &item.text_edit else {
         panic!("expected an explicit string replacement: {item:?}");
     };
     assert_eq!(edit.new_text, "name");

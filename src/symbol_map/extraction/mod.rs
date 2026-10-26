@@ -15,9 +15,8 @@ use super::docblock::{
 use super::morph_columns::{record_morph_column_call, record_morph_column_comparison};
 use super::{
     CallArg, CallArgKind, CallSites, ClassRefContext, DocblockMemberRef, MorphColumnSite,
-    NestedRanges, SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap, SymbolSpan,
-    TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite, ViewReceiverClass,
-    ViewReceiverSite,
+    NestedRanges, ReceiverClass, SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap,
+    SymbolSpan, TemplateParamDef, TypedReceiverSite, UntypedClosureSite, VarDefKind, VarDefSite,
 };
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
@@ -59,6 +58,8 @@ struct ExtractionCtx<'a> {
     template_defs: Vec<TemplateParamDef>,
     /// Call-site records for signature help and conditional return types.
     call_sites: CallSites,
+    /// `(start, args_start)` of each call written as a statement of its own.
+    discarded_calls: Vec<(u32, u32)>,
     /// Ranges where `break` is valid (loops and `switch`).
     breakable_scopes: Vec<(u32, u32)>,
     /// Ranges where `continue` is valid (loops only).
@@ -78,19 +79,25 @@ struct ExtractionCtx<'a> {
     /// indexing supplies this so Laravel-specific syntax does not guess from
     /// an alias or a namespace-local homonym. Syntax-only tests omit it.
     resolved_names: Option<&'a OwnedResolvedNames>,
-    /// Laravel strings whose meaning depends on a workspace symbol being
+    /// String keys whose meaning depends on a workspace symbol being
     /// absent. They are activated after the batch publishes its declarations.
-    conditional_laravel_spans: Vec<super::ConditionalLaravelStringSpan>,
+    conditional_string_key_spans: Vec<super::ConditionalStringKeySpan>,
     /// Closures and arrow functions passed as arguments to callable-typed
     /// parameters, used by inlay hints.
     untyped_closure_sites: Vec<UntypedClosureSite>,
-    /// Render sites whose receiver only a type settles, left for
-    /// `Backend::typed_receiver_view_spans` to confirm.
-    view_receiver_sites: Vec<ViewReceiverSite>,
+    /// String keys whose receiver only a type settles, left for
+    /// `Backend::typed_receiver_spans_for` to confirm.
+    typed_receiver_sites: Vec<TypedReceiverSite>,
     /// Possible morph aliases whose model and type column are resolved lazily.
     morph_column_sites: Vec<MorphColumnSite>,
     /// The model argument of each authorization check that named one.
     gate_subjects: Vec<crate::symbol_map::GateSubject>,
+    /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
+    /// register.
+    messenger_handlers: Vec<crate::symbol_map::MessengerHandlerSite>,
+    /// What the file's PHP configurator calls declare a service or a
+    /// parameter as.
+    container_values: Vec<crate::symbol_map::ContainerValueSite>,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -121,6 +128,20 @@ struct ExtractionCtx<'a> {
     /// being extracted.  It is what gives `@covers ::name` on a test method
     /// a subject; without one that shape names a global function.
     covers_default_class: Option<crate::atom::Atom>,
+    /// Whether the project builds a Symfony service container.  Gates the
+    /// container calls recorded for the type engine to confirm, which
+    /// `get()` and `set()` would otherwise record all over any other
+    /// project.
+    symfony: bool,
+    /// Whether the project uses Twig, outside Symfony too.  Gates the
+    /// `render()` calls recorded for the type engine to confirm as naming
+    /// a template.
+    twig: bool,
+    /// Whether the file names anything from Symfony's container
+    /// configurator namespace, checked once lazily.
+    uses_symfony_configurators: Option<bool>,
+    /// Likewise for Symfony's routing configurator namespace.
+    uses_symfony_routing_configurators: Option<bool>,
 }
 
 /// A variable token's name without its `$`.
@@ -203,19 +224,19 @@ impl<'a> ExtractionCtx<'a> {
         self.push_var_def(start, name, kind, scope_start, start);
     }
 
-    /// Move Laravel string spans emitted since `start` into the dormant
+    /// Move string-key spans emitted since `start` into the dormant
     /// candidate list. The tail is normally one span, so removing in place
     /// avoids allocating a temporary vector on this already-rare path.
-    fn defer_laravel_spans_since(
+    fn defer_string_key_spans_since(
         &mut self,
         start: usize,
-        dependency: super::LaravelStringDependency,
+        dependency: super::StringKeyDependency,
     ) {
         let spans = &mut self.spans;
-        let candidates = &mut self.conditional_laravel_spans;
+        let candidates = &mut self.conditional_string_key_spans;
         for span in spans.drain(start..) {
-            debug_assert!(matches!(&span.kind, SymbolKind::LaravelStringKey { .. }));
-            candidates.push(super::ConditionalLaravelStringSpan::new(dependency, span));
+            debug_assert!(matches!(&span.kind, SymbolKind::StringKey { .. }));
+            candidates.push(super::ConditionalStringKeySpan::new(dependency, span));
         }
     }
 }
@@ -227,6 +248,7 @@ pub(crate) mod laravel;
 mod phpunit;
 mod statements;
 mod subject_text;
+mod symfony;
 
 use class_like::*;
 use expressions::*;
@@ -235,6 +257,13 @@ use laravel::*;
 use phpunit::*;
 use statements::*;
 use subject_text::*;
+use symfony::*;
+
+pub(crate) use symfony::{
+    configurator_function_kind, is_autowire_attribute, is_bus_name_stamp,
+    is_event_listener_attribute, is_message_handler_attribute, is_template_attribute,
+    is_translatable_message, is_translate_function, symfony_receiver_method,
+};
 
 /// Descend generically through a node the typed dispatchers have no arm for,
 /// re-entering the typed extractors at the next expression or statement
@@ -261,7 +290,7 @@ fn descend_unhandled<'a>(node: Node<'a, 'a>, ctx: &mut ExtractionCtx<'a>, scope_
 /// every navigable symbol occurrence.
 #[cfg(test)]
 pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> SymbolMap {
-    extract_symbol_map_inner(program, content, None)
+    extract_symbol_map_inner(program, content, None, true, true)
 }
 
 /// Build a [`SymbolMap`] using the semantic names produced by `mago-names`.
@@ -271,25 +300,32 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
     content: &str,
     resolved_names: &OwnedResolvedNames,
 ) -> SymbolMap {
-    let mut map = extract_symbol_map_inner(program, content, Some(resolved_names));
-    map.refresh_conditional_laravel_spans(None, |_| false);
+    let mut map = extract_symbol_map_inner(program, content, Some(resolved_names), true, true);
+    map.refresh_conditional_string_key_spans(None, |_| false);
     map
 }
 
 /// Build a semantic map while retaining workspace-dependent Laravel spans as
 /// dormant candidates for the publication lifecycle to settle.
+///
+/// `symfony` says whether the project builds a Symfony service container,
+/// and `twig` whether it uses Twig.
 pub(crate) fn extract_symbol_map_for_index(
     program: &Program<'_>,
     content: &str,
     resolved_names: &OwnedResolvedNames,
+    symfony: bool,
+    twig: bool,
 ) -> SymbolMap {
-    extract_symbol_map_inner(program, content, Some(resolved_names))
+    extract_symbol_map_inner(program, content, Some(resolved_names), symfony, twig)
 }
 
 fn extract_symbol_map_inner(
     program: &Program<'_>,
     content: &str,
     resolved_names: Option<&OwnedResolvedNames>,
+    symfony: bool,
+    twig: bool,
 ) -> SymbolMap {
     let mut ctx = ExtractionCtx {
         spans: Vec::new(),
@@ -301,6 +337,7 @@ fn extract_symbol_map_inner(
         assert_narrowing_offsets: Vec::new(),
         template_defs: Vec::new(),
         call_sites: CallSites::default(),
+        discarded_calls: Vec::new(),
         breakable_scopes: Vec::new(),
         loop_scopes: Vec::new(),
         switch_scopes: Vec::new(),
@@ -309,11 +346,13 @@ fn extract_symbol_map_inner(
         trivias: program.trivia.as_slice(),
         content,
         resolved_names,
-        conditional_laravel_spans: Vec::new(),
+        conditional_string_key_spans: Vec::new(),
         untyped_closure_sites: Vec::new(),
-        view_receiver_sites: Vec::new(),
+        typed_receiver_sites: Vec::new(),
         morph_column_sites: Vec::new(),
         gate_subjects: Vec::new(),
+        messenger_handlers: Vec::new(),
+        container_values: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
@@ -322,6 +361,10 @@ fn extract_symbol_map_inner(
         in_console_command: false,
         in_mailable: false,
         covers_default_class: None,
+        symfony,
+        twig,
+        uses_symfony_configurators: None,
+        uses_symfony_routing_configurators: None,
     };
 
     for stmt in program.statements.iter() {
@@ -414,12 +457,16 @@ fn extract_symbol_map_inner(
 
     // Sort call_sites by args_start for reverse-scan lookup.
     ctx.call_sites.finish();
+    ctx.discarded_calls
+        .sort_unstable_by_key(|&(_, args_start)| args_start);
+    ctx.discarded_calls.shrink_to_fit();
     ctx.breakable_scopes.sort_by_key(|s| s.0);
     ctx.loop_scopes.sort_by_key(|s| s.0);
     ctx.switch_scopes.sort_by_key(|s| s.0);
     ctx.static_method_scopes.sort_by_key(|s| s.0);
-    ctx.view_receiver_sites.sort_by_key(|s| s.start);
+    ctx.typed_receiver_sites.sort_by_key(|s| s.start);
     ctx.morph_column_sites.sort_by_key(|s| s.start);
+    ctx.container_values.sort_by_key(|s| s.start);
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
         crate::atom::AtomMap::default();
@@ -434,7 +481,7 @@ fn extract_symbol_map_inner(
 
     SymbolMap {
         spans: ctx.spans,
-        conditional_laravel_spans: ctx.conditional_laravel_spans,
+        conditional_string_key_spans: ctx.conditional_string_key_spans,
         member_access_indices,
         var_defs: ctx.var_defs,
         var_defs_by_name,
@@ -445,15 +492,18 @@ fn extract_symbol_map_inner(
         assert_narrowing_offsets: ctx.assert_narrowing_offsets,
         template_defs: ctx.template_defs,
         call_sites: ctx.call_sites,
+        discarded_calls: ctx.discarded_calls,
         breakable_scopes: ctx.breakable_scopes,
         loop_scopes: ctx.loop_scopes,
         switch_scopes: ctx.switch_scopes,
         static_method_scopes: ctx.static_method_scopes,
         instance_method_scopes: ctx.instance_method_scopes,
         untyped_closure_sites: ctx.untyped_closure_sites,
-        view_receiver_sites: ctx.view_receiver_sites,
+        typed_receiver_sites: ctx.typed_receiver_sites,
         morph_column_sites: ctx.morph_column_sites,
         gate_subjects: ctx.gate_subjects,
+        messenger_handlers: ctx.messenger_handlers,
+        container_values: ctx.container_values,
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
         source_hash: None,
     }

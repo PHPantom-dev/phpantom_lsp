@@ -7,7 +7,9 @@
 //! matches no known directive returns an empty list rather than falling
 //! through to another strategy.
 
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Position};
+use tower_lsp_server::gen_lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionResponse, Position,
+};
 
 use crate::Backend;
 use crate::blade::directives::DIRECTIVE_COMPLETIONS;
@@ -50,7 +52,7 @@ impl Backend {
         let ctx = crate::blade::blocks::block_name_at(&content, offset)?;
         let prefix = content.get(ctx.name_start..offset)?.to_lowercase();
 
-        let edit_range = tower_lsp::lsp_types::Range {
+        let edit_range = tower_lsp_server::gen_lsp_types::Range {
             start: crate::text_position::offset_to_position(&content, ctx.name_start),
             end: position,
         };
@@ -61,23 +63,25 @@ impl Backend {
             .enumerate()
             .map(|(index, name)| CompletionItem {
                 label: name.clone(),
-                kind: Some(CompletionItemKind::VALUE),
+                kind: Some(CompletionItemKind::Value),
                 detail: Some(format!("Blade {}", ctx.kind.label())),
                 sort_text: Some(format!("{index:05}")),
                 filter_text: Some(name.clone()),
-                text_edit: Some(tower_lsp::lsp_types::CompletionTextEdit::Edit(
-                    tower_lsp::lsp_types::TextEdit {
-                        range: edit_range,
-                        new_text: name,
-                    },
-                )),
+                text_edit: Some(
+                    tower_lsp_server::gen_lsp_types::CompletionItemTextEdit::TextEdit(
+                        tower_lsp_server::gen_lsp_types::TextEdit {
+                            range: edit_range,
+                            new_text: name,
+                        },
+                    ),
+                ),
                 ..CompletionItem::default()
             })
             .collect();
         // Always short-circuits: inside a section or stack name nothing
         // else completion offers applies, so an empty list beats falling
         // through to class and variable names.
-        Some(CompletionResponse::Array(items))
+        Some(CompletionResponse::CompletionItemList(items))
     }
 
     /// Build the directive-name completion list for an already-typed
@@ -91,7 +95,7 @@ impl Backend {
     pub(super) fn complete_blade_directive(&self, prefix: &str) -> CompletionResponse {
         let prefix_lower = prefix.to_lowercase();
         let matches_prefix = |name: &str| name.to_lowercase().starts_with(&prefix_lower);
-        let directives = self.blade_directives.read();
+        let directives = self.blade.directives.read();
 
         let mut items: Vec<CompletionItem> = DIRECTIVE_COMPLETIONS
             .iter()
@@ -121,7 +125,7 @@ impl Backend {
                     )
                 }),
         );
-        CompletionResponse::Array(items)
+        CompletionResponse::CompletionItemList(items)
     }
 }
 
@@ -135,14 +139,14 @@ fn directive_item(
 ) -> CompletionItem {
     CompletionItem {
         label: format!("@{name}"),
-        kind: Some(CompletionItemKind::KEYWORD),
+        kind: Some(CompletionItemKind::Keyword),
         detail: Some(detail.to_string()),
         filter_text: Some(format!("@{name}")),
         insert_text: Some(insert_text),
         insert_text_format: Some(if is_snippet {
-            tower_lsp::lsp_types::InsertTextFormat::SNIPPET
+            tower_lsp_server::gen_lsp_types::InsertTextFormat::Snippet
         } else {
-            tower_lsp::lsp_types::InsertTextFormat::PLAIN_TEXT
+            tower_lsp_server::gen_lsp_types::InsertTextFormat::PlainText
         }),
         ..CompletionItem::default()
     }

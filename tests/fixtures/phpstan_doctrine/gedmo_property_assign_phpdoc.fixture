@@ -1,0 +1,7 @@
+// test: Properties a Gedmo annotation marks are not unused
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, MissingGedmoByPhpDocPropertyAssignRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Properties/data/gedmo-property-assign-phpdoc.php
+---

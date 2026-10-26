@@ -1,0 +1,16 @@
+{
+    "name": "phpantom/phpstan-symfony-fixtures-without-container",
+    "description": "The project PHPStan's Symfony extension fixtures run in when no container is configured",
+    "type": "project",
+    "require": {
+        "symfony/framework-bundle": "^7.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Psr\\Container\\": "../../stubs/psr/container/src/",
+            "Symfony\\Bundle\\FrameworkBundle\\": "../../stubs/symfony/framework-bundle/",
+            "Symfony\\Component\\DependencyInjection\\": "../../stubs/symfony/dependency-injection/",
+            "Symfony\\Contracts\\Service\\": "../../stubs/symfony/service-contracts/"
+        }
+    }
+}

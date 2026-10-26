@@ -8,6 +8,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -61,9 +62,9 @@ pub(super) fn resolve_rhs_static_call(
         | Expression::Identifier(_) => crate::class_lookup::class_expression_name(
             static_call.class,
             ctx.current_class,
-            ctx.all_classes,
-            ctx.source_class_loader,
-            ctx.source_imports,
+            ctx.file.all_classes,
+            ctx.file.source_class_loader,
+            ctx.file.source_imports,
         ),
         // `$var::method()`, `$this->prop::method()`, `getFoo()::method()`:
         // the classes the value names (a class-string, a string naming a
@@ -91,8 +92,8 @@ pub(super) fn resolve_rhs_static_call(
     let Some(cls_name) = class_name else {
         return vec![];
     };
-    let Some(owner) = (ctx.class_loader)(&cls_name).or_else(|| {
-        crate::class_lookup::find_class_by_fqn(ctx.all_classes, &cls_name).map(Arc::clone)
+    let Some(owner) = (ctx.file.class_loader)(Fqn::new(&cls_name)).or_else(|| {
+        crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, &cls_name).map(Arc::clone)
     }) else {
         return vec![];
     };
@@ -109,9 +110,9 @@ fn static_call_on_class(
     let concrete_owner = crate::type_engine::call_resolution::facade_concrete_owner(
         owner,
         method_name,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
-        ctx.backend,
+        ctx.file.backend,
     );
     let owner = concrete_owner.as_deref().unwrap_or(owner);
     // `parent::get()` (or `Foo::get()` written out) from inside a
@@ -123,7 +124,7 @@ fn static_call_on_class(
         .map(|args| {
             crate::virtual_members::resolve_class_fully_with_type_args(
                 owner,
-                ctx.class_loader,
+                ctx.file.class_loader,
                 ctx.resolved_class_cache,
                 &args,
             )
@@ -131,6 +132,17 @@ fn static_call_on_class(
     let owner = bound_owner.as_deref().unwrap_or(owner);
 
     if let Some(argument_list) = static_call.argument_list {
+        // The stub can only say `Closure`; the closure it makes has the
+        // signature of the callable it is handed, as `$callable(...)` does.
+        if method_name.eq_ignore_ascii_case("fromCallable")
+            && owner.fqn() == "Closure"
+            && let Some(callable) = crate::call_args::first_param_arg(argument_list, "callback")
+        {
+            return super::closure_value(
+                super::calls::closure_from_callable(callable.value(), ctx),
+                ctx,
+            );
+        }
         if let Some(result) =
             try_resolve_config_method_type(&owner.fqn(), method_name, argument_list, ctx)
         {
@@ -218,7 +230,7 @@ fn static_call_on_class_strings(
         // Get the method's return type string.
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             target,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         let method_ref = target
@@ -238,9 +250,9 @@ fn static_call_on_class_strings(
             continue;
         }
         let mr_ctx = MethodReturnCtx {
-            all_classes: ctx.all_classes,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
+            all_classes: ctx.file.all_classes,
+            class_loader: ctx.file.class_loader,
+            backend: ctx.file.backend,
             template_subs: &template_subs,
             var_resolver: Some(&var_resolver),
             cache: ctx.resolved_class_cache,
@@ -274,8 +286,8 @@ fn static_call_on_class_strings(
     let resolved_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &combined,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     if !resolved_classes.is_empty() {
         return ResolvedType::from_classes_with_hint(resolved_classes, combined);
@@ -311,7 +323,7 @@ fn static_call_on_object(
 fn static_arg_texts(static_call: &StaticCallParts<'_>, ctx: &VarResolutionCtx<'_>) -> Vec<String> {
     static_call
         .argument_list
-        .map(|list| extract_arg_texts_from_ast(list, ctx.content))
+        .map(|list| extract_arg_texts_from_ast(list, ctx.file.content))
         .unwrap_or_default()
 }
 
@@ -327,7 +339,7 @@ fn method_is_static(class_info: &ClassInfo, method_name: &str, ctx: &VarResoluti
     }
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         class_info,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     merged

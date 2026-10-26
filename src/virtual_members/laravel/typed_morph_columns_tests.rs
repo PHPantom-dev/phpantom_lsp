@@ -1,6 +1,8 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::test_fixtures::make_class;
+use crate::type_engine::resolver::FileCtx;
 
 fn symbol_map(content: &str) -> Arc<SymbolMap> {
     crate::parser::with_parsed_program(content, "morph_test", |program, content| {
@@ -10,12 +12,16 @@ fn symbol_map(content: &str) -> Arc<SymbolMap> {
 
 /// Mark `backend` as a Laravel project whose morph map registers `post`.
 fn with_morph_map(backend: Backend) -> Backend {
-    backend.resolved_class_cache.write().set_laravel(true);
+    backend
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
     backend.refresh_laravel_morph_map(
         "file:///phpantom-morph-provider.php",
         "<?php \\Illuminate\\Database\\Eloquent\\Relations\\Relation::morphMap(['post' => \\Post::class]);",
     );
-    assert!(!backend.laravel_morph_map.read().is_empty());
+    assert!(!backend.laravel.morph_map.read().is_empty());
     backend
 }
 
@@ -37,7 +43,11 @@ fn morph_columns_are_not_confirmed_without_a_laravel_morph_map() {
     assert!(plain.morph_column_spans_for(uri, &map).is_empty());
 
     let laravel = Backend::new_headless();
-    laravel.resolved_class_cache.write().set_laravel(true);
+    laravel
+        .resolved_class_cache
+        .write()
+        .laravel_mut()
+        .set_enabled(true);
     let map = open(&laravel);
     assert!(laravel.morph_column_spans_for(uri, &map).is_empty());
 
@@ -86,10 +96,16 @@ fn morph_column_cache_rejects_missing_changed_and_outdated_sources() {
         .write()
         .insert(uri.to_string(), Arc::new(format!("{source}\n")));
     assert!(backend.morph_column_spans_for(uri, &map).is_empty());
-    backend
-        .blade_virtual_content
-        .write()
-        .insert(uri.to_string(), Arc::new(source.to_string()));
+    backend.files.write().insert(
+        uri.to_string(),
+        Arc::new(crate::file_state::FileState {
+            blade: Some(crate::file_state::BladeFileState {
+                virtual_php: Arc::new(source.to_string()),
+                source_map: Arc::default(),
+            }),
+            ..Default::default()
+        }),
+    );
     assert_eq!(backend.morph_column_spans_for(uri, &map).len(), 1);
     assert!(
         backend
@@ -100,23 +116,17 @@ fn morph_column_cache_rejects_missing_changed_and_outdated_sources() {
 
 #[test]
 fn morph_columns_reject_untyped_and_missing_models() {
-    let loader = |_: &str| None;
-    let ctx = ResolutionCtx {
-        current_class: None,
-        all_classes: &[],
-        content: "",
-        cursor_offset: 0,
-        class_loader: &loader,
-        source_class_loader: &loader,
-        source_imports: None,
-        backend: None,
-        laravel_macro_this_resolver: None,
-        resolved_class_cache: None,
-        function_loader: None,
-        scope_var_resolver: None,
-        is_in_static_method: false,
-        preserve_static: false,
-    };
+    let loader = |_: Fqn<'_>| None;
+    let ctx = ResolutionCtx::new(
+        FileCtx::new(
+            "",
+            &[],
+            &loader,
+            crate::test_fixtures::fqn_source_loader(&loader),
+        ),
+        None,
+        0,
+    );
     let map = symbol_map("<?php Comment::where('subject_type', 'post');");
     let site = &map.morph_column_sites[0];
     for ty in [

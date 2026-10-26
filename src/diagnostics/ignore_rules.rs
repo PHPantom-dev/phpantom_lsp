@@ -13,7 +13,7 @@
 
 use globset::{Glob, GlobMatcher};
 use regex::Regex;
-use tower_lsp::lsp_types::{Diagnostic, NumberOrString};
+use tower_lsp_server::gen_lsp_types::{Code, Diagnostic};
 
 use crate::config::IgnoreRule;
 
@@ -28,7 +28,7 @@ pub(crate) struct CompiledIgnoreRule {
 impl CompiledIgnoreRule {
     fn matches(&self, relative_path: &str, diagnostic: &Diagnostic) -> bool {
         if let Some(re) = &self.message
-            && !re.is_match(&diagnostic.message)
+            && !re.is_match(crate::util::message_text(&diagnostic.message))
         {
             return false;
         }
@@ -41,7 +41,7 @@ impl CompiledIgnoreRule {
 
         if let Some(identifier) = &self.identifier {
             let code = match &diagnostic.code {
-                Some(NumberOrString::String(s)) => s.as_str(),
+                Some(Code::String(s)) => s.as_str(),
                 _ => "",
             };
             if code != identifier {
@@ -125,13 +125,13 @@ pub(crate) fn filter_ignored_by_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::lsp_types::{Position, Range};
+    use tower_lsp_server::gen_lsp_types::{Position, Range};
 
     fn diag(message: &str, code: &str) -> Diagnostic {
         Diagnostic {
             range: Range::new(Position::new(0, 0), Position::new(0, 1)),
-            message: message.to_string(),
-            code: Some(NumberOrString::String(code.to_string())),
+            message: message.to_string().into(),
+            code: Some(Code::String(code.to_string())),
             ..Default::default()
         }
     }
@@ -173,7 +173,7 @@ mod tests {
         ];
         filter_ignored_by_config(&mut diagnostics, "src/Foo.php", &rules);
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].message, "boom");
+        assert_eq!(crate::util::message_text(&diagnostics[0].message), "boom");
     }
 
     #[test]
@@ -196,7 +196,7 @@ mod tests {
         filter_ignored_by_config(&mut diagnostics, "src/Foo.php", &rules);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(
-            diagnostics[0].message,
+            crate::util::message_text(&diagnostics[0].message),
             "Call to deprecated function other_helper()"
         );
     }

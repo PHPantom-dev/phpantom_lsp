@@ -1,0 +1,7 @@
+// test: An entity mapped with other annotations beside its own
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testPhpStanBug6445.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/phpstan-bug-6445.php
+---

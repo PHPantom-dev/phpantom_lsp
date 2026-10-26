@@ -7,6 +7,7 @@
 //! subjects, inline assignments in the condition, and `@phpstan-assert`
 //! on property/array subjects.
 
+use crate::common::message_text;
 use crate::common::{
     create_test_backend, slow_diagnostic_messages, unknown_member_diagnostics_with_scope_cache,
 };
@@ -313,7 +314,8 @@ class C {{
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("value") && d.message.contains("OtherExpr")),
+            .any(|d| message_text(&d.message).contains("value")
+                && message_text(&d.message).contains("OtherExpr")),
         "Accessing `->value` on the narrowed `OtherExpr` should be \
          flagged, got: {diags:?}"
     );
@@ -1650,10 +1652,10 @@ function f(): void {
 }
 
 /// A no-op emptiness check joins `''` and `non-empty-string` back into
-/// `string`, which a `non-empty-string` parameter accepts like the
-/// unchecked variable.
+/// `string`, which a `non-empty-string` parameter rejects exactly as it
+/// rejects the unchecked variable.
 #[test]
-fn emptiness_check_join_does_not_fail_non_empty_string_argument() {
+fn emptiness_check_join_is_the_unchecked_string() {
     let backend = create_test_backend();
     let text = r#"<?php
 /** @param non-empty-string $s */
@@ -1672,5 +1674,9 @@ function f(string $h): void {
         text,
         "type_mismatch_argument",
     );
-    assert!(diags.is_empty(), "got: {diags:?}");
+    assert_eq!(
+        diags,
+        ["Argument 1 ($s) expects non-empty-string, got string"],
+        "got: {diags:?}"
+    );
 }

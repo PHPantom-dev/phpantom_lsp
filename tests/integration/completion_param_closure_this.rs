@@ -1,7 +1,7 @@
 use crate::common::{
     complete_at, create_psr4_workspace, create_test_backend, method_names, property_names,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── @param-closure-this: instance method call ──────────────────────────────
 
@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::*;
 #[tokio::test]
 async fn test_param_closure_this_instance_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_tag.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_tag.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -57,7 +57,7 @@ async fn test_param_closure_this_instance_method() {
 #[tokio::test]
 async fn test_param_closure_this_dollar_this_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_self.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_self.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -103,7 +103,7 @@ async fn test_param_closure_this_dollar_this_type() {
 #[tokio::test]
 async fn test_param_closure_this_static_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_static.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_static.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -140,7 +140,7 @@ async fn test_param_closure_this_static_type() {
 #[tokio::test]
 async fn test_param_closure_this_static_call_on_a_class_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_class_string.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_class_string.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -179,7 +179,7 @@ async fn test_param_closure_this_static_call_on_a_class_string() {
 #[tokio::test]
 async fn test_param_closure_this_standalone_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_func.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_func.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -222,7 +222,7 @@ async fn test_param_closure_this_standalone_function() {
 #[tokio::test]
 async fn test_param_closure_this_does_not_leak() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_no_leak.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_no_leak.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -269,7 +269,7 @@ async fn test_param_closure_this_does_not_leak() {
 #[tokio::test]
 async fn test_param_closure_this_property_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_prop.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_prop.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -312,7 +312,7 @@ async fn test_param_closure_this_property_access() {
 #[tokio::test]
 async fn test_param_closure_this_self_keyword() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_self_kw.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_self_kw.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -348,7 +348,7 @@ async fn test_param_closure_this_self_keyword() {
 #[tokio::test]
 async fn test_param_closure_this_static_keyword() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_static_kw.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_static_kw.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -385,7 +385,7 @@ async fn test_param_closure_this_static_keyword() {
 #[tokio::test]
 async fn test_param_closure_this_self_keyword_does_not_leak() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_self_kw_no_leak.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_self_kw_no_leak.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -428,7 +428,7 @@ async fn test_param_closure_this_self_keyword_does_not_leak() {
 #[tokio::test]
 async fn test_param_closure_this_fqn_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_fqn.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_fqn.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -489,7 +489,7 @@ async fn test_param_closure_this_cross_file() {
         ],
     );
 
-    let uri = Url::from_file_path(dir.path().join("src/AppRoutes.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/AppRoutes.php")).unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -546,7 +546,7 @@ async fn param_closure_this_resolves_against_the_declaring_file_not_the_caller()
         )],
     );
 
-    let uri = Url::from_file_path(dir.path().join("src/Group.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Group.php")).unwrap();
 
     // The caller imports only `Router`, and has a `Route`-less namespace
     // of its own, so a tag resolved from here would find nothing.
@@ -579,7 +579,7 @@ async fn param_closure_this_resolves_against_the_declaring_file_not_the_caller()
 #[tokio::test]
 async fn test_param_closure_this_second_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_second.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_second.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -621,7 +621,7 @@ async fn test_param_closure_this_second_param() {
 #[tokio::test]
 async fn test_param_closure_this_method_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_chain.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_chain.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -662,7 +662,7 @@ async fn test_param_closure_this_method_chain() {
 #[tokio::test]
 async fn test_param_closure_this_in_else_and_switch_branches() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_branches.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_branches.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -713,7 +713,7 @@ async fn test_param_closure_this_in_else_and_switch_branches() {
 #[tokio::test]
 async fn test_param_closure_this_nested_closures() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_nested.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_nested.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -765,7 +765,7 @@ async fn test_param_closure_this_nested_closures() {
 #[tokio::test]
 async fn test_param_closure_this_outer_body_of_nested_closures() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_nested_outer.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_nested_outer.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -817,7 +817,7 @@ async fn test_param_closure_this_outer_body_of_nested_closures() {
 #[tokio::test]
 async fn test_param_closure_this_outer_closure_assigned_to_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_assigned_var.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_assigned_var.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -864,7 +864,7 @@ async fn test_param_closure_this_outer_closure_assigned_to_variable() {
 #[tokio::test]
 async fn assert_instanceof_narrows_a_rebound_this_to_the_subclass() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_narrowed.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_narrowed.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -906,7 +906,7 @@ async fn assert_instanceof_narrows_a_rebound_this_to_the_subclass() {
 #[tokio::test]
 async fn a_captured_this_does_not_override_the_declared_binding() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_this_captured.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_this_captured.php").unwrap();
 
     let src = concat!(
         "<?php\n",

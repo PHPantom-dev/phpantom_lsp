@@ -30,6 +30,41 @@ pub(super) fn format_with_mago(
     Ok(bytes_to_str(formatted).to_string())
 }
 
+/// Format the smallest statement, class member, or import group that
+/// encloses the byte range `range` using the built-in mago-formatter.
+///
+/// Returns `content` with that construct replaced by its formatted text,
+/// or `None` when the range selects nothing mago formats (inline HTML,
+/// an ignored region) or the construct is already formatted.
+pub(super) fn format_range_with_mago(
+    content: &str,
+    range: std::ops::Range<u32>,
+    php_version: mago_php_version::PHPVersion,
+    settings: mago_formatter::settings::FormatSettings,
+) -> Result<Option<String>, String> {
+    let arena = mago_allocator::LocalArena::new();
+    let formatter = mago_formatter::Formatter::new(&arena, php_version, settings);
+    let file = mago_database::file::File::ephemeral(
+        Cow::Borrowed(b"phpantom-fmt"),
+        Cow::Owned(content.as_bytes().to_vec()),
+    );
+
+    let Some(formatted) = formatter
+        .format_range(&file, range)
+        .map_err(|e| format!("Built-in formatter failed to parse PHP: {}", e))?
+    else {
+        return Ok(None);
+    };
+
+    let (start, end) = (formatted.range.start as usize, formatted.range.end as usize);
+    let new_text = bytes_to_str(formatted.new_text);
+    let mut spliced = String::with_capacity(content.len() - (end - start) + new_text.len());
+    spliced.push_str(&content[..start]);
+    spliced.push_str(new_text);
+    spliced.push_str(&content[end..]);
+    Ok(Some(spliced))
+}
+
 #[derive(Deserialize)]
 struct MagoToml {
     formatter: Option<MagoFormatterToml>,

@@ -10,7 +10,7 @@ use crate::common::{
     get_code_actions_in_range, open_php,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const REQUEST_URI: &str = "file:///vendor/laravel/framework/src/Illuminate/Http/Request.php";
 const CARBON_URI: &str = "file:///vendor/nesbot/carbon/src/Carbon/Carbon.php";
@@ -32,19 +32,19 @@ fn range(line: u32, start: u32, end: u32) -> Range {
     Range::new(Position::new(line, start), Position::new(line, end))
 }
 
-fn titles(actions: &[CodeActionOrCommand]) -> Vec<String> {
+fn titles(actions: &[CodeActionResponse]) -> Vec<String> {
     actions
         .iter()
         .map(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title.clone(),
-            CodeActionOrCommand::Command(c) => c.title.clone(),
+            CodeActionResponse::CodeAction(ca) => ca.title.clone(),
+            CodeActionResponse::Command(c) => c.title.clone(),
         })
         .collect()
 }
 
 /// The titles of the "Import class" actions offered, leaving out the
 /// "Import class … and shorten usages" rewrite of a qualified name.
-fn import_titles(actions: &[CodeActionOrCommand]) -> Vec<String> {
+fn import_titles(actions: &[CodeActionResponse]) -> Vec<String> {
     titles(actions)
         .into_iter()
         .filter(|t| t.starts_with("Import `"))
@@ -99,6 +99,27 @@ fn import_action_offered_for_static_point_request_at_first_character() {
         "got: {:?}",
         titles(&actions)
     );
+}
+
+/// The bulk import appears wherever the single one does, the first
+/// character of a name included.
+#[test]
+fn import_all_offered_for_point_request_at_first_character() {
+    let backend = create_test_backend();
+    declare_request(&backend);
+    declare_carbon(&backend);
+    let uri = "file:///test.php";
+    let content = "<?php\nnamespace App;\n\nnew Request();\nCarbon::now();\n";
+    backend.update_ast(uri, content);
+
+    for (line, character) in [(3, 4), (4, 0)] {
+        let actions = get_code_actions_at(&backend, uri, content, line, character);
+        assert!(
+            find_action(&actions, "Import all missing classes").is_some(),
+            "at {line}:{character}, got: {:?}",
+            titles(&actions)
+        );
+    }
 }
 
 #[test]
@@ -315,7 +336,7 @@ fn import_action_offered_when_namespaced_class_in_uri_classes_index() {
 async fn import_action_offered_through_a_code_action_request() {
     let backend = create_test_backend();
     declare_request(&backend);
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, "<?php\nnamespace App;\n\nnew Request();\n").await;
 
     let actions = code_actions_via_server(&backend, &uri, range(3, 4, 11))
@@ -333,7 +354,7 @@ async fn import_action_offered_through_a_code_action_request() {
 #[tokio::test]
 async fn a_request_with_nothing_to_offer_is_answered_with_nothing() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///nothing.php").unwrap();
+    let uri = Uri::parse("file:///nothing.php").unwrap();
     open_php(&backend, &uri, "<?php\n\necho 'hello';\n").await;
 
     let actions = code_actions_via_server(&backend, &uri, range(2, 0, 13)).await;

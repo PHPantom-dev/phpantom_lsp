@@ -2,7 +2,7 @@
 //! auto-closed empty docblock (`onTypeFormatting` path), plus
 //! extraction of the raw declaration text that follows either.
 
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp_server::gen_lsp_types::{Position, Range};
 
 use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::text_position::{byte_offset_to_utf16_col, utf16_col_to_byte_offset};
@@ -250,6 +250,15 @@ pub(super) fn declaration_indent(text: &str) -> String {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// The byte offset where the declaration after a docblock starts: the
+/// first non-whitespace byte at or after `from`, the position just past
+/// the docblock.
+pub(super) fn declaration_offset(content: &str, from: Position) -> u32 {
+    let from = position_to_byte_offset(content, from).min(content.len());
+    let after = &content[from..];
+    (from + after.len() - after.trim_start().len()) as u32
 }
 
 /// Get the text after the `/**` trigger position, skipping the rest of

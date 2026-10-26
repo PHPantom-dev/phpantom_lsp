@@ -1,3 +1,4 @@
+use crate::common::message_text;
 use crate::common::{create_test_backend, unknown_member_diagnostics_with_scope_cache};
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -139,7 +140,7 @@ class Controller {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonExistentMethod")),
+            .any(|d| message_text(&d.message).contains("nonExistentMethod")),
         "Diagnostic should mention nonExistentMethod, got: {diags:#?}"
     );
 }

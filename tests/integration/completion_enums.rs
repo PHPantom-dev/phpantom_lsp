@@ -1,10 +1,10 @@
 use crate::common::{
-    create_psr4_workspace, create_psr4_workspace_with_enum_stubs, create_test_backend,
-    create_test_backend_with_stubs,
+    completion_response, create_psr4_workspace, create_psr4_workspace_with_enum_stubs,
+    create_test_backend, create_test_backend_with_stubs, goto_definition_at, open_php,
 };
 
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Nullsafe operator ?-> completion ───────────────────────────────────────
 
@@ -14,7 +14,7 @@ use tower_lsp::lsp_types::*;
 async fn test_completion_nullsafe_arrow_on_tryfrom() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///nullsafe_enum.php").unwrap();
+    let uri = Uri::parse("file:///nullsafe_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Priority: int\n",
@@ -31,36 +31,13 @@ async fn test_completion_nullsafe_arrow_on_tryfrom() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 38,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 38, None).await;
 
     assert!(result.is_some(), "Completion should return results for ?->");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // BackedEnum instances have `name` and `value` properties.
             assert!(
@@ -74,7 +51,7 @@ async fn test_completion_nullsafe_arrow_on_tryfrom() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -87,7 +64,7 @@ async fn test_completion_nullsafe_arrow_on_tryfrom() {
 async fn test_completion_arrow_on_cases_index() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///cases_index_enum.php").unwrap();
+    let uri = Uri::parse("file:///cases_index_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Priority: int\n",
@@ -104,39 +81,16 @@ async fn test_completion_arrow_on_cases_index() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 30,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 30, None).await;
 
     assert!(
         result.is_some(),
         "Completion should return results for cases()[0]->"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.contains("name")),
@@ -149,7 +103,7 @@ async fn test_completion_arrow_on_cases_index() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -158,7 +112,7 @@ async fn test_completion_arrow_on_cases_index() {
 async fn test_completion_regular_arrow_on_tryfrom() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///regular_arrow_enum.php").unwrap();
+    let uri = Uri::parse("file:///regular_arrow_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Priority: int\n",
@@ -175,36 +129,13 @@ async fn test_completion_regular_arrow_on_tryfrom() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 37,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 37, None).await;
 
     assert!(result.is_some(), "Completion should return results for ->");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.contains("name")),
@@ -217,7 +148,7 @@ async fn test_completion_regular_arrow_on_tryfrom() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -226,7 +157,7 @@ async fn test_completion_regular_arrow_on_tryfrom() {
 async fn test_completion_nullsafe_arrow_on_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nullsafe_var.php").unwrap();
+    let uri = Uri::parse("file:///nullsafe_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -241,39 +172,16 @@ async fn test_completion_nullsafe_arrow_on_variable() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 8,
-                    character: 13,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 8, 13, None).await;
 
     assert!(
         result.is_some(),
         "Completion should return results for $w?->"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.contains("render")),
@@ -286,7 +194,7 @@ async fn test_completion_nullsafe_arrow_on_variable() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -295,7 +203,7 @@ async fn test_completion_nullsafe_arrow_on_variable() {
 async fn test_completion_nullsafe_arrow_on_method_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nullsafe_method.php").unwrap();
+    let uri = Uri::parse("file:///nullsafe_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -311,39 +219,16 @@ async fn test_completion_nullsafe_arrow_on_method_call() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 9,
-                    character: 33,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 9, 33, None).await;
 
     assert!(
         result.is_some(),
         "Completion should return results for getWidget()?->"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.contains("render")),
@@ -356,7 +241,7 @@ async fn test_completion_nullsafe_arrow_on_method_call() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -367,7 +252,7 @@ async fn test_completion_nullsafe_arrow_on_method_call() {
 async fn test_completion_enum_cases_via_double_colon() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_basic.php").unwrap();
+    let uri = Uri::parse("file:///enum_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum CustomerAvailabilityStatus: int\n",
@@ -383,39 +268,16 @@ async fn test_completion_enum_cases_via_double_colon() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 9,
-                    character: 36,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 9, 36, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -430,7 +292,7 @@ async fn test_completion_enum_cases_via_double_colon() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -441,7 +303,7 @@ async fn test_completion_enum_cases_via_double_colon() {
 async fn test_completion_unit_enum_cases() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unit_enum.php").unwrap();
+    let uri = Uri::parse("file:///unit_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Color\n",
@@ -458,39 +320,16 @@ async fn test_completion_unit_enum_cases() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 15, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -510,7 +349,7 @@ async fn test_completion_unit_enum_cases() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -522,7 +361,7 @@ async fn test_completion_unit_enum_cases() {
 async fn test_completion_enum_cases_and_static_methods_via_double_colon() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_methods.php").unwrap();
+    let uri = Uri::parse("file:///enum_methods.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Suit: string\n",
@@ -550,44 +389,21 @@ async fn test_completion_enum_cases_and_static_methods_via_double_colon() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 21,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 21, 14, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -613,7 +429,7 @@ async fn test_completion_enum_cases_and_static_methods_via_double_colon() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -623,7 +439,7 @@ async fn test_completion_enum_cases_and_static_methods_via_double_colon() {
 async fn test_completion_enum_instance_methods_via_arrow() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_arrow.php").unwrap();
+    let uri = Uri::parse("file:///enum_arrow.php").unwrap();
     let text = concat!(
         "<?php\n",                               // 0
         "enum Suit: string\n",                   // 1
@@ -648,39 +464,16 @@ async fn test_completion_enum_instance_methods_via_arrow() {
         "}\n",                                   // 20
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 18,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 18, 15, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -695,7 +488,7 @@ async fn test_completion_enum_instance_methods_via_arrow() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -707,7 +500,7 @@ async fn test_completion_enum_instance_methods_via_arrow() {
 async fn test_completion_enum_mixed_constants_and_cases() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_mixed.php").unwrap();
+    let uri = Uri::parse("file:///enum_mixed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Status: int\n",
@@ -724,39 +517,16 @@ async fn test_completion_enum_mixed_constants_and_cases() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 16,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 16, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -776,7 +546,7 @@ async fn test_completion_enum_mixed_constants_and_cases() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -787,7 +557,7 @@ async fn test_completion_enum_mixed_constants_and_cases() {
 async fn test_goto_definition_enum_case_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_goto.php").unwrap();
+    let uri = Uri::parse("file:///enum_goto.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "enum Status: int\n",                   // 1
@@ -803,37 +573,17 @@ async fn test_goto_definition_enum_case_same_file() {
         "}\n",                                  // 11
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "Active" in `Status::Active` on line 9
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 9,
-                character: 23,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 9, 23).await;
     assert!(
         result.is_some(),
         "Should resolve goto-definition for enum case"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -849,7 +599,7 @@ async fn test_goto_definition_enum_case_same_file() {
 async fn test_goto_definition_enum_const_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_const_goto.php").unwrap();
+    let uri = Uri::parse("file:///enum_const_goto.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "enum Status: int\n",                     // 1
@@ -866,37 +616,17 @@ async fn test_goto_definition_enum_const_same_file() {
         "}\n",                                    // 12
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "DEFAULT_STATUS" in `Status::DEFAULT_STATUS` on line 10
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 10,
-                character: 25,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 10, 25).await;
     assert!(
         result.is_some(),
         "Should resolve goto-definition for enum const"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -913,7 +643,7 @@ async fn test_goto_definition_enum_const_same_file() {
 async fn test_goto_definition_enum_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_method_goto.php").unwrap();
+    let uri = Uri::parse("file:///enum_method_goto.php").unwrap();
     let text = concat!(
         "<?php\n",                               // 0
         "enum Suit: string\n",                   // 1
@@ -933,37 +663,17 @@ async fn test_goto_definition_enum_method() {
         "}\n",                                   // 15
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "color" in `$this->color()` on line 13
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 13,
-                character: 17,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 13, 17).await;
     assert!(
         result.is_some(),
         "Should resolve goto-definition for enum method"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 6,
@@ -1008,7 +718,7 @@ async fn test_completion_enum_cross_file_psr4() {
     let (backend, dir) =
         create_psr4_workspace(composer_json, &[("src/Enums/Priority.php", enum_content)]);
 
-    let main_uri = Url::from_file_path(dir.path().join("main.php")).unwrap();
+    let main_uri = Uri::from_file_path(dir.path().join("main.php")).unwrap();
     let main_text = concat!(
         "<?php\n",
         "use App\\Enums\\Priority;\n",
@@ -1020,44 +730,21 @@ async fn test_completion_enum_cross_file_psr4() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: main_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: main_text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &main_uri, main_text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: main_uri },
-                position: Position {
-                    line: 5,
-                    character: 18,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &main_uri, 5, 18, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1082,7 +769,7 @@ async fn test_completion_enum_cross_file_psr4() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1113,7 +800,7 @@ async fn test_goto_definition_enum_case_cross_file_psr4() {
     let (backend, dir) =
         create_psr4_workspace(composer_json, &[("src/Enums/Direction.php", enum_content)]);
 
-    let main_uri = Url::from_file_path(dir.path().join("main.php")).unwrap();
+    let main_uri = Uri::from_file_path(dir.path().join("main.php")).unwrap();
     let main_text = concat!(
         "<?php\n",
         "use App\\Enums\\Direction;\n",
@@ -1125,42 +812,19 @@ async fn test_goto_definition_enum_case_cross_file_psr4() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: main_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: main_text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &main_uri, main_text).await;
 
-    let enum_uri = Url::from_file_path(dir.path().join("src/Enums/Direction.php")).unwrap();
+    let enum_uri = Uri::from_file_path(dir.path().join("src/Enums/Direction.php")).unwrap();
 
     // Click on "North" in `Direction::North` on line 5
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier {
-                uri: main_uri.clone(),
-            },
-            position: Position {
-                line: 5,
-                character: 26,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &main_uri, 5, 26).await;
     assert!(
         result.is_some(),
         "Should resolve goto-definition for cross-file enum case"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, enum_uri, "Should jump to the enum file");
             assert_eq!(
                 location.range.start.line, 5,
@@ -1178,7 +842,7 @@ async fn test_goto_definition_enum_case_cross_file_psr4() {
 async fn test_completion_enum_in_namespace_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_ns.php").unwrap();
+    let uri = Uri::parse("file:///enum_ns.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Enums;\n",
@@ -1197,39 +861,16 @@ async fn test_completion_enum_in_namespace_same_file() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 12,
-                    character: 21,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 12, 21, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1249,7 +890,7 @@ async fn test_completion_enum_in_namespace_same_file() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1261,7 +902,7 @@ async fn test_completion_enum_in_namespace_same_file() {
 async fn test_completion_enum_with_trait_cases_via_double_colon() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_trait.php").unwrap();
+    let uri = Uri::parse("file:///enum_trait.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait HasDescription {\n",
@@ -1284,39 +925,16 @@ async fn test_completion_enum_with_trait_cases_via_double_colon() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 16,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 16, 14, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1339,7 +957,7 @@ async fn test_completion_enum_with_trait_cases_via_double_colon() {
             // via `::` access — it's only accessible on instances via `->`.
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -1348,7 +966,7 @@ async fn test_completion_enum_with_trait_cases_via_double_colon() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1360,7 +978,7 @@ async fn test_completion_enum_with_trait_cases_via_double_colon() {
 async fn test_completion_enum_implements_interface() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_iface.php").unwrap();
+    let uri = Uri::parse("file:///enum_iface.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface HasLabel {\n",
@@ -1386,39 +1004,16 @@ async fn test_completion_enum_implements_interface() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 19,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 19, 15, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1433,7 +1028,7 @@ async fn test_completion_enum_implements_interface() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1445,7 +1040,7 @@ async fn test_completion_enum_implements_interface() {
 async fn test_goto_definition_enum_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_name_goto.php").unwrap();
+    let uri = Uri::parse("file:///enum_name_goto.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "enum Status: int\n",                   // 1
@@ -1461,37 +1056,17 @@ async fn test_goto_definition_enum_name() {
         "}\n",                                  // 11
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "Status" in `Status::Active` on line 9
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 9,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 9, 15).await;
     assert!(
         result.is_some(),
         "Should resolve goto-definition for enum name"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -1510,7 +1085,7 @@ async fn test_goto_definition_enum_name() {
 async fn test_completion_self_inside_enum() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_self.php").unwrap();
+    let uri = Uri::parse("file:///enum_self.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Priority: int\n",
@@ -1526,39 +1101,16 @@ async fn test_completion_self_inside_enum() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 9,
-                    character: 31,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 9, 31, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1578,7 +1130,7 @@ async fn test_completion_self_inside_enum() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1591,7 +1143,7 @@ async fn test_completion_unit_enum_inherits_cases_from_stub() {
     let backend = create_test_backend();
 
     // Open the UnitEnum stub so it lands in the ast_map.
-    let stub_uri = Url::parse("file:///stubs/UnitEnum.php").unwrap();
+    let stub_uri = Uri::parse("file:///stubs/UnitEnum.php").unwrap();
     let unit_enum_stub = concat!(
         "<?php\n",
         "interface UnitEnum\n",
@@ -1600,19 +1152,10 @@ async fn test_completion_unit_enum_inherits_cases_from_stub() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: stub_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: unit_enum_stub.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &stub_uri, unit_enum_stub).await;
 
     // Open a file containing a unit enum and a class that uses it.
-    let uri = Url::parse("file:///enum_stub_unit.php").unwrap();
+    let uri = Uri::parse("file:///enum_stub_unit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Color\n",
@@ -1629,44 +1172,21 @@ async fn test_completion_unit_enum_inherits_cases_from_stub() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 15, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1681,7 +1201,7 @@ async fn test_completion_unit_enum_inherits_cases_from_stub() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1695,7 +1215,7 @@ async fn test_completion_unit_enum_inherits_cases_from_stub() {
 async fn test_completion_intersection_with_unit_enum_static_access() {
     let backend = create_test_backend();
 
-    let stub_uri = Url::parse("file:///stubs/UnitEnum.php").unwrap();
+    let stub_uri = Uri::parse("file:///stubs/UnitEnum.php").unwrap();
     let unit_enum_stub = concat!(
         "<?php\n",
         "interface UnitEnum\n",
@@ -1704,18 +1224,9 @@ async fn test_completion_intersection_with_unit_enum_static_access() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: stub_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: unit_enum_stub.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &stub_uri, unit_enum_stub).await;
 
-    let uri = Url::parse("file:///intersection_unit_enum.php").unwrap();
+    let uri = Uri::parse("file:///intersection_unit_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface A {\n",
@@ -1730,40 +1241,17 @@ async fn test_completion_intersection_with_unit_enum_static_access() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // `$c::` on line 9
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 9,
-                    character: 8,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 9, 8, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1774,7 +1262,7 @@ async fn test_completion_intersection_with_unit_enum_static_access() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1786,7 +1274,7 @@ async fn test_completion_backed_enum_inherits_from_and_tryfrom_from_stub() {
     let backend = create_test_backend();
 
     // Open the BackedEnum stub so it lands in the ast_map.
-    let stub_uri = Url::parse("file:///stubs/BackedEnum.php").unwrap();
+    let stub_uri = Uri::parse("file:///stubs/BackedEnum.php").unwrap();
     let backed_enum_stub = concat!(
         "<?php\n",
         "interface BackedEnum\n",
@@ -1797,19 +1285,10 @@ async fn test_completion_backed_enum_inherits_from_and_tryfrom_from_stub() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: stub_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: backed_enum_stub.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &stub_uri, backed_enum_stub).await;
 
     // Open a file containing a backed enum and a class that uses it.
-    let uri = Url::parse("file:///enum_stub_backed.php").unwrap();
+    let uri = Uri::parse("file:///enum_stub_backed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Priority: int\n",
@@ -1826,44 +1305,21 @@ async fn test_completion_backed_enum_inherits_from_and_tryfrom_from_stub() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 18,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 18, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1893,7 +1349,7 @@ async fn test_completion_backed_enum_inherits_from_and_tryfrom_from_stub() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2022,7 +1478,7 @@ async fn test_parser_enum_with_trait_also_has_implicit_interface() {
 async fn test_completion_unit_enum_gets_cases_from_embedded_stub() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///embedded_unit.php").unwrap();
+    let uri = Uri::parse("file:///embedded_unit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Direction\n",
@@ -2040,44 +1496,21 @@ async fn test_completion_unit_enum_gets_cases_from_embedded_stub() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 11,
-                    character: 20,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 11, 20, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2097,7 +1530,7 @@ async fn test_completion_unit_enum_gets_cases_from_embedded_stub() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2109,7 +1542,7 @@ async fn test_completion_unit_enum_gets_cases_from_embedded_stub() {
 async fn test_completion_backed_enum_gets_all_spl_members_from_embedded_stubs() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///embedded_backed.php").unwrap();
+    let uri = Uri::parse("file:///embedded_backed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum HttpStatus: int\n",
@@ -2126,44 +1559,21 @@ async fn test_completion_backed_enum_gets_all_spl_members_from_embedded_stubs() 
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 20,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 20, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2198,7 +1608,7 @@ async fn test_completion_backed_enum_gets_all_spl_members_from_embedded_stubs() 
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2208,7 +1618,7 @@ async fn test_completion_backed_enum_gets_all_spl_members_from_embedded_stubs() 
 async fn test_completion_backed_enum_arrow_gets_properties_from_embedded_stubs() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///embedded_arrow.php").unwrap();
+    let uri = Uri::parse("file:///embedded_arrow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Color: string\n",
@@ -2223,44 +1633,21 @@ async fn test_completion_backed_enum_arrow_gets_properties_from_embedded_stubs()
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 8,
-                    character: 22,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 8, 22, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let property_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2285,7 +1672,7 @@ async fn test_completion_backed_enum_arrow_gets_properties_from_embedded_stubs()
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2296,7 +1683,7 @@ async fn test_completion_embedded_stub_caching_across_files() {
     let backend = create_test_backend_with_stubs();
 
     // First file: a unit enum
-    let uri1 = Url::parse("file:///cache_test_1.php").unwrap();
+    let uri1 = Uri::parse("file:///cache_test_1.php").unwrap();
     let text1 = concat!(
         "<?php\n",
         "enum Suit\n",
@@ -2312,39 +1699,16 @@ async fn test_completion_embedded_stub_caching_across_files() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri1.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text1.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri1, text1).await;
 
     // Trigger completion on the first file to cause stub parsing + caching
-    let result1 = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri1 },
-                position: Position {
-                    line: 9,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result1 = completion_response(&backend, &uri1, 9, 14, None).await;
 
     // Verify first file works
-    if let Some(CompletionResponse::Array(items)) = &result1 {
+    if let Some(CompletionResponse::CompletionItemList(items)) = &result1 {
         let method_names: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .map(|i| i.filter_text.as_deref().unwrap())
             .collect();
         assert!(
@@ -2353,11 +1717,11 @@ async fn test_completion_embedded_stub_caching_across_files() {
             method_names
         );
     } else {
-        panic!("Expected CompletionResponse::Array for first file");
+        panic!("Expected CompletionResponse::CompletionItemList for first file");
     }
 
     // Second file: another unit enum — stubs should already be cached
-    let uri2 = Url::parse("file:///cache_test_2.php").unwrap();
+    let uri2 = Uri::parse("file:///cache_test_2.php").unwrap();
     let text2 = concat!(
         "<?php\n",
         "enum Season\n",
@@ -2373,38 +1737,15 @@ async fn test_completion_embedded_stub_caching_across_files() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri2.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text2.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri2, text2).await;
 
-    let result2 = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri2 },
-                position: Position {
-                    line: 9,
-                    character: 16,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result2 = completion_response(&backend, &uri2, 9, 16, None).await;
 
     // Verify second file also works (from cached stubs)
-    if let Some(CompletionResponse::Array(items)) = &result2 {
+    if let Some(CompletionResponse::CompletionItemList(items)) = &result2 {
         let method_names: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .map(|i| i.filter_text.as_deref().unwrap())
             .collect();
         assert!(
@@ -2413,7 +1754,7 @@ async fn test_completion_embedded_stub_caching_across_files() {
             method_names
         );
     } else {
-        panic!("Expected CompletionResponse::Array for second file");
+        panic!("Expected CompletionResponse::CompletionItemList for second file");
     }
 }
 
@@ -2426,7 +1767,7 @@ async fn test_completion_backed_enum_inherits_unit_enum_members_through_extends(
     let backend = create_test_backend();
 
     // Open a UnitEnum stub with `cases()` and `$name`.
-    let unit_stub_uri = Url::parse("file:///stubs/UnitEnum.php").unwrap();
+    let unit_stub_uri = Uri::parse("file:///stubs/UnitEnum.php").unwrap();
     let unit_stub = concat!(
         "<?php\n",
         "interface UnitEnum\n",
@@ -2436,19 +1777,10 @@ async fn test_completion_backed_enum_inherits_unit_enum_members_through_extends(
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: unit_stub_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: unit_stub.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &unit_stub_uri, unit_stub).await;
 
     // Open a BackedEnum stub that extends UnitEnum.
-    let backed_stub_uri = Url::parse("file:///stubs/BackedEnum.php").unwrap();
+    let backed_stub_uri = Uri::parse("file:///stubs/BackedEnum.php").unwrap();
     let backed_stub = concat!(
         "<?php\n",
         "interface BackedEnum extends UnitEnum\n",
@@ -2459,19 +1791,10 @@ async fn test_completion_backed_enum_inherits_unit_enum_members_through_extends(
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: backed_stub_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: backed_stub.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &backed_stub_uri, backed_stub).await;
 
     // Open a file with a backed enum and a class that accesses it.
-    let uri = Url::parse("file:///enum_backed_extends.php").unwrap();
+    let uri = Uri::parse("file:///enum_backed_extends.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Priority: int\n",
@@ -2488,44 +1811,21 @@ async fn test_completion_backed_enum_inherits_unit_enum_members_through_extends(
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 18,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 18, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2560,7 +1860,7 @@ async fn test_completion_backed_enum_inherits_unit_enum_members_through_extends(
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2572,7 +1872,7 @@ async fn test_completion_backed_enum_inherits_properties_through_extends() {
     let backend = create_test_backend();
 
     // Open stubs
-    let unit_stub_uri = Url::parse("file:///stubs2/UnitEnum.php").unwrap();
+    let unit_stub_uri = Uri::parse("file:///stubs2/UnitEnum.php").unwrap();
     let unit_stub = concat!(
         "<?php\n",
         "interface UnitEnum\n",
@@ -2582,18 +1882,9 @@ async fn test_completion_backed_enum_inherits_properties_through_extends() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: unit_stub_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: unit_stub.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &unit_stub_uri, unit_stub).await;
 
-    let backed_stub_uri = Url::parse("file:///stubs2/BackedEnum.php").unwrap();
+    let backed_stub_uri = Uri::parse("file:///stubs2/BackedEnum.php").unwrap();
     let backed_stub = concat!(
         "<?php\n",
         "interface BackedEnum extends UnitEnum\n",
@@ -2604,19 +1895,10 @@ async fn test_completion_backed_enum_inherits_properties_through_extends() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: backed_stub_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: backed_stub.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &backed_stub_uri, backed_stub).await;
 
     // A backed enum with a method that uses $this->
-    let uri = Url::parse("file:///enum_arrow_extends.php").unwrap();
+    let uri = Uri::parse("file:///enum_arrow_extends.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Status: int\n",
@@ -2631,44 +1913,21 @@ async fn test_completion_backed_enum_inherits_properties_through_extends() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 8,
-                    character: 22,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 8, 22, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let property_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2693,7 +1952,7 @@ async fn test_completion_backed_enum_inherits_properties_through_extends() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2705,7 +1964,7 @@ async fn test_completion_backed_enum_inherits_properties_through_extends() {
 async fn test_completion_enum_case_arrow_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_case_arrow.php").unwrap();
+    let uri = Uri::parse("file:///enum_case_arrow.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "enum Status: string\n",                  // 1
@@ -2727,42 +1986,19 @@ async fn test_completion_enum_case_arrow_top_level() {
         "Status::Active->\n",                     // 17
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 17,
-                    character: 17,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 17, 17, None).await;
 
     assert!(
         result.is_some(),
         "Completion should return results for Status::Active->"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2777,7 +2013,7 @@ async fn test_completion_enum_case_arrow_top_level() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2787,7 +2023,7 @@ async fn test_completion_enum_case_arrow_top_level() {
 async fn test_completion_enum_case_arrow_inside_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_case_arrow_method.php").unwrap();
+    let uri = Uri::parse("file:///enum_case_arrow_method.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "enum Priority: int\n",                     // 1
@@ -2809,42 +2045,19 @@ async fn test_completion_enum_case_arrow_inside_method() {
         "}\n",                                      // 17
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 15,
-                    character: 24,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 15, 24, None).await;
 
     assert!(
         result.is_some(),
         "Completion should return results for Priority::High-> inside a method"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2854,7 +2067,7 @@ async fn test_completion_enum_case_arrow_inside_method() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2864,7 +2077,7 @@ async fn test_completion_enum_case_arrow_inside_method() {
 async fn test_completion_variable_assigned_enum_case_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///enum_var_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///enum_var_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",                                            // 0
         "enum Status: string\n",                              // 1
@@ -2886,42 +2099,19 @@ async fn test_completion_variable_assigned_enum_case_top_level() {
         "$svc->\n",                                           // 17
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 17,
-                    character: 6,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 17, 6, None).await;
 
     assert!(
         result.is_some(),
         "Completion should return results for top-level $svc = new Svc()"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2931,7 +2121,7 @@ async fn test_completion_variable_assigned_enum_case_top_level() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2947,7 +2137,7 @@ async fn test_completion_variable_assigned_enum_case_top_level() {
 async fn test_completion_self_referential_assignment_backed_enum_value() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///self_ref_enum.php").unwrap();
+    let uri = Uri::parse("file:///self_ref_enum.php").unwrap();
     let text = concat!(
         "<?php\n",                                                   // 0
         "class ConvertHelper {\n",                                   // 1
@@ -2960,23 +2150,14 @@ async fn test_completion_self_referential_assignment_backed_enum_value() {
         "}\n",                                                       // 8
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // The main assertion is that this does NOT hang / crash.
     // The completion request must return within a reasonable time.
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         backend.completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
                 position: Position {
                     line: 6,
@@ -3009,7 +2190,7 @@ async fn test_completion_self_referential_assignment_backed_enum_value() {
 async fn test_goto_definition_backed_enum_value_property_not_function() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///goto_enum_prop.php").unwrap();
+    let uri = Uri::parse("file:///goto_enum_prop.php").unwrap();
     let text = concat!(
         "<?php\n",                                                   // 0
         "function value($value, ...$args) { return $value; }\n",     // 1
@@ -3024,55 +2205,17 @@ async fn test_goto_definition_backed_enum_value_property_not_function() {
         "}\n",                                                       // 10
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    // Click on "value" in `$value->value` on line 6 (character ~33)
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 6,
-                character: 33,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    // Click on "value" in `$value->value` on line 6 (character ~33).
+    // `BackedEnum::$value` is built in, which has no file to jump to
+    // without installed phpstorm-stubs, and the `value()` function in this
+    // file is not it.
+    let result = goto_definition_at(&backend, &uri, 6, 33).await;
     assert!(
-        result.is_some(),
-        "Should resolve goto-definition for BackedEnum->value property"
+        result.is_none(),
+        "Should not jump to the value() function, got: {result:?}"
     );
-
-    match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
-            // Must point into the BackedEnum stub, not the current file.
-            assert!(
-                location.uri.as_str().contains("phpantom-stub://"),
-                "Should resolve to the BackedEnum stub, not the current file. Got uri: {}",
-                location.uri
-            );
-            // The `$value` property is on line 5 of the stub (after two
-            // method declarations with `$value` parameters on lines 3–4).
-            assert_eq!(
-                location.range.start.line, 5,
-                "Should point to the `$value` property declaration (line 5 of stub), \
-                 not a method parameter. Got line: {}",
-                location.range.start.line
-            );
-        }
-        other => panic!("Expected Scalar location, got: {:?}", other),
-    }
 }
 
 /// Iterating over `Enum::cases()` in a foreach should resolve the value
@@ -3087,7 +2230,7 @@ async fn test_goto_definition_backed_enum_value_property_not_function() {
 async fn test_completion_foreach_enum_cases_resolves_to_enum_type() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///foreach_enum_cases.php").unwrap();
+    let uri = Uri::parse("file:///foreach_enum_cases.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Country: string\n",
@@ -3105,39 +2248,16 @@ async fn test_completion_foreach_enum_cases_resolves_to_enum_type() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 23,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 23, None).await;
 
     assert!(
         result.is_some(),
         "Completion should return results for $country-> inside foreach over Enum::cases()"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // BackedEnum instances have `name` and `value` properties.
             assert!(
@@ -3157,7 +2277,7 @@ async fn test_completion_foreach_enum_cases_resolves_to_enum_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3166,7 +2286,7 @@ async fn test_completion_foreach_enum_cases_resolves_to_enum_type() {
 async fn test_completion_foreach_unit_enum_cases_resolves_to_enum_type() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///foreach_unit_enum_cases.php").unwrap();
+    let uri = Uri::parse("file:///foreach_unit_enum_cases.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Suit\n",
@@ -3184,39 +2304,16 @@ async fn test_completion_foreach_unit_enum_cases_resolves_to_enum_type() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 19,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 19, None).await;
 
     assert!(
         result.is_some(),
         "Completion should return results for $suit-> inside foreach over UnitEnum::cases()"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // UnitEnum instances have a `name` property.
             assert!(
@@ -3231,7 +2328,7 @@ async fn test_completion_foreach_unit_enum_cases_resolves_to_enum_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3246,7 +2343,7 @@ async fn test_completion_foreach_unit_enum_cases_resolves_to_enum_type() {
 async fn test_completion_foreach_variable_assigned_from_enum_cases() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///foreach_var_enum_cases.php").unwrap();
+    let uri = Uri::parse("file:///foreach_var_enum_cases.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Country: string\n",
@@ -3265,39 +2362,16 @@ async fn test_completion_foreach_variable_assigned_from_enum_cases() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 11,
-                    character: 23,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 11, 23, None).await;
 
     assert!(
         result.is_some(),
         "Completion should return results for $country-> inside foreach over variable assigned from Enum::cases()"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.contains("value")),
@@ -3315,7 +2389,7 @@ async fn test_completion_foreach_variable_assigned_from_enum_cases() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3347,7 +2421,7 @@ async fn test_completion_foreach_enum_cases_cross_file() {
         &[("src/Enums/Country.php", enum_content)],
     );
 
-    let handler_uri = Url::from_file_path(dir.path().join("handler.php")).unwrap();
+    let handler_uri = Uri::from_file_path(dir.path().join("handler.php")).unwrap();
     let handler_text = concat!(
         "<?php\n",
         "namespace App\\Handlers;\n",
@@ -3363,41 +2437,16 @@ async fn test_completion_foreach_enum_cases_cross_file() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: handler_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: handler_text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &handler_uri, handler_text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: handler_uri.clone(),
-                },
-                position: Position {
-                    line: 8,
-                    character: 23,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &handler_uri, 8, 23, None).await;
 
     assert!(
         result.is_some(),
         "Completion should return results for $country-> in cross-file foreach over Enum::cases()"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.contains("value")),
@@ -3415,7 +2464,7 @@ async fn test_completion_foreach_enum_cases_cross_file() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3423,7 +2472,7 @@ async fn test_completion_foreach_enum_cases_cross_file() {
 async fn test_enum_implementing_generic_interface() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///test_enum_generic_interface.php").unwrap();
+    let uri = Uri::parse("file:///test_enum_generic_interface.php").unwrap();
     let text = r#"<?php
 /** @template T */
 interface Labeled {
@@ -3440,36 +2489,13 @@ $c = Color::Red;
 $c->
 "#;
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position {
-                    line: 13,
-                    character: 4,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 13, 4, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.contains("label")),
@@ -3482,6 +2508,6 @@ $c->
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }

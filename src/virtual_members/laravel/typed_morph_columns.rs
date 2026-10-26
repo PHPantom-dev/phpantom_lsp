@@ -7,6 +7,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::{Expression, Node};
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{MorphColumnReceiver, MorphColumnSite, SymbolMap, SymbolSpan};
 use crate::type_engine::resolver::ResolutionCtx;
@@ -31,8 +32,8 @@ impl Backend {
         // enforced, has nothing for confirmation to find. Skipping it spares
         // the re-parse and receiver resolution for every ordinary
         // `$model->status === 'active'` comparison.
-        if !self.resolved_class_cache.read().is_laravel()
-            || self.laravel_morph_map.read().is_empty()
+        if !self.resolved_class_cache.read().laravel().is_enabled()
+            || self.laravel.morph_map.read().is_empty()
         {
             return empty_spans();
         }
@@ -52,14 +53,14 @@ impl Backend {
         // an answer that finishes computing after that edit invalidated caches.
         let generation = self.symbols.class_lookup_generation();
         if let Some((cached_generation, source, spans)) =
-            self.morph_column_spans_cache.read().get(uri)
+            self.laravel.morph_column_spans_cache.read().get(uri)
             && *cached_generation == generation
             && Arc::ptr_eq(source, map)
         {
             return Arc::clone(spans);
         }
         let spans = Arc::new(self.confirm_morph_columns(uri, &content, &map.morph_column_sites));
-        self.morph_column_spans_cache.write().insert(
+        self.laravel.morph_column_spans_cache.write().insert(
             uri.to_string(),
             (generation, Arc::clone(map), Arc::clone(&spans)),
         );
@@ -70,10 +71,10 @@ impl Backend {
     pub(crate) fn evict_morph_column_spans(&self, uri: &str) {
         // Only files with confirmed candidates get an entry, so the common
         // case is a miss on an empty map that needs no write lock.
-        if self.morph_column_spans_cache.read().is_empty() {
+        if self.laravel.morph_column_spans_cache.read().is_empty() {
             return;
         }
-        self.morph_column_spans_cache.write().remove(uri);
+        self.laravel.morph_column_spans_cache.write().remove(uri);
     }
 
     fn confirm_morph_columns(
@@ -119,14 +120,14 @@ impl Backend {
                             use_map: file_ctx.use_map_at(offset),
                             namespace: file_ctx.namespace_at(offset),
                             content,
-                            class_loader: var_ctx.class_loader,
-                            source_class_loader: var_ctx.source_class_loader,
+                            class_loader: var_ctx.file.class_loader,
+                            source_class_loader: var_ctx.file.source_class_loader,
                             backend: Some(self),
                             function_loader: loaders.function_loader_at(offset),
                         },
                     )
                 } else {
-                    crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                    crate::type_engine::variable::iterable_elements::resolve_expression_type(
                         expr, &var_ctx,
                     )
                 };
@@ -163,14 +164,18 @@ fn has_morph_column(ty: &PhpType, site: &MorphColumnSite, ctx: &ResolutionCtx<'_
     let Some(name) = ty.base_name() else {
         return false;
     };
-    if crate::class_lookup::is_subtype_of_named(ty, super::ELOQUENT_MODEL_FQN, ctx.class_loader) {
-        let Some(class) = (ctx.class_loader)(name) else {
+    if crate::class_lookup::is_subtype_of_named(
+        ty,
+        super::ELOQUENT_MODEL_FQN,
+        ctx.file.class_loader,
+    ) {
+        let Some(class) = (ctx.file.class_loader)(Fqn::new(name)) else {
             return false;
         };
         // Qualified columns only refer to this model when their table matches.
         let column = if let Some((table, column)) = site.column.rsplit_once('.') {
             if site.receiver_kind == MorphColumnReceiver::Model
-                || !model_table_matches(&class, table, ctx.class_loader)
+                || !model_table_matches(&class, table, ctx.file.class_loader)
             {
                 return false;
             }
@@ -178,24 +183,24 @@ fn has_morph_column(ty: &PhpType, site: &MorphColumnSite, ctx: &ResolutionCtx<'_
         } else {
             &site.column
         };
-        return super::is_morph_type_column(&class, column, ctx.class_loader);
+        return super::is_morph_type_column(&class, column, ctx.file.class_loader);
     }
     if site.receiver_kind != MorphColumnReceiver::Model
         && crate::class_lookup::is_subtype_of_named(
             ty,
             super::ELOQUENT_BUILDER_FQN,
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
         && let Some(model) = crate::inheritance::extract_generic_arg_from_ancestor(
             ty,
             super::ELOQUENT_BUILDER_FQN,
             0,
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
         && crate::class_lookup::is_subtype_of_named(
             &model,
             super::ELOQUENT_MODEL_FQN,
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
     {
         return has_morph_column(&model, site, ctx);
@@ -203,11 +208,7 @@ fn has_morph_column(ty: &PhpType, site: &MorphColumnSite, ctx: &ResolutionCtx<'_
     false
 }
 
-fn model_table_matches(
-    class: &ClassInfo,
-    table: &str,
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+fn model_table_matches(class: &ClassInfo, table: &str, loader: &ResolvedClassLoader<'_>) -> bool {
     let mut declared_match = None;
     if !collect_table_metadata(class, table, loader, &mut declared_match, 0) {
         return false;
@@ -220,7 +221,7 @@ fn model_table_matches(
 fn collect_table_metadata(
     class: &ClassInfo,
     requested: &str,
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    loader: &ResolvedClassLoader<'_>,
     declared_match: &mut Option<bool>,
     depth: u32,
 ) -> bool {
@@ -248,7 +249,7 @@ fn collect_table_metadata(
         }
     }
     for name in &class.used_traits {
-        if let Some(trait_info) = loader(name)
+        if let Some(trait_info) = loader(Fqn::new(name))
             && !collect_table_metadata(&trait_info, requested, loader, declared_match, depth + 1)
         {
             return false;
@@ -256,7 +257,7 @@ fn collect_table_metadata(
     }
     class.parent_class.as_ref().is_none_or(|name| {
         name.as_str() == super::ELOQUENT_MODEL_FQN
-            || loader(name).is_some_and(|parent| {
+            || loader(Fqn::new(name)).is_some_and(|parent| {
                 collect_table_metadata(&parent, requested, loader, declared_match, depth + 1)
             })
     })

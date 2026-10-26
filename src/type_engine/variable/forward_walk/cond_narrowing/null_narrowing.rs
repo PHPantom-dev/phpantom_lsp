@@ -90,6 +90,9 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     if let Some((var_name, constant)) = extract_class_constant_identity(condition, true) {
         strip_null_by_constant_identity(&var_name, constant, scope, ctx);
     }
+    // `$x === Suit::Hearts` — the subject is that case; `$x !== Suit::Hearts`
+    // leaves the enum's other cases.
+    apply_enum_case_identity_narrowing(condition, scope, ctx, true);
     // `$x === $y` — the same reasoning for any comparand whose own type
     // rules out null.
     apply_identity_comparison_null_narrowing(condition, scope, ctx, true);
@@ -198,6 +201,7 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     if let Some((var_name, constant)) = extract_class_constant_identity(condition, false) {
         strip_null_by_constant_identity(&var_name, constant, scope, ctx);
     }
+    apply_enum_case_identity_narrowing(condition, scope, ctx, false);
     // When the condition is `$x !== $y`, the inverse (else/guard) means
     // the two were identical, so a comparand that cannot be null leaves
     // no null in the subject.
@@ -325,7 +329,7 @@ pub(crate) fn narrow_nullsafe_call_receiver(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     let mut keys = nullsafe_receiver_keys(object);
-    if let Some(key) = narrowing::expr_to_subject_key(object) {
+    if let Some(key) = condition_facts::expr_to_subject_key(object) {
         keys.insert(0, key);
     }
     for key in keys {
@@ -346,7 +350,7 @@ fn nullsafe_receiver_keys(expr: &Expression<'_>) -> Vec<String> {
     let mut keys = Vec::new();
     let mut node = expr;
     while let Some((receiver, nullsafe)) = chain_receiver(node) {
-        if nullsafe && let Some(key) = narrowing::expr_to_subject_key(receiver) {
+        if nullsafe && let Some(key) = condition_facts::expr_to_subject_key(receiver) {
             keys.push(key);
         }
         node = receiver;
@@ -381,9 +385,9 @@ pub(crate) fn record_nullsafe_origin<'b>(
     let mut implied = nullsafe_receiver_keys(rhs);
     // A copy reads the value; a call only reads the receiver, and what it
     // returns is its own value, not the receiver's.
-    if let Some(key) = narrowing::expr_to_subject_key(rhs)
-        && narrowing::is_member_path_key(&key)
-        && !narrowing::is_call_key(&key)
+    if let Some(key) = condition_facts::expr_to_subject_key(rhs)
+        && condition_facts::is_member_path_key(&key)
+        && !condition_facts::is_call_key(&key)
     {
         implied.push(key);
     }
@@ -394,7 +398,9 @@ pub(crate) fn record_nullsafe_origin<'b>(
     // just performed.
     let implied: Vec<Atom> = implied
         .iter()
-        .filter(|key| key.as_str() != lhs_name && !narrowing::key_reads_variable(key, lhs_name))
+        .filter(|key| {
+            key.as_str() != lhs_name && !condition_facts::key_reads_variable(key, lhs_name)
+        })
         .map(|key| atom(key))
         .collect();
     scope.record_non_null_implication(lhs_name, implied);

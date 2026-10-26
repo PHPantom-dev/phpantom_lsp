@@ -6,9 +6,10 @@
 //! container-binding string (`'view'`), which is looked up in the core
 //! container alias table to find the concrete class. No application booting.
 
-use crate::common::{create_psr4_workspace, open_php_str, position_after};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::message_text;
+use crate::common::{completion_response, create_psr4_workspace, open_php_str, position_after};
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -137,27 +138,18 @@ class Consumer {
     .await;
     open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///src/Consumer.php").unwrap(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(
+        &backend,
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
+        5,
+        12,
+        None,
+    )
+    .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -206,9 +198,9 @@ class Consumer {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(
@@ -250,9 +242,9 @@ class Consumer {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(
@@ -285,9 +277,9 @@ class ViewServiceProvider
 
     let result = backend
         .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
+                    uri: Uri::parse(uri).unwrap(),
                 },
                 position: position_after(provider, "$this->"),
             },
@@ -299,8 +291,8 @@ class ViewServiceProvider
         .unwrap();
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -353,9 +345,9 @@ class ViewServiceProvider
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(

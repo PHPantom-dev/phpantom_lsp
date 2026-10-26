@@ -14,6 +14,11 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     });
 
     extract_from_attribute_lists(&class.attribute_lists, ctx, 0);
+    emit_symfony_route_spans(class, ctx);
+    emit_symfony_form_field_spans(class, ctx);
+    emit_symfony_config_tree_spans(class, ctx);
+    emit_symfony_listener_spans(class, ctx);
+    emit_messenger_handler_sites(class, ctx);
 
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {
@@ -309,7 +314,7 @@ pub(super) fn extract_from_attribute_lists<'a>(
                         }
                         LaravelContainerAttribute::Config => {
                             try_emit_laravel_string_span_partial_for_parameter(
-                                crate::symbol_map::LaravelStringKind::Config,
+                                crate::symbol_map::StringKeyKind::Config,
                                 arg_list,
                                 "key",
                                 ctx.content,
@@ -317,6 +322,19 @@ pub(super) fn extract_from_attribute_lists<'a>(
                             );
                         }
                     }
+                }
+
+                // `#[Autowire(service: 'app.mailer')]` and
+                // `#[Autowire(param: 'app.sender')]` inject a service or a
+                // parameter by name.
+                if is_autowire_attribute(semantic_class_name) {
+                    emit_autowire_attribute_spans(arg_list, ctx);
+                }
+
+                // `#[Template('demo/index.html.twig')]` renders an action's
+                // result with a template.
+                if is_template_attribute(semantic_class_name) {
+                    emit_template_attribute_span(arg_list, ctx);
                 }
 
                 // `#[RedirectToRoute('login')]` on a form request names the
@@ -327,7 +345,7 @@ pub(super) fn extract_from_attribute_lists<'a>(
                     ctx.content,
                 ) {
                     try_emit_laravel_string_span_partial_for_parameter(
-                        crate::symbol_map::LaravelStringKind::Route,
+                        crate::symbol_map::StringKeyKind::Route,
                         arg_list,
                         "route",
                         ctx.content,
@@ -421,6 +439,7 @@ pub(super) fn extract_from_class_member<'a>(
                 kind: SymbolKind::MemberDeclaration {
                     name: crate::atom::atom_bytes(case_name_ident.value),
                     is_static: true,
+                    is_method: false,
                 },
             });
 
@@ -549,6 +568,7 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         kind: SymbolKind::MemberDeclaration {
             name: crate::atom::atom_bytes(method.name.value),
             is_static,
+            is_method: true,
         },
     });
 
@@ -821,6 +841,7 @@ pub(super) fn extract_from_class_constant<'a>(
             kind: SymbolKind::MemberDeclaration {
                 name: crate::atom::atom_bytes(item.name.value),
                 is_static: true,
+                is_method: false,
             },
         });
     }

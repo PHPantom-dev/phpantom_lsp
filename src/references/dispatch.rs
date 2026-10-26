@@ -6,7 +6,7 @@
 
 use super::*;
 
-use tower_lsp::lsp_types::{Location, Position};
+use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::references::push_location;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
@@ -99,19 +99,25 @@ impl Backend {
                 include_declaration,
                 mode,
             );
-            // A YAML/XML occurrence is a reference the user can be shown,
-            // but not one an edit can be planned against: its text may be
-            // the escaped `App\\Handler` form the document's own quoting
-            // requires, which is neither the PHP spelling of the name nor
-            // something a PHP-shaped replacement can be written over.
-            // Rename verifies every location before emitting any edit and
-            // drops the whole rename when one fails, so leaving these in
-            // makes a single escaped name in any config file silently turn
-            // the class rename into a no-op.
-            if mode == ReferenceSearchMode::Rename {
-                locations.retain(|location| {
-                    !crate::resource_navigation::is_resource_document(location.uri.as_str())
-                });
+            // A YAML/XML occurrence of a class or namespace is a reference
+            // the user can be shown, but not one a PHP-shaped edit can be
+            // written over: its text may be the escaped `App\\Handler` form
+            // the document's own quoting requires.  Rename rewrites those
+            // through the framework resource index, which keeps each
+            // occurrence's spelling, so they are left out here.  A member
+            // occurrence (`Controller::action`) covers the bare member name,
+            // which the PHP edit replaces as written, and so does a property a
+            // validation mapping names, reached from the property's
+            // declaration (a `Variable` span).
+            if mode == ReferenceSearchMode::Rename
+                && !matches!(
+                    sym.kind,
+                    SymbolKind::MemberAccess { .. }
+                        | SymbolKind::MemberDeclaration { .. }
+                        | SymbolKind::Variable { .. }
+                )
+            {
+                locations.retain(|location| !self.is_resource_uri(location.uri.as_str()));
             }
             sort_locations_for_references(&mut locations);
             tracing::info!(
@@ -124,7 +130,7 @@ impl Backend {
             }
         }
 
-        if self.resolved_class_cache.read().is_laravel()
+        if self.resolved_class_cache.read().laravel().is_enabled()
             && let Some(locations) = laravel::find_json_trans_references(
                 self,
                 uri,
@@ -138,7 +144,7 @@ impl Backend {
 
         // Fallback for declaration sites in config/*.php and routes/*.php
         let start_laravel = std::time::Instant::now();
-        if self.resolved_class_cache.read().is_laravel()
+        if self.resolved_class_cache.read().laravel().is_enabled()
             && let Some(mut locations) =
                 laravel::find_config_references(self, uri, content, position, include_declaration)
                     .or_else(|| {
@@ -216,6 +222,7 @@ impl Backend {
                     return self.find_member_references(
                         name,
                         is_static,
+                        MemberRefKind::Value,
                         include_declaration,
                         hierarchy.as_ref(),
                         declaration_scope.flatten().as_ref(),
@@ -280,9 +287,18 @@ impl Backend {
                     return self.find_constructor_references(&seeds, include_declaration);
                 }
 
+                // A relationship is the same member whether it is called
+                // (`$author->posts()`) or read (`$author->posts`).
+                let target_kind = match &declaration_scope {
+                    Some(scope) if self.is_eloquent_relationship_in(scope, member_name) => {
+                        MemberRefKind::Either
+                    }
+                    _ => MemberRefKind::of_access(kind).unwrap_or(MemberRefKind::Either),
+                };
                 let mut locations = self.find_member_references(
                     member_name,
                     *is_static,
+                    target_kind,
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.as_ref(),
@@ -341,7 +357,11 @@ impl Backend {
                     include_declaration,
                 )
             }
-            SymbolKind::MemberDeclaration { name, is_static } => {
+            SymbolKind::MemberDeclaration {
+                name,
+                is_static,
+                is_method,
+            } => {
                 // A constructor declaration's "references" are the
                 // `new ClassName(...)` instantiation sites (and `#[...]`
                 // attribute usages), not `->__construct()` member accesses
@@ -362,6 +382,7 @@ impl Backend {
                 let mut locations = self.find_member_references(
                     name,
                     *is_static,
+                    MemberRefKind::of_method(*is_method),
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.flatten().as_ref(),
@@ -400,15 +421,14 @@ impl Backend {
 
             SymbolKind::NamespaceDeclaration { .. } => Vec::new(),
 
-            SymbolKind::LaravelStringKey { kind, key, .. } => {
-                if !self.resolved_class_cache.read().is_laravel() {
+            SymbolKind::StringKey { kind, key, .. } => {
+                if !self.string_key_kind_enabled(*kind) {
                     return Vec::new();
                 }
                 // Config resources and their generic config spelling share a
                 // canonical index identity. Declaration lookup is independent
                 // of this usage snapshot, so every request stays narrow.
-                let reference_key =
-                    crate::reference_index::laravel_string_reference_key(*kind, key);
+                let reference_key = crate::reference_index::string_key_reference_key(*kind, key);
                 let snapshot = self.user_file_symbol_maps_for_reference_keys(&[reference_key]);
                 laravel::find_laravel_string_key_references(
                     self,

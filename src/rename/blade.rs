@@ -10,7 +10,7 @@
 //! all.  The directive is scanned in the template's own text instead, with
 //! the scanner in [`crate::blade::use_directive`].
 
-use tower_lsp::lsp_types::{Range, TextEdit};
+use tower_lsp_server::gen_lsp_types::{Range, TextEdit};
 
 use crate::blade::use_directive::{
     first_string_literal, group_members, imported_name, use_directives,

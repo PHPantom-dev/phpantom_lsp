@@ -6,7 +6,7 @@
 //! reads those methods once per class body and records the facts the
 //! property checks build on.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use mago_span::HasSpan;
 use mago_syntax::cst::access::Access;
@@ -29,6 +29,12 @@ pub(crate) struct ClassInitFacts {
     /// the time any other method runs: promoted parameters and
     /// unconditional `$this->name = …` statements in its body.
     pub(crate) initialized: HashSet<String>,
+    /// Body range of `__construct`.
+    constructor_range: Option<(u32, u32)>,
+    /// For each property the constructor body assigns unconditionally,
+    /// where the first such statement ends.  Any later write in the
+    /// constructor finds the property already initialized.
+    first_assignment_end: HashMap<String, u32>,
 }
 
 impl ClassInitFacts {
@@ -37,6 +43,17 @@ impl ClassInitFacts {
         self.initializer_ranges
             .iter()
             .any(|(start, end)| offset >= *start && offset <= *end)
+    }
+
+    /// Whether a write to `property` at `offset` lands in the constructor
+    /// after an unconditional assignment has already initialized it.
+    pub(crate) fn reassigns_in_constructor(&self, property: &str, offset: u32) -> bool {
+        self.constructor_range
+            .is_some_and(|(start, end)| offset >= start && offset <= end)
+            && self
+                .first_assignment_end
+                .get(property)
+                .is_some_and(|first_end| offset > *first_end)
     }
 }
 
@@ -67,6 +84,7 @@ pub(crate) fn class_init_facts(members: &Sequence<'_, ClassLikeMember<'_>>) -> C
         if !is_constructor {
             continue;
         }
+        facts.constructor_range = Some((span.start.offset, span.end.offset));
 
         for param in method.parameter_list.parameters.iter() {
             if param.is_promoted_property() {
@@ -88,9 +106,12 @@ pub(crate) fn class_init_facts(members: &Sequence<'_, ClassLikeMember<'_>>) -> C
                 && is_this(access.object)
                 && let ClassLikeMemberSelector::Identifier(ident) = &access.property
             {
+                let name = bytes_to_str(ident.value);
+                facts.initialized.insert(name.to_string());
                 facts
-                    .initialized
-                    .insert(bytes_to_str(ident.value).to_string());
+                    .first_assignment_end
+                    .entry(name.to_string())
+                    .or_insert(stmt.span().end.offset);
             }
         }
     }

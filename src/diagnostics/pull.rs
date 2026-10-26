@@ -9,8 +9,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
+use tower_lsp_server::jsonrpc::Result;
 
 use crate::Backend;
 
@@ -20,27 +20,33 @@ impl Backend {
     pub(crate) fn document_pull_diagnostic(
         &self,
         params: DocumentDiagnosticParams,
-    ) -> Result<DocumentDiagnosticReportResult> {
+    ) -> Result<DocumentDiagnosticReport> {
         let uri_str = params.text_document.uri.to_string();
 
         // Check resultId — if the client sends back the same resultId we
         // last returned AND the full cache is still present (not
         // invalidated by schedule_diagnostics), the diagnostics have not
         // changed and we can return Unchanged immediately.
-        let cache_present = self.diag.last_full.lock().contains_key(&uri_str);
-        if cache_present && let Some(prev_id) = &params.previous_result_id {
+        // Read both under the `last_full` guard: delivery swaps the set
+        // and bumps the id under that same guard.
+        if let Some(prev_id) = &params.previous_result_id {
+            let cache = self.diag.last_full.lock();
             let ids = self.diag.result_ids.lock();
-            if let Some(&current_id) = ids.get(&uri_str)
+            if cache.contains_key(&uri_str)
+                && let Some(&current_id) = ids.get(&uri_str)
                 && prev_id == &current_id.to_string()
             {
-                return Ok(DocumentDiagnosticReportResult::Report(
-                    DocumentDiagnosticReport::Unchanged(RelatedUnchangedDocumentDiagnosticReport {
-                        related_documents: None,
-                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
-                            result_id: current_id.to_string(),
+                return Ok(
+                    DocumentDiagnosticReport::RelatedUnchangedDocumentDiagnosticReport(
+                        RelatedUnchangedDocumentDiagnosticReport {
+                            related_documents: None,
+                            unchanged_document_diagnostic_report:
+                                UnchangedDocumentDiagnosticReport {
+                                    result_id: current_id.to_string(),
+                                },
                         },
-                    }),
-                ));
+                    ),
+                );
             }
         }
 
@@ -71,15 +77,17 @@ impl Backend {
             (diags, rid)
         };
 
-        Ok(DocumentDiagnosticReportResult::Report(
-            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
-                related_documents: None,
-                full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                    result_id: Some(result_id),
-                    items: diagnostics,
+        Ok(
+            DocumentDiagnosticReport::RelatedFullDocumentDiagnosticReport(
+                RelatedFullDocumentDiagnosticReport {
+                    related_documents: None,
+                    full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                        result_id: Some(result_id),
+                        items: diagnostics,
+                    },
                 },
-            }),
-        ))
+            ),
+        )
     }
 
     /// Body of `workspace/diagnostic`. Reports open files from the live
@@ -88,7 +96,7 @@ impl Backend {
     pub(crate) fn workspace_pull_diagnostic(
         &self,
         params: WorkspaceDiagnosticParams,
-    ) -> Result<WorkspaceDiagnosticReportResult> {
+    ) -> Result<WorkspaceDiagnosticReport> {
         // The first workspace pull releases the deferred background
         // workspace pass (see `wait_for_first_workspace_pull`).  This
         // request returns whatever is cached; the pass streams the rest
@@ -113,37 +121,42 @@ impl Backend {
         let mut items = Vec::new();
 
         for uri_str in &open_uris {
-            // Read the current resultId for this file.
-            let current_id = {
-                let ids = self.diag.result_ids.lock();
-                ids.get(uri_str.as_str()).copied().unwrap_or(0)
-            };
-
             // Check if the client already has up-to-date diagnostics.
             // The resultId must match AND the full cache must be present.
             // When `schedule_diagnostics` invalidates the cache (removing
             // diag_last_full), the resultId is intentionally kept so it
             // doesn't reset to 0.  But we must not return "unchanged"
             // when the cache is missing — that means fresh computation
-            // is needed.
-            let cache_present = self.diag.last_full.lock().contains_key(uri_str.as_str());
+            // is needed.  Both are read under the `last_full` guard,
+            // which delivery holds while it swaps the set and bumps the id.
+            let (cache_present, current_id) = {
+                let cache = self.diag.last_full.lock();
+                let ids = self.diag.result_ids.lock();
+                (
+                    cache.contains_key(uri_str.as_str()),
+                    ids.get(uri_str.as_str()).copied().unwrap_or(0),
+                )
+            };
             if cache_present
                 && let Some(prev_id) = previous.get(uri_str.as_str())
                 && *prev_id == current_id.to_string()
             {
-                let uri = match uri_str.parse::<Url>() {
+                let uri = match uri_str.parse::<Uri>() {
                     Ok(u) => u,
                     Err(_) => continue,
                 };
-                items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
-                    WorkspaceUnchangedDocumentDiagnosticReport {
-                        uri,
-                        version: None,
-                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
-                            result_id: current_id.to_string(),
+                items.push(
+                    WorkspaceDocumentDiagnosticReport::WorkspaceUnchangedDocumentDiagnosticReport(
+                        WorkspaceUnchangedDocumentDiagnosticReport {
+                            uri,
+                            version: None,
+                            unchanged_document_diagnostic_report:
+                                UnchangedDocumentDiagnosticReport {
+                                    result_id: current_id.to_string(),
+                                },
                         },
-                    },
-                ));
+                    ),
+                );
                 continue;
             }
 
@@ -157,32 +170,32 @@ impl Backend {
                 self.trigger_diagnostics_for_pull(uri_str);
             }
 
-            let diagnostics = {
+            let (diagnostics, current_id) = {
                 let cache = self.diag.last_full.lock();
-                cache.get(uri_str.as_str()).cloned().unwrap_or_default()
-            };
-
-            // Re-read the resultId after potential computation.
-            let current_id = {
                 let ids = self.diag.result_ids.lock();
-                ids.get(uri_str.as_str()).copied().unwrap_or(0)
+                (
+                    cache.get(uri_str.as_str()).cloned().unwrap_or_default(),
+                    ids.get(uri_str.as_str()).copied().unwrap_or(0),
+                )
             };
 
-            let uri = match uri_str.parse::<Url>() {
+            let uri = match uri_str.parse::<Uri>() {
                 Ok(u) => u,
                 Err(_) => continue,
             };
 
-            items.push(WorkspaceDocumentDiagnosticReport::Full(
-                WorkspaceFullDocumentDiagnosticReport {
-                    uri,
-                    version: None,
-                    full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                        result_id: Some(current_id.to_string()),
-                        items: diagnostics,
+            items.push(
+                WorkspaceDocumentDiagnosticReport::WorkspaceFullDocumentDiagnosticReport(
+                    WorkspaceFullDocumentDiagnosticReport {
+                        uri,
+                        version: None,
+                        full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                            result_id: Some(current_id.to_string()),
+                            items: diagnostics,
+                        },
                     },
-                },
-            ));
+                ),
+            );
         }
 
         // ── Background workspace diagnostics (unopened files) ────────
@@ -210,36 +223,37 @@ impl Backend {
         };
 
         for (uri_str, result_id, diagnostics) in workspace_items {
-            let Ok(uri) = uri_str.parse::<Url>() else {
+            let Ok(uri) = uri_str.parse::<Uri>() else {
                 continue;
             };
 
             match diagnostics {
                 // The client already has this exact result set.
-                None => items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
-                    WorkspaceUnchangedDocumentDiagnosticReport {
-                        uri,
-                        version: None,
-                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
-                            result_id,
+                None => items.push(
+                    WorkspaceDocumentDiagnosticReport::WorkspaceUnchangedDocumentDiagnosticReport(
+                        WorkspaceUnchangedDocumentDiagnosticReport {
+                            uri,
+                            version: None,
+                            unchanged_document_diagnostic_report:
+                                UnchangedDocumentDiagnosticReport { result_id },
                         },
-                    },
-                )),
-                Some(diags) => items.push(WorkspaceDocumentDiagnosticReport::Full(
-                    WorkspaceFullDocumentDiagnosticReport {
-                        uri,
-                        version: None,
-                        full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                            result_id: Some(result_id),
-                            items: diags,
+                    ),
+                ),
+                Some(diags) => items.push(
+                    WorkspaceDocumentDiagnosticReport::WorkspaceFullDocumentDiagnosticReport(
+                        WorkspaceFullDocumentDiagnosticReport {
+                            uri,
+                            version: None,
+                            full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                                result_id: Some(result_id),
+                                items: diags,
+                            },
                         },
-                    },
-                )),
+                    ),
+                ),
             }
         }
 
-        Ok(WorkspaceDiagnosticReportResult::Report(
-            WorkspaceDiagnosticReport { items },
-        ))
+        Ok(WorkspaceDiagnosticReport { items })
     }
 }

@@ -6,8 +6,10 @@
 //! `ends_with(')')`, etc.) with exhaustive `match` in the resolver.
 //!
 //! The parser ([`SubjectExpr::parse`]) accepts the raw subject strings
-//! produced by the symbol map or text scanner and returns the
-//! corresponding variant.
+//! produced by the symbol map or by
+//! [`subject_extraction`](super::subject_extraction) and returns the
+//! corresponding variant, which the resolver or
+//! [`subject_resolution`](super::subject_resolution) then types.
 
 use crate::text_scan::{
     CodeOffsets, ScanStep, find_matching_backward, find_matching_forward, scan_top_level_backward,
@@ -105,6 +107,9 @@ pub enum SubjectExpr {
     ClassName(String),
     /// A bare function name used as a call target.
     FunctionCall(String),
+    /// A closure or arrow-function literal used as a call target, written
+    /// the way call arguments carry one (`fn(int $x): User => new User()`).
+    Closure(String),
     /// Array index access: `base['key']` or `base[]`.
     ArrayAccess {
         /// The base expression being indexed.
@@ -408,10 +413,25 @@ impl SubjectExpr {
                             | SubjectExpr::ArrayAccess { .. }
                             | SubjectExpr::InlineArray { .. }
                             | SubjectExpr::CallExpr { .. }
+                            | SubjectExpr::Closure(_)
                     );
+                    // A constructor's arguments go inside the parentheses
+                    // a bare `new` is written with: `(new Foo(args))`.
+                    let new_class = match callee.as_ref() {
+                        SubjectExpr::NewExpr { class_name } => Some(class_name),
+                        _ => None,
+                    };
+                    if new_class.is_some() {
+                        stack.push(Step::Text(")"));
+                    }
                     stack.push(Step::Text(")"));
                     stack.push(Step::Text(args_text));
                     stack.push(Step::Text("("));
+                    if let Some(class_name) = new_class {
+                        stack.push(Step::Text(class_name));
+                        out.push_str("(new ");
+                        continue;
+                    }
                     if needs_parens {
                         // The opening paren precedes the callee, so it is
                         // written now rather than queued.
@@ -435,12 +455,16 @@ impl SubjectExpr {
                     out.push_str("::");
                     out.push_str(member);
                 }
+                // Parenthesised, so a member access on the instance does not
+                // read as `new ($class->member)`.
                 SubjectExpr::NewExpr { class_name } => {
-                    out.push_str("new ");
+                    out.push_str("(new ");
                     out.push_str(class_name);
+                    out.push(')');
                 }
                 SubjectExpr::ClassName(name) => out.push_str(name),
                 SubjectExpr::FunctionCall(name) => out.push_str(name),
+                SubjectExpr::Closure(text) => out.push_str(text),
                 SubjectExpr::ArrayAccess { base, segments } => {
                     stack.push(Step::Brackets(segments));
                     stack.push(Step::Node(base));
@@ -546,6 +570,10 @@ impl SubjectExpr {
                     out.push(name.clone());
                     break;
                 }
+                SubjectExpr::NewExpr { class_name } if class_name.starts_with('$') => {
+                    out.push(class_name.clone());
+                    break;
+                }
                 SubjectExpr::PropertyChain { base, .. }
                 | SubjectExpr::MethodCall { base, .. }
                 | SubjectExpr::ArrayAccess { base, .. } => base,
@@ -557,6 +585,10 @@ impl SubjectExpr {
                     for elem in elements {
                         collect_text_local_variables(elem, out);
                     }
+                    break;
+                }
+                SubjectExpr::Closure(text) => {
+                    collect_text_local_variables(text, out);
                     break;
                 }
                 SubjectExpr::This
@@ -629,6 +661,7 @@ fn detach_child(node: &mut SubjectExpr, pending: &mut Vec<SubjectExpr>) {
         | SubjectExpr::NewExpr { .. }
         | SubjectExpr::ClassName(_)
         | SubjectExpr::FunctionCall(_)
+        | SubjectExpr::Closure(_)
         | SubjectExpr::InlineArray { .. } => return,
     };
     pending.push(std::mem::replace(child.as_mut(), SubjectExpr::This));
@@ -686,6 +719,9 @@ fn parse_callee(call_body: &str) -> SubjectExpr {
         && find_matching_forward(call_body, 0, b'(', b')') == Some(call_body.len() - 1)
     {
         let inner = &call_body[1..call_body.len() - 1];
+        if crate::completion::source::helpers::closure_literal_parts(inner).is_some() {
+            return SubjectExpr::Closure(inner.trim().to_string());
+        }
         return SubjectExpr::parse(inner);
     }
 
@@ -836,9 +872,15 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
     // A leading `\` stays: it marks an explicit global reference, which
     // resolving the bare name inside a namespace would lose.
     let class_name = &rest[..end];
-    let bare = class_name.strip_prefix('\\').unwrap_or(class_name);
+    // `new $class` names its class through a variable, and `new class`
+    // (unprefixed) opens an anonymous class.
+    let is_variable = class_name.starts_with('$');
+    let bare = class_name
+        .strip_prefix('\\')
+        .or_else(|| class_name.strip_prefix('$'))
+        .unwrap_or(class_name);
     if bare.is_empty()
-        || bare == "class"
+        || (!is_variable && bare == "class")
         || !bare
             .chars()
             .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')

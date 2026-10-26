@@ -86,7 +86,7 @@ fn translation_insertion_adds_nested_keys_without_overwriting_existing_values() 
 fn translation_insertion_ignores_stale_documents_ranges_and_deleted_files() {
     let backend = crate::test_fixtures::make_backend();
     let dir = tempfile::tempdir().unwrap();
-    let uri = Url::from_file_path(dir.path().join("usage.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("usage.php")).unwrap();
     let source = "<?php __('messages.first'); __('messages.second');";
     let range = Range::new(Position::new(0, 9), Position::new(0, 23));
     let params = CodeActionParams {
@@ -95,7 +95,7 @@ fn translation_insertion_ignores_stale_documents_ranges_and_deleted_files() {
         context: CodeActionContext {
             diagnostics: vec![Diagnostic {
                 range,
-                code: Some(NumberOrString::String("invalid_laravel_trans".to_string())),
+                code: Some(Code::String("invalid_laravel_trans".to_string())),
                 ..Default::default()
             }],
             only: None,

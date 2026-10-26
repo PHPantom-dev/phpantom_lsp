@@ -112,8 +112,12 @@ fn labels_at(backend: &crate::Backend, content: &str, needle: &str) -> Vec<Strin
     let code = crate::completion::source::code_context::code_context_at(content, idx)
         .expect("the cursor is in a string literal");
     match backend.try_route_param_completion(content, position, &code) {
-        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-        Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
+        Some(CompletionResponse::CompletionItemList(items)) => {
+            items.into_iter().map(|i| i.label).collect()
+        }
+        Some(CompletionResponse::CompletionList(list)) => {
+            list.items.into_iter().map(|i| i.label).collect()
+        }
         None => Vec::new(),
     }
 }

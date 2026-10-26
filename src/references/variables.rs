@@ -8,7 +8,7 @@ use super::*;
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, VarDefKind};
 use crate::text_position::LineIndex;
@@ -28,10 +28,9 @@ impl Backend {
     ) -> Vec<Location> {
         let mut locations = Vec::new();
 
-        let maps = self.symbol_maps.read();
-        let symbol_map = match maps.get(uri) {
-            Some(m) => m,
-            None => return locations,
+        // Hold the map, not the index guard, for the walk below.
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
+            return locations;
         };
 
         // Determine the effective scope for this variable.
@@ -77,19 +76,16 @@ impl Backend {
             }
             scope_start = decl;
         }
-        let parsed_uri = match Url::parse(uri) {
-            Ok(u) => u,
-            Err(e) => {
-                tracing::warn!("find-references: could not parse URI {uri:?}: {e}");
-                return locations;
-            }
+        let Some(parsed_uri) = crate::util::parse_url(uri) else {
+            tracing::warn!("find-references: could not parse URI {uri:?}");
+            return locations;
         };
 
         // Build the set of reachable scopes: the primary (declaring)
         // scope plus every nested closure/arrow-function scope that
         // can see the variable (via explicit `use` or implicit arrow
         // capture) without being shadowed.
-        let mut reachable_scopes = Self::collect_capture_scopes(symbol_map, var_name, scope_start);
+        let mut reachable_scopes = Self::collect_capture_scopes(&symbol_map, var_name, scope_start);
         // `global $var` binds a function's `$var` to the file's top-level
         // `$var`, so the program scope and every scope that declares the
         // global are one variable.
@@ -101,8 +97,11 @@ impl Backend {
         if scope_start == 0 || global_decl_scopes.clone().any(|s| s == scope_start) {
             for scope in std::iter::once(0).chain(global_decl_scopes) {
                 if !reachable_scopes.contains(&scope) {
-                    reachable_scopes
-                        .extend(Self::collect_capture_scopes(symbol_map, var_name, scope));
+                    reachable_scopes.extend(Self::collect_capture_scopes(
+                        &symbol_map,
+                        var_name,
+                        scope,
+                    ));
                 }
             }
         }
@@ -289,10 +288,9 @@ impl Backend {
     ) -> Vec<Location> {
         let mut locations = Vec::new();
 
-        let maps = self.symbol_maps.read();
-        let symbol_map = match maps.get(uri) {
-            Some(m) => m,
-            None => return locations,
+        // Hold the map, not the index guard, for the walk below.
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
+            return locations;
         };
 
         // Determine the class body the cursor is in.
@@ -302,12 +300,9 @@ impl Backend {
             None => return locations,
         };
 
-        let parsed_uri = match Url::parse(uri) {
-            Ok(u) => u,
-            Err(e) => {
-                tracing::warn!("find-references: could not parse URI {uri:?}: {e}");
-                return locations;
-            }
+        let Some(parsed_uri) = crate::util::parse_url(uri) else {
+            tracing::warn!("find-references: could not parse URI {uri:?}");
+            return locations;
         };
 
         let lines = LineIndex::new(content);

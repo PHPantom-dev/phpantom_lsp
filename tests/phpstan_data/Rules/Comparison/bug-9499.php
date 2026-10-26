@@ -42,11 +42,11 @@ function test2(FooEnum $f, Foo $foo): void
 {
 	$arr = ['f' => $f];
 	match ($arr['f']) {
-		FooEnum::A, FooEnum::B => assertType(FooEnum::class . '::A|' . FooEnum::class . '::B', $arr['f']), // SKIP: there is no type for a single enum case
+		FooEnum::A, FooEnum::B => assertType(FooEnum::class . '::A|' . FooEnum::class . '::B', $arr['f']),
 		default => '',
 	};
 	match ($foo->f) {
-		FooEnum::A, FooEnum::B => assertType(FooEnum::class . '::A|' . FooEnum::class . '::B', $foo->f), // SKIP: there is no type for a single enum case
+		FooEnum::A, FooEnum::B => assertType(FooEnum::class . '::A|' . FooEnum::class . '::B', $foo->f),
 		default => '',
 	};
 }

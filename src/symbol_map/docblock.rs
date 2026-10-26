@@ -347,6 +347,7 @@ fn emit_method_tag_symbols(
         kind: SymbolKind::MemberDeclaration {
             name: crate::atom::atom_bytes(value.name.value),
             is_static: value.is_static(),
+            is_method: true,
         },
     });
 
@@ -393,6 +394,7 @@ fn emit_property_tag_symbols(value: &PropertyTagValue<'_>, sink: &mut DocblockSi
         kind: SymbolKind::MemberDeclaration {
             name: crate::atom::atom(name),
             is_static: false,
+            is_method: false,
         },
     });
 }

@@ -9,10 +9,11 @@
 //! The WASI reactor exports in [`crate::wasm_wasi`] wrap this.
 
 use serde_json::{Value, json};
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentHighlightParams, GotoDefinitionParams, HoverParams,
-    Position, RenameParams, SignatureHelpParams, TextDocumentPositionParams, Url,
+use tower_lsp_server::gen_lsp_types::{
+    CompletionItem, CompletionParams, DefinitionParams, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentHighlightParams, HoverParams,
+    Position, RenameParams, SignatureHelpParams, TextDocumentContentChangeEvent,
+    TextDocumentPositionParams,
 };
 
 use crate::Backend;
@@ -122,7 +123,16 @@ impl LspDispatcher {
             // We advertise full sync, so the last change carries the whole
             // document.
             if let Some(change) = p.content_changes.into_iter().next_back() {
-                self.store(p.text_document.uri.to_string(), change.text);
+                let text = match change {
+                    TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(c) => {
+                        c.text
+                    }
+                    TextDocumentContentChangeEvent::TextDocumentContentChangePartial(c) => c.text,
+                };
+                self.store(
+                    p.text_document.text_document_identifier.uri.to_string(),
+                    text,
+                );
             }
         }
     }
@@ -152,33 +162,33 @@ impl LspDispatcher {
     fn hover(&self, params: Value) -> Result<Value, (i64, String)> {
         let params: HoverParams = serde_json::from_value(params).map_err(bad_params)?;
         self.dispatch_position_request(
+            "hover",
             params.text_document_position_params,
             |uri, content, position| self.backend.handle_hover(uri, content, position),
         )
     }
 
     fn definition(&self, params: Value) -> Result<Value, (i64, String)> {
-        let params: GotoDefinitionParams = serde_json::from_value(params).map_err(bad_params)?;
-        let position = params.text_document_position_params.position;
-        let uri = params.text_document_position_params.text_document.uri;
-        let Some((uri, content)) = self.buffer(&uri) else {
-            return Ok(Value::Null);
-        };
-        let locations: Vec<_> = self
-            .backend
-            .resolve_definition(&uri, &content, position)
-            .into_iter()
-            .map(|location| self.backend.translate_location(location))
-            .collect();
-        if locations.is_empty() {
-            return Ok(Value::Null);
-        }
-        Ok(to_value(locations))
+        let params: DefinitionParams = serde_json::from_value(params).map_err(bad_params)?;
+        self.dispatch_position_request(
+            "goto_definition",
+            params.text_document_position_params,
+            |uri, content, position| {
+                let locations: Vec<_> = self
+                    .backend
+                    .resolve_definition(uri, content, position)
+                    .into_iter()
+                    .map(|location| self.backend.translate_location(location))
+                    .collect();
+                (!locations.is_empty()).then_some(locations)
+            },
+        )
     }
 
     fn document_highlight(&self, params: Value) -> Result<Value, (i64, String)> {
         let params: DocumentHighlightParams = serde_json::from_value(params).map_err(bad_params)?;
         self.dispatch_position_request(
+            "document_highlight",
             params.text_document_position_params,
             |uri, content, position| {
                 self.backend
@@ -189,15 +199,23 @@ impl LspDispatcher {
 
     fn rename(&self, params: Value) -> Result<Value, (i64, String)> {
         let params: RenameParams = serde_json::from_value(params).map_err(bad_params)?;
-        let position = params.text_document_position.position;
-        let uri = params.text_document_position.text_document.uri;
-        let Some((uri, content)) = self.buffer(&uri) else {
-            return Ok(Value::Null);
-        };
-        match self
+        let position = params.text_document_position_params.position;
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let outcome = self
             .backend
-            .handle_rename(&uri, &content, position, &params.new_name)
-        {
+            .handle_with_position("rename", &uri, position, |content, position| {
+                Some(
+                    self.backend
+                        .handle_rename(&uri, content, position, &params.new_name),
+                )
+            })
+            .ok()
+            .flatten();
+        match outcome.unwrap_or(Ok(None)) {
             Ok(edit) => Ok(edit.map_or(Value::Null, to_value)),
             // The move's destination is taken; the reason is the whole
             // point of the response.
@@ -208,34 +226,32 @@ impl LspDispatcher {
     fn signature_help(&self, params: Value) -> Result<Value, (i64, String)> {
         let params: SignatureHelpParams = serde_json::from_value(params).map_err(bad_params)?;
         self.dispatch_position_request(
+            "signature_help",
             params.text_document_position_params,
             |uri, content, position| self.backend.handle_signature_help(uri, content, position),
         )
     }
 
-    /// Resolve the buffer for `text_document_position_params` and call
-    /// `handler` with `(uri, content, position)`, producing `Value::Null`
-    /// when the document was never opened or the handler found nothing.
-    /// Shared tail of `hover`, `document_highlight`, and `signature_help`.
+    /// Call `handler` with `(uri, content, position)` inside the request
+    /// scope and panic guard every server request gets, producing
+    /// `Value::Null` when the document was never opened or the handler
+    /// found nothing.
     fn dispatch_position_request<T: serde::Serialize>(
         &self,
+        handler_name: &str,
         text_document_position_params: TextDocumentPositionParams,
         handler: impl FnOnce(&str, &str, Position) -> Option<T>,
     ) -> Result<Value, (i64, String)> {
         let position = text_document_position_params.position;
-        let uri = text_document_position_params.text_document.uri;
-        let Some((uri, content)) = self.buffer(&uri) else {
-            return Ok(Value::Null);
-        };
-        Ok(handler(&uri, &content, position).map_or(Value::Null, to_value))
-    }
-
-    /// The stored buffer for `uri`, as the `(uri, content)` pair the `handle_*`
-    /// methods take. `None` when the document was never opened.
-    fn buffer(&self, uri: &Url) -> Option<(String, String)> {
-        let uri = uri.to_string();
-        let content = self.backend.get_file_content(&uri)?;
-        Some((uri, content))
+        let uri = text_document_position_params.text_document.uri.to_string();
+        let result = self
+            .backend
+            .handle_with_position(handler_name, &uri, position, |content, position| {
+                handler(&uri, content, position)
+            })
+            .ok()
+            .flatten();
+        Ok(result.map_or(Value::Null, to_value))
     }
 
     /// The `initialize` result. Advertises exactly what `handle` routes, so a

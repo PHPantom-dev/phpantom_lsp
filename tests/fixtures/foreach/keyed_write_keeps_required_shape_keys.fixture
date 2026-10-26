@@ -1,0 +1,16 @@
+// test: a loop writing at every key of a shape keeps the keys the shape requires
+// feature: hover
+// expect: $out = array{dk: Translation, en?: Translation}
+---
+<?php
+
+class Translation {}
+
+/** @param array{dk: string, en?: string} $texts */
+function f(array $texts): void {
+    $out = [];
+    foreach ($texts as $market => $text) {
+        $out[$market] = new Translation();
+    }
+    $<>out;
+}

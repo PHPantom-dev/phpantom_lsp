@@ -12,12 +12,13 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use parking_lot::RwLock;
-use tower_lsp::lsp_types::Range;
+use tower_lsp_server::gen_lsp_types::Range;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
 use crate::backend::file_access::namespace_in_spans;
-use crate::symbol_map::{LaravelStringKind, SelfStaticParentKind, SymbolKind, SymbolMap};
+use crate::names::resolve_to_fqn;
+use crate::symbol_map::{SelfStaticParentKind, StringKeyKind, SymbolKind, SymbolMap};
 use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, short_name, strip_fqn_prefix};
 
@@ -41,33 +42,30 @@ pub(crate) enum ReferenceIndexKey {
         name: String,
         is_static: bool,
     },
-    LaravelString {
-        kind: LaravelStringKind,
+    StringKey {
+        kind: StringKeyKind,
         key: String,
     },
 }
 
-/// Build the one index identity shared by a Laravel string-key usage and its
+/// Build the one index identity shared by a string-key usage and its
 /// config-backed aliases.
 ///
 /// Resource spans deliberately retain their short source text (for example,
 /// `redis`), while the reference index stores the canonical config address
 /// (`cache.stores.redis`). This keeps one entry per semantic identity without
 /// changing the exact source range consumers return.
-pub(crate) fn laravel_string_reference_key(
-    kind: LaravelStringKind,
-    key: &str,
-) -> ReferenceIndexKey {
+pub(crate) fn string_key_reference_key(kind: StringKeyKind, key: &str) -> ReferenceIndexKey {
     match kind {
-        LaravelStringKind::ConfigResource(resource)
+        StringKeyKind::ConfigResource(resource)
             if !crate::symbol_map::laravel_resources::is_implicit_resource_name(resource, key) =>
         {
-            ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::Config,
+            ReferenceIndexKey::StringKey {
+                kind: StringKeyKind::Config,
                 key: crate::symbol_map::laravel_resources::config_key(resource, key),
             }
         }
-        _ => ReferenceIndexKey::LaravelString {
+        _ => ReferenceIndexKey::StringKey {
             kind,
             key: key.to_string(),
         },
@@ -109,7 +107,7 @@ impl ReferenceIndexKey {
         match self {
             Self::Class(s) | Self::Function(s) | Self::Constant(s) => s.capacity(),
             Self::Member { name, .. } => name.capacity(),
-            Self::LaravelString { key, .. } => key.capacity(),
+            Self::StringKey { key, .. } => key.capacity(),
         }
     }
 }
@@ -381,10 +379,8 @@ impl Backend {
         // semantic walk was running. The result remains usable by its caller,
         // which owns the same snapshot, but must not become the current cache.
         if !self
-            .symbol_maps
-            .read()
-            .get(uri)
-            .is_some_and(|current| Arc::ptr_eq(current, &symbol_map))
+            .symbol_map_for(uri)
+            .is_some_and(|current| Arc::ptr_eq(&current, &symbol_map))
         {
             return built;
         }
@@ -471,7 +467,7 @@ impl Backend {
         &self,
         keys: &[ReferenceIndexKey],
     ) -> Option<HashSet<Arc<str>>> {
-        if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
+        if self.skip_reference_index || !self.workspace_index.indexed.load(Ordering::Acquire) {
             return None;
         }
 
@@ -491,7 +487,7 @@ impl Backend {
     /// is conclusive: semantic filtering can remove name matches, but it
     /// cannot create a reference that the symbol map did not index.
     pub(crate) fn indexed_reference_count(&self, key: &ReferenceIndexKey) -> Option<usize> {
-        if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
+        if self.skip_reference_index || !self.workspace_index.indexed.load(Ordering::Acquire) {
             return None;
         }
 
@@ -508,7 +504,7 @@ impl Backend {
     /// instance method on a custom builder; the exact search searches both
     /// keys for exactly that reason (see `member_candidate_keys`).
     pub(crate) fn indexed_member_reference_count(&self, member: &str) -> Option<usize> {
-        if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
+        if self.skip_reference_index || !self.workspace_index.indexed.load(Ordering::Acquire) {
             return None;
         }
 
@@ -537,7 +533,7 @@ impl Backend {
         keys: &[ReferenceIndexKey],
         uris: &mut Vec<String>,
     ) -> bool {
-        if !self.workspace_indexed.load(Ordering::Acquire) {
+        if !self.workspace_index.indexed.load(Ordering::Acquire) {
             return false;
         }
 
@@ -688,7 +684,7 @@ impl Backend {
         let mut entries: Vec<(ReferenceIndexKey, bool)> = Vec::new();
         // Resolving a namespace-qualified name back to the namespace it
         // was written in needs the file's namespace blocks; cloning them
-        // once beats re-locking `file_namespaces` per span.
+        // once beats re-locking the file states per span.
         let namespaces = OnceCell::new();
         for span in &symbol_map.spans {
             let is_declaration = matches!(
@@ -710,27 +706,50 @@ impl Backend {
             }
         }
 
-        // A render site behind a typed receiver is only settled lazily, and
-        // whoever wants the answer has to find the file before it can be
-        // asked for. The candidate joins the index unconfirmed: this index
-        // narrows a workspace scan to the files that *might* hold a key,
-        // and every consumer of it re-checks what it found. Outside Laravel
-        // no candidate can ever be confirmed, and morph sites are recorded
-        // for every plain `$x->prop === 'literal'`, so skip them there.
-        if self.resolved_class_cache.read().is_laravel() {
-            for site in &symbol_map.view_receiver_sites {
+        // A key behind a typed receiver is only settled lazily, and whoever
+        // wants the answer has to find the file before it can be asked for.
+        // The candidate joins the index unconfirmed, under every kind it
+        // could turn out to be: this index narrows a workspace scan to the
+        // files that *might* hold a key, and every consumer of it re-checks
+        // what it found. Outside the framework a candidate belongs to it can
+        // never be confirmed, and morph sites are recorded for every plain
+        // `$x->prop === 'literal'`, so skip them there.
+        let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
+        let is_symfony = self.is_symfony_project();
+        let is_twig = self.is_twig_project();
+        for site in &symbol_map.typed_receiver_sites {
+            let kind = site.receiver.key_kind();
+            let enabled = if kind == StringKeyKind::TwigTemplate {
+                is_twig
+            } else if kind.is_symfony() {
+                is_symfony
+            } else {
+                is_laravel
+            };
+            if !enabled {
+                continue;
+            }
+            let mut kinds: Vec<StringKeyKind> = Vec::with_capacity(2);
+            for (_, kind) in site.receiver.targets() {
+                if !kinds.contains(kind) {
+                    kinds.push(*kind);
+                }
+            }
+            for kind in kinds {
                 entries.push((
-                    ReferenceIndexKey::LaravelString {
-                        kind: crate::symbol_map::LaravelStringKind::View,
+                    ReferenceIndexKey::StringKey {
+                        kind,
                         key: site.key.clone(),
                     },
                     false,
                 ));
             }
+        }
+        if is_laravel {
             for site in &symbol_map.morph_column_sites {
                 entries.push((
-                    ReferenceIndexKey::LaravelString {
-                        kind: crate::symbol_map::LaravelStringKind::MorphAlias,
+                    ReferenceIndexKey::StringKey {
+                        kind: crate::symbol_map::StringKeyKind::MorphAlias,
                         key: site.key.clone(),
                     },
                     false,
@@ -779,7 +798,7 @@ impl Backend {
                 // FQN can never apply.  Skipping it keeps a large generated
                 // XML from adding one index entry per distinct class it
                 // names on top of the one that answers lookups.
-                if *is_fqn && crate::resource_navigation::is_resource_document(uri) {
+                if *is_fqn && self.is_resource_uri(uri) {
                     return vec![(
                         ReferenceIndexKey::class_owned(normalize_symbol_name(name)),
                         true,
@@ -791,7 +810,7 @@ impl Backend {
                     fqn
                 } else {
                     let (use_map, namespace) = self.use_map_and_namespace_at(uri, span.start);
-                    normalize_symbol_name(Self::resolve_to_fqn(name, &use_map, &namespace))
+                    normalize_symbol_name(resolve_to_fqn(name, &use_map, &namespace))
                 };
                 class_keys(&resolved, name)
             }
@@ -818,7 +837,7 @@ impl Backend {
                     fqn
                 } else {
                     let (use_map, namespace) = self.use_map_and_namespace_at(uri, span.start);
-                    normalize_symbol_name(Self::resolve_to_fqn(name, &use_map, &namespace))
+                    normalize_symbol_name(resolve_to_fqn(name, &use_map, &namespace))
                 };
                 let global_fallback =
                     self.names_global_fallback(uri, span.start, name, &resolved, namespaces);
@@ -838,6 +857,7 @@ impl Backend {
             | SymbolKind::MemberDeclaration {
                 name: member_name,
                 is_static,
+                ..
             } => {
                 vec![(
                     ReferenceIndexKey::Member {
@@ -847,15 +867,15 @@ impl Backend {
                     true,
                 )]
             }
-            SymbolKind::LaravelStringKey { kind, key, .. } => {
-                vec![(laravel_string_reference_key(*kind, key), true)]
+            SymbolKind::StringKey { kind, key, .. } => {
+                vec![(string_key_reference_key(*kind, key), true)]
             }
             _ => Vec::new(),
         }
     }
 
     fn is_reference_indexable_uri(&self, uri: &str) -> bool {
-        if uri.starts_with("phpantom-stub://") || uri.starts_with("phpantom-stub-fn://") {
+        if crate::stubs::is_stub_uri(uri) {
             return false;
         }
         !self
@@ -904,10 +924,13 @@ impl Backend {
     }
 
     fn resolved_name_at(&self, uri: &str, offset: u32) -> Option<String> {
-        self.resolved_names
+        self.files
             .read()
-            .get(uri)
-            .and_then(|rn| rn.get(offset).map(normalize_symbol_name))
+            .get(uri)?
+            .resolved_names
+            .as_ref()?
+            .get(offset)
+            .map(normalize_symbol_name)
     }
 
     /// The key a function named at `offset` in `uri` is indexed under.
@@ -935,7 +958,7 @@ impl Backend {
             fqn
         } else {
             let (use_map, namespace) = self.use_map_and_namespace_at(uri, offset);
-            Self::resolve_to_fqn(name, &use_map, &namespace)
+            resolve_to_fqn(name, &use_map, &namespace)
         };
         normalize_symbol_name(resolved)
     }
@@ -1110,8 +1133,11 @@ mod tests {
     #[test]
     fn candidate_lookup_is_disabled_when_reference_indexing_is_skipped() {
         let mut backend = Backend::new_test();
-        backend.skip_reference_index = true;
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend.state_mut().skip_reference_index = true;
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         let candidates =
             backend.reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Foo")]);
@@ -1127,7 +1153,10 @@ mod tests {
             uri,
             "<?php\nnamespace App;\nclass Foo { public string $name; public function save(): void {} }\nfunction helper(): void {}\n$foo = new Foo();\n$foo->save();\nconfig('app.name');\n",
         );
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_candidate_contains(&backend, ReferenceIndexKey::class("App\\Foo"), uri);
         assert_candidate_contains(&backend, ReferenceIndexKey::function("App\\helper"), uri);
@@ -1149,8 +1178,8 @@ mod tests {
         );
         assert_candidate_contains(
             &backend,
-            ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::Config,
+            ReferenceIndexKey::StringKey {
+                kind: StringKeyKind::Config,
                 key: "app.name".to_string(),
             },
             uri,
@@ -1160,7 +1189,10 @@ mod tests {
     #[test]
     fn config_resources_and_generic_config_keys_share_one_canonical_candidate_key() {
         let backend = Backend::new_test();
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
         let resource_uri = "file:///project/src/CacheConsumer.php";
         let config_uri = "file:///project/src/ConfigConsumer.php";
         let queue_uri = "file:///project/src/QueueConsumer.php";
@@ -1168,35 +1200,34 @@ mod tests {
         backend.reindex_references_for_symbol_maps_batch(vec![
             (
                 resource_uri.to_string(),
-                laravel_string_map(
-                    LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+                string_key_map(
+                    StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
                     "redis",
                 ),
             ),
             (
                 config_uri.to_string(),
-                laravel_string_map(LaravelStringKind::Config, "cache.stores.redis"),
+                string_key_map(StringKeyKind::Config, "cache.stores.redis"),
             ),
             (
                 queue_uri.to_string(),
-                laravel_string_map(
-                    LaravelStringKind::ConfigResource(LaravelConfigResource::QueueConnection),
+                string_key_map(
+                    StringKeyKind::ConfigResource(LaravelConfigResource::QueueConnection),
                     "redis",
                 ),
             ),
         ]);
 
-        let resource_key = laravel_string_reference_key(
-            LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+        let resource_key = string_key_reference_key(
+            StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
             "redis",
         );
-        let config_key =
-            laravel_string_reference_key(LaravelStringKind::Config, "cache.stores.redis");
+        let config_key = string_key_reference_key(StringKeyKind::Config, "cache.stores.redis");
         assert_eq!(resource_key, config_key);
         assert_candidate_contains(&backend, config_key.clone(), resource_uri);
         assert_candidate_contains(&backend, config_key, config_uri);
-        let queue_key = laravel_string_reference_key(
-            LaravelStringKind::ConfigResource(LaravelConfigResource::QueueConnection),
+        let queue_key = string_key_reference_key(
+            StringKeyKind::ConfigResource(LaravelConfigResource::QueueConnection),
             "redis",
         );
         assert_candidate_contains(&backend, queue_key.clone(), queue_uri);
@@ -1212,29 +1243,29 @@ mod tests {
     #[test]
     fn non_config_laravel_string_keys_keep_their_original_identity() {
         assert_eq!(
-            laravel_string_reference_key(LaravelStringKind::View, "dashboard"),
-            ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::View,
+            string_key_reference_key(StringKeyKind::View, "dashboard"),
+            ReferenceIndexKey::StringKey {
+                kind: StringKeyKind::View,
                 key: "dashboard".to_string(),
             }
         );
         assert_eq!(
-            laravel_string_reference_key(
-                LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+            string_key_reference_key(
+                StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
                 "null",
             ),
-            ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+            ReferenceIndexKey::StringKey {
+                kind: StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
                 key: "null".to_string(),
             }
         );
         assert_eq!(
-            laravel_string_reference_key(
-                LaravelStringKind::ConfigResource(LaravelConfigResource::DatabaseConnection),
+            string_key_reference_key(
+                StringKeyKind::ConfigResource(LaravelConfigResource::DatabaseConnection),
                 "mysql::read",
             ),
-            ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::Config,
+            ReferenceIndexKey::StringKey {
+                kind: StringKeyKind::Config,
                 key: "database.connections.mysql".to_string(),
             }
         );
@@ -1245,7 +1276,10 @@ mod tests {
         let backend = Backend::new_test();
         let uri = "file:///project/src/Foo.php";
         backend.update_ast(uri, "<?php\nnamespace App;\nclass Foo {}\nnew Foo();\n");
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_candidate_contains(&backend, ReferenceIndexKey::class("App\\Foo"), uri);
 
@@ -1259,7 +1293,10 @@ mod tests {
     #[test]
     fn batch_reindex_replaces_existing_uri_and_keeps_last_duplicate() {
         let backend = Backend::new_test();
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
         let uri = "file:///project/src/Foo.php".to_string();
 
         backend.reindex_references_for_symbol_maps_batch(vec![(
@@ -1306,7 +1343,10 @@ mod tests {
 
         let backend = Backend::new_test();
         backend.add_vendor_dir(&vendor);
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         let user_uri = "file:///project/src/User.php".to_string();
         let vendor_uri = crate::util::path_to_uri(&vendor.join("Package.php"));
@@ -1340,7 +1380,10 @@ mod tests {
     #[test]
     fn self_static_parent_without_enclosing_class_is_not_indexed() {
         let backend = Backend::new_test();
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
         let uri = "file:///project/src/Loose.php".to_string();
 
         backend.reindex_references_for_symbol_maps_batch(vec![(
@@ -1364,7 +1407,10 @@ mod tests {
     #[test]
     fn zero_offset_property_declaration_is_not_indexed() {
         let backend = Backend::new_test();
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
         let uri = "file:///project/src/Foo.php".to_string();
 
         let mut class = crate::types::ClassInfo {
@@ -1423,7 +1469,10 @@ mod tests {
         let backend = Backend::new_test();
         let uri = "file:///project/src/constants.php";
         backend.update_ast(uri, "<?php\nconst FOO = 1;\necho FOO;\n");
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_eq!(
             reference_count(&backend, ReferenceIndexKey::Constant("FOO".to_string())),
@@ -1437,7 +1486,10 @@ mod tests {
         let backend = Backend::new_test();
         let uri = "file:///project/src/constants.php";
         backend.update_ast(uri, "<?php\ndefine('FOO', 1);\necho FOO;\n");
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_eq!(
             reference_count(&backend, ReferenceIndexKey::Constant("FOO".to_string())),
@@ -1453,7 +1505,10 @@ mod tests {
             uri,
             "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n}\n",
         );
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         // PHP calls `App\helper` when it exists and the global `helper`
         // otherwise, so both spellings are credited.
@@ -1475,7 +1530,10 @@ mod tests {
             uri,
             "<?php\nnamespace App;\nuse function Support\\helper;\nfunction run(): void {\n    helper();\n}\n",
         );
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         // The `use function` import names it too, so both spans count.
         assert_eq!(
@@ -1494,7 +1552,10 @@ mod tests {
         let backend = Backend::new_test();
         let uri = "file:///project/src/Service.php";
         backend.update_ast(uri, "<?php\nfunction helper(): void {}\nHELPER();\n");
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_eq!(
             reference_count(&backend, ReferenceIndexKey::function("helper")),
@@ -1510,7 +1571,10 @@ mod tests {
             uri,
             "<?php\nnamespace App;\nclass Widget {}\n$a = new WIDGET();\n$b = new widget();\n",
         );
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
 
         assert_eq!(
             reference_count(&backend, ReferenceIndexKey::class("App\\Widget")),
@@ -1562,12 +1626,12 @@ mod tests {
         })
     }
 
-    fn laravel_string_map(kind: LaravelStringKind, key: &str) -> Arc<SymbolMap> {
+    fn string_key_map(kind: StringKeyKind, key: &str) -> Arc<SymbolMap> {
         Arc::new(SymbolMap {
             spans: vec![SymbolSpan {
                 start: 0,
                 end: key.len() as u32,
-                kind: SymbolKind::LaravelStringKey {
+                kind: SymbolKind::StringKey {
                     kind,
                     key: key.to_string(),
                     is_write: false,

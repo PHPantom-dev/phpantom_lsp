@@ -53,115 +53,65 @@ No outstanding items.
 
 ## Templates
 
-No outstanding items.
+### B682. A templated override keeps the parent's wider `@return` beside its own native type
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+interface View { public function name(): string; }
+interface Htmlable {}
+
+abstract class Component {
+    /** @return View|Htmlable|\Closure|string */
+    abstract public function render();
+}
+
+/** @template TModel */
+final class PerPage extends Component {
+    public function render(): View { throw new Exception(); }
+}
+
+function f(PerPage $p): void {
+    $p->render()->name();   // resolves on View|Htmlable|Closure
+}
+```
+
+`render()` declares `: View` and has no docblock, so its return type is
+`View`. It resolves to `View|Htmlable|Closure` instead: the inheritance
+merge takes the parent's `@return` and
+`without_alternatives_the_native_type_forbids` (in
+`src/php_type/normalize.rs`) only drops alternatives whose value domain
+the native type rules out, so `string` goes and every class stays. The
+same override without `@template TModel` on its class resolves to `View`,
+so a second path, taken only for a templated class, is the one that
+lets the wider type through. PHPStan discards an inherited `@return` that
+is not a subtype of the native type.
+
+Found running the opt-in `partial-union-members` diagnostic over a
+Laravel project: a Blade component's `render(): View` reported `name()`
+as missing on `Htmlable` and `Closure`.
 
 ## Name resolution
 
 No outstanding items.
 
+## Code actions
+
+No outstanding items.
+
 ## Miscellaneous
 
-### B618. "Update return type" on a closure writes the enclosing method's type
+### B682. `test_pivot_attached_when_relation_file_was_never_opened` fails intermittently
 
-**Impact: Medium · Complexity: Medium-High**
+**Impact: Low · Complexity: Low-Medium**
 
-```php
-public function run(): array {
-    $f = function (): string {
-        return 42;   // PHPStan: Anonymous function should return string but returns int.
-    };
-    return [];
-}
-```
-
-The quick fix rewrites the closure to `function (): array` and adds a
-`@return array{}` docblock above the statement: the type it writes is the
-method's, not the closure's. The return-type quick fixes
-(`code_actions/phpstan/fix_return_type/`, `remove_unused_return_type.rs`,
-`add_iterable_type.rs`) find their function by scanning text (braces back
-from the diagnostic line, the `)` before the `{`, the line holding
-`function`), and the inference behind them (`declared_body` in
-`fix_return_type/inference.rs`) then looks for a named function or method
-around the body brace, so a closure resolves to the method it sits in. An
-arrow function has no brace at all, and the text scan lands on the
-method's. Locate the function through the parsed AST instead
-(`find_enclosing_function` in `code_actions/cursor_context.rs`, with
-`FunctionKinds::All`) and read the native return type, the body to infer
-from and the docblock (already `paren_function_docblock`) from that one
-node.
-
-### B630. An unclosed call inside a braced `namespace` block drops the block
-
-**Impact: Low · Complexity: Medium**
-
-```php
-<?php
-namespace Lib {
-    function greet(string $name): void {}
-}
-namespace App {
-    use function Lib\greet;
-    greet(   // until the `)` is typed, this line reads as `namespace Lib`
-}
-```
-
-While a call inside a braced `namespace App { … }` block is missing its
-`)`, mago's parser leaves the whole block out of `program.statements`, so
-`update_ast` (`parser/ast_update.rs`) records no `NamespaceSpan` for it and
-indexes none of its imports, classes or functions. An offset in it falls
-into the last block the parse kept (`NamespaceSpan::containing`), and
-every name typed there resolves against that block's namespace and imports
-until the call is closed. Signature help runs on exactly this text, so it
-shows the wrong function or none. A file that declares its blocks as
-`namespace App;` keeps every block. The block survives only if the
-parser's recovery ends the argument list at the block's `}` instead of
-dropping the statement: upstream in `mago-syntax`, or by re-parsing with
-the call closed, as signature help's text fallback already does for the
-classes (`patch_content_for_signature`).
-
-### B633. Diagnostics forget top-level variables at a braced `namespace` block
-
-**Impact: Low · Complexity: Low**
-
-```php
-<?php
-namespace A {
-    $x = new \DateTime();
-    $x->nope();   // reported: no `nope()` on DateTime
-}
-namespace B {
-    $x->nope();   // not reported, though `$x` is still the DateTime
-}
-```
-
-PHP keeps one global variable scope across a file's `namespace` blocks, and
-hover follows it: `walk_body_forward` (`forward_walk/statements.rs`) walks
-each block's statements on the same scope, so hovering `$x` in block B shows
-`DateTime`. The diagnostic walk does not: `walk_top_level_statements`
-(`forward_walk/diagnostic_walk.rs`) recurses into each `Statement::Namespace`
-and starts it on a fresh `ScopeState`, so a variable assigned in one block
-is untyped in the next and nothing checks the members, arguments or types
-it is used with there. Carry the top-level scope from block to block,
-switching only the loaders and imports, as the recursion's `block_ctx`
-already does.
-
-### B634. Edits outside the PHPStan quick fixes write `\n` line endings into `\r\n` files
-
-**Impact: Low · Complexity: Medium**
-
-In a file saved with `\r\n` line endings, most edits other than the PHPStan
-quick fixes end the lines they add with `\n`: the `use` line an import adds
-(from completion, "Import class", or the `use Override;` of "Add
-`#[Override]`"), a generated constructor, getter, setter or property hook,
-implemented methods, an extracted function, constant or interface, "Update
-docblock", the docblock generated on `/**`, and an override completion,
-among others. The file is left with mixed line endings. Each builder writes a literal
-`\n` (`build_constructor` in `generate_constructor.rs`,
-`extract_function/codegen.rs`, `update_docblock/rewrite.rs`, …) where it
-should write `line_ending(content)` from `text_position.rs`, as the PHPStan
-quick fixes and `sort_use_statements` do. Imports need the terminator
-carried in: `UseBlockInfo::import_text` (`completion/use_edit.rs`) and the
-template's `@use` writer (`blade/use_block.rs`) build their line without
-the file's content, so `analyze_use_block_in` and
-`analyze_template_use_block` would record it in the `UseBlockInfo`, and
-`drop_repeated_separator` would strip that terminator instead of `\n`.
+The Laravel completion test in `tests/integration/completion_laravel.rs`
+failed once in a full `cargo nextest run` and passed on every run on its
+own and in the suite runs before and after. The test calls
+`initialized()` and then completes on a model whose relationship lives in
+a file nothing opened, so its answer depends on the workspace index that
+`initialized()` builds. A result that changes with machine load points at
+the completion reading that index before the work it waits for has
+finished, or at state leaking in from another test on the same thread.
+Find which, and make the test (or the code under it) wait for what it
+needs.

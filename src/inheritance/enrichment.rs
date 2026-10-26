@@ -286,6 +286,7 @@ fn parameter_enrichment_would_change(
         return true;
     }
     existing_param.callable_invocation.is_none() && ancestor_param.callable_invocation.is_some()
+        || existing_param.param_out_type.is_none() && ancestor_param.param_out_type.is_some()
         || existing_param.description.is_none() && ancestor_param.description.is_some()
 }
 
@@ -460,6 +461,10 @@ pub(crate) fn enrich_single_parameter(
     // invocation tags.
     if existing_param.callable_invocation.is_none() {
         existing_param.callable_invocation = ancestor_param.callable_invocation;
+    }
+    // Likewise for what it writes through a by-reference parameter.
+    if existing_param.param_out_type.is_none() {
+        existing_param.param_out_type = ancestor_param.param_out_type.clone();
     }
     // Description enrichment
     if existing_param.description.is_none() && ancestor_param.description.is_some() {

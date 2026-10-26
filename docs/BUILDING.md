@@ -16,6 +16,24 @@ The `build.rs` script automatically fetches the latest [JetBrains phpstorm-stubs
 
 The stubs are downloaded on first build and cached in `stubs/`. To update to the latest stubs, delete the `stubs/` directory and rebuild.
 
+If the download fails, the build fails. A binary without the stubs would report every built-in function and class as unknown, so it is not built by accident.
+
+### Packaging without network access
+
+Package managers that build in a sandbox without network access (Homebrew, Nix, distribution builders) can supply the stubs themselves. Download the tarball pinned in `stubs.lock`:
+
+```
+https://github.com/<repo>/archive/<commit>.tar.gz
+```
+
+Check it against the `sha256` in `stubs.lock` and extract it. Then point `PHPANTOM_STUBS_DIR` at the extracted directory, the one that holds `PhpStormStubsMap.php`:
+
+```bash
+PHPANTOM_STUBS_DIR=/path/to/phpstorm-stubs cargo install --locked --path .
+```
+
+The directory is embedded as-is, so verifying the tarball is up to the packager. To check the result, run `phpantom_lsp analyze` on a file that calls a built-in function such as `strlen()`. A build without the stubs reports it as unknown.
+
 For details on how symbol resolution and stub loading work, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Optional features
@@ -28,7 +46,8 @@ continues instead of downloading them. Stubs already present in
 `stubs/` are still embedded, so a machine that has built once keeps its
 standard library. A build without them resolves only the project's own
 code, so use it when the build must not make network calls rather than
-to save time.
+to save time. The language server shows a warning when it starts
+without stubs, and so do `analyze` and `fix`.
 
 `semantic-export` compiles `phpantom_lsp::semantic_export`, an API for
 programs that embed PHPantom as a library rather than talking to it
@@ -97,7 +116,11 @@ cargo fmt --check
 find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l
 php -d zend.assertions=1 examples/php/scaffolding/assertions.php
 php -l examples/laravel/app/Demo.php
+find examples/symfony/src examples/symfony/config -name '*.php' -print0 | xargs -0 -n1 php -l
+php examples/laravel/assertions.php
+php examples/symfony/assertions.php
 phpantom_lsp analyze --project-root examples/laravel --no-colour
+phpantom_lsp analyze --project-root examples/symfony --no-colour
 ```
 
 CI additionally builds the WebAssembly target and runs
@@ -105,9 +128,15 @@ CI additionally builds the WebAssembly target and runs
 if your change touches dependencies, `Cargo.toml`, or anything in the
 per-file request path. See [wasm.md](wasm.md).
 
-All ten must pass with zero warnings and zero failures, except the
-final `analyze` run: `app/Demo.php` carries three deliberate mistakes,
-each demonstrating a diagnostic. `Artisan::call('does:not-exist')`
+The framework `assertions.php` and `analyze` runs need `composer
+install` in `examples/laravel/` and `examples/symfony/` first. Each
+`assertions.php` checks its playground's demo against the real framework.
+
+All fourteen must pass with zero warnings and zero failures, and the
+Symfony `analyze` run must report `[OK] No errors`. The Laravel
+`analyze` run is the exception: `app/Demo.php` carries three
+deliberate mistakes, each demonstrating a diagnostic.
+`Artisan::call('does:not-exist')`
 demonstrates `invalid_laravel_command`, and one `view('welcome', …)`
 call both leaves out a variable the template declares and passes a
 misspelled key, demonstrating `missing_view_variable` and

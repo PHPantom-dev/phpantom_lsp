@@ -28,10 +28,10 @@ impl Backend {
             let Some(uri) = self.resolve_class_uri(fqn) else {
                 continue;
             };
-            let Ok(url) = tower_lsp::lsp_types::Url::parse(&uri) else {
+            let Some(url) = crate::util::parse_url(&uri) else {
                 continue;
             };
-            let Ok(path) = url.to_file_path() else {
+            let Some(path) = crate::util::url_to_path(&url) else {
                 continue;
             };
             if self.is_in_vendor_dir(&path) {
@@ -47,8 +47,8 @@ impl Backend {
                 configured = Some(class);
             }
         }
-        *self.laravel_date_seed_uris.write() = seed_uris;
-        let previous = self.laravel_date_class.write().replace(configured.clone());
+        *self.laravel.date_seed_uris.write() = seed_uris;
+        let previous = self.laravel.date_class.write().replace(configured.clone());
         // `now()` reaches the configured class through this slot rather than
         // through a lookup of the provider that set it, so a cached receiver
         // resolution records no dependency on it.

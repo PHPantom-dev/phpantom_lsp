@@ -15,7 +15,7 @@ use crate::common::{
     definition_locations, find_references, goto_definition_at, hover_text_at, messages_with_code,
     position_after,
 };
-use tower_lsp::lsp_types::{Location, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Uri};
 
 const CONSUMER_PATH: &str = "src/Links.php";
 
@@ -35,7 +35,7 @@ fn consumer_calling(names: &[&str]) -> String {
 async fn workspace_calling(
     files: &[(&str, &str)],
     names: &[&str],
-) -> (phpantom_lsp::Backend, tempfile::TempDir, Url, String) {
+) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri, String) {
     let consumer = consumer_calling(names);
     let mut all: Vec<(&str, &str)> = files.to_vec();
     all.push((CONSUMER_PATH, &consumer));
@@ -957,7 +957,7 @@ const USERS_AND_TEAMS_ROUTES: &str = "<?php\nRoute::get('/users', 'index')->name
 /// `content`, as sorted `(file name, line)` pairs.
 async fn route_references(
     backend: &phpantom_lsp::Backend,
-    uri: Url,
+    uri: Uri,
     content: &str,
     needle: &str,
     include_declaration: bool,
@@ -1014,7 +1014,7 @@ async fn find_references_from_a_route_registration_reaches_its_calls() {
         &["users.index", "teams.index", "users.index"],
     )
     .await;
-    let routes_uri = Url::from_file_path(dir.path().join("routes/web.php")).unwrap();
+    let routes_uri = Uri::from_file_path(dir.path().join("routes/web.php")).unwrap();
     crate::common::open_php(&backend, &routes_uri, USERS_AND_TEAMS_ROUTES).await;
     assert_eq!(
         route_references(

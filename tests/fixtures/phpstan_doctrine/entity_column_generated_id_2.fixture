@@ -1,0 +1,8 @@
+// test: A generated identifier, case 2
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testGeneratedIds.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/GeneratedIdEntity2.php
+// expect_diagnostic: 17: Property PHPStan\Rules\Doctrine\ORM\GeneratedIdEntity2::$id type mapping mismatch: database can contain int|null but property expects int. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

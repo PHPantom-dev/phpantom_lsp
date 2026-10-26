@@ -284,6 +284,7 @@ fn method_eq(a: &MethodInfo, b: &MethodInfo) -> bool {
         is_pure,
         is_impure,
         reads_func_args,
+        is_no_discard,
         extras: _,
     } = a;
     *name == b.name
@@ -301,6 +302,7 @@ fn method_eq(a: &MethodInfo, b: &MethodInfo) -> bool {
         && *is_pure == b.is_pure
         && *is_impure == b.is_impure
         && *reads_func_args == b.reads_func_args
+        && *is_no_discard == b.is_no_discard
         && *description == b.description
         && a.extras_eq(b)
         && parameters_eq(parameters, &b.parameters)

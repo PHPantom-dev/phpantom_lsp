@@ -1,0 +1,13 @@
+parameters:
+  app.support_email: support@example.com
+
+services:
+  App\:
+    resource: '../src/'
+  App\EventListener\OrderPlacedListener:
+    tags:
+      - { name: kernel.event_listener, event: app.order.placed, method: onOrderPlaced }
+  # Try: go-to-definition on app.welcome_mailer below. It is declared in
+  # config/services.php, and find references on it lists every file that
+  # names it.
+  app.legacy_mailer: '@app.welcome_mailer'

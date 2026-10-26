@@ -1,0 +1,8 @@
+// test: A query builder with many branches
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testBranchingPerformance.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/query-builder-branches-performance.php
+// expect_diagnostic: 121: QueryBuilder: [Semantical Error] line 0, col 58 near 'p.id = 1 AND': Error: 'p' is not defined. // SKIP: DQL and query builder strings are not checked
+---

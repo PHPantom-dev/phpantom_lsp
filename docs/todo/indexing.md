@@ -302,144 +302,39 @@ Filtering the three where they merge into the index makes one rule out
 of two and removes the asymmetry; the cost is one already-compiled glob
 match per entry, skipped outright when no exclude is configured.
 
-## X14. Ask Zed to expose `file_scan_exclusions` and `file_types` to extensions
+## X14. Forward Zed's `file_scan_exclusions` and `file_types`
 
 **Impact: Low · Complexity: Low**
 
-An upstream request, not a code change here. Zed's extension API serves
-extensions only the `language`, `lsp`, and `context_servers` settings
-categories (the `category` match in `get_settings`, `extension_host`
-crate), so the PHP extension cannot read the editor's own
-`file_scan_exclusions` or `file_types` and forward them the way the VS
-Code extension forwards `files.exclude` and `files.associations`. Zed
-users therefore have to restate those two lists under
-`lsp.phpantom.initialization_options`, which
-[`editor-setup.md`](../editor-setup.md) documents as the workaround.
+Waiting on upstream review. Zed's extension API serves extensions only
+the `language`, `lsp`, and `context_servers` settings categories, so the
+PHP extension cannot read the editor's own `file_scan_exclusions` or
+`file_types` and forward them the way the VS Code extension forwards
+`files.exclude` and `files.associations`. Zed users therefore have to
+restate those two lists under `lsp.phpantom.initialization_options`,
+which [`editor-setup.md`](../editor-setup.md) documents as the
+workaround.
 
-File the request against `zed-industries/zed` for read access to those
-two settings, then link the issue from that section so users can track
-it. When it lands, the forwarding itself is a small change in Zed's
-official PHP extension, and the manual step in the docs goes away.
+[zed-industries/zed#66121](https://github.com/zed-industries/zed/pull/66121)
+adds `WorktreeSettings::for_worktree` (`file_scan_exclusions` and
+`file_scan_inclusions` as their source globs) and
+`FileTypeSettings::for_worktree` (the effective `file_types` map) to
+extension API 0.8.0, and the Zed section of `editor-setup.md` links it.
+Zed is slow to review, so nothing here is scheduled until it merges.
+What follows it:
 
-## X17. Index the workspace's other folders
+- **A pull request to `zed-extensions/php`**, once a Zed release ships
+  the API. Bump `zed_extension_api`, read both settings in
+  `language_server_initialization_options`, and merge them into
+  `indexing.exclude` and `indexing.extensions` without overwriting what
+  the user set there. An exclusion that an inclusion overrides must not
+  be forwarded. A `file_types` entry for `PHP` contributes only when it
+  is a bare `*.ext` glob, the same rule the VS Code extension applies to
+  `files.associations`.
+- **Drop the manual step** from the Zed section of `editor-setup.md`
+  once that extension release is out.
 
-**Impact: Medium · Complexity: Medium**
-
-A multi-root workspace is the one case where the editor already knows
-about PHP source outside a server's root and can say so without the user
-configuring anything, the same way `files.exclude` and
-`files.associations` already reach the server. The VS Code extension
-starts one server per workspace folder, each scoped to that folder, so a
-project whose shared library sits in a sibling folder resolves nothing
-across the boundary: the library's classes are missing from completion,
-go-to-definition, and find-references in the project that uses them.
-Intelephense splits a multi-root workspace the same way and asks the user
-to name the sibling explicitly; the folder list is already in front of
-the extension, so nothing needs naming.
-
-Forwarded through `ClientIndexingOptions` beside `exclude` and
-`extensions`, as a list of absolute directories:
-
-```json
-{ "indexing": { "extra_roots": ["/home/me/work/shared-lib"] } }
-```
-
-Not `include`: that `.phpantom.toml` key already exists and means
-something else. It names paths to index *despite* the gitignore and
-hidden-entry filters, with a walk of its own that turns both off. A
-sibling folder is the opposite case. It is another project root, and
-its `vendor/`, `node_modules/`, and build output have to stay out
-exactly as they do in this one, so it is walked as a root with every
-filter in force.
-
-`collectIndexFilters` fills it from `vscode.workspace.workspaceFolders`,
-dropping the client's own folder, and the extension re-sends on
-`onDidChangeWorkspaceFolders` the way it already re-sends on a
-`files.exclude` change. Because it travels inside the block the extension
-builds in one place, it cannot collide with the `phpantom` section VS
-Code's `synchronize` pushes: that blob has no `indexing` key, so
-`ClientIndexingOptions::from_client_settings` ignores it and the
-whole-value replacement in `set_client_indexing_options` stays safe.
-
-The shape stays generic, so a Zed or Neovim user can hand-write the same
-block for a directory their editor has no concept of.
-
-**Not in scope: a `phpantom.*` editor setting for arbitrary
-directories.** A user who wants to name a path by hand already has
-`[indexing] include` in `.phpantom.toml`, which `analyze` sees too. It
-answers the questions a hand-typed path raises: relative paths resolve
-against the workspace root (no `~` or variable expansion), `exclude`
-prunes below a named directory but never the named path itself, and a
-removed entry keeps its symbols until restart. An included path outside
-the workspace gets no file watcher, which is X18 rather than part of
-this item.
-
-**Append to the existing roots slice.** `walk_roots` already takes a
-roots slice and puts every root in a single `ignore` walk, which is what
-compiles each shared ancestor `.gitignore` once instead of once per root.
-Extra roots belong in that slice, not in a walk of their own. Its
-attribute-by-depth accounting holds for a root whose files were reached
-through a followed link, pinned by
-`walk_roots_attributes_a_followed_link_to_the_root_that_reached_it`.
-
-Putting them in that slice also gets the duplicate protection for free:
-`LinkClaims` claims every root up front, so a symlink pointing at an
-extra root loses to that root's own walk rather than
-indexing the tree a second time under the link's spelling.
-
-**Two folders can still overlap.** The guard above only sees symlinks,
-and VS Code lets a workspace hold both a folder and its parent. An
-extra root that is a parent, child, or exact duplicate of another one
-(or of the server's own root) is walked twice, because nothing crossed a
-link to get there. Canonicalize the extra roots when they are
-registered and drop the ones contained in another, the same containment
-test `LinkClaims::claim` already does.
-
-**Switch every walker together.** Every serial walk goes through
-`visit_workspace_files_gitignore` (`classmap_scanner/walk.rs`):
-`collect_php_files_gitignore` (namespace rename, go-to-implementation),
-`collect_workspace_index_files_gitignore` (the one find-references
-walks), and `analyse::collect_php_files`. It takes a single root, so
-only `walk_roots` is multi-root today. Leaving the serial walk behind
-would index classes from an extra root while find-references, rename,
-and go-to-implementation never see them, which is the half-wired state
-the symlink change avoided by moving all the walkers at once. (`[indexing] include` gets away with one walk of its own
-because its paths are few and named. Discovery and the full background
-index both list them, and namespace rename and go-to-implementation read
-them back out of the indexes. An extra root is a whole project tree, so
-that shortcut does not scale to it.)
-
-**Add the roots to the discovery snapshot.** Both entry points that
-reconcile a live change, `reload_config` and `did_change_configuration`,
-take a `DiscoveryInputs` snapshot before applying it and hand it to
-`reconcile_index_for_input_change`, which already covers the compiled
-filters and `[indexing] include`. The extra roots go in as a third field
-of that snapshot, not as a comparison of their own at either site.
-
-**Confirm the watchers before building any.** VS Code limits a
-string-pattern watcher to paths inside the workspace, and a sibling
-folder is inside it, so the `**/*.php` watchers every session registers
-should already report a change written in one. Verify that and stop
-there. The relative-pattern-per-base machinery followed links need
-(`watchable_followed_links`, the per-base list in `WatchedFileInputs`)
-exists for trees that sit outside the workspace altogether, which these
-do not, and server-side registration for such a path is reported not to
-deliver events at all
-([vscode-languageserver-node#1783](https://github.com/microsoft/vscode-languageserver-node/issues/1783)).
-
-**Resolution only: no diagnostics, no edits.** The sibling folder has its
-own server publishing its own diagnostics, so a second pass from this one
-would duplicate every message the user sees on those files. Index an
-extra root, resolve into it, and leave publishing and workspace-wide
-edits (rename, fix) to the server that owns the folder. That also keeps
-the extension's per-folder `documentSelector` as it is: a file opened
-from an extra root is served by its own folder's client. An
-`[indexing] include` path outside the workspace already gets exactly
-this treatment by being registered like a vendor directory
-(`add_library_path` in `indexing/scan.rs`), so register each extra root
-the same way rather than adding a second notion of library code.
-
-## X18. Watch `[indexing] include` paths outside the workspace
+## X18. Watch `[indexing] include` and stub paths outside the workspace
 
 **Impact: Low-Medium · Complexity: Medium**
 
@@ -460,6 +355,11 @@ outside the workspace actually delivers events
 ([vscode-languageserver-node#1783](https://github.com/microsoft/vscode-languageserver-node/issues/1783)
 reports that it does not). If it does not, fall back to a server-side
 `notify` watcher for these few named paths.
+
+Stub paths outside the workspace (`[stubs] paths` and the editor's stub
+directory) have the same gap and take the same watchers. An event under
+one already sets `stubs_changed` in `classify_watched_changes`, which
+rebuilds the stub index, so only the registration is missing.
 
 ## X13. Decide how workspace-wide edits treat excluded files
 

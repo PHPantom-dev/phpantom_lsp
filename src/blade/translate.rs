@@ -8,21 +8,22 @@
 //! lands in the injected prologue, which has no template text behind it.
 
 use crate::Backend;
+use crate::code_actions::{FileTextEdits, visit_file_text_edits};
 
 impl Backend {
     /// Check whether a URI refers to a Blade template file.
     /// Returns true if the URI ends with `.blade.php` OR was opened with `languageId == "blade"`.
     pub(crate) fn is_blade_file(&self, uri: &str) -> bool {
-        crate::blade::is_blade_file(uri) || self.blade_uris.read().contains(uri)
+        crate::blade::is_blade_file(uri) || self.blade.uris.read().contains(uri)
     }
 
     /// Translate a position from an original Blade file to the virtual PHP file.
     pub(crate) fn translate_blade_to_php(
         &self,
         uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
+        pos: tower_lsp_server::gen_lsp_types::Position,
+    ) -> tower_lsp_server::gen_lsp_types::Position {
+        if let Some(map) = self.blade_source_map(uri) {
             map.blade_to_php(pos)
         } else {
             pos
@@ -33,9 +34,9 @@ impl Backend {
     pub(crate) fn translate_php_to_blade(
         &self,
         uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
+        pos: tower_lsp_server::gen_lsp_types::Position,
+    ) -> tower_lsp_server::gen_lsp_types::Position {
+        if let Some(map) = self.blade_source_map(uri) {
             map.php_to_blade(pos)
         } else {
             pos
@@ -52,9 +53,9 @@ impl Backend {
     pub(crate) fn try_translate_php_to_blade(
         &self,
         uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> Option<tower_lsp::lsp_types::Position> {
-        match self.blade_source_maps.read().get(uri) {
+        pos: tower_lsp_server::gen_lsp_types::Position,
+    ) -> Option<tower_lsp_server::gen_lsp_types::Position> {
+        match self.blade_source_map(uri) {
             Some(map) => map.try_php_to_blade(pos),
             None => Some(pos),
         }
@@ -68,9 +69,9 @@ impl Backend {
     pub(crate) fn translate_blade_range_to_php(
         &self,
         uri: &str,
-        range: tower_lsp::lsp_types::Range,
-    ) -> tower_lsp::lsp_types::Range {
-        tower_lsp::lsp_types::Range {
+        range: tower_lsp_server::gen_lsp_types::Range,
+    ) -> tower_lsp_server::gen_lsp_types::Range {
+        tower_lsp_server::gen_lsp_types::Range {
             start: self.translate_blade_to_php(uri, range.start),
             end: self.translate_blade_to_php(uri, range.end),
         }
@@ -88,9 +89,9 @@ impl Backend {
     pub(crate) fn translate_blade_range(
         &self,
         uri: &str,
-        range: tower_lsp::lsp_types::Range,
-    ) -> tower_lsp::lsp_types::Range {
-        tower_lsp::lsp_types::Range {
+        range: tower_lsp_server::gen_lsp_types::Range,
+    ) -> tower_lsp_server::gen_lsp_types::Range {
+        tower_lsp_server::gen_lsp_types::Range {
             start: self.translate_php_to_blade(uri, range.start),
             end: self.translate_php_to_blade(uri, range.end),
         }
@@ -101,9 +102,9 @@ impl Backend {
     pub(crate) fn try_translate_blade_range(
         &self,
         uri: &str,
-        range: tower_lsp::lsp_types::Range,
-    ) -> Option<tower_lsp::lsp_types::Range> {
-        Some(tower_lsp::lsp_types::Range {
+        range: tower_lsp_server::gen_lsp_types::Range,
+    ) -> Option<tower_lsp_server::gen_lsp_types::Range> {
+        Some(tower_lsp_server::gen_lsp_types::Range {
             start: self.try_translate_php_to_blade(uri, range.start)?,
             end: self.try_translate_php_to_blade(uri, range.end)?,
         })
@@ -115,20 +116,20 @@ impl Backend {
     fn translate_completion_item(
         &self,
         uri: &str,
-        mut item: tower_lsp::lsp_types::CompletionItem,
-    ) -> Option<tower_lsp::lsp_types::CompletionItem> {
-        use tower_lsp::lsp_types::CompletionTextEdit;
+        mut item: tower_lsp_server::gen_lsp_types::CompletionItem,
+    ) -> Option<tower_lsp_server::gen_lsp_types::CompletionItem> {
+        use tower_lsp_server::gen_lsp_types::CompletionItemTextEdit;
 
         if let Some(edit) = item.text_edit.take() {
             item.text_edit = Some(match edit {
-                CompletionTextEdit::Edit(mut e) => {
+                CompletionItemTextEdit::TextEdit(mut e) => {
                     e.range = self.try_translate_blade_range(uri, e.range)?;
-                    CompletionTextEdit::Edit(e)
+                    CompletionItemTextEdit::TextEdit(e)
                 }
-                CompletionTextEdit::InsertAndReplace(mut e) => {
+                CompletionItemTextEdit::InsertReplaceEdit(mut e) => {
                     e.insert = self.try_translate_blade_range(uri, e.insert)?;
                     e.replace = self.try_translate_blade_range(uri, e.replace)?;
-                    CompletionTextEdit::InsertAndReplace(e)
+                    CompletionItemTextEdit::InsertReplaceEdit(e)
                 }
             });
         }
@@ -152,25 +153,31 @@ impl Backend {
     pub(crate) fn translate_completion_response(
         &self,
         uri: &str,
-        response: tower_lsp::lsp_types::CompletionResponse,
-    ) -> tower_lsp::lsp_types::CompletionResponse {
-        use tower_lsp::lsp_types::{CompletionList, CompletionResponse};
+        response: tower_lsp_server::gen_lsp_types::CompletionResponse,
+    ) -> tower_lsp_server::gen_lsp_types::CompletionResponse {
+        use tower_lsp_server::gen_lsp_types::{CompletionList, CompletionResponse};
 
         match response {
-            CompletionResponse::Array(items) => CompletionResponse::Array(
-                items
-                    .into_iter()
-                    .filter_map(|item| self.translate_completion_item(uri, item))
-                    .collect(),
-            ),
-            CompletionResponse::List(list) => CompletionResponse::List(CompletionList {
-                is_incomplete: list.is_incomplete,
-                items: list
-                    .items
-                    .into_iter()
-                    .filter_map(|item| self.translate_completion_item(uri, item))
-                    .collect(),
-            }),
+            CompletionResponse::CompletionItemList(items) => {
+                CompletionResponse::CompletionItemList(
+                    items
+                        .into_iter()
+                        .filter_map(|item| self.translate_completion_item(uri, item))
+                        .collect(),
+                )
+            }
+            CompletionResponse::CompletionList(list) => {
+                CompletionResponse::CompletionList(CompletionList {
+                    is_incomplete: list.is_incomplete,
+                    items: list
+                        .items
+                        .into_iter()
+                        .filter_map(|item| self.translate_completion_item(uri, item))
+                        .collect(),
+                    apply_kind: None,
+                    item_defaults: None,
+                })
+            }
         }
     }
 
@@ -178,8 +185,8 @@ impl Backend {
     /// coordinates if the location points into a Blade file.
     pub(crate) fn translate_location(
         &self,
-        mut location: tower_lsp::lsp_types::Location,
-    ) -> tower_lsp::lsp_types::Location {
+        mut location: tower_lsp_server::gen_lsp_types::Location,
+    ) -> tower_lsp_server::gen_lsp_types::Location {
         let uri_str = location.uri.to_string();
         if self.is_blade_file(&uri_str) {
             location.range.start = self.translate_php_to_blade(&uri_str, location.range.start);
@@ -192,8 +199,8 @@ impl Backend {
     /// range falls inside the preprocessor's prologue.
     pub(crate) fn try_translate_location(
         &self,
-        mut location: tower_lsp::lsp_types::Location,
-    ) -> Option<tower_lsp::lsp_types::Location> {
+        mut location: tower_lsp_server::gen_lsp_types::Location,
+    ) -> Option<tower_lsp_server::gen_lsp_types::Location> {
         let uri_str = location.uri.to_string();
         if self.is_blade_file(&uri_str) {
             location.range = self.try_translate_blade_range(&uri_str, location.range)?;
@@ -216,36 +223,26 @@ impl Backend {
     pub(crate) fn translate_template_edits(
         &self,
         uri: &str,
-        edits: &mut Vec<tower_lsp::lsp_types::TextEdit>,
+        edits: &mut Vec<tower_lsp_server::gen_lsp_types::TextEdit>,
     ) -> bool {
-        self.retain_translated(uri, edits, |edit| &mut edit.range)
+        self.retain_translated(uri, FileTextEdits::Plain(edits))
     }
 
     /// Translate the range of every edit in `edits` back into `uri`'s own
     /// coordinates, dropping the ones that land where the template has no
     /// position, and report whether any edit is left.
-    ///
-    /// `range_of` reaches the range through whichever edit shape the
-    /// caller holds.
-    fn retain_translated<T>(
-        &self,
-        uri: &str,
-        edits: &mut Vec<T>,
-        range_of: impl Fn(&mut T) -> &mut tower_lsp::lsp_types::Range,
-    ) -> bool {
-        if !self.is_blade_file(uri) {
-            return !edits.is_empty();
+    fn retain_translated(&self, uri: &str, mut edits: FileTextEdits<'_>) -> bool {
+        if self.is_blade_file(uri) {
+            edits.retain_mut(
+                |edit| match self.try_translate_blade_range(uri, edit.range) {
+                    Some(translated) => {
+                        edit.range = translated;
+                        true
+                    }
+                    None => false,
+                },
+            );
         }
-        edits.retain_mut(|edit| {
-            let range = range_of(edit);
-            match self.try_translate_blade_range(uri, *range) {
-                Some(translated) => {
-                    *range = translated;
-                    true
-                }
-                None => false,
-            }
-        });
         !edits.is_empty()
     }
 
@@ -263,51 +260,12 @@ impl Backend {
     /// nothing left to offer.
     pub(crate) fn translate_workspace_edit(
         &self,
-        edit: &mut tower_lsp::lsp_types::WorkspaceEdit,
+        edit: &mut tower_lsp_server::gen_lsp_types::WorkspaceEdit,
     ) -> bool {
-        use tower_lsp::lsp_types::{DocumentChangeOperation, DocumentChanges};
-
         let mut applies = false;
-        if let Some(changes) = edit.changes.as_mut() {
-            for (uri, edits) in changes.iter_mut() {
-                applies |= self.translate_template_edits(uri.as_str(), edits);
-            }
-        }
-        let Some(document_changes) = edit.document_changes.as_mut() else {
-            return applies;
-        };
-        match document_changes {
-            DocumentChanges::Edits(edits) => {
-                for document in edits {
-                    applies |= self.translate_document_edit(document);
-                }
-            }
-            DocumentChanges::Operations(operations) => {
-                for operation in operations {
-                    match operation {
-                        DocumentChangeOperation::Edit(document) => {
-                            applies |= self.translate_document_edit(document);
-                        }
-                        DocumentChangeOperation::Op(_) => applies = true,
-                    }
-                }
-            }
-        }
-        applies
-    }
-
-    /// [`Self::translate_template_edits`] for the edits of one
-    /// `TextDocumentEdit`, whichever of the two edit shapes each carries.
-    fn translate_document_edit(
-        &self,
-        document: &mut tower_lsp::lsp_types::TextDocumentEdit,
-    ) -> bool {
-        use tower_lsp::lsp_types::OneOf;
-
-        let uri = document.text_document.uri.to_string();
-        self.retain_translated(&uri, &mut document.edits, |edit| match edit {
-            OneOf::Left(edit) => &mut edit.range,
-            OneOf::Right(edit) => &mut edit.text_edit.range,
-        })
+        let has_resource_op = visit_file_text_edits(edit, |uri, edits| {
+            applies |= self.retain_translated(uri.as_str(), edits);
+        });
+        applies || has_resource_op
     }
 }

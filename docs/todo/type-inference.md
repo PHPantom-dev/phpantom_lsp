@@ -138,7 +138,9 @@ upstream's `nsrt/class-constant-types.php` were dropped when
 `tests/phpstan_nsrt/class-constant-types.php` was ported (only the
 `self::` cases survive); port them back. The `static::`/`$this::`
 assertions in `tests/phpstan_nsrt/class-constant-native-type.php` are
-`// SKIP` against this item.
+`// SKIP` against this item, and so is the `$hw::C` read of a typed
+constant initialised to an enum case in
+`tests/phpstan_data/Rules/Constants/bug-10212.php`.
 
 ---
 
@@ -193,69 +195,6 @@ key) the fallback can never be assigned, so `$string ??= 1` is still
 **References:**
 - Psalm: `Context::$vars_in_scope` and `Context::$vars_possibly_in_scope`
   (`Psalm\Context`)
-
----
-
-## T44. A single enum case has no type
-**Impact: Medium · Complexity: High**
-
-```php
-enum Suit { case Hearts; case Spades; case Clubs; }
-function f(Suit $s) {
-    if ($s === Suit::Hearts) {
-    } elseif ($s === Suit::Spades) {
-    } else {
-        $s; // PHPStan: Suit::Clubs; PHPantom: Suit
-    }
-}
-```
-
-`Suit::Hearts` resolves to the enum class, so narrowing by comparing
-against cases can only ever say "some `Suit`". PHPStan and Psalm give each
-case its own type, a subtype of the enum: comparing narrows to the cases
-left, a `match` over the rest is known exhaustive, a `readonly` property
-assigned one case keeps it, and `->value`/`->name` on it are the case's
-literal values. Today `->value` and `->name` on any `Suit` read as the
-union of every case's backing value and name, since nothing narrower than
-the enum is known.
-
-The type model needs an enum-case variant (or a literal kind for it) that
-is a subtype of its enum in `is_subtype_of`, prints as `Enum::CASE`, and
-joins back into the enum when every case is present. Narrowing by `===`
-and `instanceof` then subtracts cases the way it subtracts union members,
-and a branch that has compared away every case holds `never`.
-
-[D24](diagnostics.md#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported)
-depends on this: its second example only stays quiet if `$s->value === 'H'`
-removes `Suit::Hearts` from `$s`, which is exactly this case subtraction.
-
-Since `value-of<…>` over an enum is evaluated, the gap also produces false
-positives. A case passed to a template binds the template to the whole
-enum, so the operator gives every case's value:
-
-```php
-/**
- * @template T of Suit
- * @param T $case
- * @return value-of<T>
- */
-function backingValue(Suit $case) { return $case->value; }
-
-/** @param 'hearts' $value */
-function acceptsHearts(string $value): void {}
-
-acceptsHearts(backingValue(Suit::Hearts)); // reported: 'spades' does not satisfy 'hearts'
-```
-
-A case held in a variable loses its value the same way: after `$case =
-Suit::Hearts;`, `acceptsHearts($case->value)` is reported too. Found
-running the php-typing-conformance suite
-(`phpdoc_advanced_fallback_value_of_template_enum.php`).
-
-The ported copies of PHPStan's `Rules/Comparison/data/bug-8485.php`,
-`Rules/Comparison/data/bug-9499.php` and
-`Rules/Methods/data/return-type-class-constant.php` under
-`tests/phpstan_data/` carry `// SKIP` assertions against this item.
 
 ---
 
@@ -485,7 +424,7 @@ reads as the unresolved `RedCar::DataArray`, so `TData` never gets the
 shape and completion sees only the untyped `array` declared return.
 
 Bare alias names in `extends_generics`/`implements_generics` are already
-substituted (`type_engine/types/aliases.rs`), but the match is an exact
+substituted (`type_engine/type_ops/aliases.rs`), but the match is an exact
 comparison against a `Named` type, so `self::DataArray` never matches it,
 and `qualify_self_constant` (`php_type/transform.rs`) reads it as a class
 constant instead.
@@ -497,3 +436,229 @@ the *declaring* class's own `type_aliases` and resolve it through
 `resolve_type_alias_typed` with that class as `owning_class_name`, before
 substituting it into the parent's template. Mago's `issue_870.php` can be
 ported once this lands.
+
+---
+
+## T45. Doctrine `getRepository(Entity::class)` is typed as the generic repository
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$repo = $entityManager->getRepository(User::class);
+$repo->findActive(); // PHPantom: EntityRepository<User>, so findActive() is unknown
+```
+
+Doctrine's stubs type `getRepository()` as `EntityRepository<T>` (or
+`ObjectRepository<T>`), but the object it returns is the entity's own
+repository: the class named by `#[ORM\Entity(repositoryClass: ...)]` or by
+the `repositoryClass`/`repository-class` key of a YAML/XML mapping.
+PHPStan's Doctrine extension answers this with a dynamic return type
+extension. Completion, hover, diagnostics, and Find References on the
+repository's own methods all miss it today.
+
+The return type belongs in the type engine, as a return-type hook for
+`getRepository()` with a class-string argument, so every consumer sees
+the concrete repository. The Doctrine mapping index built from YAML/XML
+resources already knows those pairs; the attribute form needs the
+`ClassInfo` support F24 describes.
+
+**Where to look:** `src/framework.rs`
+(`framework_doctrine_repository_fqns_for_entity`) for the YAML/XML
+mapping pairs, and method-call return resolution under
+`src/type_engine/variable/rhs_resolution/` for where the hook goes. The
+extension's fixture, `tests/phpstan_doctrine/data/namedManagerRepository.php`,
+has an entity whose repository depends on the entity manager; its
+`named-manager-registry.php` is the registry that says which.
+
+
+---
+
+## T52. Symfony return types an argument decides
+
+**Impact: Low-Medium · Complexity: Medium**
+
+PHPStan's Symfony extension narrows a list of framework methods by their
+arguments, and its stubs declare a few framework classes more precisely
+than Symfony does. The extension's fixtures run against Symfony 7.4 in
+`tests/phpstan_symfony/data/`, where each case this lacks is marked
+`// SKIP: Symfony return types an argument decides`:
+
+- `Request::getContent($asResource)`, `HeaderBag::get($key, $default)`,
+  `InputBag::get($key, $default)` (`null` once `has($key)` is false) and
+  `InputBag::all($key)`, `ResponseHeaderBag::getCookies($format)`;
+- `Envelope::all($stampFqcn)`, `SerializerInterface::deserialize()` and
+  `DenormalizerInterface::denormalize()` by their `$type`;
+- `FormInterface::getErrors($deep, $flatten)`, `CacheInterface::get()` by
+  the callback's return type, `Extension::getConfiguration()`,
+  `Command::getHelper()`, and BrowserKit's `getClient()`;
+- `ContainerInterface::has()` and `hasParameter()`, and
+  `ParameterBagInterface::has()`, as `true` or `false` by whether the
+  project declares the name;
+- the form's data class through `AbstractType<TData>`,
+  `FormFactoryInterface::create()`, `createForm()`, and
+  `FormInterface::getData()`, and the shape of
+  `TraceableMessageBus::getDispatchedMessages()`, which the extension's
+  stubs declare;
+- `TreeBuilder::getRootNode()` and the node definitions' `end()` returning
+  their parent, for the Symfony versions that do not declare them as
+  generics yet. Symfony 7.4 does, and its fixtures follow those
+  declarations.
+
+Where a rule fits a conditional return type, write it as a declarative
+patch on the vendor class (the way `virtual_members/laravel/patches.rs`
+patches Laravel's) rather than as code. The extension's `stubs/` directory
+shows which declarations it overrides wholesale.
+
+**Where to look:** `src/virtual_members/laravel/patches.rs`, and PHPStan's
+Symfony extension (`src/Type/Symfony/`, `stubs/`).
+
+---
+
+## T53. Doctrine collections narrowed by `isEmpty()`
+
+**Impact: Low · Complexity: Medium**
+
+```php
+if (!$order->lines->isEmpty()) {
+    $first = $order->lines->first(); // OrderLine|false, should be OrderLine
+}
+```
+
+`Collection::first()` and `last()` return `T|false`; once `isEmpty()` has
+been ruled out they cannot return `false`. This is a narrowing of the
+receiver's state rather than of a variable's type, which the narrowing
+pass does not model for method calls yet. PHPStan's Doctrine extension
+also adds `matching()` to every `Collection`, which only `Selectable` ones
+declare. The extension's fixture is
+`tests/phpstan_doctrine/data/Collection/collection.php`.
+
+**Where to look:** the narrowing under `src/type_engine/`, and PHPStan's
+Doctrine extension (`Type/Doctrine/Collection/IsEmptyTypeSpecifyingExtension`,
+`DoctrineSelectableClassReflectionExtension`).
+
+---
+
+## T54. Messenger handlers a service tag registers
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```yaml
+services:
+    App\Handler\GetOrderHandler:
+        tags: [messenger.message_handler]
+```
+
+A query bus's `HandleTrait::handle()` returns what the message's one
+handler returns, but only a handler `#[AsMessageHandler]` registers is
+found. One registered by a `messenger.message_handler` tag in YAML or
+XML, or autoconfigured because it implements the old
+`MessageHandlerInterface` or `MessageSubscriberInterface`, is not, so
+`handle()` stays `mixed` for its message, and the message's CodeLens
+does not list it. A tag can name the message (`handles`) and the method
+(`method`); without them the message is the type of the method's first
+parameter, which only the class says, so a tag-registered handler has to
+be recorded with its message still to be read from the class.
+
+PHPStan's extension also follows a bus method that wraps `handle()` (its
+`handleTraitWrappers` setting): `QueryBus::dispatch($query)` returning
+`$this->handle($query)` returns what the handler returns. PHPantom reads
+the wrapper's body, so the wrapper's result can follow from the call's
+argument without a setting. The fixtures are
+`tests/phpstan_symfony/data/messenger_handle_trait.php`, with the handlers
+tagged in `tests/phpstan_symfony/config/services.xml`.
+
+**Where to look:** `src/symfony/tags.rs` (which already reads the tag's
+`bus`), `MessengerHandlerSite` and `Backend::symfony_message_handlers` in
+`src/symfony/messenger.rs`, and PHPStan's Symfony extension
+(`MessageMapFactory`).
+
+---
+
+## T55. Symfony array parameters are typed as plain `array`
+
+**Impact: Low · Complexity: Medium**
+
+```yaml
+parameters:
+    app.locales: [en, da]        # array, PHPStan says array<int, string>
+    app.mailer:
+        dsn: smtp://localhost    # array, PHPStan says array{dsn: string}
+```
+
+`getParameter()` is typed by the parameter's declared value, but an
+array value is typed as `array` whatever it holds. PHPStan's Symfony
+extension gives a map with string keys its shape and a list its element
+type, each scalar generalized. The YAML scan reads values line by line
+and records only the type of the whole value; reading the entries needs
+the nested lines (and the flow sequences and mappings) read as values
+too. An XML `type="collection"` parameter has the same gap; the
+extension's fixtures declare theirs that way, in
+`tests/phpstan_symfony/config/services.xml`, and assert them in
+`tests/phpstan_symfony/data/ExampleAbstractController.php`.
+
+**Where to look:** `src/symfony/resources.rs` (`scan_yaml`) and
+`src/symfony/container.rs`, and PHPStan's Symfony extension
+(`ParameterDynamicReturnTypeExtension::generalizeTypeFromValue`).
+
+---
+
+## T56. A DBAL result's row count ignores the connection's driver
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$rows = $result->rowCount(); // int|numeric-string, though only mysqli returns a string
+```
+
+DBAL 4 declares `Result::rowCount()` as `int|numeric-string`, because the
+`mysqli` driver can return a row count too large for an `int` as a string.
+Every other driver returns an `int`, and PHPStan's Doctrine extension
+narrows the return type by the driver the project's connection uses. The
+driver is in the connection's configuration: the `driver` or `url` of
+`DriverManager::getConnection()`, or the `dbal` section of a Symfony
+project's `doctrine.yaml`.
+
+The fixtures are `tests/phpstan_doctrine/data/DBAL/pdo/` and
+`tests/phpstan_doctrine/data/DBAL/mysqli/`, each a project whose
+`entity-manager.php` builds the connection.
+
+**Where to look:** PHPStan's Doctrine extension
+(`Type/Doctrine/DBAL/*RowCountReturnTypeExtension`,
+`Doctrine/Driver/DriverDetector`).
+
+---
+
+## T57. A `global` variable is untyped unless a `@var` sits above it
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/**
+ * @global wpdb $wpdb WordPress database abstraction object.
+ */
+function acme_count_orders(): int {
+    global $wpdb;
+    return (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}acme_orders");
+}
+```
+
+`global $x` takes its type from the same file's top-level scope, or from
+a `@var` docblock directly above the statement. Two more sources are
+ignored:
+
+- **`@global Type $name`** on the enclosing function's docblock, the
+  phpDocumentor tag WordPress core and most plugins use for exactly
+  this. Reading it is the cheap half.
+- **An assignment in another file**, such as the ones WordPress core
+  makes to `$wp_query` and `$wpdb` (directly or through `$GLOBALS`)
+  during bootstrap, or a globals stub file that declares them with `@var`. PhpStorm types
+  globals this way. It needs an index of global variable assignments,
+  which must stay cheap: decide which files may feed it (stubs, and
+  files the project includes at top level) before building it.
+
+WordPress is the biggest user (`$wpdb`, `$post`, `$wp_query`), but the
+gap is in the generic engine.
+
+**Where to look:** `src/type_engine/variable/forward_walk/statements.rs`
+(`Statement::Global`), `apply_global_var_docblocks` in
+`src/type_engine/variable/forward_walk/var_docblocks.rs`.

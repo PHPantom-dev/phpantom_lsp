@@ -1,7 +1,9 @@
-use crate::common::{create_psr4_workspace, goto_definition_at, open_document};
+use crate::common::{
+    create_psr4_workspace, goto_definition_at, open_document, references_response,
+};
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "autoload": { "psr-4": { "App\\": "src/" } }
@@ -20,11 +22,11 @@ fn position_in(content: &str, needle: &str, inside: usize) -> Position {
 
 async fn definition_at(
     backend: &Backend,
-    uri: Url,
+    uri: Uri,
     content: &str,
     needle: &str,
     inside: usize,
-) -> Option<GotoDefinitionResponse> {
+) -> Option<DefinitionResponse> {
     let position = position_in(content, needle, inside);
     goto_definition_at(backend, &uri, position.line, position.character).await
 }
@@ -44,7 +46,7 @@ async fn navigates_php_classes_from_arbitrary_yaml_keys_and_values() {
             ("schema/paths/playlists.yaml", yaml),
         ],
     );
-    let yaml_uri = Url::from_file_path(dir.path().join("schema/paths/playlists.yaml")).unwrap();
+    let yaml_uri = Uri::from_file_path(dir.path().join("schema/paths/playlists.yaml")).unwrap();
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
     for (needle, inside) in [
@@ -55,7 +57,7 @@ async fn navigates_php_classes_from_arbitrary_yaml_keys_and_values() {
         let result = definition_at(&backend, yaml_uri.clone(), yaml, needle, inside)
             .await
             .expect("class should resolve from YAML");
-        let GotoDefinitionResponse::Scalar(location) = result else {
+        let DefinitionResponse::Definition(Definition::Location(location)) = result else {
             panic!("expected one class definition");
         };
         assert!(
@@ -76,14 +78,14 @@ async fn navigates_php_classes_from_xml_attributes_and_text() {
         COMPOSER,
         &[("src/Handler/Run.php", php), ("config/arbitrary.xml", xml)],
     );
-    let xml_uri = Url::from_file_path(dir.path().join("config/arbitrary.xml")).unwrap();
+    let xml_uri = Uri::from_file_path(dir.path().join("config/arbitrary.xml")).unwrap();
     open_document(&backend, &xml_uri, "xml", xml).await;
 
     for needle in ["handler=\"App\\Handler\\Run", ">App\\Handler\\Run"] {
         let result = definition_at(&backend, xml_uri.clone(), xml, needle, needle.len() - 2)
             .await
             .expect("class should resolve from XML");
-        let GotoDefinitionResponse::Scalar(location) = result else {
+        let DefinitionResponse::Definition(Definition::Location(location)) = result else {
             panic!("expected one class definition");
         };
         assert!(location.uri.path().ends_with("/src/Handler/Run.php"));
@@ -104,13 +106,13 @@ async fn navigates_class_members_and_yaml_escaped_class_names() {
         COMPOSER,
         &[("src/Handler/Run.php", php), ("config/callbacks.yml", yaml)],
     );
-    let yaml_uri = Url::from_file_path(dir.path().join("config/callbacks.yml")).unwrap();
+    let yaml_uri = Uri::from_file_path(dir.path().join("config/callbacks.yml")).unwrap();
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
     let class_result = definition_at(&backend, yaml_uri.clone(), yaml, "App", 1)
         .await
         .expect("escaped class should resolve");
-    let GotoDefinitionResponse::Scalar(class_location) = class_result else {
+    let DefinitionResponse::Definition(Definition::Location(class_location)) = class_result else {
         panic!("expected one class definition");
     };
     assert_eq!(class_location.range.start.line, 2);
@@ -118,7 +120,8 @@ async fn navigates_class_members_and_yaml_escaped_class_names() {
     let member_result = definition_at(&backend, yaml_uri, yaml, "handle", 2)
         .await
         .expect("class member should resolve");
-    let GotoDefinitionResponse::Scalar(member_location) = member_result else {
+    let DefinitionResponse::Definition(Definition::Location(member_location)) = member_result
+    else {
         panic!("expected one member definition");
     };
     assert_eq!(member_location.range.start.line, 3);
@@ -140,25 +143,11 @@ async fn resource_classes_feed_find_references_and_code_lens() {
             ("config/widgets.xml", xml),
         ],
     );
-    let php_uri = Url::from_file_path(dir.path().join("src/Domain/Widget.php")).unwrap();
+    let php_uri = Uri::from_file_path(dir.path().join("src/Domain/Widget.php")).unwrap();
     open_document(&backend, &php_uri, "php", php).await;
 
-    let references = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: php_uri.clone(),
-                },
-                position: Position::new(2, 8),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
+    let references = references_response(&backend, &php_uri, Position::new(2, 8), false)
         .await
-        .expect("reference request should succeed")
         .expect("resource references should be found");
     assert_eq!(references.len(), 3);
     assert_eq!(
@@ -219,25 +208,11 @@ async fn resource_class_members_feed_find_references_and_code_lens() {
             ("config/callbacks.yaml", yaml),
         ],
     );
-    let php_uri = Url::from_file_path(dir.path().join("src/Handler/Run.php")).unwrap();
+    let php_uri = Uri::from_file_path(dir.path().join("src/Handler/Run.php")).unwrap();
     open_document(&backend, &php_uri, "php", php).await;
 
-    let references = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: php_uri.clone(),
-                },
-                position: Position::new(3, 22),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
+    let references = references_response(&backend, &php_uri, Position::new(3, 22), false)
         .await
-        .expect("reference request should succeed")
         .expect("resource member reference should be found");
     assert_eq!(references.len(), 1);
     assert!(references[0].uri.path().ends_with("/config/callbacks.yaml"));
@@ -278,7 +253,7 @@ async fn resource_class_members_feed_find_references_and_code_lens() {
 async fn unknown_and_unqualified_names_do_not_navigate() {
     let yaml = "short: DeletePlaylist\nunknown: App\\Missing\\DeletePlaylist\n";
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("config/classes.yaml", yaml)]);
-    let yaml_uri = Url::from_file_path(dir.path().join("config/classes.yaml")).unwrap();
+    let yaml_uri = Uri::from_file_path(dir.path().join("config/classes.yaml")).unwrap();
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
     assert!(
@@ -307,27 +282,25 @@ async fn navigates_class_constants_from_yaml() {
         COMPOSER,
         &[("src/Handler/Run.php", php), ("config/modes.yaml", yaml)],
     );
-    let yaml_uri = Url::from_file_path(dir.path().join("config/modes.yaml")).unwrap();
+    let yaml_uri = Uri::from_file_path(dir.path().join("config/modes.yaml")).unwrap();
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
     let result = definition_at(&backend, yaml_uri, yaml, "MODE", 2)
         .await
         .expect("class constant should resolve from YAML");
-    let GotoDefinitionResponse::Scalar(location) = result else {
+    let DefinitionResponse::Definition(Definition::Location(location)) = result else {
         panic!("expected one constant definition");
     };
     assert_eq!(location.range.start.line, 3);
 }
 
-/// A resource occurrence is a reference the user can be shown, but never an
-/// edit target: the escaped `"App\\Widget"` spelling YAML quoting requires
-/// is not a PHP name token, and rename drops every edit as soon as one
-/// location fails verification.  Leaving them in turned a single escaped
-/// name anywhere in the workspace into a silent no-op rename.
+/// A class rename rewrites a resource occurrence in the spelling its
+/// document uses: the escaped `"App\\Widget"` YAML quoting requires keeps
+/// its doubled backslashes.  A `.dist` copy is renamed the same way.
 #[tokio::test]
-async fn rename_ignores_resource_occurrences() {
+async fn rename_rewrites_resource_occurrences_in_their_own_spelling() {
     let backend = Backend::new_test();
-    let php_uri = Url::parse("file:///test.php").unwrap();
+    let php_uri = Uri::parse("file:///test.php").unwrap();
     let php = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -336,27 +309,16 @@ async fn rename_ignores_resource_occurrences() {
     );
     open_document(&backend, &php_uri, "php", php).await;
 
-    let yaml_uri = Url::parse("file:///config/widgets.yaml").unwrap();
+    let yaml_uri = Uri::parse("file:///config/widgets.yaml").unwrap();
     let yaml = "plain: App\\Widget\nescaped: \"App\\\\Widget\"\n";
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
+    let dist_uri = Uri::parse("file:///config/widgets.yaml.dist").unwrap();
+    open_document(&backend, &dist_uri, "yaml", "plain: App\\Widget\n").await;
+
     // Both spellings are found by Find References.
-    let references = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: php_uri.clone(),
-                },
-                position: Position::new(2, 8),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
+    let references = references_response(&backend, &php_uri, Position::new(2, 8), false)
         .await
-        .expect("reference request should succeed")
         .expect("resource references should be found");
     assert_eq!(
         references
@@ -366,10 +328,9 @@ async fn rename_ignores_resource_occurrences() {
         2
     );
 
-    // The rename still happens, and touches only the PHP file.
     let edit = backend
         .rename(RenameParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: php_uri.clone(),
                 },
@@ -382,45 +343,81 @@ async fn rename_ignores_resource_occurrences() {
         .expect("rename should not be refused")
         .expect("rename should produce an edit");
     let changes = edit.changes.expect("rename should carry changes");
-    assert_eq!(changes.keys().collect::<Vec<_>>(), vec![&php_uri]);
     assert_eq!(changes[&php_uri].len(), 2);
+    assert_eq!(changes[&dist_uri].len(), 1);
+    assert_eq!(changes[&dist_uri][0].new_text, "App\\Gadget");
+
+    let mut yaml_edits: Vec<(u32, &str)> = changes[&yaml_uri]
+        .iter()
+        .map(|edit| (edit.range.start.line, edit.new_text.as_str()))
+        .collect();
+    yaml_edits.sort();
+    assert_eq!(
+        yaml_edits,
+        vec![(0, "App\\Gadget"), (1, "App\\\\Gadget")],
+        "each occurrence keeps its own spelling"
+    );
 }
 
+/// Renaming a class from a resource file renames the PHP class it names,
+/// with the same edits a rename started on the declaration produces.
 #[tokio::test]
-async fn rename_is_refused_from_inside_a_resource_file() {
+async fn rename_from_inside_a_resource_file_renames_the_php_class() {
     let backend = Backend::new_test();
-    let php_uri = Url::parse("file:///test.php").unwrap();
+    let php_uri = Uri::parse("file:///test.php").unwrap();
     let php = "<?php\nnamespace App;\nclass Widget {}\n";
     open_document(&backend, &php_uri, "php", php).await;
 
-    let yaml_uri = Url::parse("file:///config/widgets.yaml").unwrap();
+    let yaml_uri = Uri::parse("file:///config/widgets.yaml").unwrap();
     let yaml = "primary: App\\Widget\n";
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
-    assert!(
-        backend
-            .prepare_rename(TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: yaml_uri.clone()
-                },
-                position: Position::new(0, 13),
-            })
-            .await
-            .expect("prepare rename should succeed")
-            .is_none()
+    let prepared = backend
+        .prepare_rename(TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: yaml_uri.clone(),
+            },
+            position: Position::new(0, 13),
+        })
+        .await
+        .expect("prepare rename should succeed");
+    let Some(PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+        range,
+        placeholder,
+    })) = prepared
+    else {
+        panic!("expected a rename range, got {prepared:?}");
+    };
+    assert_eq!(placeholder, "Widget");
+    assert_eq!(
+        range,
+        Range::new(Position::new(0, 13), Position::new(0, 19))
     );
-    assert!(
-        backend
-            .rename(RenameParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: yaml_uri },
-                    position: Position::new(0, 13),
-                },
-                new_name: "Gadget".to_string(),
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .expect("rename should not be refused")
-            .is_none()
-    );
+
+    let rename_from = |uri: Uri, position: Position| {
+        let backend = &backend;
+        async move {
+            backend
+                .rename(RenameParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri },
+                        position,
+                    },
+                    new_name: "Gadget".to_string(),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .expect("rename should not be refused")
+                .expect("rename should produce an edit")
+        }
+    };
+    let from_resource = rename_from(yaml_uri.clone(), Position::new(0, 13)).await;
+    let from_declaration = rename_from(php_uri.clone(), Position::new(2, 8)).await;
+    assert_eq!(from_resource, from_declaration);
+
+    let changes = from_resource.changes.expect("rename should carry changes");
+    assert_eq!(changes[&yaml_uri].len(), 1);
+    assert_eq!(changes[&yaml_uri][0].new_text, "App\\Gadget");
+    assert_eq!(changes[&php_uri].len(), 1);
+    assert_eq!(changes[&php_uri][0].new_text, "Gadget");
 }

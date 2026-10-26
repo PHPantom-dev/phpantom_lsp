@@ -1,4 +1,5 @@
-//! Per-thread memo for [`Backend::find_or_load_class_typed`].
+//! Per-thread memos for [`Backend::find_or_load_class_typed`]: one for the
+//! name search, one for the framework refinements applied to what it found.
 //!
 //! [`Backend`]: crate::Backend
 //!
@@ -135,6 +136,87 @@ pub(crate) fn store(owner: u64, generation: u64, ty: &PhpType, class: &Option<Ar
         table[slot_of(ty)] = Slot {
             key: Some(ty.clone()),
             class: class.clone(),
+            owner,
+            generation,
+        };
+    });
+}
+
+/// One memoised refinement: the class as linked, and the class every
+/// framework hook made of it.
+struct RefinedSlot {
+    /// `(linked, refined)`, or `None` in a slot never written.
+    ///
+    /// The linked class is held rather than its address for the same reason
+    /// [`Slot::key`] is: a freed class's address can be reused.
+    entry: Option<(Arc<ClassInfo>, Arc<ClassInfo>)>,
+    owner: u64,
+    /// Refinement generation `entry` was computed at.
+    generation: u64,
+}
+
+thread_local! {
+    /// The refinements the class loader runs after the name search, keyed
+    /// on the class they refine.
+    ///
+    /// A refinement that changes a class copies it into a new `Arc`, and
+    /// most lookups change nothing yet still pay for checking.  Handing back
+    /// the same `Arc` on a repeat also keeps the pointer-identity shortcuts
+    /// downstream (the scope merge) working for refined classes.  Fresh
+    /// only while the hooks' combined generation is unchanged; the class
+    /// being refined is the key, so a re-indexed class misses on its own.
+    static REFINED: RefCell<Option<Box<[RefinedSlot]>>> = const { RefCell::new(None) };
+}
+
+#[inline]
+fn refined_slot_of(class: &Arc<ClassInfo>) -> usize {
+    const PHI: u64 = 0x9e37_79b9_7f4a_7c15;
+    ((Arc::as_ptr(class) as usize as u64).wrapping_mul(PHI) >> (64 - SLOTS.trailing_zeros()))
+        as usize
+}
+
+/// The memoised refinement of `class`, or `None` when the caller must run
+/// the hooks and report back to [`store_refined`].
+pub(crate) fn probe_refined(
+    owner: u64,
+    generation: u64,
+    class: &Arc<ClassInfo>,
+) -> Option<Arc<ClassInfo>> {
+    REFINED.with(|table| {
+        let table = table.borrow();
+        let slot = &table.as_ref()?[refined_slot_of(class)];
+        if slot.owner != owner || slot.generation != generation {
+            return None;
+        }
+        let (linked, refined) = slot.entry.as_ref()?;
+        Arc::ptr_eq(linked, class).then(|| Arc::clone(refined))
+    })
+}
+
+/// Record `refined` as what the hooks made of `class`.
+///
+/// Like [`store`], called only once the hooks have returned: they load
+/// classes themselves.
+pub(crate) fn store_refined(
+    owner: u64,
+    generation: u64,
+    class: &Arc<ClassInfo>,
+    refined: &Arc<ClassInfo>,
+) {
+    REFINED.with(|table| {
+        let mut table = table.borrow_mut();
+        let table = table.get_or_insert_with(|| {
+            (0..SLOTS)
+                .map(|_| RefinedSlot {
+                    entry: None,
+                    owner: 0,
+                    generation: 0,
+                })
+                .collect::<Vec<_>>()
+                .into()
+        });
+        table[refined_slot_of(class)] = RefinedSlot {
+            entry: Some((Arc::clone(class), Arc::clone(refined))),
             owner,
             generation,
         };

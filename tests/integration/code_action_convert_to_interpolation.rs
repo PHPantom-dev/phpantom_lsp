@@ -1,7 +1,7 @@
 //! Integration tests for the "Convert to string interpolation" code action.
 
 use crate::common::{create_test_backend, find_action_titled, get_code_actions_at};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Apply the action's single edit to `content` and return the result.
 fn apply(action: &CodeAction, content: &str) -> String {
@@ -25,7 +25,7 @@ fn apply(action: &CodeAction, content: &str) -> String {
     result
 }
 
-fn actions_at(content: &str, line: u32, character: u32) -> Vec<CodeActionOrCommand> {
+fn actions_at(content: &str, line: u32, character: u32) -> Vec<CodeActionResponse> {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     backend.update_ast(uri, content);

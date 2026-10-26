@@ -32,8 +32,8 @@ use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
-use crate::symbol_map::{LaravelStringKind, SymbolKind, SymbolMap};
-use crate::type_engine::resolver::Loaders;
+use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap};
+use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::variable::resolution::VarQuery;
 
 pub(crate) use super::view_call_walker::string_literal_contents;
@@ -273,8 +273,8 @@ impl Backend {
         let keys: Vec<crate::reference_index::ReferenceIndexKey> = view_names
             .iter()
             .map(
-                |name| crate::reference_index::ReferenceIndexKey::LaravelString {
-                    kind: LaravelStringKind::View,
+                |name| crate::reference_index::ReferenceIndexKey::StringKey {
+                    kind: StringKeyKind::View,
                     key: name.clone(),
                 },
             )
@@ -330,8 +330,8 @@ impl Backend {
             // snapshot's copy can describe a text that no longer exists.
             let is_blade = self.is_blade_file(file_uri);
             let symbol_map = match is_blade {
-                true => match self.symbol_maps.read().get(file_uri) {
-                    Some(map) => Arc::clone(map),
+                true => match self.symbol_map_for(file_uri) {
+                    Some(map) => map,
                     None => continue,
                 },
                 false => Arc::clone(snapshot_map),
@@ -347,11 +347,11 @@ impl Backend {
             // here, in the refresh pass, rather than in the diagnostic pass
             // that has a warm scope cache.
             let has_candidate = symbol_map
-                .view_receiver_sites
+                .typed_receiver_sites
                 .iter()
-                .any(|site| view_names.contains(&site.key));
+                .any(|site| site.receiver.names_views() && view_names.contains(&site.key));
             let extra = if has_candidate {
-                self.typed_receiver_view_spans_for(file_uri, &symbol_map)
+                self.typed_receiver_spans_for(file_uri, &symbol_map)
             } else {
                 Arc::new(Vec::new())
             };
@@ -360,8 +360,8 @@ impl Backend {
                 .iter()
                 .chain(extra.iter())
                 .filter_map(|span| match &span.kind {
-                    SymbolKind::LaravelStringKey {
-                        kind: LaravelStringKind::View,
+                    SymbolKind::StringKey {
+                        kind: StringKeyKind::View,
                         key,
                         ..
                     } if view_names.iter().any(|n| n == key) => Some(span.start),
@@ -414,7 +414,8 @@ impl Backend {
                 // attributes became arguments of the tag's call and are
                 // therefore not `blade_bound_attr_directive` calls to count.
                 let caller_components = self
-                    .blade_injected_vars
+                    .blade
+                    .injected_vars
                     .read()
                     .get(file_uri)
                     .map(|scope| scope.components.clone())
@@ -511,19 +512,22 @@ impl Backend {
     /// PHP, which is what [`Self::caller_source`] hands back for one.
     pub(super) fn view_caller_snapshot(&self) -> ViewCallerSnapshot {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
-        let maps = self.symbol_maps.read();
+        let maps = self.files.read();
         let mut files: Vec<(String, Arc<SymbolMap>)> = maps
             .iter()
+            .filter_map(|(uri, state)| Some((uri, state.symbol_map.as_ref()?)))
             .filter(|(uri, map)| {
-                !uri.starts_with("phpantom-stub://")
-                    && !uri.starts_with("phpantom-stub-fn://")
+                !crate::stubs::is_stub_uri(uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
-                    && (!map.view_receiver_sites.is_empty()
+                    && (map
+                        .typed_receiver_sites
+                        .iter()
+                        .any(|site| site.receiver.names_views())
                         || map.spans.iter().any(|span| {
                             matches!(
                                 &span.kind,
-                                SymbolKind::LaravelStringKey {
-                                    kind: LaravelStringKind::View,
+                                SymbolKind::StringKey {
+                                    kind: StringKeyKind::View,
                                     ..
                                 }
                             )
@@ -543,14 +547,19 @@ impl Backend {
                     .spans
                     .iter()
                     .filter_map(|span| match &span.kind {
-                        SymbolKind::LaravelStringKey {
-                            kind: LaravelStringKind::View,
+                        SymbolKind::StringKey {
+                            kind: StringKeyKind::View,
                             key,
                             ..
                         } => Some(key.as_str()),
                         _ => None,
                     })
-                    .chain(map.view_receiver_sites.iter().map(|site| site.key.as_str()))
+                    .chain(
+                        map.typed_receiver_sites
+                            .iter()
+                            .filter(|site| site.receiver.names_views())
+                            .map(|site| site.key.as_str()),
+                    )
                     .collect();
                 names.sort_unstable();
                 names.dedup();
@@ -574,7 +583,7 @@ impl Backend {
     /// Blade file once per refresh pass.
     pub(super) fn blade_caller_snapshot(&self) -> BladeCallerSnapshot {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
-        let uris: Vec<String> = self.blade_virtual_content.read().keys().cloned().collect();
+        let uris = self.lowered_template_uris();
         uris.into_iter()
             .filter(|uri| !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str())))
             .filter_map(|uri| {
@@ -652,7 +661,7 @@ impl Backend {
                                 Expression::Variable(Variable::Direct(dv)) => {
                                     variable_type(bytes_to_str(dv.name))
                                 }
-                                _ => crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                                _ => crate::type_engine::variable::iterable_elements::resolve_expression_type(
                                     expr, &var_ctx,
                                 ),
                             }
@@ -739,16 +748,20 @@ impl Backend {
         let function_loader = self.function_loader(file_ctx);
         let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
         let ty = crate::type_engine::variable::resolution::resolve_variable_php_type(VarQuery {
-            var_name: name,
-            cursor_offset: offset,
-            content,
-            current_class: crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset),
-            all_classes: &file_ctx.classes,
-            class_loader: &resolved_class_loader,
-            source_class_loader: &class_loader,
-            source_imports: Some(&file_ctx.use_map),
-            backend: Some(self),
             loaders: Loaders::with_function(Some(&function_loader_cl)),
+            ..VarQuery::new(
+                name,
+                FileCtx::new(
+                    content,
+                    &file_ctx.classes,
+                    &resolved_class_loader,
+                    &class_loader,
+                )
+                .with_imports(Some(&file_ctx.use_map))
+                .with_backend(Some(self)),
+                crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset),
+                offset,
+            )
         })?;
         Some(qualify_class_names(ty, &resolved_class_loader))
     }
@@ -798,7 +811,7 @@ impl Backend {
                             continue;
                         };
                         let var_ctx = loaders.var_ctx_at(content, expr.span().start.offset);
-                        let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                        let ty = crate::type_engine::variable::iterable_elements::resolve_expression_type(
                         expr, &var_ctx,
                     )
                     .unwrap_or_else(PhpType::mixed);

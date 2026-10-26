@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::create_test_backend;
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use crate::common::{create_test_backend, goto_definition_at};
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     #[tokio::test]
     async fn test_blade_syntax_error_resilience() {
         let backend = create_test_backend();
-        let blade_uri = Url::parse("file:///complex_view.blade.php").unwrap();
+        let blade_uri = Uri::parse("file:///complex_view.blade.php").unwrap();
         let blade_text = r#"
 @extends('layouts.admin')
 @section('header')
@@ -41,28 +41,14 @@ mod tests {
             .did_open(DidOpenTextDocumentParams {
                 text_document: TextDocumentItem {
                     uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
+                    language_id: "blade".to_string().into(),
                     version: 1,
                     text: blade_text.to_string(),
                 },
             })
             .await;
 
-        let params = GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: blade_uri.clone(),
-                },
-                position: Position {
-                    line: 5,
-                    character: 10,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        };
-
-        let result = backend.goto_definition(params).await.unwrap();
+        let result = goto_definition_at(&backend, &blade_uri, 5, 10).await;
         let _ = result;
     }
 }

@@ -11,3 +11,4 @@ examples/laravel/.codelite/laravel.session
 examples/laravel/.codelite/
 /site/
 /.venv/
+__pycache__/

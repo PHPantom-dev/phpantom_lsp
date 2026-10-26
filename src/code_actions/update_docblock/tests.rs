@@ -35,7 +35,17 @@ fn body_facts(
     php: &str,
     cl: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> BodyFacts {
-    analyse_body(info, php, &[], cl, None, None, &HashMap::new(), &None)
+    analyse_body(
+        info,
+        php,
+        &[],
+        cl,
+        &|_| None,
+        None,
+        None,
+        &HashMap::new(),
+        &None,
+    )
 }
 
 fn needs_update(
@@ -53,7 +63,7 @@ fn updated_docblock(
     cl: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> String {
     let facts = body_facts(info, php, cl);
-    build_updated_docblock(info, &facts, cl, &HashMap::new(), &None)
+    build_updated_docblock(info, &facts, cl, &|_| None, &HashMap::new(), &None)
 }
 
 #[test]

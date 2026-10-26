@@ -6,14 +6,14 @@ use crate::common::{
     line_char_of, open_php, prepare_rename, rename, rename_result,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Non-Renameable Symbols ─────────────────────────────────────────────────
 
 #[tokio::test]
 async fn prepare_rename_rejects_this() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -34,7 +34,7 @@ async fn prepare_rename_rejects_this() {
 #[tokio::test]
 async fn prepare_rename_rejects_self() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -54,7 +54,7 @@ async fn prepare_rename_rejects_self() {
 #[tokio::test]
 async fn prepare_rename_rejects_static() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -76,7 +76,7 @@ async fn prepare_rename_rejects_static() {
 #[tokio::test]
 async fn prepare_rename_rejects_parent() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -103,7 +103,7 @@ async fn prepare_rename_rejects_parent() {
 #[tokio::test]
 async fn rename_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function helper(): void {}\n",
@@ -139,7 +139,7 @@ async fn rename_function() {
 #[tokio::test]
 async fn rename_class_constant() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Status {\n",
@@ -176,7 +176,7 @@ async fn rename_class_constant() {
 #[tokio::test]
 async fn rename_function_rewrites_only_the_last_segment_of_an_import() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/import.php").unwrap();
+    let uri = Uri::parse("file:///test/import.php").unwrap();
     let text = "<?php
 namespace Foo;
 
@@ -214,7 +214,7 @@ bar();
 #[tokio::test]
 async fn rename_function_leaves_an_explicit_alias_alone() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/alias.php").unwrap();
+    let uri = Uri::parse("file:///test/alias.php").unwrap();
     let text = "<?php
 namespace Foo;
 
@@ -254,7 +254,7 @@ quux();
 #[tokio::test]
 async fn rename_global_constant_reaches_its_import_and_uses() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/const.php").unwrap();
+    let uri = Uri::parse("file:///test/const.php").unwrap();
     let text = "<?php
 namespace Foo;
 
@@ -292,7 +292,7 @@ echo BAR;
 #[tokio::test]
 async fn rename_global_constant_leaves_a_same_named_class_constant_alone() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/const_collision.php").unwrap();
+    let uri = Uri::parse("file:///test/const_collision.php").unwrap();
     let text = "<?php
 namespace App;
 
@@ -336,7 +336,7 @@ echo Holder::BAR;
 #[tokio::test]
 async fn rename_namespaced_constant_leaves_a_sibling_namespace_constant_alone() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/const_namespace_collision.php").unwrap();
+    let uri = Uri::parse("file:///test/const_namespace_collision.php").unwrap();
     let text = "<?php
 namespace A;
 
@@ -376,7 +376,7 @@ echo VERSION;
 #[tokio::test]
 async fn rename_namespaced_function_leaves_a_sibling_namespace_function_alone() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/function_namespace_collision.php").unwrap();
+    let uri = Uri::parse("file:///test/function_namespace_collision.php").unwrap();
     let text = "<?php
 namespace A;
 
@@ -408,7 +408,7 @@ function version(): string { return '2'; }
 #[tokio::test]
 async fn rename_global_constant_reaches_an_unqualified_use_inside_a_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/const_global_fallback.php").unwrap();
+    let uri = Uri::parse("file:///test/const_global_fallback.php").unwrap();
     let text = "<?php
 const VERSION = '1';
 
@@ -438,7 +438,7 @@ echo VERSION;
 #[tokio::test]
 async fn rename_constant_leaves_an_explicit_alias_alone() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/const_alias.php").unwrap();
+    let uri = Uri::parse("file:///test/const_alias.php").unwrap();
     let text = "<?php
 namespace Foo;
 
@@ -472,7 +472,7 @@ echo QUUX;
 #[tokio::test]
 async fn constant_references_agree_from_the_import_and_from_a_use() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/const_refs.php").unwrap();
+    let uri = Uri::parse("file:///test/const_refs.php").unwrap();
     let text = "<?php
 namespace Foo;
 
@@ -513,7 +513,7 @@ echo BAR;
 #[tokio::test]
 async fn rename_from_a_use_rewrites_the_define_that_declares_the_constant() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/define_use.php").unwrap();
+    let uri = Uri::parse("file:///test/define_use.php").unwrap();
     let text = "<?php
 define('FOO', 1);
 
@@ -541,7 +541,7 @@ echo FOO;
 #[tokio::test]
 async fn rename_from_a_define_call_rewrites_the_constants_uses() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/define_decl.php").unwrap();
+    let uri = Uri::parse("file:///test/define_decl.php").unwrap();
     let text = "<?php
 define('FOO', 1);
 
@@ -574,7 +574,7 @@ echo 'FOO';
 #[tokio::test]
 async fn rename_of_a_define_leaves_a_same_named_class_constant_alone() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/define_collision.php").unwrap();
+    let uri = Uri::parse("file:///test/define_collision.php").unwrap();
     let text = "<?php
 define('FOO', 1);
 
@@ -612,7 +612,7 @@ echo Holder::FOO;
 #[tokio::test]
 async fn rename_of_a_constant_rewrites_defined_and_constant_calls() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/defined_constant_calls.php").unwrap();
+    let uri = Uri::parse("file:///test/defined_constant_calls.php").unwrap();
     let text = "<?php
 define('FOO', 1);
 
@@ -646,8 +646,8 @@ if (defined('FOO')) {
 #[tokio::test]
 async fn rename_function_rewrites_a_call_spelled_in_another_case() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///helpers.php").unwrap();
-    let uri_b = Url::parse("file:///main.php").unwrap();
+    let uri_a = Uri::parse("file:///helpers.php").unwrap();
+    let uri_b = Uri::parse("file:///main.php").unwrap();
     let text_a = concat!(
         "<?php\n",                      // L0
         "function helper(): void {}\n", // L1
@@ -680,7 +680,7 @@ async fn rename_function_rewrites_a_call_spelled_in_another_case() {
 #[tokio::test]
 async fn rename_function_can_start_from_a_fully_qualified_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                     // L0
         "namespace Support;\n",        // L1
@@ -714,8 +714,8 @@ async fn rename_function_can_start_from_a_fully_qualified_call() {
 #[tokio::test]
 async fn rename_class_cross_file() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -763,8 +763,8 @@ async fn a_rename_keeps_an_indented_imports_indentation() {
     // (an alias can appear or disappear).  Taking the whole line along
     // with it flattened the import against the left margin.
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -800,8 +800,8 @@ async fn a_rename_keeps_an_indented_imports_indentation() {
 #[tokio::test]
 async fn rename_method_cross_file() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -845,7 +845,7 @@ async fn rename_method_cross_file() {
 #[tokio::test]
 async fn prepare_rename_on_whitespace_returns_none() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!("<?php\n", "\n", "function demo(): void {}\n",);
 
     open_php(&backend, &uri, text).await;
@@ -858,7 +858,7 @@ async fn prepare_rename_on_whitespace_returns_none() {
 #[tokio::test]
 async fn rename_on_whitespace_returns_none() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!("<?php\n", "\n", "function demo(): void {}\n",);
 
     open_php(&backend, &uri, text).await;
@@ -872,7 +872,7 @@ async fn rename_on_whitespace_returns_none() {
 #[tokio::test]
 async fn rename_variable_produces_valid_php() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): void {\n",
@@ -905,7 +905,7 @@ async fn rename_variable_produces_valid_php() {
 /// This is the state a request lands in between a `didChange` and the
 /// background parse that follows it: `open_files` already holds the new
 /// text, `symbol_maps` still describes the old.
-fn set_buffer_without_reparsing(backend: &Backend, uri: &Url, text: &str) {
+fn set_buffer_without_reparsing(backend: &Backend, uri: &Uri, text: &str) {
     backend
         .open_files()
         .write()
@@ -921,7 +921,7 @@ fn set_buffer_without_reparsing(backend: &Backend, uri: &Url, text: &str) {
 #[tokio::test]
 async fn rename_returns_none_for_stale_symbol_map() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///stale.php").unwrap();
+    let uri = Uri::parse("file:///stale.php").unwrap();
     let before = concat!(
         "<?php\n",
         "function demo($store): string {\n",
@@ -963,7 +963,7 @@ async fn rename_returns_none_for_stale_symbol_map() {
 #[tokio::test]
 async fn rename_returns_none_when_token_text_changed_in_place() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///overtyped.php").unwrap();
+    let uri = Uri::parse("file:///overtyped.php").unwrap();
     let before = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -993,8 +993,8 @@ async fn rename_returns_none_when_token_text_changed_in_place() {
 #[tokio::test]
 async fn rename_returns_none_when_a_referencing_file_is_stale() {
     let backend = create_test_backend();
-    let decl_uri = Url::parse("file:///decl.php").unwrap();
-    let usage_uri = Url::parse("file:///usage.php").unwrap();
+    let decl_uri = Uri::parse("file:///decl.php").unwrap();
+    let usage_uri = Uri::parse("file:///usage.php").unwrap();
 
     let decl_text = concat!("<?php\n", "class Widget {}\n");
     let usage_before = concat!(
@@ -1030,8 +1030,8 @@ async fn rename_returns_none_when_a_referencing_file_is_stale() {
 #[tokio::test]
 async fn rename_namespace_returns_none_when_a_file_is_stale() {
     let backend = create_test_backend();
-    let decl_uri = Url::parse("file:///ns_decl.php").unwrap();
-    let usage_uri = Url::parse("file:///ns_usage.php").unwrap();
+    let decl_uri = Uri::parse("file:///ns_decl.php").unwrap();
+    let usage_uri = Uri::parse("file:///ns_usage.php").unwrap();
 
     let decl_text = concat!("<?php\n", "namespace App\\Old;\n", "class Foo {}\n");
     let usage_before = concat!(
@@ -1068,7 +1068,7 @@ async fn rename_namespace_returns_none_when_a_file_is_stale() {
 /// The refusal a rename at `needle` in `text` to `new_name` answers with.
 async fn rename_refusal(text: &str, needle: &str, new_name: &str) -> String {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, text).await;
     let (line, character) = line_char_of(text, needle);
     match rename_result(&backend, &uri, line, character + 1, new_name).await {
@@ -1127,7 +1127,7 @@ async fn rename_method_to_an_invalid_name_is_refused() {
 #[tokio::test]
 async fn rename_accepts_a_multibyte_identifier() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nfunction f($x) {\n    return $x;\n}\n";
     open_php(&backend, &uri, text).await;
     let (line, character) = line_char_of(text, "$x;");

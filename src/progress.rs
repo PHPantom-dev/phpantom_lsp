@@ -17,9 +17,9 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use tower_lsp::lsp_types::{
-    MessageType, NumberOrString, ProgressParams, ProgressParamsValue, WorkDoneProgress,
-    WorkDoneProgressBegin, WorkDoneProgressCreateParams, WorkDoneProgressEnd,
+use tower_lsp_server::gen_lsp_types::{
+    MessageType, ProgressNotification, ProgressParams, ProgressToken, WorkDoneProgressBegin,
+    WorkDoneProgressCreateParams, WorkDoneProgressCreateRequest, WorkDoneProgressEnd,
     WorkDoneProgressReport,
 };
 
@@ -241,7 +241,7 @@ impl Backend {
     /// the underlying ratio regress.
     pub(crate) fn spawn_progress_poller(
         &self,
-        token: NumberOrString,
+        token: ProgressToken,
         state: Arc<ScanProgress>,
     ) -> ProgressPoller {
         let backend = self.clone_for_blocking();
@@ -277,6 +277,21 @@ impl Backend {
         }
     }
 
+    /// [`log`](Self::log) for synchronous code, such as a blocking task
+    /// applying a watched-file batch: the message is sent from a task
+    /// spawned on the runtime.  Without a client or a runtime (the CLI
+    /// subcommands), it goes to `tracing` instead.
+    pub(crate) fn log_detached(&self, typ: MessageType, message: String) {
+        if let Some(client) = &self.client
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let client = client.clone();
+            runtime.spawn(async move { client.log_message(typ, message).await });
+        } else {
+            tracing::warn!("{}", message);
+        }
+    }
+
     /// Create a server-initiated work-done progress token and send the
     /// `window/workDoneProgress/create` request to the client.
     ///
@@ -284,21 +299,16 @@ impl Backend {
     /// or the client rejects the request.  The caller should pass the
     /// returned token to [`progress_begin`], [`progress_report`], and
     /// [`progress_end`].
-    pub(crate) async fn progress_create(&self, token_name: &str) -> Option<NumberOrString> {
-        use tower_lsp::lsp_types::request::WorkDoneProgressCreate;
-
+    pub(crate) async fn progress_create(&self, token_name: &str) -> Option<ProgressToken> {
         // Per the LSP spec, servers must only use
         // window/workDoneProgress/create when the client signals
         // support via the window.workDoneProgress capability.
-        if !self
-            .supports_work_done_progress
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if !self.caps().work_done_progress {
             return None;
         }
 
         let client = self.client.as_ref()?;
-        let token = NumberOrString::String(token_name.to_string());
+        let token = ProgressToken::String(token_name.to_string());
         let params = WorkDoneProgressCreateParams {
             token: token.clone(),
         };
@@ -311,10 +321,11 @@ impl Backend {
         // dropped, which is exactly what a timeout wrapped directly
         // around the request does to a client that answers late.
         let client = client.clone();
-        let request =
-            tokio::spawn(
-                async move { client.send_request::<WorkDoneProgressCreate>(params).await },
-            );
+        let request = tokio::spawn(async move {
+            client
+                .send_request::<WorkDoneProgressCreateRequest>(params)
+                .await
+        });
         match tokio::time::timeout(std::time::Duration::from_secs(2), request).await {
             Ok(Ok(Ok(()))) => Some(token),
             _ => None,
@@ -327,26 +338,20 @@ impl Backend {
     /// `message` is an optional detail line (e.g. "Scanning subprojects").
     pub(crate) async fn progress_begin(
         &self,
-        token: &NumberOrString,
+        token: &ProgressToken,
         title: &str,
         message: Option<String>,
     ) {
-        use tower_lsp::lsp_types::notification::Progress;
-
-        let Some(client) = &self.client else { return };
-        client
-            .send_notification::<Progress>(ProgressParams {
-                token: token.clone(),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
-                    WorkDoneProgressBegin {
-                        title: title.to_string(),
-                        cancellable: Some(false),
-                        message,
-                        percentage: Some(0),
-                    },
-                )),
-            })
-            .await;
+        self.send_progress(
+            token,
+            WorkDoneProgressBegin {
+                title: title.to_string(),
+                cancellable: Some(false),
+                message,
+                percentage: Some(0),
+            },
+        )
+        .await;
     }
 
     /// Send a `WorkDoneProgressReport` notification with a percentage
@@ -356,25 +361,19 @@ impl Backend {
     /// the previous detail line when `Some`.
     pub(crate) async fn progress_report(
         &self,
-        token: &NumberOrString,
+        token: &ProgressToken,
         percentage: u32,
         message: Option<String>,
     ) {
-        use tower_lsp::lsp_types::notification::Progress;
-
-        let Some(client) = &self.client else { return };
-        client
-            .send_notification::<Progress>(ProgressParams {
-                token: token.clone(),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                    WorkDoneProgressReport {
-                        cancellable: Some(false),
-                        message,
-                        percentage: Some(percentage),
-                    },
-                )),
-            })
-            .await;
+        self.send_progress(
+            token,
+            WorkDoneProgressReport {
+                cancellable: Some(false),
+                message,
+                percentage: Some(percentage),
+            },
+        )
+        .await;
     }
 
     /// Send a `WorkDoneProgressEnd` notification.
@@ -382,16 +381,22 @@ impl Backend {
     /// After this call the editor removes the progress indicator.
     /// `message` is an optional final status line (e.g. "Indexed 5,678
     /// classes").
-    pub(crate) async fn progress_end(&self, token: &NumberOrString, message: Option<String>) {
-        use tower_lsp::lsp_types::notification::Progress;
+    pub(crate) async fn progress_end(&self, token: &ProgressToken, message: Option<String>) {
+        self.send_progress(token, WorkDoneProgressEnd { message })
+            .await;
+    }
 
+    /// Send a `$/progress` notification. The payload's `kind` field is
+    /// written by its own serializer.
+    async fn send_progress(&self, token: &ProgressToken, value: impl serde::Serialize) {
         let Some(client) = &self.client else { return };
+        let Ok(value) = serde_json::to_value(value) else {
+            return;
+        };
         client
-            .send_notification::<Progress>(ProgressParams {
+            .send_notification::<ProgressNotification>(ProgressParams {
                 token: token.clone(),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
-                    message,
-                })),
+                value,
             })
             .await;
     }
@@ -409,7 +414,7 @@ mod tests {
         let backend = crate::Backend::new_test();
         let state = ScanProgress::new();
         let poller = backend.spawn_progress_poller(
-            NumberOrString::String("test-token".to_string()),
+            ProgressToken::String("test-token".to_string()),
             Arc::clone(&state),
         );
 

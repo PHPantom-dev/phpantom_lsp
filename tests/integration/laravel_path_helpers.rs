@@ -6,9 +6,12 @@
 //! to open a folder as a document reports an error — but they do complete, so
 //! the next segment of the path can be typed against a real listing.
 
-use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, goto_definition_at, position_of};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{
+    LARAVEL_SRC_COMPOSER, completion_response, create_psr4_workspace, goto_definition_at, open_php,
+    position_after, position_of,
+};
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// A composer file with no Laravel dependency, so the helper names mean
 /// whatever the project made them mean.
@@ -26,46 +29,37 @@ const WORKSPACE_FILES: [(&str, &str); 4] = [
 async fn workspace(
     composer_json: &str,
     consumer: &str,
-) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
     let mut files: Vec<(&str, &str)> = WORKSPACE_FILES.to_vec();
     files.push(("src/Paths.php", consumer));
     let (backend, dir) = create_psr4_workspace(composer_json, &files);
     backend.initialized(InitializedParams {}).await;
 
-    let uri = Url::from_file_path(dir.path().join("src/Paths.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    let uri = Uri::from_file_path(dir.path().join("src/Paths.php")).unwrap();
+    open_php(&backend, &uri, consumer).await;
     (backend, dir, uri)
 }
 
 /// Go-to-definition at the first occurrence of `marker` in `consumer`.
 async fn definition_at(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     consumer: &str,
     marker: &str,
-) -> Option<GotoDefinitionResponse> {
+) -> Option<DefinitionResponse> {
     let position = position_of(consumer, marker);
     goto_definition_at(backend, uri, position.line, position.character).await
 }
 
 /// The single target of a go-to-definition response.
-fn single_target(response: &GotoDefinitionResponse) -> Url {
+fn single_target(response: &DefinitionResponse) -> Uri {
     match response {
-        GotoDefinitionResponse::Scalar(location) => location.uri.clone(),
-        GotoDefinitionResponse::Array(locations) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => location.uri.clone(),
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => {
             assert_eq!(locations.len(), 1, "expected one target: {locations:?}");
             locations[0].uri.clone()
         }
-        GotoDefinitionResponse::Link(links) => {
+        DefinitionResponse::DefinitionLinkList(links) => {
             assert_eq!(links.len(), 1, "expected one target: {links:?}");
             links[0].target_uri.clone()
         }
@@ -102,7 +96,7 @@ class Paths {
             .unwrap_or_else(|| panic!("{marker} should resolve"));
         assert_eq!(
             single_target(&response),
-            Url::from_file_path(dir.path().join(expected)).unwrap(),
+            Uri::from_file_path(dir.path().join(expected)).unwrap(),
             "{marker} should land in {expected}"
         );
     }
@@ -124,7 +118,7 @@ class Paths {
 
     let response = definition_at(&backend, &uri, CONSUMER, "routes/console.php").await;
     assert!(
-        response.is_none_or(|r| matches!(&r, GotoDefinitionResponse::Array(l) if l.is_empty())),
+        response.is_none_or(|r| matches!(&r, DefinitionResponse::Definition(Definition::LocationList(l)) if l.is_empty())),
         "nothing is there to open"
     );
 }
@@ -145,7 +139,7 @@ class Paths {
 
     let response = definition_at(&backend, &uri, CONSUMER, "'routes'").await;
     assert!(
-        response.is_none_or(|r| matches!(&r, GotoDefinitionResponse::Array(l) if l.is_empty())),
+        response.is_none_or(|r| matches!(&r, DefinitionResponse::Definition(Definition::LocationList(l)) if l.is_empty())),
         "an editor cannot open a folder as a document"
     );
 }
@@ -166,7 +160,7 @@ class Paths {
 
     let response = definition_at(&backend, &uri, CONSUMER, "routes/web.php").await;
     assert!(
-        response.is_none_or(|r| matches!(&r, GotoDefinitionResponse::Array(l) if l.is_empty())),
+        response.is_none_or(|r| matches!(&r, DefinitionResponse::Definition(Definition::LocationList(l)) if l.is_empty())),
         "a project without Laravel defines its own base_path()"
     );
 }
@@ -200,7 +194,7 @@ class Paths {
     assert_eq!(
         targets,
         vec![
-            Url::from_file_path(dir.path().join("routes/web.php"))
+            Uri::from_file_path(dir.path().join("routes/web.php"))
                 .unwrap()
                 .to_string()
         ],
@@ -227,31 +221,17 @@ class Paths {
 /// Complete at the end of `marker` in `consumer`.
 async fn completion_at(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     consumer: &str,
     marker: &str,
 ) -> Vec<CompletionItem> {
-    let offset = consumer.find(marker).expect("marker is in the source") + marker.len();
-    let line = consumer[..offset].matches('\n').count() as u32;
-    let line_start = consumer[..offset].rfind('\n').map_or(0, |idx| idx + 1);
-    let character = (offset - line_start) as u32;
+    let position = position_after(consumer, marker);
 
-    let response = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let response = completion_response(backend, uri, position.line, position.character, None).await;
 
     match response {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     }
 }
@@ -273,9 +253,9 @@ class Paths {
     let items = completion_at(&backend, &uri, CONSUMER, "resource_path('").await;
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
     assert_eq!(labels, vec!["views"], "resources/ holds only views/");
-    assert_eq!(items[0].kind, Some(CompletionItemKind::FOLDER));
+    assert_eq!(items[0].kind, Some(CompletionItemKind::Folder));
 
-    let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+    let Some(CompletionItemTextEdit::TextEdit(edit)) = &items[0].text_edit else {
         panic!("expected a text edit");
     };
     assert_eq!(
@@ -301,9 +281,9 @@ class Paths {
     let items = completion_at(&backend, &uri, CONSUMER, "views/wel").await;
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
     assert_eq!(labels, vec!["welcome.blade.php"]);
-    assert_eq!(items[0].kind, Some(CompletionItemKind::FILE));
+    assert_eq!(items[0].kind, Some(CompletionItemKind::File));
 
-    let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+    let Some(CompletionItemTextEdit::TextEdit(edit)) = &items[0].text_edit else {
         panic!("expected a text edit");
     };
     assert_eq!(

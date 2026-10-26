@@ -1,6 +1,6 @@
 use crate::common::create_test_backend;
 use std::fs;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: open a file in the backend and return its document links.
 fn get_document_links(

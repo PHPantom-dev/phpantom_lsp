@@ -464,3 +464,82 @@ pub(crate) fn for_each_node_with_ancestors<'ast, 'arena>(
         pending.extend(children.drain(..).rev().map(|child| (child, depth + 1)));
     }
 }
+
+/// One property a PHP 8.5 `clone($object, [...])` call writes on the copy:
+/// a literal string key of its property array.
+pub(crate) struct CloneWithWrite<'ast> {
+    /// The property name, without the `$`.
+    pub name: &'ast str,
+    /// Byte range of the name inside the key's quotes.
+    pub start: u32,
+    pub end: u32,
+    /// The value written to the property.
+    pub value: &'ast mago_syntax::cst::Expression<'ast>,
+}
+
+/// The object a two-argument `clone($object, [...])` call copies, and the
+/// properties its array literal writes on the copy.
+///
+/// Both arguments may be passed by name (`object:`, `withProperties:`).
+/// Only keys spelled as a plain string literal whose source text is the
+/// name itself are listed: a computed or escaped key names nothing a span
+/// can point at.  `None` for any other call, and for a property array that
+/// is not an array literal.
+pub(crate) fn clone_with_writes<'ast>(
+    call: &mago_syntax::cst::FunctionCall<'ast>,
+    content: &str,
+) -> Option<(
+    &'ast mago_syntax::cst::Expression<'ast>,
+    Vec<CloneWithWrite<'ast>>,
+)> {
+    use mago_syntax::cst::{Argument, Expression};
+
+    let Expression::Identifier(ident) = call.function else {
+        return None;
+    };
+    if !ident.value().eq_ignore_ascii_case(b"clone") {
+        return None;
+    }
+
+    let mut object = None;
+    let mut properties = None;
+    let mut position = 0usize;
+    for arg in call.argument_list.arguments.iter() {
+        match arg {
+            Argument::Positional(pos) => {
+                if pos.ellipsis.is_some() {
+                    return None;
+                }
+                match position {
+                    0 => object = Some(pos.value),
+                    1 => properties = Some(pos.value),
+                    _ => {}
+                }
+                position += 1;
+            }
+            Argument::Named(named) => match named.name.value {
+                b"object" => object = Some(named.value),
+                b"withProperties" => properties = Some(named.value),
+                _ => {}
+            },
+        }
+    }
+    let elements = array_literal_elements(properties?)?;
+
+    let writes = elements
+        .iter()
+        .filter_map(|element| {
+            let key = array_element_key(element)?;
+            let value = array_element_value(element)?;
+            let (name, start, end) =
+                crate::virtual_members::laravel::helpers::resolved_string_literal(key, content)?;
+            (content.get(start..end) == Some(name)).then_some(CloneWithWrite {
+                name,
+                start: start as u32,
+                end: end as u32,
+                value,
+            })
+        })
+        .collect();
+    Some((object?, writes))
+}

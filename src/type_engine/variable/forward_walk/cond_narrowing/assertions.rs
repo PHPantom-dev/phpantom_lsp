@@ -2,17 +2,17 @@ use super::*;
 
 use crate::php_type::ShapeEntry;
 
-/// Extract the `(base subject key, key expression, negated)` of an
+/// Extract the `(array, key, negated)` expressions of an
 /// `array_key_exists($k, $arr)` check, unwrapping parentheses and a
 /// leading `!`.
 pub(super) fn array_key_exists_target<'b>(
     expr: &'b Expression<'b>,
-) -> Option<(String, &'b Expression<'b>, bool)> {
+) -> Option<(&'b Expression<'b>, &'b Expression<'b>, bool)> {
     match expr {
         Expression::Parenthesized(inner) => array_key_exists_target(inner.expression),
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
             array_key_exists_target(prefix.operand)
-                .map(|(base, key, negated)| (base, key, !negated))
+                .map(|(array, key, negated)| (array, key, !negated))
         }
         Expression::Call(Call::Function(call)) => {
             let Expression::Identifier(ident) = call.function else {
@@ -24,12 +24,10 @@ pub(super) fn array_key_exists_target<'b>(
             {
                 return None;
             }
-            let args: Vec<_> = call.argument_list.arguments.iter().collect();
-            if args.len() < 2 {
-                return None;
-            }
-            let base_key = narrowing::expr_to_subject_key(narrowing::argument_value(args[1]))?;
-            Some((base_key, narrowing::argument_value(args[0]), false))
+            let mut args = call.argument_list.arguments.iter();
+            let key = condition_facts::argument_value(args.next()?);
+            let array = condition_facts::argument_value(args.next()?);
+            Some((array, key, false))
         }
         _ => None,
     }
@@ -45,7 +43,7 @@ pub(super) fn constant_array_key(expr: &Expression<'_>, scope: &ScopeState) -> O
     match unwrap_parens(expr) {
         Expression::Literal(Literal::Integer(int)) => int.value.map(|v| v.to_string()),
         Expression::Literal(Literal::String(_)) => {
-            narrowing::string_literal_value(unwrap_parens(expr))
+            condition_facts::string_literal_value(unwrap_parens(expr))
         }
         other => {
             let key = expr_to_subject(other)?;
@@ -121,7 +119,7 @@ pub(super) fn write_offset_narrowing_into_shapes(
 /// entry cannot hold the narrowed value, so the branch sees only the
 /// shapes the check left possible.
 pub(crate) fn write_offset_key_into_shapes(key: &str, scope: &mut ScopeState) {
-    let Some((base, segment)) = narrowing::split_trailing_bracket(key) else {
+    let Some((base, segment)) = condition_facts::split_trailing_bracket(key) else {
         return;
     };
     let Some(literal) = segment
@@ -335,11 +333,11 @@ pub(super) fn apply_assertion_to_key(
         if should_exclude {
             return;
         }
-        if narrowing::scalar_assert_guard_kind(asserted_type).is_some() {
+        if condition_facts::scalar_assert_guard_kind(asserted_type).is_some() {
             results.push(ResolvedType::from_type_string(asserted_type.clone()));
         } else {
             let var_ctx = build_var_ctx(target, ctx, scope_resolver);
-            narrowing::include_instance_of(asserted_type, false, &var_ctx, &mut results);
+            condition_facts::include_instance_of(asserted_type, false, &var_ctx, &mut results);
         }
         scope.set(target, results);
         return;
@@ -351,12 +349,20 @@ pub(super) fn apply_assertion_to_key(
     // check never contradicted, and a class inclusion comes back empty
     // when the loader cannot find the class.
     let mut exhaustible = false;
-    if let Some(kind) = narrowing::scalar_assert_guard_kind(asserted_type) {
+    if let Some(kind) = condition_facts::scalar_assert_guard_kind(asserted_type) {
         exhaustible = true;
         if should_exclude {
-            narrowing::apply_type_guard_exclusion(kind, &mut results, Some(ctx.class_loader));
+            condition_facts::apply_type_guard_exclusion(
+                kind,
+                &mut results,
+                Some(ctx.file.class_loader),
+            );
         } else {
-            narrowing::apply_type_guard_inclusion(kind, &mut results, Some(ctx.class_loader));
+            condition_facts::apply_type_guard_inclusion(
+                kind,
+                &mut results,
+                Some(ctx.file.class_loader),
+            );
         }
     } else if should_exclude && matches!(asserted_type.kind(), TypeKind::Union(_)) {
         // Ruling out a union rules out every member, so each one narrows on
@@ -369,23 +375,58 @@ pub(super) fn apply_assertion_to_key(
         // the union, so an included union stays whole.
         let var_ctx = build_var_ctx(target, ctx, scope_resolver);
         for member in asserted_type.union_members() {
-            if let Some(kind) = narrowing::scalar_assert_guard_kind(member) {
-                narrowing::apply_type_guard_exclusion(kind, &mut results, Some(ctx.class_loader));
+            if let Some(kind) = condition_facts::scalar_assert_guard_kind(member) {
+                condition_facts::apply_type_guard_exclusion(
+                    kind,
+                    &mut results,
+                    Some(ctx.file.class_loader),
+                );
             } else {
                 ResolvedType::apply_narrowing(&mut results, |classes| {
-                    narrowing::apply_instanceof_exclusion(member, &var_ctx, classes)
+                    condition_facts::apply_instanceof_exclusion(member, &var_ctx, classes)
                 });
             }
         }
+    } else if !should_exclude && is_scalar_refinement(asserted_type) {
+        // `@phpstan-assert class-string $name` on a `string` names no class
+        // to narrow to: it refines the scalar the subject already holds.
+        exhaustible = true;
+        results.retain_mut(|rt| {
+            let kept: Vec<PhpType> = rt
+                .type_string
+                .union_members()
+                .into_iter()
+                .filter_map(|member| {
+                    if member.is_subtype_of(asserted_type) {
+                        Some(member.clone())
+                    } else if member.is_mixed() || asserted_type.is_subtype_of(member) {
+                        Some(asserted_type.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            match kept.len() {
+                0 => false,
+                1 => {
+                    rt.replace_type(kept.into_iter().next().unwrap_or_else(PhpType::mixed));
+                    true
+                }
+                _ => {
+                    rt.replace_type(PhpType::union(kept));
+                    true
+                }
+            }
+        });
     } else {
         let var_ctx = build_var_ctx(target, ctx, scope_resolver);
         if should_exclude {
             ResolvedType::apply_narrowing(&mut results, |classes| {
-                narrowing::apply_instanceof_exclusion(asserted_type, &var_ctx, classes)
+                condition_facts::apply_instanceof_exclusion(asserted_type, &var_ctx, classes)
             });
         } else {
             ResolvedType::apply_narrowing(&mut results, |classes| {
-                narrowing::apply_instanceof_inclusion(asserted_type, false, &var_ctx, classes)
+                condition_facts::apply_instanceof_inclusion(asserted_type, false, &var_ctx, classes)
             });
             narrow_type_arguments(asserted_type, &mut results, ctx);
         }
@@ -396,6 +437,20 @@ pub(super) fn apply_assertion_to_key(
     } else if exhaustible {
         mark_exhausted(target, scope);
     }
+}
+
+/// Whether `ty` is a narrower form of `string` or `int` (`class-string`,
+/// `non-empty-string`, `positive-int`, a literal), which an assertion
+/// applies by refining the subject's scalar rather than naming a class.
+fn is_scalar_refinement(ty: &PhpType) -> bool {
+    let string = PhpType::string();
+    let int = PhpType::int();
+    ty != &string
+        && ty != &int
+        && ty
+            .union_members()
+            .iter()
+            .all(|member| member.is_subtype_of(&string) || member.is_subtype_of(&int))
 }
 
 /// Give entries of the asserted class the type arguments the assertion

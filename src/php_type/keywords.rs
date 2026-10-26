@@ -55,12 +55,17 @@ pub(crate) fn is_lowercase_only_pseudo_type(lower: &str) -> bool {
 /// Lowercase `name` for keyword matching, leaving the casing of a
 /// [`is_lowercase_only_pseudo_type`] name intact so a class of that name falls
 /// through to the caller's class handling instead of matching the pseudo-type.
-pub(crate) fn keyword_lowercase(name: &str) -> String {
-    let lower = name.to_ascii_lowercase();
-    if lower != name && is_lowercase_only_pseudo_type(&lower) {
-        return name.to_string();
-    }
-    lower
+///
+/// The lowercase copy lives on the stack, so a name too long to be a keyword
+/// reaches `f` as the empty string.
+pub(crate) fn with_keyword_lowercase<R>(name: &str, f: impl FnOnce(&str) -> R) -> R {
+    with_ascii_lowercase(name, |lower| {
+        if lower != name && is_lowercase_only_pseudo_type(lower) {
+            f(name)
+        } else {
+            f(lower)
+        }
+    })
 }
 
 /// Whether `name` is a type PHP itself accepts in a native declaration.
@@ -211,26 +216,28 @@ pub(crate) fn unmodelled_refinement_base(name: &str) -> Option<&'static str> {
 /// Unlike [`is_scalar_name`], this excludes `mixed`, `object`, `self`,
 /// `static`, `parent`, `class-string`, and other PHPDoc pseudo-types.
 pub(crate) fn is_primitive_scalar_name(name: &str) -> bool {
-    matches!(
-        keyword_lowercase(name).as_str(),
-        "int"
-            | "integer"
-            | "float"
-            | "double"
-            | "real"
-            | "string"
-            | "bool"
-            | "boolean"
-            | "void"
-            | "never"
-            | "null"
-            | "false"
-            | "true"
-            | "array"
-            | "callable"
-            | "iterable"
-            | "resource"
-    )
+    with_keyword_lowercase(name, |lower| {
+        matches!(
+            lower,
+            "int"
+                | "integer"
+                | "float"
+                | "double"
+                | "real"
+                | "string"
+                | "bool"
+                | "boolean"
+                | "void"
+                | "never"
+                | "null"
+                | "false"
+                | "true"
+                | "array"
+                | "callable"
+                | "iterable"
+                | "resource"
+        )
+    })
 }
 
 /// Returns `true` when `name` is a built-in type keyword (case-sensitive) that
@@ -434,8 +441,7 @@ pub(crate) fn is_class_like_name(name: &str) -> bool {
 ///
 /// Class names and unrecognised identifiers pass through unchanged.
 pub(crate) fn normalize_keyword_casing(name: &str) -> String {
-    let lower = keyword_lowercase(name);
-    match lower.as_str() {
+    with_keyword_lowercase(name, |lower| match lower {
         // PHP aliases that map to a different canonical name.
         "integer" => "int".to_string(),
         "boolean" => "bool".to_string(),
@@ -450,13 +456,13 @@ pub(crate) fn normalize_keyword_casing(name: &str) -> String {
         | "non-empty-array" | "non-empty-list" | "non-empty-mixed" | "associative-array"
         | "closed-resource" | "open-resource" | "callable-object" | "callable-array"
         | "stringable-object"
-        | "array-key" | "scalar" | "numeric" => lower,
+        | "array-key" | "scalar" | "numeric" => lower.to_string(),
         // `number`, `real`, `integer`, `boolean`, `double`, and `resource`
         // are aliases/pseudo-types only in lowercase; fall through so a
         // same-named class keeps its casing and the lowercase spellings
         // stay as-is.
         _ => name.to_string(),
-    }
+    })
 }
 
 /// Map a PHPStan/docblock type name to its native PHP equivalent.
@@ -466,8 +472,7 @@ pub(crate) fn normalize_keyword_casing(name: &str) -> String {
 /// for names that have no single native PHP type (`scalar`, `numeric`,
 /// `array-key`, `number`).  Class names pass through unchanged.
 pub(crate) fn native_scalar_name(name: &str) -> Option<&str> {
-    let lower = keyword_lowercase(name);
-    match lower.as_str() {
+    with_keyword_lowercase(name, |lower| match lower {
         // Direct native types.
         "int" | "integer" => Some("int"),
         "float" | "double" | "real" => Some("float"),
@@ -505,7 +510,7 @@ pub(crate) fn native_scalar_name(name: &str) -> Option<&str> {
 
         // Anything else is a class name — pass it through.
         _ => Some(name),
-    }
+    })
 }
 
 /// Whether `name` is a single identifier-like word the PHPDoc parser reads

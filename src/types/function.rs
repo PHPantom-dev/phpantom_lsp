@@ -33,6 +33,9 @@ pub(crate) struct ResolvedCallableTarget {
     /// Whether the body calls `func_get_args()` (or a sibling), so the
     /// callable accepts arguments beyond its declared parameters.
     pub reads_func_args: bool,
+    /// Whether discarding the callable's result is reported, because it
+    /// carries `#[\NoDiscard]`.
+    pub no_discard: bool,
     /// Alternate parameter lists from overloaded function declarations.
     ///
     /// Populated from `FunctionInfo::overloads` when resolving standalone
@@ -119,11 +122,11 @@ pub struct FunctionInfo {
     pub links: Vec<String>,
     /// Symbol and URL references from `@see` tags in the docblock.
     ///
-    /// Each entry is the raw text after `@see`, which may be a symbol
+    /// Each entry's `text` is what follows `@see`, which may be a symbol
     /// reference (e.g. `"UnsetDemo"`, `"MyClass::method()"`) or a URL
     /// (e.g. `"https://example.com/docs"`).  Rendered in hover below
     /// `@link` entries.
-    pub see_refs: Vec<String>,
+    pub see_refs: Vec<SeeRef>,
     /// The namespace this function is declared in, if any.
     /// For example, `Amp\delay` would have namespace `Some("Amp")`.
     pub namespace: Option<String>,
@@ -230,6 +233,9 @@ pub struct FunctionInfo {
     /// Whether the body calls `func_get_args()` (or a sibling), so the
     /// callable accepts arguments beyond its declared parameters.
     pub reads_func_args: bool,
+    /// Whether the function carries `#[\NoDiscard]`, so a call that throws
+    /// its result away is reported.
+    pub is_no_discard: bool,
     /// The types the docblock settled in place of a native hint while
     /// naming a class the hint does not, which loading the function keeps
     /// only where they narrow the hint.

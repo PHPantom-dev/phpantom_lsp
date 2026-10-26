@@ -23,7 +23,7 @@ impl Backend {
 
         index.rebuild();
         let alias_count = index.all_aliases().len();
-        *self.laravel_morph_map.write() = index;
+        *self.laravel.morph_map.write() = index;
 
         tracing::info!(
             "PHPantom: scanned {} Laravel provider files, indexed {} morph aliases",
@@ -64,11 +64,11 @@ impl Backend {
     /// A cheap no-op unless the file currently contributes registrations or its
     /// new content contains a `morphMap(` call.  Only runs for Laravel projects.
     pub(crate) fn refresh_laravel_morph_map(&self, uri: &str, content: &str) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
         let has_token = memchr::memmem::find(content.as_bytes(), b"orphMap(").is_some();
-        refresh_file(&self.laravel_morph_map, uri, has_token, || {
+        refresh_file(&self.laravel.morph_map, uri, has_token, || {
             self.scan_morph_map(content)
         });
     }

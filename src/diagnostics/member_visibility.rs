@@ -71,7 +71,7 @@ use std::sync::Arc;
 
 use super::member_lookup::{MemberKind, declared_member, display_class_name};
 use crate::atom::Atom;
-use crate::class_lookup::is_subtype_of;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of};
 use crate::inheritance::ancestors;
 use crate::types::{ClassInfo, ClassLikeKind, Visibility};
 
@@ -159,7 +159,7 @@ pub(crate) fn inaccessible_member_message(
     is_method_call: bool,
     current_class: Option<&ClassInfo>,
     subject_binds_scope: bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<String> {
     // Inside a trait the host class that supplies `$this` is unknown,
     // so every visibility answer would be a guess.
@@ -200,7 +200,7 @@ fn judge_branch(
     is_method_call: bool,
     current_class: Option<&ClassInfo>,
     subject_binds_scope: bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> BranchVerdict {
     // A trait naming the member is never a call PHP resolves.  The
     // spans that carry one are the identifiers in a `use` adaptation
@@ -348,9 +348,9 @@ fn declaring_class(
     is_static: bool,
     is_method_call: bool,
     restriction: Restriction,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Arc<ClassInfo>> {
-    let raw = class_loader(merged.fqn().as_str())?;
+    let raw = class_loader(Fqn::new(merged.fqn().as_str()))?;
 
     match restriction {
         // A private member is never inherited, so the merge can only
@@ -414,7 +414,7 @@ fn declares_through_own_traits(
     member_name: &str,
     is_static: bool,
     is_method_call: bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     class.used_traits.iter().any(|trait_name| {
         trait_declares(
@@ -435,7 +435,7 @@ fn declares_non_privately(
     member_name: &str,
     is_static: bool,
     is_method_call: bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     if let Some((visibility, _)) = declared_member(class, member_name, is_static, is_method_call) {
         return visibility != Visibility::Private;
@@ -471,7 +471,7 @@ fn trait_declares(
     member_name: &str,
     is_static: bool,
     is_method_call: bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Visibility> {
     let declares = |class: &ClassInfo| {
         declared_member(class, member_name, is_static, is_method_call).is_some()
@@ -495,7 +495,7 @@ fn private_ancestor_declaration(
     member_name: &str,
     is_static: bool,
     is_method_call: bool,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Rejection> {
     for (_, ancestor) in ancestors(merged, class_loader) {
         let Some((visibility, kind)) =
@@ -532,7 +532,7 @@ fn private_ancestor_declaration(
 fn is_accessible(
     rejection: &Rejection,
     current_class: Option<&ClassInfo>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     let Some(current) = current_class else {
         return false;

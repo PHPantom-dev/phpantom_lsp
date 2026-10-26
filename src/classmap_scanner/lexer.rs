@@ -75,6 +75,16 @@ fn scan<const SYMBOLS: bool>(content: &[u8], result: &mut ScanResult) {
     // `const` declarations at this depth (or depth 0 outside braced
     // namespaces) are top-level.
     let mut namespace_brace_depth: u32 = 0;
+    // Whether the scan is inside a class-like or function body, and the
+    // depth that body's brace opened at. A `function` outside every body
+    // declares a function even within a block, as in the
+    // `if (! function_exists('foo')) { function foo() {} }` guard helper
+    // files are written with.
+    let mut in_body = false;
+    let mut body_brace_depth: u32 = 0;
+    // A class-like or function keyword was read outside every body, so
+    // the next `{` opens one.
+    let mut body_pending = false;
 
     // State flags
     let mut in_line_comment = false;
@@ -176,12 +186,20 @@ fn scan<const SYMBOLS: bool>(content: &[u8], result: &mut ScanResult) {
         // Braces for depth tracking
         if SYMBOLS {
             if b == b'{' {
+                if body_pending {
+                    body_pending = false;
+                    in_body = true;
+                    body_brace_depth = brace_depth;
+                }
                 brace_depth += 1;
                 i += 1;
                 continue;
             }
             if b == b'}' {
                 brace_depth = brace_depth.saturating_sub(1);
+                if in_body && brace_depth == body_brace_depth {
+                    in_body = false;
+                }
                 // Exiting a braced namespace block resets the namespace.
                 if in_braced_namespace && brace_depth == namespace_brace_depth {
                     in_braced_namespace = false;
@@ -314,6 +332,9 @@ fn scan<const SYMBOLS: bool>(content: &[u8], result: &mut ScanResult) {
 
             if let Some(keyword_len) = class_keyword_at(content, i) {
                 i += keyword_len;
+                if SYMBOLS && !in_body {
+                    body_pending = true;
+                }
                 if let Some(name) = read_name(content, &mut i) {
                     result.classes.push(format!("{namespace}{name}"));
                 }
@@ -321,6 +342,19 @@ fn scan<const SYMBOLS: bool>(content: &[u8], result: &mut ScanResult) {
             }
 
             if SYMBOLS {
+                // An anonymous class, `new class(…) {` or `new class{`,
+                // which `class_keyword_at` leaves alone: its body still
+                // holds methods, not functions.
+                if !in_body
+                    && b == b'c'
+                    && content[i..].starts_with(b"class")
+                    && matches!(content.get(i + 5), Some(b'(' | b'{'))
+                {
+                    body_pending = true;
+                    i += 5;
+                    continue;
+                }
+
                 // Only top-level declarations: depth 0 outside a braced
                 // namespace, or directly inside the braced namespace.
                 let is_top_level = || {
@@ -331,7 +365,8 @@ fn scan<const SYMBOLS: bool>(content: &[u8], result: &mut ScanResult) {
                     }
                 };
 
-                // function (standalone — not inside a class/trait/enum body)
+                // function (standalone — not inside a class-like or
+                // function body)
                 if b == b'f'
                     && i + 8 <= len
                     && &content[i..i + 8] == b"function"
@@ -344,7 +379,8 @@ fn scan<const SYMBOLS: bool>(content: &[u8], result: &mut ScanResult) {
                     // are not function declarations.
                     if is_preceded_by_use(content, i - 8) {
                         skip_use_statement(content, &mut i);
-                    } else if is_top_level() {
+                    } else if !in_body {
+                        body_pending = true;
                         // Skip `function (` — that's a closure, not a named function.
                         let mut j = i;
                         while j < len && content[j].is_ascii_whitespace() {

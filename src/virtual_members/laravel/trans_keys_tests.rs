@@ -16,7 +16,7 @@ fn translation_types_resolve_while_the_workspace_index_is_held() {
     .expect("lang file");
 
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
-    let indexing = backend.workspace_index_lock.lock();
+    let indexing = backend.workspace_index.lock.lock();
 
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     let resolver = {

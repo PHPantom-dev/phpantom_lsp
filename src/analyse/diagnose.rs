@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use std::time::Instant;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::diagnostics::ignore_rules::CompiledIgnoreRule;
@@ -129,7 +129,7 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
                             crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                                 content,
                                 &file_ctx.classes,
-                                &class_loaders.as_dyn(),
+                                &class_loaders.as_dyn_resolved(),
                                 &source_class_loaders.as_dyn(),
                                 &file_ctx.block_imports(),
                                 Some(backend),
@@ -273,18 +273,21 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
                         let mut filtered: Vec<FileDiagnostic> = raw
                             .into_iter()
                             .filter_map(|d| {
-                                let sev = d.severity.unwrap_or(DiagnosticSeverity::WARNING);
+                                let sev = d.severity.unwrap_or(DiagnosticSeverity::Warning);
                                 if !passes_severity_filter(sev, severity_filter) {
                                     return None;
                                 }
                                 let identifier = match &d.code {
-                                    Some(NumberOrString::String(s)) => Some(s.clone()),
+                                    Some(Code::String(s)) => Some(s.clone()),
                                     _ => None,
                                 };
                                 Some(FileDiagnostic {
                                     line: d.range.start.line + 1,
                                     column: d.range.start.character,
-                                    message: d.message,
+                                    message: match d.message {
+ Message::String(text) => text,
+ Message::MarkupContent(markup) => markup.value,
+ },
                                     identifier,
                                     severity: sev,
                                 })
@@ -350,10 +353,10 @@ fn passes_severity_filter(severity: DiagnosticSeverity, filter: SeverityFilter) 
         SeverityFilter::Warning => {
             matches!(
                 severity,
-                DiagnosticSeverity::ERROR | DiagnosticSeverity::WARNING
+                DiagnosticSeverity::Error | DiagnosticSeverity::Warning
             )
         }
-        SeverityFilter::Error => severity == DiagnosticSeverity::ERROR,
+        SeverityFilter::Error => severity == DiagnosticSeverity::Error,
     }
 }
 
@@ -379,19 +382,19 @@ mod tests {
     #[test]
     fn severity_filter_all_passes_everything() {
         assert!(passes_severity_filter(
-            DiagnosticSeverity::ERROR,
+            DiagnosticSeverity::Error,
             SeverityFilter::All
         ));
         assert!(passes_severity_filter(
-            DiagnosticSeverity::WARNING,
+            DiagnosticSeverity::Warning,
             SeverityFilter::All
         ));
         assert!(passes_severity_filter(
-            DiagnosticSeverity::INFORMATION,
+            DiagnosticSeverity::Information,
             SeverityFilter::All
         ));
         assert!(passes_severity_filter(
-            DiagnosticSeverity::HINT,
+            DiagnosticSeverity::Hint,
             SeverityFilter::All
         ));
     }
@@ -399,19 +402,19 @@ mod tests {
     #[test]
     fn severity_filter_warning_blocks_info_and_hint() {
         assert!(passes_severity_filter(
-            DiagnosticSeverity::ERROR,
+            DiagnosticSeverity::Error,
             SeverityFilter::Warning
         ));
         assert!(passes_severity_filter(
-            DiagnosticSeverity::WARNING,
+            DiagnosticSeverity::Warning,
             SeverityFilter::Warning
         ));
         assert!(!passes_severity_filter(
-            DiagnosticSeverity::INFORMATION,
+            DiagnosticSeverity::Information,
             SeverityFilter::Warning
         ));
         assert!(!passes_severity_filter(
-            DiagnosticSeverity::HINT,
+            DiagnosticSeverity::Hint,
             SeverityFilter::Warning
         ));
     }
@@ -419,19 +422,19 @@ mod tests {
     #[test]
     fn severity_filter_error_only() {
         assert!(passes_severity_filter(
-            DiagnosticSeverity::ERROR,
+            DiagnosticSeverity::Error,
             SeverityFilter::Error
         ));
         assert!(!passes_severity_filter(
-            DiagnosticSeverity::WARNING,
+            DiagnosticSeverity::Warning,
             SeverityFilter::Error
         ));
         assert!(!passes_severity_filter(
-            DiagnosticSeverity::INFORMATION,
+            DiagnosticSeverity::Information,
             SeverityFilter::Error
         ));
         assert!(!passes_severity_filter(
-            DiagnosticSeverity::HINT,
+            DiagnosticSeverity::Hint,
             SeverityFilter::Error
         ));
     }

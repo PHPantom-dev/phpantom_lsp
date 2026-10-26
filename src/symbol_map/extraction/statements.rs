@@ -54,6 +54,9 @@ pub(super) fn extract_from_statement<'a>(
                 ctx.assert_narrowing_offsets
                     .push(expr_stmt.expression.span().start.offset);
             }
+            if let Some(call) = discarded_call(expr_stmt.expression) {
+                ctx.discarded_calls.push(call);
+            }
             extract_from_expression(expr_stmt.expression, ctx, scope_start);
         }
         Statement::Return(ret) => {
@@ -490,4 +493,27 @@ pub(super) fn extract_from_switch_body<'a>(
     if let SwitchBody::ColonDelimited(b) = body {
         emit_keyword(&b.end_switch, ctx);
     }
+}
+
+/// `(start, args_start)` of the call a statement consists of, when the
+/// statement is nothing but a call (parentheses aside), so the call's
+/// result is thrown away.  `(void) f();` is a cast, not a call, and never
+/// matches.
+fn discarded_call(mut expr: &Expression<'_>) -> Option<(u32, u32)> {
+    while let Expression::Parenthesized(inner) = expr {
+        expr = inner.expression;
+    }
+    let Expression::Call(call) = expr else {
+        return None;
+    };
+    let argument_list = match call {
+        Call::Function(call) => &call.argument_list,
+        Call::Method(call) => &call.argument_list,
+        Call::NullSafeMethod(call) => &call.argument_list,
+        Call::StaticMethod(call) => &call.argument_list,
+    };
+    Some((
+        call.span().start.offset,
+        argument_list.left_parenthesis.end.offset,
+    ))
 }

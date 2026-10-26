@@ -7,7 +7,7 @@
 use crate::common::{
     create_test_backend, extract_edit_text, find_action_containing, get_code_actions_at,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Check whether the docblock text contains a `@param` tag with the given
 /// type and name, allowing arbitrary whitespace between them (for column
@@ -53,7 +53,7 @@ class Foo {
     let action = find_action_containing(&actions, "Update docblock")
         .expect("should offer Update docblock action");
 
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
 
     let new_text = extract_edit_text(action);
@@ -313,6 +313,36 @@ class Foo {
     assert!(
         new_text.contains("The value"),
         "should preserve return description: {}",
+        new_text
+    );
+}
+
+/// The summary mentioning "function" and holding a `{` must not be taken
+/// for the declaration the body is inferred from.
+#[test]
+fn infers_return_when_summary_mentions_function() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    /**
+     * Builds the function map. {@see Bar}
+     */
+    public function ids(): array {
+        return [1, 2];
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    let actions = get_code_actions_at(&backend, uri, content, 3, 10);
+    let action = find_action_containing(&actions, "Update docblock")
+        .expect("should offer Update docblock action");
+
+    let new_text = extract_edit_text(action);
+    assert!(
+        new_text.contains("@return array{1, 2}"),
+        "should add the inferred return type: {}",
         new_text
     );
 }

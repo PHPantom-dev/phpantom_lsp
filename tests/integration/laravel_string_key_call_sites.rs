@@ -8,11 +8,12 @@
 //! variable behind `Env::get()`.
 
 use crate::common::{
-    LARAVEL_APP_COMPOSER, create_initialized_psr4_workspace, create_psr4_workspace,
-    markup_hover_at, open_initialized_php, open_php,
+    LARAVEL_APP_COMPOSER, completion_response, create_initialized_psr4_workspace,
+    create_psr4_workspace, goto_definition_at, markup_hover_at, open_initialized_php, open_php,
+    references_response,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Every location go-to-definition offers at `line`/`character` of `relative`.
 async fn definitions(
@@ -25,24 +26,14 @@ async fn definitions(
     backend.initialized(InitializedParams {}).await;
     let path = dir.path().join(relative);
     let text = std::fs::read_to_string(&path).unwrap();
-    let uri = Url::from_file_path(&path).unwrap();
+    let uri = Uri::from_file_path(&path).unwrap();
     open_php(backend, &uri, &text).await;
 
-    let response = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    let response = goto_definition_at(backend, &uri, line, character).await;
     match response {
-        Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
-        Some(GotoDefinitionResponse::Array(locations)) => locations,
-        Some(GotoDefinitionResponse::Link(links)) => links
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => vec![location],
+        Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => locations,
+        Some(DefinitionResponse::DefinitionLinkList(links)) => links
             .into_iter()
             .map(|link| Location {
                 uri: link.target_uri,
@@ -136,7 +127,7 @@ async fn a_route_pattern_is_judged_by_what_it_matches() {
     let route_diagnostics: Vec<&Diagnostic> = diagnostics
         .iter()
         .filter(|diagnostic| {
-            matches!(&diagnostic.code, Some(NumberOrString::String(code))
+            matches!(&diagnostic.code, Some(Code::String(code))
                 if code == "invalid_laravel_route")
         })
         .collect();
@@ -238,24 +229,12 @@ async fn find_references_gathers_every_read_of_an_environment_variable() {
     for relative in ["app/Demo.php", "config/mail.php"] {
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
-        open_php(&backend, &Url::from_file_path(&path).unwrap(), &text).await;
+        open_php(&backend, &Uri::from_file_path(&path).unwrap(), &text).await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    let found = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position::new(4, 24),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration: true,
-            },
-        })
+    let uri = Uri::from_file_path(dir.path().join("app/Demo.php")).unwrap();
+    let found = references_response(&backend, &uri, Position::new(4, 24), true)
         .await
-        .unwrap()
         .expect("an env key should have references");
 
     for expected in ["/app/Demo.php", "/config/mail.php", "/.env"] {
@@ -326,21 +305,9 @@ async fn the_env_helper_completes_the_projects_variables() {
     )
     .await;
 
-    let items = match backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position::new(4, 13),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap()
-    {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+    let items = match completion_response(&backend, &uri, 4, 13, None).await {
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
 

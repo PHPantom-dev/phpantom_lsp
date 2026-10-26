@@ -1,5 +1,5 @@
 use crate::common::{complete_at, create_psr4_workspace, create_test_backend, filter_texts};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Basic trigger ──────────────────────────────────────────────────────────
 
@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::*;
 #[tokio::test]
 async fn test_phpdoc_bare_at_triggers_completion() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_bare.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_bare.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -37,7 +37,7 @@ async fn test_phpdoc_bare_at_triggers_completion() {
 #[tokio::test]
 async fn test_phpdoc_partial_prefix_filters() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_filter.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -68,7 +68,7 @@ async fn test_phpdoc_partial_prefix_filters() {
 #[tokio::test]
 async fn test_phpdoc_not_triggered_outside_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_outside.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_outside.php").unwrap();
     let text = concat!("<?php\n", "@mkdir('/tmp/test');\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 1).await;
@@ -92,7 +92,7 @@ async fn test_phpdoc_not_triggered_outside_docblock() {
 #[tokio::test]
 async fn test_phpdoc_not_triggered_in_regular_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_regular_comment.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_regular_comment.php").unwrap();
     let text = concat!("<?php\n", "/* @param string $x */\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 4).await;
@@ -118,7 +118,7 @@ async fn test_phpdoc_not_triggered_in_regular_comment() {
 #[tokio::test]
 async fn test_phpdoc_function_context_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_func.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -167,7 +167,7 @@ async fn test_phpdoc_function_context_tags() {
 #[tokio::test]
 async fn test_phpdoc_method_context_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_method.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -194,7 +194,7 @@ async fn test_phpdoc_method_context_tags() {
 #[tokio::test]
 async fn test_phpdoc_static_method_context_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_static_method.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_static_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -220,7 +220,7 @@ async fn test_phpdoc_static_method_context_tags() {
 #[tokio::test]
 async fn test_phpdoc_class_context_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_class.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -263,7 +263,7 @@ async fn test_phpdoc_class_context_tags() {
 #[tokio::test]
 async fn test_phpdoc_abstract_class_context() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_abstract.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_abstract.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -288,7 +288,7 @@ async fn test_phpdoc_abstract_class_context() {
 #[tokio::test]
 async fn test_phpdoc_final_class_context() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_final.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_final.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -309,7 +309,7 @@ async fn test_phpdoc_final_class_context() {
 #[tokio::test]
 async fn test_phpdoc_interface_context_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_iface.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_iface.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -335,7 +335,7 @@ async fn test_phpdoc_interface_context_tags() {
 #[tokio::test]
 async fn test_phpdoc_trait_context_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_trait.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_trait.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -360,7 +360,7 @@ async fn test_phpdoc_trait_context_tags() {
 #[tokio::test]
 async fn test_phpdoc_enum_context_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_enum.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -384,7 +384,7 @@ async fn test_phpdoc_enum_context_tags() {
 #[tokio::test]
 async fn test_phpdoc_property_context_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_prop.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -423,7 +423,7 @@ async fn test_phpdoc_property_context_tags() {
 #[tokio::test]
 async fn test_phpdoc_nullable_property_context() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_nullable_prop.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_nullable_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -445,7 +445,7 @@ async fn test_phpdoc_nullable_property_context() {
 #[tokio::test]
 async fn test_phpdoc_readonly_property_context() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_readonly_prop.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_readonly_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Entity {\n",
@@ -466,7 +466,7 @@ async fn test_phpdoc_readonly_property_context() {
 #[tokio::test]
 async fn test_phpdoc_static_property_context() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_static_prop.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_static_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Registry {\n",
@@ -490,7 +490,7 @@ async fn test_phpdoc_static_property_context() {
 #[tokio::test]
 async fn test_phpdoc_constant_context_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_const.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -526,7 +526,7 @@ async fn test_phpdoc_constant_context_tags() {
 #[tokio::test]
 async fn test_phpdoc_visibility_constant_context() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_vis_const.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_vis_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class HttpStatus {\n",
@@ -550,7 +550,7 @@ async fn test_phpdoc_visibility_constant_context() {
 #[tokio::test]
 async fn test_phpdoc_phpstan_prefix_filtering() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_phpstan.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_phpstan.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -591,7 +591,7 @@ async fn test_phpdoc_phpstan_prefix_filtering() {
 #[tokio::test]
 async fn test_phpdoc_phpstan_context_aware() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_phpstan_ctx.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_phpstan_ctx.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -624,7 +624,7 @@ async fn test_phpdoc_phpstan_context_aware() {
 #[tokio::test]
 async fn test_phpdoc_phpstan_class_context() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_phpstan_class.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_phpstan_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -667,7 +667,7 @@ async fn test_phpdoc_phpstan_class_context() {
 #[tokio::test]
 async fn test_phpdoc_unknown_context_suggests_all() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_unknown.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_unknown.php").unwrap();
     let text = concat!("<?php\n", "/**\n", " * @\n", " */\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
@@ -689,7 +689,7 @@ async fn test_phpdoc_unknown_context_suggests_all() {
 #[tokio::test]
 async fn test_phpdoc_items_have_keyword_kind() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_kind.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_kind.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -703,7 +703,7 @@ async fn test_phpdoc_items_have_keyword_kind() {
     for item in &items {
         assert_eq!(
             item.kind,
-            Some(CompletionItemKind::KEYWORD),
+            Some(CompletionItemKind::Keyword),
             "PHPDoc tag {:?} should use KEYWORD kind",
             item.label
         );
@@ -714,7 +714,7 @@ async fn test_phpdoc_items_have_keyword_kind() {
 #[tokio::test]
 async fn test_phpdoc_items_have_detail() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_detail.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_detail.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -743,7 +743,7 @@ async fn test_phpdoc_items_have_detail() {
 #[tokio::test]
 async fn test_phpdoc_no_duplicates() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_dedup.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_dedup.php").unwrap();
     let text = concat!("<?php\n", "/**\n", " * @\n", " */\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
@@ -764,7 +764,7 @@ async fn test_phpdoc_no_duplicates() {
 #[tokio::test]
 async fn test_phpdoc_open_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_open.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_open.php").unwrap();
     let text = concat!("<?php\n", "/**\n", " * @\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
@@ -790,7 +790,7 @@ async fn test_phpdoc_open_docblock() {
 #[tokio::test]
 async fn test_phpdoc_multiple_docblocks() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_multi.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -828,7 +828,7 @@ async fn test_phpdoc_multiple_docblocks() {
 #[tokio::test]
 async fn test_phpdoc_case_insensitive_prefix() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_case.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_case.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -853,7 +853,7 @@ async fn test_phpdoc_case_insensitive_prefix() {
 #[tokio::test]
 async fn test_phpdoc_second_tag_in_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_second.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_second.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -882,7 +882,7 @@ async fn test_phpdoc_deprecated_in_all_contexts() {
     let backend = create_test_backend();
 
     // Function context
-    let uri1 = Url::parse("file:///phpdoc_dep_func.php").unwrap();
+    let uri1 = Uri::parse("file:///phpdoc_dep_func.php").unwrap();
     let text1 = concat!(
         "<?php\n",
         "/**\n",
@@ -899,7 +899,7 @@ async fn test_phpdoc_deprecated_in_all_contexts() {
     );
 
     // Class context
-    let uri2 = Url::parse("file:///phpdoc_dep_class.php").unwrap();
+    let uri2 = Uri::parse("file:///phpdoc_dep_class.php").unwrap();
     let text2 = concat!(
         "<?php\n",
         "/**\n",
@@ -916,7 +916,7 @@ async fn test_phpdoc_deprecated_in_all_contexts() {
     );
 
     // Property context
-    let uri3 = Url::parse("file:///phpdoc_dep_prop.php").unwrap();
+    let uri3 = Uri::parse("file:///phpdoc_dep_prop.php").unwrap();
     let text3 = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -935,7 +935,7 @@ async fn test_phpdoc_deprecated_in_all_contexts() {
     );
 
     // Constant context
-    let uri4 = Url::parse("file:///phpdoc_dep_const.php").unwrap();
+    let uri4 = Uri::parse("file:///phpdoc_dep_const.php").unwrap();
     let text4 = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -962,7 +962,7 @@ async fn test_phpdoc_template_context_awareness() {
     let backend = create_test_backend();
 
     // Class context — should have @template
-    let uri_class = Url::parse("file:///phpdoc_tmpl_class.php").unwrap();
+    let uri_class = Uri::parse("file:///phpdoc_tmpl_class.php").unwrap();
     let text_class = concat!(
         "<?php\n",
         "/**\n",
@@ -979,7 +979,7 @@ async fn test_phpdoc_template_context_awareness() {
     );
 
     // Property context — should NOT have @template
-    let uri_prop = Url::parse("file:///phpdoc_tmpl_prop.php").unwrap();
+    let uri_prop = Uri::parse("file:///phpdoc_tmpl_prop.php").unwrap();
     let text_prop = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1007,7 +1007,7 @@ async fn test_phpdoc_var_context_awareness() {
     let backend = create_test_backend();
 
     // Function context — should NOT have @var (use @param / @return instead)
-    let uri_func = Url::parse("file:///phpdoc_var_func.php").unwrap();
+    let uri_func = Uri::parse("file:///phpdoc_var_func.php").unwrap();
     let text_func = concat!(
         "<?php\n",
         "/**\n",
@@ -1024,7 +1024,7 @@ async fn test_phpdoc_var_context_awareness() {
     );
 
     // Property context
-    let uri_prop = Url::parse("file:///phpdoc_var_prop.php").unwrap();
+    let uri_prop = Uri::parse("file:///phpdoc_var_prop.php").unwrap();
     let text_prop = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1043,7 +1043,7 @@ async fn test_phpdoc_var_context_awareness() {
     );
 
     // Class context — should NOT have @var
-    let uri_class = Url::parse("file:///phpdoc_var_class.php").unwrap();
+    let uri_class = Uri::parse("file:///phpdoc_var_class.php").unwrap();
     let text_class = concat!("<?php\n", "/**\n", " * @va\n", " */\n", "class Foo {}\n",);
     let items_class = complete_at(&backend, &uri_class, text_class, 2, 6).await;
     assert!(
@@ -1062,7 +1062,7 @@ async fn test_phpdoc_inheritdoc_context() {
     let backend = create_test_backend();
 
     // Method context — should have @inheritdoc
-    let uri_method = Url::parse("file:///phpdoc_inherit_method.php").unwrap();
+    let uri_method = Uri::parse("file:///phpdoc_inherit_method.php").unwrap();
     let text_method = concat!(
         "<?php\n",
         "class Child extends Base {\n",
@@ -1081,7 +1081,7 @@ async fn test_phpdoc_inheritdoc_context() {
     );
 
     // Class context — should NOT have @inheritdoc
-    let uri_class = Url::parse("file:///phpdoc_inherit_class.php").unwrap();
+    let uri_class = Uri::parse("file:///phpdoc_inherit_class.php").unwrap();
     let text_class = concat!(
         "<?php\n",
         "/**\n",
@@ -1106,7 +1106,7 @@ async fn test_phpdoc_magic_property_tags_context() {
     let backend = create_test_backend();
 
     // Class context — should have @property
-    let uri_class = Url::parse("file:///phpdoc_magic_class.php").unwrap();
+    let uri_class = Uri::parse("file:///phpdoc_magic_class.php").unwrap();
     let text_class = concat!(
         "<?php\n",
         "/**\n",
@@ -1119,7 +1119,7 @@ async fn test_phpdoc_magic_property_tags_context() {
     assert!(tags.contains(&"@property"), "Should suggest @property");
 
     // Function context — should NOT have @property
-    let uri_func = Url::parse("file:///phpdoc_magic_func.php").unwrap();
+    let uri_func = Uri::parse("file:///phpdoc_magic_func.php").unwrap();
     let text_func = concat!(
         "<?php\n",
         "/**\n",
@@ -1142,7 +1142,7 @@ async fn test_phpdoc_magic_property_tags_context() {
 #[tokio::test]
 async fn test_phpdoc_display_labels_show_usage_format() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_display.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_display.php").unwrap();
     let text = concat!("<?php\n", "/**\n", " * @\n", " */\n", "class Foo {}\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
@@ -1185,7 +1185,7 @@ async fn test_phpdoc_display_labels_show_usage_format() {
 #[tokio::test]
 async fn test_phpdoc_insert_text_is_raw_tag() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_insert.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_insert.php").unwrap();
     let text = concat!("<?php\n", "/**\n", " * @\n", " */\n", "class Foo {}\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
@@ -1218,7 +1218,7 @@ async fn test_phpdoc_insert_text_is_raw_tag() {
 #[tokio::test]
 async fn test_phpdoc_smart_param_prefilled() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_smart_param.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_smart_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1258,7 +1258,7 @@ async fn test_phpdoc_smart_param_prefilled() {
 #[tokio::test]
 async fn test_phpdoc_smart_return_prefilled() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_smart_return.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_smart_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1283,7 +1283,7 @@ async fn test_phpdoc_smart_return_prefilled() {
 #[tokio::test]
 async fn test_phpdoc_smart_return_void_generic() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_smart_void.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_smart_void.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1310,7 +1310,7 @@ async fn test_phpdoc_smart_return_void_generic() {
 #[tokio::test]
 async fn test_phpdoc_smart_return_void_with_return_value() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_void_returns.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_void_returns.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1338,7 +1338,7 @@ async fn test_phpdoc_smart_return_void_with_return_value() {
 #[tokio::test]
 async fn test_phpdoc_smart_return_void_with_bare_return() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_void_bare.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_void_bare.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1368,7 +1368,7 @@ async fn test_phpdoc_smart_return_void_with_bare_return() {
 #[tokio::test]
 async fn test_phpdoc_smart_var_prefilled() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_smart_var.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_smart_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1394,7 +1394,7 @@ async fn test_phpdoc_smart_var_prefilled() {
 #[tokio::test]
 async fn test_phpdoc_smart_param_skips_documented() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_smart_skip.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_smart_skip.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1425,7 +1425,7 @@ async fn test_phpdoc_smart_param_skips_documented() {
 #[tokio::test]
 async fn test_phpdoc_smart_return_skipped_when_documented() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_smart_ret_skip.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_smart_ret_skip.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1453,7 +1453,7 @@ async fn test_phpdoc_smart_return_skipped_when_documented() {
 #[tokio::test]
 async fn test_phpdoc_smart_var_nullable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_smart_nullable.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_smart_nullable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1477,7 +1477,7 @@ async fn test_phpdoc_smart_var_nullable() {
 #[tokio::test]
 async fn test_phpdoc_smart_return_nullable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_smart_ret_null.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_smart_ret_null.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1499,7 +1499,7 @@ async fn test_phpdoc_smart_return_nullable() {
 #[tokio::test]
 async fn test_phpdoc_smart_param_untyped() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_smart_untyped.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_smart_untyped.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1524,7 +1524,7 @@ async fn test_phpdoc_smart_param_untyped() {
 #[tokio::test]
 async fn test_phpdoc_smart_all_params_documented() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_smart_all_doc.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_smart_all_doc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1559,7 +1559,7 @@ async fn test_phpdoc_smart_all_params_documented() {
 #[tokio::test]
 async fn test_phpdoc_no_class_completion_for_unknown_tag() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_potato.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_potato.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class PotatoFactory {}\n",
@@ -1586,7 +1586,7 @@ async fn test_phpdoc_no_class_completion_for_unknown_tag() {
 #[tokio::test]
 async fn test_phpdoc_partial_tag_suggests_matching_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_throw.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_throw.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1610,7 +1610,7 @@ async fn test_phpdoc_partial_tag_suggests_matching_tags() {
     // Should NOT contain class items
     let class_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .filter(|i| i.kind == Some(CompletionItemKind::Class))
         .collect();
     assert!(
         class_items.is_empty(),
@@ -1624,7 +1624,7 @@ async fn test_phpdoc_partial_tag_suggests_matching_tags() {
 #[tokio::test]
 async fn test_phpdoc_partial_re_suggests_return_not_classes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_re.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_re.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Renderer {}\n",
@@ -1649,7 +1649,7 @@ async fn test_phpdoc_partial_re_suggests_return_not_classes() {
     // Should NOT contain Renderer or any class
     let class_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .filter(|i| i.kind == Some(CompletionItemKind::Class))
         .collect();
     assert!(
         class_items.is_empty(),
@@ -1662,7 +1662,7 @@ async fn test_phpdoc_partial_re_suggests_return_not_classes() {
 #[tokio::test]
 async fn test_phpdoc_at_sign_only_shows_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_at.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_at.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SomeClass {}\n",
@@ -1684,7 +1684,7 @@ async fn test_phpdoc_at_sign_only_shows_tags() {
     for item in &items {
         assert_eq!(
             item.kind,
-            Some(CompletionItemKind::KEYWORD),
+            Some(CompletionItemKind::Keyword),
             "All items in docblock @ context should be KEYWORD, got {:?} for '{}'",
             item.kind,
             item.label
@@ -1699,7 +1699,7 @@ async fn test_phpdoc_at_sign_only_shows_tags() {
 #[tokio::test]
 async fn test_phpdoc_return_void_no_type_hint_empty_body() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_void_no_hint.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_void_no_hint.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Demo {\n",
@@ -1735,7 +1735,7 @@ async fn test_phpdoc_return_void_no_type_hint_empty_body() {
 #[tokio::test]
 async fn test_phpdoc_return_no_type_hint_with_return_value() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_no_hint_ret.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_no_hint_ret.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Demo {\n",
@@ -1770,7 +1770,7 @@ async fn test_phpdoc_return_no_type_hint_with_return_value() {
 #[tokio::test]
 async fn test_phpdoc_return_void_no_hint_bare_return() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_no_hint_bare.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_no_hint_bare.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Demo {\n",
@@ -1803,7 +1803,7 @@ async fn test_phpdoc_return_void_no_hint_bare_return() {
 #[tokio::test]
 async fn test_phpdoc_return_void_no_hint_closure_return() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_no_hint_closure.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_no_hint_closure.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Demo {\n",
@@ -1835,7 +1835,7 @@ async fn test_phpdoc_return_void_no_hint_closure_return() {
 #[tokio::test]
 async fn test_phpdoc_inline_var_sorts_first() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_inline_sort.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_inline_sort.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -1881,7 +1881,7 @@ async fn test_phpdoc_inline_var_sorts_first() {
 #[tokio::test]
 async fn test_phpdoc_inline_var_inferred_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_inline_inferred.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_inline_inferred.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -1928,7 +1928,7 @@ async fn test_phpdoc_inline_var_inferred_type() {
 #[tokio::test]
 async fn test_phpdoc_inline_var_no_inferred_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_inline_no_infer.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_inline_no_infer.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -1961,7 +1961,7 @@ async fn test_phpdoc_inline_var_no_inferred_type() {
     );
     assert_eq!(
         v.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Inline @var without inferred type should use snippet format"
     );
     assert!(
@@ -1975,7 +1975,7 @@ async fn test_phpdoc_inline_var_no_inferred_type() {
 #[tokio::test]
 async fn test_phpdoc_unknown_context_var_snippet() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_unknown_var.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_unknown_var.php").unwrap();
     // Docblock at file level, not above any declaration
     let text = concat!("<?php\n", "/**\n", " * @\n", " */\n",);
 
@@ -2000,7 +2000,7 @@ async fn test_phpdoc_unknown_context_var_snippet() {
     );
     assert_eq!(
         v.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Unknown-context @var should have SNIPPET insert format"
     );
 }
@@ -2018,7 +2018,7 @@ async fn test_phpdoc_template_enrichment_param() {
             "<?php\nnamespace App;\n/**\n * @template T\n */\nclass Collection {}\n",
         )],
     );
-    let uri = Url::parse("file:///phpdoc_enrich_param.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_enrich_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Collection;\n",
@@ -2049,7 +2049,7 @@ async fn test_phpdoc_template_enrichment_param() {
     );
     assert_eq!(
         first.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Enriched @param should use snippet format"
     );
 }
@@ -2065,7 +2065,7 @@ async fn test_phpdoc_template_enrichment_return() {
             "<?php\nnamespace App;\n/**\n * @template T\n */\nclass Collection {}\n",
         )],
     );
-    let uri = Url::parse("file:///phpdoc_enrich_return.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_enrich_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Collection;\n",
@@ -2093,7 +2093,7 @@ async fn test_phpdoc_template_enrichment_return() {
     );
     assert_eq!(
         r.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Enriched @return should use snippet format"
     );
 }
@@ -2113,7 +2113,7 @@ async fn test_phpdoc_template_enrichment_var_property() {
             "<?php\nnamespace App;\n/**\n * @template T\n */\nclass Collection {}\n",
         )],
     );
-    let uri = Url::parse("file:///phpdoc_enrich_var.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_enrich_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Collection;\n",
@@ -2148,7 +2148,7 @@ async fn test_phpdoc_template_enrichment_var_property() {
     );
     assert_eq!(
         v.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Enriched @var should use snippet format"
     );
 }
@@ -2163,7 +2163,7 @@ async fn test_phpdoc_template_enrichment_multiple_params() {
             "<?php\nnamespace App;\n/**\n * @template TKey\n * @template TValue\n */\nclass Map {}\n",
         )],
     );
-    let uri = Url::parse("file:///phpdoc_enrich_multi.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_enrich_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Map;\n",
@@ -2191,7 +2191,7 @@ async fn test_phpdoc_template_enrichment_multiple_params() {
     );
     assert_eq!(
         param_items[0].insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Enriched @param should use snippet format"
     );
 
@@ -2211,7 +2211,7 @@ async fn test_phpdoc_template_enrichment_multiple_params() {
     );
     assert_eq!(
         r.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Enriched @return should use snippet format"
     );
 }
@@ -2224,7 +2224,7 @@ async fn test_phpdoc_template_enrichment_multiple_params() {
 #[tokio::test]
 async fn test_phpdoc_inline_var_method_call_not_assignment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_inline_method_call.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_inline_method_call.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -2255,7 +2255,7 @@ async fn test_phpdoc_inline_var_method_call_not_assignment() {
     );
     assert_eq!(
         v.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Should be a snippet with tab stops"
     );
 }
@@ -2265,7 +2265,7 @@ async fn test_phpdoc_inline_var_method_call_not_assignment() {
 #[tokio::test]
 async fn test_phpdoc_inline_var_blank_line_gap() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_inline_blank_gap.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_inline_blank_gap.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -2295,7 +2295,7 @@ async fn test_phpdoc_inline_var_blank_line_gap() {
     );
     assert_eq!(
         v.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Should be a snippet with tab stops"
     );
 }
@@ -2305,7 +2305,7 @@ async fn test_phpdoc_inline_var_blank_line_gap() {
 #[tokio::test]
 async fn test_phpdoc_inline_var_immediate_assignment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_inline_immediate.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_inline_immediate.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -2338,7 +2338,7 @@ async fn test_phpdoc_inline_var_immediate_assignment() {
     );
     assert_eq!(
         v.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Inline @var with inferred type should be a snippet with tab stops"
     );
 }
@@ -2355,7 +2355,7 @@ async fn test_phpdoc_inline_var_enriched_with_templates() {
             "<?php\nnamespace App;\n/**\n * @template TKey\n * @template TValue\n */\nclass Collection {}\n",
         )],
     );
-    let uri = Url::parse("file:///phpdoc_inline_enrich.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_inline_enrich.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Collection;\n",
@@ -2388,7 +2388,7 @@ async fn test_phpdoc_inline_var_enriched_with_templates() {
     );
     assert_eq!(
         v.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Enriched inline @var should use snippet format"
     );
 }
@@ -2399,7 +2399,7 @@ async fn test_phpdoc_inline_var_enriched_with_templates() {
 #[tokio::test]
 async fn test_phpdoc_inline_var_usage_not_assignment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_inline_usage.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_inline_usage.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -2437,7 +2437,7 @@ async fn test_phpdoc_smart_var_property_with_v_prefix() {
     // When typing `@v` (not bare `@`), the smart pre-filled @var should
     // still appear for a typed property — not the generic `@var Type $var`.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_var_v_prefix.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_var_v_prefix.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -2477,7 +2477,7 @@ async fn test_phpdoc_smart_var_promoted_property_bare_at() {
     // A docblock above a promoted constructor property should detect
     // Property context and offer smart @var with the type hint.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_promoted_bare.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_promoted_bare.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -2512,7 +2512,7 @@ async fn test_phpdoc_smart_var_promoted_property_with_v_prefix() {
     // Typing `@v` above a promoted constructor property should still
     // produce the smart pre-filled @var, not the generic snippet.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_promoted_v.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_promoted_v.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -2559,7 +2559,7 @@ async fn test_phpdoc_smart_var_promoted_property_enriched() {
             "<?php\nnamespace App;\n/**\n * @template TKey\n * @template TModel\n */\nclass Collection {}\n",
         )],
     );
-    let uri = Url::parse("file:///phpdoc_promoted_enriched.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_promoted_enriched.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Collection;\n",
@@ -2591,7 +2591,7 @@ async fn test_phpdoc_smart_var_promoted_property_enriched() {
     // Insert text should use snippet format with tab stops on template params.
     assert_eq!(
         v.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Enriched property @var should use snippet format. insert_text: {:?}",
         v.insert_text
     );
@@ -2608,7 +2608,7 @@ async fn test_phpdoc_smart_var_no_generic_when_smart_available() {
     // When a smart @var is available, the generic `@var Type $var` snippet
     // must NOT appear alongside it.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_no_generic.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_no_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -2647,7 +2647,7 @@ async fn test_phpdoc_smart_var_property_retrigger_after_v() {
     // gets completions, then types `v` and the editor re-requests.
     // The file content at that point has `@v` in it.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_retrigger_v.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_retrigger_v.php").unwrap();
 
     // Step 1: bare `@` — should get smart @var
     let text_at = concat!(
@@ -2672,7 +2672,7 @@ async fn test_phpdoc_smart_var_property_retrigger_after_v() {
 
     // Step 2: user types `v`, editor re-requests with `@v` in the content.
     // Use a different URI to avoid cached state from step 1.
-    let uri2 = Url::parse("file:///phpdoc_retrigger_v2.php").unwrap();
+    let uri2 = Uri::parse("file:///phpdoc_retrigger_v2.php").unwrap();
     let text_v = concat!(
         "<?php\n",
         "class MyService {\n",
@@ -2719,7 +2719,7 @@ async fn test_phpdoc_smart_var_property_open_docblock_v_prefix() {
     // context detection falls back to scanning text after the cursor.
     // Make sure the smart @var still works with an unclosed docblock.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_open_v_prefix.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_open_v_prefix.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -2756,7 +2756,7 @@ async fn test_phpdoc_smart_var_property_open_docblock_v_prefix() {
 #[tokio::test]
 async fn test_phpdoc_inline_var_compound_assignment_is_unknown() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///phpdoc_inline_compound.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_inline_compound.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -2794,7 +2794,7 @@ async fn test_phpdoc_inline_var_compound_assignment_is_unknown() {
 #[tokio::test]
 async fn test_phpdoc_param_type_excludes_traits() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/phpdoc_trait_filter.php").unwrap();
+    let uri = Uri::parse("file:///test/phpdoc_trait_filter.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2815,7 +2815,7 @@ async fn test_phpdoc_param_type_excludes_traits() {
     let items = complete_at(&backend, &uri, src, 8, 17).await;
     let class_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .filter(|i| i.kind == Some(CompletionItemKind::Class))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2845,7 +2845,7 @@ async fn test_phpdoc_param_type_excludes_traits() {
 #[tokio::test]
 async fn test_phpdoc_return_type_excludes_traits() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/phpdoc_return_trait.php").unwrap();
+    let uri = Uri::parse("file:///test/phpdoc_return_trait.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2864,7 +2864,7 @@ async fn test_phpdoc_return_type_excludes_traits() {
     let items = complete_at(&backend, &uri, src, 6, 18).await;
     let class_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .filter(|i| i.kind == Some(CompletionItemKind::Class))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2884,7 +2884,7 @@ async fn test_phpdoc_return_type_excludes_traits() {
 #[tokio::test]
 async fn test_phpdoc_var_type_excludes_traits() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/phpdoc_var_trait.php").unwrap();
+    let uri = Uri::parse("file:///test/phpdoc_var_trait.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -2903,7 +2903,7 @@ async fn test_phpdoc_var_type_excludes_traits() {
     let items = complete_at(&backend, &uri, src, 6, 15).await;
     let class_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .filter(|i| i.kind == Some(CompletionItemKind::Class))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2929,7 +2929,7 @@ async fn test_phpdoc_param_variable_uses_text_edit_with_dollar() {
     // a `text_edit` with an explicit replacement range covering the typed
     // `$…` prefix instead of using `insert_text`.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/phpdoc_var_text_edit.php").unwrap();
+    let uri = Uri::parse("file:///test/phpdoc_var_text_edit.php").unwrap();
 
     // Cursor is right after `$v` on the @param line — partial = "$v".
     let src = concat!(
@@ -2956,7 +2956,7 @@ async fn test_phpdoc_param_variable_uses_text_edit_with_dollar() {
     // Must use text_edit (not insert_text) so the editor replaces the
     // already-typed `$v` prefix rather than inserting after it.
     match &item.text_edit {
-        Some(CompletionTextEdit::Edit(te)) => {
+        Some(CompletionItemTextEdit::TextEdit(te)) => {
             assert_eq!(te.new_text, "$value", "text_edit new_text should be $value");
             // Range must start at the `$` (col 22) and end at cursor (col 24).
             assert_eq!(
@@ -2988,7 +2988,7 @@ async fn test_phpdoc_param_variable_uses_text_edit_with_dollar() {
 #[tokio::test]
 async fn test_phpdoc_param_variable_bare_dollar_text_edit_range() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/phpdoc_bare_dollar.php").unwrap();
+    let uri = Uri::parse("file:///test/phpdoc_bare_dollar.php").unwrap();
 
     // Cursor is right after `$` on the @param line — partial = "$".
     let src = concat!(
@@ -3013,7 +3013,7 @@ async fn test_phpdoc_param_variable_bare_dollar_text_edit_range() {
     let item = name_item.unwrap();
 
     match &item.text_edit {
-        Some(CompletionTextEdit::Edit(te)) => {
+        Some(CompletionItemTextEdit::TextEdit(te)) => {
             assert_eq!(te.new_text, "$name", "new_text should be $name");
             // Range covers just the `$` at col 21..22.
             assert_eq!(
@@ -3034,7 +3034,7 @@ async fn test_phpdoc_param_variable_bare_dollar_text_edit_range() {
 #[tokio::test]
 async fn test_phpdoc_throws_uses_throwable_filter_not_type_hint() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/phpdoc_throws_filter.php").unwrap();
+    let uri = Uri::parse("file:///test/phpdoc_throws_filter.php").unwrap();
 
     let src = concat!(
         "<?php\n",

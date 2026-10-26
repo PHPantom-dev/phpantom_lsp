@@ -1,6 +1,5 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{completion_response, create_psr4_workspace, create_test_backend, open_php};
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── parent:: completion tests ──────────────────────────────────────────────
 
@@ -8,7 +7,7 @@ use tower_lsp::lsp_types::*;
 async fn test_completion_parent_double_colon_shows_static_and_instance() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_basic.php").unwrap();
+    let uri = Uri::parse("file:///parent_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -22,40 +21,19 @@ async fn test_completion_parent_double_colon_shows_static_and_instance() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 7,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 7, 16, None).await;
     assert!(
         result.is_some(),
         "parent:: should return completion results"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -71,7 +49,7 @@ async fn test_completion_parent_double_colon_shows_static_and_instance() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -79,7 +57,7 @@ async fn test_completion_parent_double_colon_shows_static_and_instance() {
 async fn test_completion_parent_double_colon_excludes_private() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_vis.php").unwrap();
+    let uri = Uri::parse("file:///parent_vis.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -103,47 +81,26 @@ async fn test_completion_parent_double_colon_excludes_private() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 17,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 17, 16, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.label.as_str())
                 .collect();
             let const_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
 
@@ -199,7 +156,7 @@ async fn test_completion_parent_double_colon_excludes_private() {
                 "Should NOT include private constant"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -207,7 +164,7 @@ async fn test_completion_parent_double_colon_excludes_private() {
 async fn test_completion_parent_double_colon_includes_constants() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_const.php").unwrap();
+    let uri = Uri::parse("file:///parent_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -221,37 +178,16 @@ async fn test_completion_parent_double_colon_includes_constants() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 7,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 7, 16, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let const_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
 
@@ -264,7 +200,7 @@ async fn test_completion_parent_double_colon_includes_constants() {
                 "Should include constant 'APP_NAME'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -294,7 +230,7 @@ async fn test_completion_parent_double_colon_cross_file_psr4() {
         )],
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\BaseService;\n",
@@ -305,45 +241,24 @@ async fn test_completion_parent_double_colon_cross_file_psr4() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 4, 16, None).await;
     assert!(
         result.is_some(),
         "parent:: should resolve cross-file via PSR-4"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let const_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
 
@@ -371,7 +286,7 @@ async fn test_completion_parent_double_colon_cross_file_psr4() {
                 "Should include constant"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -379,7 +294,7 @@ async fn test_completion_parent_double_colon_cross_file_psr4() {
 async fn test_completion_parent_double_colon_with_grandparent() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_grandparent.php").unwrap();
+    let uri = Uri::parse("file:///parent_grandparent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Grandparent {\n",
@@ -397,37 +312,16 @@ async fn test_completion_parent_double_colon_with_grandparent() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 16, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -459,7 +353,7 @@ async fn test_completion_parent_double_colon_with_grandparent() {
                 "Should NOT include child's own 'test'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -467,7 +361,7 @@ async fn test_completion_parent_double_colon_with_grandparent() {
 async fn test_completion_parent_double_colon_no_parent_falls_back() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_none.php").unwrap();
+    let uri = Uri::parse("file:///parent_none.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Standalone {\n",
@@ -477,30 +371,9 @@ async fn test_completion_parent_double_colon_no_parent_falls_back() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 3, 16, None).await;
     // Should return None since there's no parent class
     assert!(
         result.is_none(),
@@ -512,7 +385,7 @@ async fn test_completion_parent_double_colon_no_parent_falls_back() {
 async fn test_completion_parent_double_colon_construct_and_magic_included() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_magic.php").unwrap();
+    let uri = Uri::parse("file:///parent_magic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -527,37 +400,16 @@ async fn test_completion_parent_double_colon_construct_and_magic_included() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 16, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -576,7 +428,7 @@ async fn test_completion_parent_double_colon_construct_and_magic_included() {
                 "Non-magic method should appear via parent::"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -586,7 +438,7 @@ async fn test_completion_parent_double_colon_construct_and_magic_included() {
 async fn test_completion_static_double_colon_suppressed_on_final_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///static_final.php").unwrap();
+    let uri = Uri::parse("file:///static_final.php").unwrap();
     let text = concat!(
         "<?php\n",
         "final class Singleton {\n",
@@ -597,30 +449,9 @@ async fn test_completion_static_double_colon_suppressed_on_final_class() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 4, 16, None).await;
     // Should return None since the class is final — static:: is suppressed
     assert!(
         result.is_none(),
@@ -633,7 +464,7 @@ async fn test_completion_static_double_colon_suppressed_on_final_class() {
 async fn test_completion_static_double_colon_works_on_non_final_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///static_non_final.php").unwrap();
+    let uri = Uri::parse("file:///static_non_final.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -643,37 +474,16 @@ async fn test_completion_static_double_colon_works_on_non_final_class() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 3, 16, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -683,7 +493,7 @@ async fn test_completion_static_double_colon_works_on_non_final_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -692,7 +502,7 @@ async fn test_completion_static_double_colon_works_on_non_final_class() {
 async fn test_completion_static_double_colon_suppressed_on_enum() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///static_enum.php").unwrap();
+    let uri = Uri::parse("file:///static_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Color {\n",
@@ -704,30 +514,9 @@ async fn test_completion_static_double_colon_suppressed_on_enum() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 5,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 5, 16, None).await;
     assert!(
         result.is_none(),
         "static:: in an enum should return None (enums are final)"
@@ -739,7 +528,7 @@ async fn test_completion_static_double_colon_suppressed_on_enum() {
 async fn test_completion_self_double_colon_works_on_final_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///self_final.php").unwrap();
+    let uri = Uri::parse("file:///self_final.php").unwrap();
     let text = concat!(
         "<?php\n",
         "final class Config {\n",
@@ -750,40 +539,19 @@ async fn test_completion_self_double_colon_works_on_final_class() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 4, 14, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let has_version = items.iter().any(|i| {
-                i.kind == Some(CompletionItemKind::CONSTANT)
+                i.kind == Some(CompletionItemKind::Constant)
                     && i.filter_text.as_deref() == Some("VERSION")
             });
             let has_get_version = items.iter().any(|i| {
-                i.kind == Some(CompletionItemKind::METHOD)
+                i.kind == Some(CompletionItemKind::Method)
                     && i.filter_text.as_deref() == Some("getVersion")
             });
             assert!(
@@ -797,7 +565,7 @@ async fn test_completion_self_double_colon_works_on_final_class() {
                 items.iter().map(|i| &i.label).collect::<Vec<_>>()
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -806,7 +574,7 @@ async fn test_completion_self_double_colon_works_on_final_class() {
 async fn test_completion_self_double_colon_includes_construct() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///self_construct.php").unwrap();
+    let uri = Uri::parse("file:///self_construct.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class MyService {\n",
@@ -818,37 +586,16 @@ async fn test_completion_self_double_colon_includes_construct() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 5,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 5, 14, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -866,7 +613,7 @@ async fn test_completion_self_double_colon_includes_construct() {
                 "self:: should include static methods"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -875,7 +622,7 @@ async fn test_completion_self_double_colon_includes_construct() {
 async fn test_completion_static_double_colon_includes_construct() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///static_construct.php").unwrap();
+    let uri = Uri::parse("file:///static_construct.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -887,37 +634,16 @@ async fn test_completion_static_double_colon_includes_construct() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 5,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 5, 16, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -931,7 +657,7 @@ async fn test_completion_static_double_colon_includes_construct() {
                 "static:: offers implemented magic methods like __clone"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -941,7 +667,7 @@ async fn test_completion_static_double_colon_includes_construct() {
 async fn test_completion_classname_double_colon_includes_construct() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///classname_construct.php").unwrap();
+    let uri = Uri::parse("file:///classname_construct.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -953,37 +679,16 @@ async fn test_completion_classname_double_colon_includes_construct() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 5,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 5, 16, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1001,7 +706,7 @@ async fn test_completion_classname_double_colon_includes_construct() {
                 "ClassName:: should include static methods"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1012,7 +717,7 @@ async fn test_completion_classname_double_colon_includes_construct() {
 async fn test_completion_other_classname_double_colon_includes_construct() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///other_class_construct.php").unwrap();
+    let uri = Uri::parse("file:///other_class_construct.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -1027,37 +732,16 @@ async fn test_completion_other_classname_double_colon_includes_construct() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 14, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1075,7 +759,7 @@ async fn test_completion_other_classname_double_colon_includes_construct() {
                 "Base:: should include static methods"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1084,7 +768,7 @@ async fn test_completion_other_classname_double_colon_includes_construct() {
 async fn test_completion_arrow_access_still_excludes_construct() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///arrow_no_construct.php").unwrap();
+    let uri = Uri::parse("file:///arrow_no_construct.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Thing {\n",
@@ -1099,37 +783,16 @@ async fn test_completion_arrow_access_still_excludes_construct() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 12, None).await;
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1143,6 +806,6 @@ async fn test_completion_arrow_access_still_excludes_construct() {
                 "Regular methods should still appear via -> access"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }

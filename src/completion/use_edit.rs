@@ -13,7 +13,7 @@
 //! written by [`crate::blade::use_block`].
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::blade::use_block::TemplateUseBlock;
@@ -455,8 +455,8 @@ impl Backend {
         let Some(template) = self.get_file_content_arc(uri) else {
             return analyze_use_block_in(content, block);
         };
-        let maps = self.blade_source_maps.read();
-        crate::blade::use_block::analyze_template_use_block(&template, maps.get(uri))
+        let source_map = self.blade_source_map(uri);
+        crate::blade::use_block::analyze_template_use_block(&template, source_map.as_deref())
     }
 }
 

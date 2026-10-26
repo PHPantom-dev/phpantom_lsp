@@ -1,0 +1,7 @@
+// test: A first-class callable in a match arm
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, QueryBuilderDqlFirstClassCallableTest::testFirstClassCallableInMatchArm.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/query-builder-first-class-callable.php
+---

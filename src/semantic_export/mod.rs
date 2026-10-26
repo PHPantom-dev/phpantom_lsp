@@ -326,7 +326,7 @@ fn export_document(backend: &Backend, source: &SourceDocument) -> ExportDocument
     let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
 
     let context = backend.file_context(&source.uri);
-    let symbol_map = backend.symbol_maps.read().get(&source.uri).cloned();
+    let symbol_map = backend.symbol_map_for(&source.uri);
     let mut declarations = export_declarations(backend, source, &context, symbol_map.as_deref());
     let mut output = SpanExportOutput::default();
 
@@ -353,17 +353,22 @@ fn export_document(backend: &Backend, source: &SourceDocument) -> ExportDocument
         }
     }
 
-    if let Some(errors) = backend.parse_errors.read().get(&source.uri) {
+    if let Some(state) = backend.file_state(&source.uri) {
         output
             .diagnostics
-            .extend(errors.iter().map(|(message, start, end)| ExportDiagnostic {
-                kind: ExportDiagnosticKind::ParseError,
-                range: ByteRange {
-                    start: *start,
-                    end: (*end).max(*start),
-                },
-                message: message.clone(),
-            }));
+            .extend(
+                state
+                    .parse_errors
+                    .iter()
+                    .map(|(message, start, end)| ExportDiagnostic {
+                        kind: ExportDiagnosticKind::ParseError,
+                        range: ByteRange {
+                            start: *start,
+                            end: (*end).max(*start),
+                        },
+                        message: message.clone(),
+                    }),
+            );
     }
 
     let mut calls = symbol_map.as_deref().map_or_else(Vec::new, |map| {

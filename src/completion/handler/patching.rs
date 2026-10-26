@@ -3,9 +3,10 @@
 //! nothing after it).  Shared by [`super::member_access`] and
 //! [`super::named_args`].
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use crate::Backend;
+use crate::text_position::utf16_col_to_byte_offset;
 
 impl Backend {
     /// Patch incomplete member-access expressions for parser recovery.
@@ -17,16 +18,11 @@ impl Backend {
     /// recover the surrounding structure.
     pub(super) fn patch_incomplete_member_access(content: &str, position: Position) -> String {
         let line_idx = position.line as usize;
-        let col = position.character as usize;
         let mut result = String::with_capacity(content.len() + 4);
 
         for (i, line) in content.lines().enumerate() {
             if i == line_idx {
-                let byte_col = line
-                    .char_indices()
-                    .nth(col)
-                    .map(|(idx, _)| idx)
-                    .unwrap_or(line.len());
+                let byte_col = utf16_col_to_byte_offset(line, position.character);
                 // Only patch when the cursor is right after `->` or
                 // `?->` with nothing meaningful following it.
                 let before = &line[..byte_col];
@@ -60,16 +56,11 @@ impl Backend {
     /// surrounding class/function structure.
     pub(super) fn patch_content_at_cursor(content: &str, position: Position) -> String {
         let line_idx = position.line as usize;
-        let col = position.character as usize;
         let mut result = String::with_capacity(content.len() + 2);
 
         for (i, line) in content.lines().enumerate() {
             if i == line_idx {
-                let byte_col = line
-                    .char_indices()
-                    .nth(col)
-                    .map(|(idx, _)| idx)
-                    .unwrap_or(line.len());
+                let byte_col = utf16_col_to_byte_offset(line, position.character);
                 result.push_str(&line[..byte_col]);
                 result.push_str(");");
                 result.push_str(&line[byte_col..]);

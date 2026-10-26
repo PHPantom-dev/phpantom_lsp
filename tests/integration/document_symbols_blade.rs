@@ -7,8 +7,8 @@ mod tests {
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
         create_psr4_workspace, open_blade_template,
     };
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     /// The template a class-based component renders, which is also a
     /// Blade file with an outline of its own.
@@ -68,7 +68,7 @@ mod tests {
             .await
             .unwrap()
         {
-            Some(DocumentSymbolResponse::Nested(symbols)) => symbols,
+            Some(DocumentSymbolResponse::DocumentSymbolList(symbols)) => symbols,
             None => Vec::new(),
             other => panic!("expected a nested outline, got {other:?}"),
         }
@@ -127,7 +127,7 @@ mod tests {
                 Some("App\\View\\Components\\Alert".to_string())
             )]
         );
-        assert_eq!(symbols[0].kind, SymbolKind::CLASS);
+        assert_eq!(symbols[0].kind, SymbolKind::Class);
         assert_eq!(symbols[0].range.end.line, 2);
     }
 

@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::atom::{Atom, AtomMap, atom};
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::PhpType;
 use crate::types::{
     ClassInfo, ELOQUENT_PIVOT_FQN, PivotAccessor, PivotRelation, PropertyInfo, PropertySource,
@@ -103,7 +104,7 @@ fn pivot_type_for(
     declaring: &ClassInfo,
     return_type: &PhpType,
     config: Option<&PivotRelation>,
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
     if let Some(pivot) = extract_pivot_type_typed(return_type)
         && let Some(name) = pivot.base_name()
@@ -130,7 +131,7 @@ fn pivot_type_for(
 /// accessor names coexist on the target model.
 pub(crate) fn build_pivot_index(
     classes: &[(String, Arc<ClassInfo>)],
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    loader: &ResolvedClassLoader<'_>,
 ) -> LaravelPivotIndex {
     let mut index = LaravelPivotIndex::default();
     let base = base_pivot_type();

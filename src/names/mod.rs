@@ -12,7 +12,8 @@ mod written;
 pub(crate) use docblock_type_names::{DocblockTypeNames, scan_declares_docblock_type_name};
 pub use resolved::OwnedResolvedNames;
 pub(crate) use written::{
-    function_lookup_names, lookup_import, resolve_code_class_name, resolve_code_php_type_names,
-    resolve_name_via_loader, resolve_php_type_names, resolve_source_php_type_names, resolve_to_fqn,
-    shorten_class_fqn, shorten_from_fqn, shorten_type_for_file, written_name_region,
+    fill_generic_type_defaults, function_lookup_names, lookup_import, resolve_code_class_name,
+    resolve_code_php_type_names, resolve_name_via_loader, resolve_php_type_names,
+    resolve_source_php_type_names, resolve_to_fqn, shorten_class_fqn, shorten_from_fqn,
+    shorten_type_for_file, written_name_region,
 };

@@ -15,6 +15,7 @@ use super::*;
 use std::cell::OnceCell;
 
 use crate::atom::{Atom, AtomMap};
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::references::member_scope::MemberScope;
 use crate::symbol_map::SymbolKind;
@@ -48,7 +49,7 @@ impl Backend {
         let method = class.get_method(member_name)?;
         let kind = MagicMemberKind::of(method)?;
         let use_name = kind.use_name(&method.name)?;
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         if !extends_eloquent_model(&class, &class_loader) {
             return None;
         }
@@ -56,6 +57,23 @@ impl Backend {
             model: normalize_fqn(&class.fqn()),
             kind,
             use_name: crate::atom::atom(&use_name),
+        })
+    }
+
+    /// Whether a model in `scope` declares `member_name` as a relationship
+    /// method, which the model also exposes as a property of that name.
+    pub(super) fn is_eloquent_relationship_in(
+        &self,
+        scope: &MemberScope,
+        member_name: &str,
+    ) -> bool {
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
+        scope.indexed().iter().any(|fqn| {
+            self.find_or_load_class(fqn).is_some_and(|class| {
+                class.get_method(member_name).and_then(MagicMemberKind::of)
+                    == Some(MagicMemberKind::Relationship)
+                    && extends_eloquent_model(&class, &class_loader)
+            })
         })
     }
 

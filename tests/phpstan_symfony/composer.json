@@ -1,0 +1,20 @@
+{
+    "name": "phpantom/phpstan-symfony-fixtures",
+    "description": "The project PHPStan's Symfony extension type fixtures run in",
+    "type": "project",
+    "require": {
+        "symfony/browser-kit": "^7.4",
+        "symfony/cache": "^7.4",
+        "symfony/config": "^7.4",
+        "symfony/console": "^7.4",
+        "symfony/dependency-injection": "^7.4",
+        "symfony/form": "^7.4",
+        "symfony/framework-bundle": "^7.4",
+        "symfony/http-foundation": "^7.4",
+        "symfony/http-kernel": "^7.4",
+        "symfony/messenger": "^7.4",
+        "symfony/options-resolver": "^7.4",
+        "symfony/property-access": "^7.4",
+        "symfony/serializer": "^7.4"
+    }
+}

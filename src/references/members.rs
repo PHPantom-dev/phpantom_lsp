@@ -10,7 +10,7 @@
 
 use super::*;
 
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::atom::{Atom, AtomMap};
 use crate::references::eloquent::EloquentMagicMember;
@@ -21,12 +21,76 @@ use crate::symbol_map::SymbolKind;
 use crate::symbol_map::SymbolMap;
 use crate::text_position::offset_to_position;
 
+/// Which kind of member a reference search is after.
+///
+/// A method and a property can share a name (`$email` and `email()` on a
+/// value object), so the name and static-ness alone do not say which one
+/// an access or a declaration belongs to.  Constants and enum cases count
+/// as values: their accesses are spelled like a static property's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum MemberRefKind {
+    Method,
+    /// A property, a constant, or an enum case.
+    Value,
+    /// A reference that names a member without saying which kind: a
+    /// `@see` target, PHPUnit coverage metadata (which can name a property
+    /// hook), or a Symfony property path (which the property accessor
+    /// reaches through a getter as readily as through the property).
+    Either,
+}
+
+impl MemberRefKind {
+    pub(crate) fn of_method(is_method: bool) -> Self {
+        if is_method { Self::Method } else { Self::Value }
+    }
+
+    /// The kind of member an access span names, or `None` for any other
+    /// span.
+    pub(crate) fn of_access(kind: &SymbolKind) -> Option<Self> {
+        let SymbolKind::MemberAccess {
+            is_method_call,
+            docblock_ref,
+            ..
+        } = kind
+        else {
+            return None;
+        };
+        Some(if *is_method_call {
+            Self::Method
+        } else if docblock_ref.is_reference() {
+            Self::Either
+        } else {
+            Self::Value
+        })
+    }
+
+    /// Whether a member of kind `other` can be the one searched for.
+    pub(crate) fn admits(self, other: Self) -> bool {
+        self == other || self == Self::Either || other == Self::Either
+    }
+
+    /// Whether the access span `kind` can name the member searched for.
+    pub(crate) fn admits_access(self, kind: &SymbolKind) -> bool {
+        Self::of_access(kind).is_some_and(|access| self.admits(access))
+    }
+}
+
+/// The member [`push_member_access_matches`](Backend::push_member_access_matches)
+/// collects the accesses of.
+#[derive(Clone, Copy)]
+struct SearchedMember {
+    name: Atom,
+    is_static: bool,
+    kind: MemberRefKind,
+}
+
 #[derive(Clone)]
 pub(crate) struct MemberDeclarationReferenceQuery {
     pub(crate) uri: Arc<str>,
     pub(crate) offset: u32,
     pub(crate) member: Atom,
     pub(crate) is_static: bool,
+    pub(crate) kind: MemberRefKind,
 }
 
 impl Backend {
@@ -38,7 +102,7 @@ impl Backend {
         include_declaration: bool,
     ) -> Vec<Location> {
         let targets = {
-            let index = self.laravel_macros.read();
+            let index = self.laravel.macros.read();
             index.targets_at(uri, span_start, name)
         };
         if targets.is_empty() {
@@ -155,7 +219,7 @@ impl Backend {
         let Some(targets) = targets else {
             return;
         };
-        let index = self.laravel_macros.read();
+        let index = self.laravel.macros.read();
         for target in targets.indexed() {
             if !index.has_macro(target, name) {
                 continue;
@@ -166,7 +230,7 @@ impl Backend {
             let Some(content) = self.get_file_content_arc(uri) else {
                 continue;
             };
-            let Ok(parsed_uri) = Url::parse(uri) else {
+            let Some(parsed_uri) = crate::util::parse_url(uri) else {
                 continue;
             };
             let start = offset_to_position(&content, offset as usize + 1);
@@ -180,14 +244,14 @@ impl Backend {
         locations: &mut Vec<Location>,
         name: &str,
     ) {
-        let index = self.laravel_macros.read();
+        let index = self.laravel.macros.read();
         let Some((uri, offset)) = index.unique_definition_for_name(name) else {
             return;
         };
         let Some(content) = self.get_file_content_arc(uri) else {
             return;
         };
-        let Ok(parsed_uri) = Url::parse(uri) else {
+        let Some(parsed_uri) = crate::util::parse_url(uri) else {
             return;
         };
         let start = offset_to_position(&content, offset as usize + 1);
@@ -206,12 +270,14 @@ impl Backend {
         offset: u32,
         member_name: &str,
         is_static: bool,
+        kind: MemberRefKind,
     ) -> Vec<Location> {
         self.member_declaration_references_batch(&[MemberDeclarationReferenceQuery {
             uri: Arc::from(uri),
             offset,
             member: crate::atom::atom(member_name),
             is_static,
+            kind,
         }])
         .pop()
         .unwrap_or_default()
@@ -246,6 +312,7 @@ impl Backend {
         struct PreparedQuery {
             member: Atom,
             is_static: bool,
+            kind: MemberRefKind,
             hierarchy: Option<MemberScope>,
         }
 
@@ -259,6 +326,7 @@ impl Backend {
             .map(|query| PreparedQuery {
                 member: query.member,
                 is_static: query.is_static,
+                kind: query.kind,
                 hierarchy: self
                     .resolve_member_declaration_scopes(
                         &query.uri,
@@ -331,9 +399,8 @@ impl Backend {
                 if let Some(warm) = warm {
                     let mut matches = Vec::new();
                     for span_index in span_indices {
-                        let SymbolKind::MemberAccess { member_name, .. } =
-                            &symbol_map.spans[span_index].kind
-                        else {
+                        let span_kind = &symbol_map.spans[span_index].kind;
+                        let SymbolKind::MemberAccess { member_name, .. } = span_kind else {
                             continue;
                         };
                         let Some(query_indices) = by_member.get(member_name) else {
@@ -343,10 +410,13 @@ impl Backend {
                             continue;
                         };
                         for &query_index in query_indices {
-                            let Some(hierarchy) = prepared[query_index].hierarchy.as_ref() else {
+                            let query = &prepared[query_index];
+                            let Some(hierarchy) = query.hierarchy.as_ref() else {
                                 continue;
                             };
-                            if subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn)) {
+                            if query.kind.admits_access(span_kind)
+                                && subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn))
+                            {
                                 matches.push((
                                     query_index,
                                     Location {
@@ -414,6 +484,9 @@ impl Backend {
 
                     for &query_index in query_indices {
                         let query = &prepared[query_index];
+                        if !query.kind.admits_access(&span.kind) {
+                            continue;
+                        }
                         if let Some(hierarchy) = &query.hierarchy {
                             if !subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn)) {
                                 continue;
@@ -479,10 +552,14 @@ impl Backend {
     /// When `hierarchy` is `None`, all references with a matching member
     /// name and static-ness are returned (the v1 behaviour, kept as a
     /// fallback when the target class cannot be determined).
+    ///
+    /// Either way, only accesses and declarations that `target_kind`
+    /// admits count, so a property's search skips the method of its name.
     pub(super) fn find_member_references(
         &self,
         target_member: &str,
         target_is_static: bool,
+        target_kind: MemberRefKind,
         include_declaration: bool,
         hierarchy: Option<&MemberScope>,
         declaration_scope: Option<&MemberScope>,
@@ -503,8 +580,9 @@ impl Backend {
                         .member_access_indices(target_member)
                         .iter()
                         .any(|&idx| match &symbol_map.spans[idx].kind {
-                            SymbolKind::MemberAccess { is_static, .. } => {
-                                hierarchy.is_some() || *is_static == target_is_static
+                            kind @ SymbolKind::MemberAccess { is_static, .. } => {
+                                (hierarchy.is_some() || *is_static == target_is_static)
+                                    && target_kind.admits_access(kind)
                             }
                             _ => false,
                         });
@@ -519,8 +597,11 @@ impl Backend {
                     self.push_member_access_matches(
                         file,
                         symbol_map,
-                        member,
-                        target_is_static,
+                        SearchedMember {
+                            name: member,
+                            is_static: target_is_static,
+                            kind: target_kind,
+                        },
                         hierarchy,
                         locations,
                     );
@@ -537,8 +618,12 @@ impl Backend {
 
                 for span in &symbol_map.spans {
                     match &span.kind {
-                        SymbolKind::MemberDeclaration { name, is_static }
-                            if name == target_member =>
+                        SymbolKind::MemberDeclaration {
+                            name,
+                            is_static,
+                            is_method,
+                        } if name == target_member
+                            && target_kind.admits(MemberRefKind::of_method(*is_method)) =>
                         {
                             if *is_static != target_is_static && hierarchy.is_none() {
                                 continue;
@@ -575,6 +660,9 @@ impl Backend {
                 // MemberDeclaration) because GTD relies on the Variable
                 // kind to jump to the type hint.  Scan the uri_classes_index
                 // to pick up property declaration sites.
+                if !target_kind.admits(MemberRefKind::Value) {
+                    return;
+                }
                 if let Some(classes) = self.shared_classes_for_uri(file_uri) {
                     for class in &classes {
                         if let Some(hier) = declaration_scope.or(hierarchy)
@@ -619,16 +707,21 @@ impl Backend {
     /// `$x->method()` makes common names such as `find` unusably noisy in
     /// large projects.
     ///
-    /// Without one, every access of the right static-ness matches.
+    /// Without one, every access of the right static-ness matches.  An
+    /// access of a kind the searched member's does not admit never does.
     fn push_member_access_matches(
         &self,
         file: &CandidateFile<'_>,
         symbol_map: &Arc<SymbolMap>,
-        member: Atom,
-        target_is_static: bool,
+        searched: SearchedMember,
         hierarchy: Option<&MemberScope>,
         locations: &mut Vec<Location>,
     ) {
+        let SearchedMember {
+            name: member,
+            is_static: target_is_static,
+            kind: target_kind,
+        } = searched;
         let access_indices = symbol_map.member_access_indices(&member);
 
         let Some(hierarchy) = hierarchy else {
@@ -637,7 +730,7 @@ impl Backend {
                 let SymbolKind::MemberAccess { is_static, .. } = &span.kind else {
                     continue;
                 };
-                if *is_static != target_is_static {
+                if *is_static != target_is_static || !target_kind.admits_access(&span.kind) {
                     continue;
                 }
                 let Some(location) = file.location(span.start, span.end) else {
@@ -655,6 +748,9 @@ impl Backend {
             return;
         };
         for &span_index in access_indices {
+            if !target_kind.admits_access(&symbol_map.spans[span_index].kind) {
+                continue;
+            }
             let Some((range, targets)) = resolved.resolved_access(span_index) else {
                 continue;
             };

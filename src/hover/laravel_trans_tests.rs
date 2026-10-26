@@ -1,6 +1,6 @@
 use super::*;
 use crate::test_fixtures::make_backend;
-use tower_lsp::lsp_types::Url;
+use tower_lsp_server::gen_lsp_types::Uri;
 
 #[test]
 fn translation_hover_lists_locales_values_and_links_from_both_roots() {
@@ -48,7 +48,7 @@ fn translation_hover_lists_locales_values_and_links_from_both_roots() {
 
 #[test]
 fn translation_hover_links_custom_paths_and_escapes_markdown_values() {
-    let uri = Url::parse("file:///vendor/package/translations/en.json").unwrap();
+    let uri = Uri::parse("file:///vendor/package/translations/en.json").unwrap();
     let detail = locale_detail("en", &uri, 5, Some("Hello `name`"));
     assert!(detail.contains("`` Hello `name` ``"));
     assert!(detail.contains("[\u{60}/vendor/package/translations/en.json\u{60}](<file:///vendor/package/translations/en.json#L6>)"));

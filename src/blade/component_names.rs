@@ -38,7 +38,7 @@ impl Backend {
     /// under it has a view name to be matched against in the first place.
     pub(crate) fn anonymous_component_namespaces(&self) -> Vec<AnonymousNamespace> {
         let (mut namespaces, paths) = {
-            let resources = self.laravel_provider_resources.read();
+            let resources = self.laravel.provider_resources.read();
             (
                 resources.anonymous_component_namespaces.clone(),
                 resources.anonymous_component_paths.clone(),

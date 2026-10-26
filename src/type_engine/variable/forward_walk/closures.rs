@@ -8,9 +8,17 @@ use crate::atom::bytes_to_str;
 use crate::php_type::PhpType;
 
 // ─── Closure return edges ───────────────────────────────────────────────────
+//
+// The branch merge drops a branch that returns, because such a branch does
+// not reach the statement after the `if`.  The end of a closure body is not
+// that statement: a by-reference capture written on a path that returns
+// early is visible to the caller all the same.  So a `return` records the
+// state it leaves with in the walk's innermost return frame (see
+// [`WalkFlow::return_edges`]), and the walk that opened the frame folds
+// those states into the body's exit state.
 
-/// What one entry of the [`RETURN_EDGES`] stack is doing.
-enum ReturnFrame {
+/// What one entry of a walk's return-edge stack is doing.
+pub(crate) enum ReturnFrame {
     /// Accumulates the states that `return` out of the body being walked.
     /// `None` until the first `return` is seen.
     ///
@@ -22,74 +30,57 @@ enum ReturnFrame {
     Barrier,
 }
 
-thread_local! {
-    /// One frame per body being walked for the types it writes to its
-    /// `use (&$x)` captures, innermost last.
-    ///
-    /// The branch merge drops a branch that returns, because such a branch
-    /// does not reach the statement after the `if`.  The end of a closure
-    /// body is not that statement: a by-reference capture written on a
-    /// path that returns early is visible to the caller all the same.  So
-    /// a `return` records the state it leaves with here, and the walk that
-    /// opened the frame folds those states into the body's exit state.
-    ///
-    /// Set and cleared within a single synchronous walk, like the loop
-    /// exit edges in `loop_control`.
-    static RETURN_EDGES: RefCell<Vec<ReturnFrame>> = const { RefCell::new(Vec::new()) };
-}
-
 /// Closes the frame [`push_return_frame`] opened.
 ///
 /// Dropping the guard without calling [`Self::finish`] (a panic in the
-/// walk, which the request handler catches while the thread lives on)
-/// still pops the frame, so later `return`s on the thread do not feed a
-/// leaked one.
-pub(crate) struct ReturnFrameGuard {
+/// walk) still pops the frame, so the frames of the bodies around it stay
+/// aligned with the walk that owns them.
+pub(crate) struct ReturnFrameGuard<'f> {
+    flow: &'f WalkFlow,
     open: bool,
 }
 
-impl ReturnFrameGuard {
+impl ReturnFrameGuard<'_> {
     /// Close the frame and return the state its `return`s carried out, or
     /// `None` when the body has no reachable `return`.
     pub(crate) fn finish(mut self) -> Option<ScopeState> {
         self.open = false;
-        pop_return_frame()
+        pop_return_frame(self.flow)
     }
 }
 
-impl Drop for ReturnFrameGuard {
+impl Drop for ReturnFrameGuard<'_> {
     fn drop(&mut self) {
         if self.open {
-            pop_return_frame();
+            pop_return_frame(self.flow);
         }
     }
 }
 
 /// Open a frame for a closure body about to be walked for its by-reference
 /// captures.
-pub(crate) fn push_return_frame() -> ReturnFrameGuard {
-    RETURN_EDGES.with(|frames| frames.borrow_mut().push(ReturnFrame::Open(None)));
-    ReturnFrameGuard { open: true }
+pub(crate) fn push_return_frame(flow: &WalkFlow) -> ReturnFrameGuard<'_> {
+    flow.return_edges.borrow_mut().push(ReturnFrame::Open(None));
+    ReturnFrameGuard { flow, open: true }
 }
 
-fn pop_return_frame() -> Option<ScopeState> {
-    RETURN_EDGES.with(|frames| match frames.borrow_mut().pop() {
+fn pop_return_frame(flow: &WalkFlow) -> Option<ScopeState> {
+    match flow.return_edges.borrow_mut().pop() {
         Some(ReturnFrame::Open(state)) => state.map(|s| *s),
         _ => None,
-    })
+    }
 }
 
 /// Lifts the barrier [`suspend_return_edges`] put in place.
-pub(crate) struct ReturnEdgeBarrierGuard {
+pub(crate) struct ReturnEdgeBarrierGuard<'f> {
+    flow: &'f WalkFlow,
     pushed: bool,
 }
 
-impl Drop for ReturnEdgeBarrierGuard {
+impl Drop for ReturnEdgeBarrierGuard<'_> {
     fn drop(&mut self) {
         if self.pushed {
-            RETURN_EDGES.with(|frames| {
-                frames.borrow_mut().pop();
-            });
+            self.flow.return_edges.borrow_mut().pop();
         }
     }
 }
@@ -97,36 +88,30 @@ impl Drop for ReturnEdgeBarrierGuard {
 /// Stop `return`s from reaching the enclosing closure's frame for the
 /// lifetime of the returned guard.
 ///
-/// A nested body — another closure, an anonymous class method, or a callee
-/// whose return type is being inferred — is walked by the same
-/// [`walk_body_forward`] machinery, and its `return`s belong to it rather
-/// than to whatever closure is being walked further out.
-pub(crate) fn suspend_return_edges() -> ReturnEdgeBarrierGuard {
-    let pushed = RETURN_EDGES.with(|frames| {
-        let mut frames = frames.borrow_mut();
-        // Nothing to shield when no frame is collecting.
-        if frames.is_empty() {
-            return false;
-        }
+/// A nested body — another closure, or an anonymous class method — walked
+/// on the same [`WalkFlow`] has `return`s that belong to it rather than to
+/// whatever closure is being walked further out.
+pub(crate) fn suspend_return_edges(flow: &WalkFlow) -> ReturnEdgeBarrierGuard<'_> {
+    let mut frames = flow.return_edges.borrow_mut();
+    // Nothing to shield when no frame is collecting.
+    let pushed = !frames.is_empty();
+    if pushed {
         frames.push(ReturnFrame::Barrier);
-        true
-    });
-    ReturnEdgeBarrierGuard { pushed }
+    }
+    ReturnEdgeBarrierGuard { flow, pushed }
 }
 
 /// Record the state a `return` carries out of the body being walked.
-pub(crate) fn record_return_edge(scope: &ScopeState) {
+pub(crate) fn record_return_edge(flow: &WalkFlow, scope: &ScopeState) {
     if scope.unreachable {
         return;
     }
-    RETURN_EDGES.with(|frames| {
-        if let Some(ReturnFrame::Open(state)) = frames.borrow_mut().last_mut() {
-            match state {
-                Some(accumulated) => accumulated.merge_branch(scope),
-                None => *state = Some(Box::new(scope.clone())),
-            }
+    if let Some(ReturnFrame::Open(state)) = flow.return_edges.borrow_mut().last_mut() {
+        match state {
+            Some(accumulated) => accumulated.merge_branch(scope),
+            None => *state = Some(Box::new(scope.clone())),
         }
-    });
+    }
 }
 
 // ─── Closure handling ───────────────────────────────────────────────────────
@@ -153,7 +138,7 @@ pub(crate) fn seed_closure_captures(
 ) {
     let carry_paths_through = |root: &str, closure_scope: &mut ScopeState| {
         for key in outer.locals.compound_keys() {
-            if crate::type_engine::types::narrowing::key_reads_variable(key.as_str(), root)
+            if crate::type_engine::type_ops::condition_facts::key_reads_variable(key.as_str(), root)
                 && let Some(types) = outer.locals.get(key)
             {
                 closure_scope.set(key.as_str(), types.clone());
@@ -378,7 +363,7 @@ fn try_enter_closure_body<'b>(
     }
 
     {
-        let _barrier = suspend_return_edges();
+        let _barrier = suspend_return_edges(ctx.flow);
         walk_body_forward(closure.body.statements.iter(), &mut closure_scope, ctx);
     }
 

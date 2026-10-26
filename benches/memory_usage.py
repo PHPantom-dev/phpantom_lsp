@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Measure PHPantom LSP resident memory (RSS) on two workloads.
+"""Measure PHPantom LSP resident memory (RSS) on three workloads.
 
 Scenarios
 ---------
 1. **hello_world** – open a single-file PHP project containing one SPL call.
 2. **laravel_model** – open the default ``User`` model inside a full
    laravel/laravel checkout (with Composer dependencies installed).
+3. **symfony_controller** – open a controller inside a full symfony/demo
+   checkout (with Composer dependencies installed).
 
 The script communicates with the LSP binary over JSON-RPC / stdio,
 waits for indexing to finish, sends a ``textDocument/didOpen``, lets the
@@ -16,7 +18,8 @@ Output is printed as ``customSmallerIsBetter`` JSON so
 
     [
       {"name": "memory_hello_world",  "unit": "MiB", "value": 24.5},
-      {"name": "memory_laravel_model", "unit": "MiB", "value": 31.7}
+      {"name": "memory_laravel_model", "unit": "MiB", "value": 31.7},
+      {"name": "memory_symfony_controller", "unit": "MiB", "value": 45.2}
     ]
 
 Usage (CI)::
@@ -61,6 +64,14 @@ LARAVEL_LOCK_FIXTURE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "fixtures", "laravel", "composer.lock"
 )
 
+# Pinned symfony/demo tag. The demo commits its own composer.lock, so the
+# tag alone pins every dependency version.
+SYMFONY_TAG = "v3.1.0"
+SYMFONY_TARBALL = (
+    "https://github.com/symfony/demo/archive/refs/tags/"
+    f"{SYMFONY_TAG}.tar.gz"
+)
+
 HELLO_WORLD_PHP = """\
 <?php
 
@@ -82,6 +93,23 @@ class TestController extends Controller
     public function helloWorld(User $user): View
     {
         return view('welcome', ['name' => $user->name]);
+    }
+}
+"""
+
+SYMFONY_CONTROLLER_PHP = r"""<?php
+
+namespace App\Controller;
+
+use App\Entity\Post;
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\Response;
+
+final class TestController extends AbstractController
+{
+    public function helloWorld(Post $post): Response
+    {
+        return $this->render('blog/post_show.html.twig', ['title' => $post->getTitle()]);
     }
 }
 """
@@ -473,6 +501,38 @@ def run_hello_world(binary: str, work_dir: str) -> int:
         client.shutdown()
 
 
+def download_project(tarball_url: str, work_dir: str, prefix: str) -> str:
+    """Download a GitHub tarball and extract it into *work_dir*.
+
+    GitHub tarballs contain a single top-level directory named
+    ``<repo>-<tag-without-v>/``, which must start with *prefix*.
+
+    Returns the path to the extracted directory.
+    """
+    import tarfile
+    import urllib.request
+
+    tarball_path = os.path.join(work_dir, f"{prefix}tarball.tar.gz")
+
+    print(f"  Downloading {tarball_url}...", file=sys.stderr)
+    urllib.request.urlretrieve(tarball_url, tarball_path)
+
+    print("  Extracting...", file=sys.stderr)
+    with tarfile.open(tarball_path, "r:gz") as tar:
+        tar.extractall(path=work_dir, filter="data")
+    os.remove(tarball_path)
+
+    extracted = [
+        d for d in os.listdir(work_dir)
+        if os.path.isdir(os.path.join(work_dir, d)) and d.startswith(prefix)
+    ]
+    if len(extracted) != 1:
+        raise RuntimeError(
+            f"Expected exactly one {prefix}* directory, found: {extracted}"
+        )
+    return os.path.join(work_dir, extracted[0])
+
+
 def setup_laravel(work_dir: str) -> str:
     """Download laravel/laravel at the pinned tag and install Composer deps.
 
@@ -483,32 +543,7 @@ def setup_laravel(work_dir: str) -> str:
 
     Returns the path to the Laravel project root.
     """
-    import tarfile
-    import urllib.request
-
-    tarball_path = os.path.join(work_dir, "laravel.tar.gz")
-
-    # Download the tarball.
-    print(f"  Downloading laravel/laravel {LARAVEL_TAG}...", file=sys.stderr)
-    urllib.request.urlretrieve(LARAVEL_TARBALL, tarball_path)
-
-    # Extract. GitHub tarballs contain a single top-level directory
-    # named ``laravel-<tag-without-v>/``.
-    print("  Extracting...", file=sys.stderr)
-    with tarfile.open(tarball_path, "r:gz") as tar:
-        tar.extractall(path=work_dir, filter="data")
-    os.remove(tarball_path)
-
-    # Find the extracted directory (e.g. ``laravel-12.12.2``).
-    extracted = [
-        d for d in os.listdir(work_dir)
-        if os.path.isdir(os.path.join(work_dir, d)) and d.startswith("laravel-")
-    ]
-    if len(extracted) != 1:
-        raise RuntimeError(
-            f"Expected exactly one laravel-* directory, found: {extracted}"
-        )
-    laravel_dir = os.path.join(work_dir, extracted[0])
+    laravel_dir = download_project(LARAVEL_TARBALL, work_dir, "laravel-")
 
     # Copy our pinned composer.lock so ``composer install`` resolves
     # the exact same versions every run.
@@ -577,6 +612,71 @@ def run_laravel_model(binary: str, work_dir: str) -> int:
         client.shutdown()
 
 
+def setup_symfony(work_dir: str) -> str:
+    """Download symfony/demo at the pinned tag and install Composer deps.
+
+    Composer scripts and plugins are skipped: Flex's recipes are already
+    applied in the checkout, and the scripts boot the application (cache
+    warm-up, asset installation), which the language server never does.
+
+    Returns the path to the Symfony project root.
+    """
+    symfony_dir = download_project(SYMFONY_TARBALL, work_dir, "demo-")
+
+    print("  Running composer install...", file=sys.stderr)
+    subprocess.run(
+        [
+            "composer", "install",
+            "--no-interaction",
+            "--no-progress",
+            "--prefer-dist",
+            "--no-scripts",
+            "--no-plugins",
+            "--quiet",
+        ],
+        check=True,
+        cwd=symfony_dir,
+        timeout=300,
+    )
+
+    return symfony_dir
+
+
+def run_symfony_controller(binary: str, work_dir: str) -> int:
+    """Measure RSS after indexing symfony/demo and hovering an entity getter.
+
+    Opens a controller that renders a template with ``$post->getTitle()``,
+    then hovers on ``getTitle``.  Indexing reads the demo's routing,
+    services, translation catalogues, and Twig templates as well as its
+    PHP, and the hover resolves the Doctrine entity and the controller's
+    ``AbstractController`` parent from the vendor directory.
+
+    Returns RSS in KiB.
+    """
+    symfony_dir = setup_symfony(work_dir)
+
+    ctrl_path = os.path.join(symfony_dir, "src", "Controller", "TestController.php")
+    with open(ctrl_path, "w") as f:
+        f.write(SYMFONY_CONTROLLER_PHP)
+
+    client = LspClient(binary, symfony_dir)
+    try:
+        client.initialize()
+        client.wait_for_indexing(timeout=INDEX_TIMEOUT)
+
+        file_uri = Path(ctrl_path).as_uri()
+        client.did_open(file_uri, SYMFONY_CONTROLLER_PHP)
+
+        # Hover on ``$post->getTitle()`` (line 12, col 77).
+        client.hover(file_uri, line=12, character=77)
+        client.drain_notifications(SETTLE_TIME)
+
+        rss = sample_rss(client.pid)
+        return rss
+    finally:
+        client.shutdown()
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
@@ -609,7 +709,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--scenario",
-        choices=["hello_world", "laravel_model", "all"],
+        choices=["hello_world", "laravel_model", "symfony_controller", "all"],
         default="all",
         help="Which scenario to run (default: all).",
     )
@@ -649,7 +749,9 @@ def main() -> None:
         print(f"Warning: could not get version: {e}", file=sys.stderr)
 
     use_temp = args.work_dir is None
-    work_dir = args.work_dir or tempfile.mkdtemp(prefix="phpantom_mem_")
+    work_dir = os.path.abspath(
+        args.work_dir or tempfile.mkdtemp(prefix="phpantom_mem_")
+    )
     os.makedirs(work_dir, exist_ok=True)
 
     results: dict[str, int] = {}
@@ -667,6 +769,14 @@ def main() -> None:
             print("Running laravel_model scenario...", file=sys.stderr)
             rss = run_laravel_model(binary, work_dir)
             results["memory_laravel_model"] = rss
+            print(
+                f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
+            )
+
+        if args.scenario in ("symfony_controller", "all"):
+            print("Running symfony_controller scenario...", file=sys.stderr)
+            rss = run_symfony_controller(binary, work_dir)
+            results["memory_symfony_controller"] = rss
             print(
                 f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
             )

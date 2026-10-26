@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, ResolvedType};
@@ -48,7 +49,7 @@ pub(crate) fn infer_relation_callback_params(
         let method = class.get_method_arc(method_name).or_else(|| {
             crate::virtual_members::resolve_class_fully_maybe_cached(
                 class,
-                ctx.class_loader,
+                ctx.file.class_loader,
                 ctx.resolved_class_cache,
             )
             .get_method_arc(method_name)
@@ -136,30 +137,37 @@ fn is_framework_relation_method(
     method: &str,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
-    let Some(raw) = (ctx.class_loader)(&class.fqn()) else {
+    let Some(raw) = (ctx.file.class_loader)(Fqn::new(&class.fqn())) else {
         return false;
     };
-    if let Some(framework) = declared_relation_method(&raw, method, ctx.class_loader, 0) {
+    if let Some(framework) = declared_relation_method(&raw, method, ctx.file.class_loader, 0) {
         return framework;
     }
     // Models forward to their builder statically; relations forward to the
     // related model's builder through `__call`.
-    let model = if crate::virtual_members::laravel::extends_eloquent_model(&raw, ctx.class_loader) {
-        raw
-    } else if let Some(related) =
-        crate::virtual_members::laravel::related_model_type(&receiver.type_string, ctx.class_loader)
-            .and_then(|related| related.base_name().and_then(ctx.class_loader))
-    {
-        related
-    } else {
-        return false;
-    };
-    let builder = crate::virtual_members::laravel::model_builder_type(&model, ctx.class_loader);
+    let model =
+        if crate::virtual_members::laravel::extends_eloquent_model(&raw, ctx.file.class_loader) {
+            raw
+        } else if let Some(related) = crate::virtual_members::laravel::related_model_type(
+            &receiver.type_string,
+            ctx.file.class_loader,
+        )
+        .and_then(|related| {
+            related
+                .base_name()
+                .and_then(|name| (ctx.file.class_loader)(Fqn::new(name)))
+        }) {
+            related
+        } else {
+            return false;
+        };
+    let builder =
+        crate::virtual_members::laravel::model_builder_type(&model, ctx.file.class_loader);
     builder
         .base_name()
-        .and_then(ctx.class_loader)
+        .and_then(|name| (ctx.file.class_loader)(Fqn::new(name)))
         .is_some_and(|builder| {
-            declared_relation_method(&builder, method, ctx.class_loader, 0) == Some(true)
+            declared_relation_method(&builder, method, ctx.file.class_loader, 0) == Some(true)
         })
 }
 
@@ -168,7 +176,7 @@ fn is_framework_relation_method(
 fn declared_relation_method(
     class: &ClassInfo,
     method: &str,
-    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    loader: &ResolvedClassLoader<'_>,
     depth: u32,
 ) -> Option<bool> {
     if depth >= MAX_INHERITANCE_DEPTH {
@@ -201,7 +209,7 @@ fn declared_relation_method(
         }) {
             continue;
         }
-        if let Some(class) = loader(name)
+        if let Some(class) = loader(Fqn::new(name))
             && let Some(result) = declared_relation_method(&class, method, loader, depth + 1)
         {
             return Some(result);
@@ -210,7 +218,7 @@ fn declared_relation_method(
     class
         .parent_class
         .as_ref()
-        .and_then(|name| loader(name))
+        .and_then(|name| loader(Fqn::new(name)))
         .and_then(|parent| declared_relation_method(&parent, method, loader, depth + 1))
 }
 
@@ -282,7 +290,7 @@ pub(crate) fn eager_callback_arguments<'a>(
             let Some(method) = class.get_method_arc("with").or_else(|| {
                 crate::virtual_members::resolve_class_fully_maybe_cached(
                     class,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                     ctx.resolved_class_cache,
                 )
                 .get_method_arc("with")
@@ -432,7 +440,7 @@ fn try_relation_query_override(
             queries.push(morph_candidate_builders(
                 candidates,
                 &fallback,
-                rctx.class_loader,
+                rctx.file.class_loader,
             ));
         } else if let Some(query) = query {
             queries.push(query);
@@ -474,7 +482,7 @@ fn relation_callback_type(
         let related = resolve_relation_chain_details(
             model,
             chain,
-            rctx.class_loader,
+            rctx.file.class_loader,
             rctx.resolved_class_cache,
         )?;
         if method_name == "with" {
@@ -484,7 +492,7 @@ fn relation_callback_type(
             related
                 .models
                 .iter()
-                .map(|model| model_builder_type(model, rctx.class_loader))
+                .map(|model| model_builder_type(model, rctx.file.class_loader))
                 .collect(),
         )
         .simplified();
@@ -501,12 +509,16 @@ fn relation_callback_type(
     // A relation object hands its related model to the `Relation` ancestor;
     // projecting through the ancestor chain (which applies the object's own
     // type arguments) copes with subclasses that reorder or fix them.
-    let related = related_model_type(relation, rctx.class_loader)?;
+    let related = related_model_type(relation, rctx.file.class_loader)?;
     let fallback = PhpType::generic(
         ELOQUENT_BUILDER_FQN,
         vec![PhpType::named(atom(ELOQUENT_MODEL_FQN))],
     );
-    Some(morph_model_builders(&related, &fallback, rctx.class_loader))
+    Some(morph_model_builders(
+        &related,
+        &fallback,
+        rctx.file.class_loader,
+    ))
 }
 
 /// Map candidate class-strings through the same builder selector as model
@@ -515,7 +527,7 @@ fn relation_callback_type(
 fn morph_candidate_builders(
     candidates: &PhpType,
     fallback: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
     // Laravel casts `$types` to an array, so a `null` candidate adds no
     // model: the callback only runs for the others.
@@ -532,7 +544,7 @@ fn morph_candidate_builders(
         TypeKind::Literal(value) => value
             .string_content()
             .and_then(|name| {
-                class_loader(&name).filter(|model| {
+                class_loader(Fqn::new(&name)).filter(|model| {
                     model
                         .fqn()
                         .eq_ignore_ascii_case(name.trim_start_matches('\\'))
@@ -553,7 +565,7 @@ fn morph_candidate_builders(
 fn morph_model_builders(
     model: &PhpType,
     fallback: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
     if let TypeKind::Union(parts) = model.kind() {
         return PhpType::union(
@@ -565,7 +577,7 @@ fn morph_model_builders(
     }
     model
         .base_name()
-        .and_then(class_loader)
+        .and_then(|name| class_loader(Fqn::new(name)))
         .filter(|model| {
             model.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(model, class_loader)
         })
@@ -585,7 +597,7 @@ fn find_models_from_receivers(
         let Some(cls) = receiver.class_info.as_ref() else {
             continue;
         };
-        if cls.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(cls, rctx.class_loader) {
+        if cls.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(cls, rctx.file.class_loader) {
             models.push(Arc::clone(cls));
             continue;
         }
@@ -596,25 +608,26 @@ fn find_models_from_receivers(
             crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 ty,
                 &current_class,
-                rctx.all_classes,
-                rctx.class_loader,
+                rctx.file.all_classes,
+                rctx.file.class_loader,
             )
             .into_iter()
             .filter(|model| {
                 model.fqn() == ELOQUENT_MODEL_FQN
-                    || extends_eloquent_model(model, rctx.class_loader)
+                    || extends_eloquent_model(model, rctx.file.class_loader)
             })
             .collect()
         };
         if cls.fqn() != ELOQUENT_BUILDER_FQN
             && !crate::virtual_members::laravel::helpers::extends_eloquent_builder(
                 cls,
-                rctx.class_loader,
+                rctx.file.class_loader,
             )
         {
             // A relation forwards its query methods to a builder over its
             // related model, so that model is the one the callback sees.
-            if let Some(related) = related_model_type(&receiver.type_string, rctx.class_loader) {
+            if let Some(related) = related_model_type(&receiver.type_string, rctx.file.class_loader)
+            {
                 models.extend(as_models(&related));
             }
             continue;
@@ -629,7 +642,7 @@ fn find_models_from_receivers(
             &receiver.type_string,
             ELOQUENT_BUILDER_FQN,
             0,
-            rctx.class_loader,
+            rctx.file.class_loader,
         )
         .and_then(|ty| non_empty(as_models(&ty)))
         .or_else(|| {

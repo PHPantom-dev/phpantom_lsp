@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
@@ -16,16 +16,16 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let workspace_root = match self.workspace_root().read().clone() {
             Some(r) => r,
             None => return,
         };
-        let Ok(url) = Url::parse(uri) else {
+        let Some(url) = crate::util::parse_url(uri) else {
             return;
         };
-        let Ok(file_path) = url.to_file_path() else {
+        let Some(file_path) = crate::util::url_to_path(&url) else {
             return;
         };
         let mappings = self.psr4_mappings().read().clone();
@@ -64,9 +64,9 @@ impl Backend {
         let expected_display = expected_ns.as_deref().unwrap_or("<global>");
         let title = format!("Fix namespace to `{}`", expected_display);
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title,
-            kind: Some(CodeActionKind::QUICKFIX),
+            kind: Some(CodeActionKind::QuickFix),
             diagnostics: Some(vec![diag]),
             edit: Some(single_file_edit(url, vec![edit])),
             is_preferred: Some(true),
@@ -99,7 +99,7 @@ fn insert_namespace_edit(content: &str, ns: &str) -> TextEdit {
 #[cfg(test)]
 mod tests {
     use super::insert_namespace_edit;
-    use tower_lsp::lsp_types::Position;
+    use tower_lsp_server::gen_lsp_types::Position;
 
     fn insertion(content: &str) -> (Position, String) {
         let edit = insert_namespace_edit(content, "App");

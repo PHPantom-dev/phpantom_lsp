@@ -29,15 +29,15 @@
 //!   not itself guarantee.
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use std::sync::Arc;
-
-use tower_lsp::lsp_types::Url;
 
 use crate::Backend;
 use crate::php_type::PhpType;
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, MethodInfo};
 
 use super::config_values::{ConfigNode, parse_config_tree};
+use super::method_refinement::refine_methods;
 
 /// FQN of the auth user contract every configured model must satisfy.
 pub(crate) const AUTHENTICATABLE_FQN: &str = "Illuminate\\Contracts\\Auth\\Authenticatable";
@@ -74,54 +74,38 @@ pub(crate) fn patch_auth_user_class(backend: &Backend, loaded: Arc<ClassInfo>) -
 
     // Context-free FQN loader for the compatibility filter: configured models
     // and the `Authenticatable` contract are fully-qualified here.
-    let loader = |name: &str| backend.find_or_load_class(name);
+    let loader = |name: Fqn<'_>| backend.find_or_load_class(&name);
     let Some(model_type) = resolve_auth_user_type(backend, None, &loader) else {
         return loaded;
     };
 
-    let mut patched = (*loaded).clone();
-    let mut changed = false;
-    for method in patched.methods.make_mut().iter_mut() {
-        if method.name.as_str() != "user" {
-            continue;
-        }
-        let method = Arc::make_mut(method);
-        refine_user_return_type(method, &model_type);
-        changed = true;
-    }
-
-    // The `Auth` facade declares `user()` as a `@method` tag, not a real
-    // method; rewrite the parsed tag so the phpdoc provider materializes
-    // the virtual method with the configured model.
-    if let Some(doc) = patched.doc_members.as_ref()
-        && doc.methods.iter().any(|m| m.name.as_str() == "user")
-    {
-        let mut doc = (**doc).clone();
-        for method in &mut doc.methods {
-            if method.name.as_str() != "user" {
-                continue;
-            }
-            refine_user_return_type(Arc::make_mut(method), &model_type);
-            changed = true;
-        }
-        patched.doc_members = Some(Arc::new(doc));
-    }
-
-    if changed { Arc::new(patched) } else { loaded }
+    // The `Auth` facade declares `user()` as a `@method` tag rather than a
+    // real method, so the helper's doc-member pass covers it.
+    refine_methods(
+        loaded,
+        |name| name == "user",
+        |method| refine_user_return_type(method, &model_type),
+    )
 }
 
 /// Replace a `user()` method's return type with the configured model,
-/// preserving the declared `?Authenticatable` nullability.
-fn refine_user_return_type(method: &mut crate::types::MethodInfo, model_type: &PhpType) {
+/// preserving the declared `?Authenticatable` nullability.  Returns whether
+/// the return type changed.
+fn refine_user_return_type(method: &mut MethodInfo, model_type: &PhpType) -> bool {
     let nullable = method
         .return_type
         .as_ref()
         .is_none_or(|rt| rt.accepts_null());
-    method.return_type = Some(if nullable {
+    let refined = if nullable {
         PhpType::nullable(model_type.clone())
     } else {
         model_type.clone()
-    });
+    };
+    if method.return_type.as_ref() == Some(&refined) {
+        return false;
+    }
+    method.return_type = Some(refined);
+    true
 }
 
 /// Resolve (and memoize) the authenticated-user model type for a guard.
@@ -134,10 +118,10 @@ fn refine_user_return_type(method: &mut crate::types::MethodInfo, model_type: &P
 pub(crate) fn resolve_auth_user_type(
     backend: &Backend,
     guard: Option<&str>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let key = guard.unwrap_or("").to_string();
-    if let Some(cached) = backend.auth_user_type_cache.read().get(&key) {
+    if let Some(cached) = backend.laravel.auth_user_type_cache.read().get(&key) {
         return cached.clone();
     }
     // Break re-entry: resolving the floor scans the class index and re-loads
@@ -146,21 +130,25 @@ pub(crate) fn resolve_auth_user_type(
     // exactly what the implementor scan needs — then overwrite with the real
     // result once computed.
     backend
+        .laravel
         .auth_user_type_cache
         .write()
         .insert(key.clone(), None);
     let result = compute_auth_user_type(backend, guard, class_loader);
     backend
+        .laravel
         .auth_user_type_cache
         .write()
         .insert(key, result.clone());
+    // A class loaded during the computation saw the seeded `None`.
+    backend.laravel.note_config_facts_change();
     result
 }
 
 fn compute_auth_user_type(
     backend: &Backend,
     guard: Option<&str>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     let content = read_auth_config(backend)?;
     let tree = parse_config_tree(&content)?;
@@ -176,7 +164,7 @@ fn compute_auth_user_type(
 /// configures, so widening the floor to them would only add framework noise.
 fn project_auth_implementors(
     backend: &Backend,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<String> {
     // Resolve implementors first so its internal index reads are released
     // before we take the `fqn_uri_index` read guard below.  `project_only`
@@ -218,9 +206,9 @@ fn read_auth_config(backend: &Backend) -> Option<String> {
         return None;
     }
     // Prefer an open editor buffer (keyed by an absolute file URI); fall back
-    // to disk.  `Url::from_file_path` requires an absolute path, so relative
+    // to disk.  `Uri::from_file_path` requires an absolute path, so relative
     // workspace roots (e.g. `analyze --project-root`) go straight to disk.
-    if let Ok(uri) = Url::from_file_path(&path)
+    if let Some(uri) = crate::util::path_to_url(&path)
         && let Some(content) = backend.get_file_content(uri.as_ref())
     {
         return Some(content);
@@ -231,12 +219,9 @@ fn read_auth_config(backend: &Backend) -> Option<String> {
 /// Resolve a configured model name to its canonical FQN, keeping it only if it
 /// is a subtype of [`AUTHENTICATABLE_FQN`].  This both filters misreads and
 /// canonicalizes short names written against a `use` statement.
-fn resolve_model_fqn(
-    name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<String> {
+fn resolve_model_fqn(name: &str, class_loader: &ResolvedClassLoader<'_>) -> Option<String> {
     let normalized = name.trim_start_matches('\\');
-    let class_info = class_loader(normalized)?;
+    let class_info = class_loader(Fqn::new(normalized))?;
     if crate::class_lookup::is_subtype_of(&class_info, AUTHENTICATABLE_FQN, class_loader) {
         Some(class_info.fqn().to_string())
     } else {

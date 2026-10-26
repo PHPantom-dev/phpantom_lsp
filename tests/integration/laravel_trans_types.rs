@@ -5,8 +5,9 @@
 //! at the call site settles which branch applies.
 
 use crate::common::create_psr4_workspace;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{hover_response, open_php};
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -85,17 +86,8 @@ async fn hover_after(needle: &str) -> String {
     );
     backend.initialized(InitializedParams {}).await;
 
-    let uri = Url::from_file_path(dir.path().join("src/Greeting.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: CONSUMER.to_string(),
-            },
-        })
-        .await;
+    let uri = Uri::from_file_path(dir.path().join("src/Greeting.php")).unwrap();
+    open_php(&backend, &uri, CONSUMER).await;
 
     let idx = CONSUMER.find(needle).expect("needle not found") + needle.len();
     let mut line = 0u32;
@@ -112,21 +104,10 @@ async fn hover_after(needle: &str) -> String {
         }
     }
 
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap();
+    let hover = hover_response(&backend, &uri, line, character).await;
 
     match hover.map(|h| h.contents) {
-        Some(HoverContents::Markup(markup)) => markup.value,
-        Some(HoverContents::Scalar(MarkedString::String(s))) => s,
-        Some(HoverContents::Scalar(MarkedString::LanguageString(ls))) => ls.value,
+        Some(Contents::MarkupContent(markup)) => markup.value,
         _ => String::new(),
     }
 }
@@ -198,17 +179,8 @@ class Banner
     );
     backend.initialized(InitializedParams {}).await;
 
-    let uri = Url::from_file_path(dir.path().join("src/Banner.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: CALLER.to_string(),
-            },
-        })
-        .await;
+    let uri = Uri::from_file_path(dir.path().join("src/Banner.php")).unwrap();
+    open_php(&backend, &uri, CALLER).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CALLER, &mut diags);

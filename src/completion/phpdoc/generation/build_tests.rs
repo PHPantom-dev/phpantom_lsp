@@ -2,7 +2,7 @@ use super::*;
 use crate::atom::atom;
 use crate::completion::phpdoc::context::SymbolInfo;
 use std::collections::HashMap;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 /// Dummy class loader that returns `None` for all lookups.
 fn no_classes(_name: &str) -> Option<Arc<ClassInfo>> {
@@ -187,10 +187,12 @@ fn generates_function_snippet_no_indent_in_continuation() {
             line: 0,
             character: 0,
         },
+        0,
         &use_map,
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -225,10 +227,12 @@ fn snippet_escapes_dollar_in_param_names() {
             line: 0,
             character: 0,
         },
+        0,
         &use_map,
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -279,10 +283,12 @@ fn generates_function_snippet_skips_fully_typed_params() {
             line: 0,
             character: 0,
         },
+        0,
         &use_map,
         &file_ns,
         &[],
         &loader,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -322,10 +328,12 @@ fn generates_function_snippet_for_untyped_params() {
             line: 0,
             character: 0,
         },
+        0,
         &use_map,
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -370,10 +378,12 @@ fn generates_function_snippet_for_array_param_and_return() {
             line: 0,
             character: 0,
         },
+        0,
         &use_map,
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -402,10 +412,12 @@ fn generates_void_function_snippet_without_return() {
             line: 0,
             character: 0,
         },
+        0,
         &use_map,
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -433,10 +445,12 @@ fn paramless_void_generates_summary_skeleton() {
             line: 0,
             character: 0,
         },
+        0,
         &use_map,
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -611,10 +625,12 @@ fn param_names_are_space_aligned() {
             line: 0,
             character: 0,
         },
+        0,
         &use_map,
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -666,10 +682,12 @@ fn param_names_aligned_with_mixed_enrichment_widths() {
             line: 0,
             character: 0,
         },
+        0,
         &use_map,
         &file_ns,
         &[],
         &loader,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );
@@ -743,10 +761,12 @@ fn blank_separator_between_tag_groups() {
             line: 1,
             character: 0,
         },
+        0,
         &use_map,
         &file_ns,
         &[],
         &no_classes,
+        &crate::test_fixtures::no_loader,
         None,
         None,
     );

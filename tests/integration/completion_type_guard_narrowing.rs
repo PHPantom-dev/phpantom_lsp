@@ -1,12 +1,12 @@
 use crate::common::{complete_at, create_test_backend, method_names};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── is_array narrowing with PHPDoc generic list ─────────────────────────
 
 #[tokio::test]
 async fn test_is_array_narrows_to_generic_list_element_in_foreach() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_array_generic.php").unwrap();
+    let uri = Uri::parse("file:///is_array_generic.php").unwrap();
     // Reproduces a pattern where a native union `null|array|Request`
     // with a PHPDoc `@param null|list<Request>|Request`.  After `is_array()`,
     // `$request` should narrow to `list<Request>`, so iterating yields `Request`.
@@ -44,7 +44,7 @@ async fn test_is_array_narrows_to_generic_list_element_in_foreach() {
 #[tokio::test]
 async fn test_is_array_narrows_union_keeps_array_branch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_array_simple.php").unwrap();
+    let uri = Uri::parse("file:///is_array_simple.php").unwrap();
     // `$input` is `string|array<int, Foo>|Foo`.  After `is_array($input)`,
     // only the `array<int, Foo>` branch survives.  Foreach yields `Foo`.
     let text = concat!(
@@ -81,7 +81,7 @@ async fn test_is_array_narrows_union_keeps_array_branch() {
 #[tokio::test]
 async fn test_backslash_prefixed_is_array_narrows_union_keeps_array_branch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_array_fqn.php").unwrap();
+    let uri = Uri::parse("file:///is_array_fqn.php").unwrap();
     // Same as `test_is_array_narrows_union_keeps_array_branch`, but the
     // guard call is written `\is_array($input)` (the style enforced by
     // PHP-CS-Fixer's `native_function_invocation` rule).
@@ -119,7 +119,7 @@ async fn test_backslash_prefixed_is_array_narrows_union_keeps_array_branch() {
 #[tokio::test]
 async fn test_is_array_inverse_narrows_to_class_in_else() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_array_inverse.php").unwrap();
+    let uri = Uri::parse("file:///is_array_inverse.php").unwrap();
     // After `if (is_array($x)) { ... } else { $x-> }`, only the non-array
     // members survive.  Here the docblock says `list<Item>|Item`, so the
     // else-body should see `Item`.
@@ -157,7 +157,7 @@ async fn test_is_array_inverse_narrows_to_class_in_else() {
 #[tokio::test]
 async fn test_is_array_guard_clause_narrows_to_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_array_guard.php").unwrap();
+    let uri = Uri::parse("file:///is_array_guard.php").unwrap();
     // `if (is_array($x)) { return; }` — after the if, $x is NOT array.
     let text = concat!(
         "<?php\n",
@@ -192,7 +192,7 @@ async fn test_is_array_guard_clause_narrows_to_class() {
 #[tokio::test]
 async fn test_negated_is_array_guard_clause_narrows_to_array() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///neg_is_array_guard.php").unwrap();
+    let uri = Uri::parse("file:///neg_is_array_guard.php").unwrap();
     // `if (!is_array($x)) { return; }` — after the if, $x IS array.
     let text = concat!(
         "<?php\n",
@@ -229,7 +229,7 @@ async fn test_negated_is_array_guard_clause_narrows_to_array() {
 #[tokio::test]
 async fn test_is_array_strips_null_and_class_keeps_generic_list() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_array_nullable.php").unwrap();
+    let uri = Uri::parse("file:///is_array_nullable.php").unwrap();
     // `@param null|list<Task>|Task $t` with native `null|array|Task`.
     // After `is_array($t)`, only `list<Task>` survives.
     let text = concat!(
@@ -266,7 +266,7 @@ async fn test_is_array_strips_null_and_class_keeps_generic_list() {
 #[tokio::test]
 async fn test_is_object_narrows_to_class_in_union() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_object_narrowing.php").unwrap();
+    let uri = Uri::parse("file:///is_object_narrowing.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Entity {\n",
@@ -299,7 +299,7 @@ async fn test_is_object_narrows_to_class_in_union() {
 #[tokio::test]
 async fn test_is_array_in_elseif_narrows_correctly() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_array_elseif.php").unwrap();
+    let uri = Uri::parse("file:///is_array_elseif.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Payload {\n",
@@ -337,7 +337,7 @@ async fn test_is_array_in_elseif_narrows_correctly() {
 #[tokio::test]
 async fn test_is_array_direct_access_after_narrowing() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_array_direct.php").unwrap();
+    let uri = Uri::parse("file:///is_array_direct.php").unwrap();
     // After `is_array($data)`, the variable should NOT offer class members
     // because the type is narrowed to array-only.  But an `Item` in the
     // else branch should offer class members.
@@ -378,7 +378,7 @@ async fn test_is_array_direct_access_after_narrowing() {
 #[tokio::test]
 async fn test_is_array_foreach_docblock_only() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_array_docblock_only.php").unwrap();
+    let uri = Uri::parse("file:///is_array_docblock_only.php").unwrap();
     // The parameter has native `array` hint with docblock `list<Request>`.
     // No union involved — just verifying that after is_array(), the docblock
     // element type is preserved through foreach.
@@ -418,7 +418,7 @@ async fn test_is_array_foreach_docblock_only() {
 #[tokio::test]
 async fn test_not_is_array_reassignment_no_var_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///not_is_array_no_var.php").unwrap();
+    let uri = Uri::parse("file:///not_is_array_no_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -458,7 +458,7 @@ async fn test_not_is_array_reassignment_no_var_docblock() {
 #[tokio::test]
 async fn test_inline_var_override_on_reassigned_variable_foreach() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///inline_var_reassign.php").unwrap();
+    let uri = Uri::parse("file:///inline_var_reassign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -493,7 +493,7 @@ async fn test_inline_var_override_on_reassigned_variable_foreach() {
 #[tokio::test]
 async fn test_not_is_array_reassignment_to_array_foreach() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///not_is_array_reassign.php").unwrap();
+    let uri = Uri::parse("file:///not_is_array_reassign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -531,7 +531,7 @@ async fn test_not_is_array_reassignment_to_array_foreach() {
 #[tokio::test]
 async fn test_instanceof_narrows_array_access_expression() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///instanceof_array_access.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_array_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Page {\n",
@@ -570,7 +570,7 @@ async fn test_guard_reassignment_keeps_narrowed_fallthrough_enum() {
     // caused the narrowed fall-through (`Country`) to be dropped, leaving
     // no type at all.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///guard_reassign_enum.php").unwrap();
+    let uri = Uri::parse("file:///guard_reassign_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Country {\n",
@@ -601,7 +601,7 @@ async fn test_guard_reassignment_keeps_narrowed_fallthrough_enum() {
 #[tokio::test]
 async fn test_guard_reassignment_keeps_narrowed_fallthrough_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///guard_reassign_class.php").unwrap();
+    let uri = Uri::parse("file:///guard_reassign_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Country {\n",
@@ -633,7 +633,7 @@ async fn test_guard_reassignment_keeps_narrowed_fallthrough_class() {
 #[tokio::test]
 async fn test_array_false_union_keeps_element_after_is_array_guard() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///array_false_is_array.php").unwrap();
+    let uri = Uri::parse("file:///array_false_is_array.php").unwrap();
     // A native `array|false` return refined by a `array<int, self>|false`
     // docblock. After `if (!is_array(...)) return;` the element type must
     // survive so the foreach value resolves to the class.
@@ -670,7 +670,7 @@ async fn test_array_false_union_keeps_element_after_is_array_guard() {
 #[tokio::test]
 async fn test_array_false_union_keeps_element_after_false_check() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///array_false_eqeq.php").unwrap();
+    let uri = Uri::parse("file:///array_false_eqeq.php").unwrap();
     // Same as above, but guarding with `=== false` instead of `is_array`.
     let text = concat!(
         "<?php\n",
@@ -705,7 +705,7 @@ async fn test_array_false_union_keeps_element_after_false_check() {
 #[tokio::test]
 async fn test_instanceof_guard_narrows_repeated_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///repeated_call_completion.php").unwrap();
+    let uri = Uri::parse("file:///repeated_call_completion.php").unwrap();
     // The shape from the Symfony kernel: the guard checks one call and
     // the body makes the same call again, so the second one has to know
     // what the check proved.
@@ -746,7 +746,7 @@ async fn test_instanceof_guard_narrows_repeated_method_call() {
 #[tokio::test]
 async fn is_iterable_keeps_only_the_members_that_can_be_iterated() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_iterable.php").unwrap();
+    let uri = Uri::parse("file:///is_iterable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Traversable {}\n",
@@ -786,7 +786,7 @@ async fn is_iterable_keeps_only_the_members_that_can_be_iterated() {
 #[tokio::test]
 async fn the_else_branch_of_is_iterable_keeps_the_non_iterable_members() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_iterable_else.php").unwrap();
+    let uri = Uri::parse("file:///is_iterable_else.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Traversable {}\n",
@@ -828,7 +828,7 @@ async fn the_else_branch_of_is_iterable_keeps_the_non_iterable_members() {
 #[tokio::test]
 async fn an_iterable_assertion_tag_narrows_its_argument() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///assert_iterable.php").unwrap();
+    let uri = Uri::parse("file:///assert_iterable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Traversable {}\n",
@@ -875,7 +875,7 @@ async fn an_iterable_assertion_tag_narrows_its_argument() {
 #[tokio::test]
 async fn is_object_on_an_iterable_keeps_the_traversable_value_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_object_iterable.php").unwrap();
+    let uri = Uri::parse("file:///is_object_iterable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -914,7 +914,7 @@ async fn is_object_on_an_iterable_keeps_the_traversable_value_type() {
 #[tokio::test]
 async fn a_guard_clause_on_an_iterable_leaves_the_traversable_half() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///is_array_iterable_guard.php").unwrap();
+    let uri = Uri::parse("file:///is_array_iterable_guard.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",

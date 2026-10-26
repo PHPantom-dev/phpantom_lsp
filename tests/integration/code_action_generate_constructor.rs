@@ -9,7 +9,7 @@
 use crate::common::{
     apply_workspace_edit, create_test_backend, find_action_titled, get_code_actions_at,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── Basic generation ────────────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ class Foo {
         .expect("should offer generate constructor action");
     assert_eq!(
         action.kind,
-        Some(CodeActionKind::REFACTOR_REWRITE),
+        Some(CodeActionKind::RefactorRewrite),
         "should be refactor.rewrite"
     );
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
@@ -876,6 +876,36 @@ class Foo {
 }
 
 #[test]
+fn promoted_removes_property_docblocks() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class Order {
+    /** @var list<Item> */
+    private array $items;
+    /**
+     * @var int
+     */
+    public static int $count = 0;
+}
+";
+    let actions = get_code_actions_at(&backend, uri, content, 3, 10);
+    let action = find_action_titled(&actions, "Generate promoted constructor")
+        .expect("should offer promoted action");
+    let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
+
+    assert!(
+        !result.contains("list<Item>"),
+        "promoted property's docblock should be removed: {result}"
+    );
+    assert!(
+        result.contains("    /**\n     * @var int\n     */\n    public static int $count = 0;"),
+        "static property should keep its own docblock: {result}"
+    );
+}
+
+#[test]
 fn promoted_preserves_visibility_variants() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
@@ -1030,5 +1060,29 @@ class Foo {
     assert!(
         static_pos < constructor_pos,
         "static property should appear above the constructor:\n{result}"
+    );
+}
+
+#[test]
+fn promoted_deletes_multi_property_declaration_once() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "<?php\nclass Foo {\n    private int $a, $b;\n}\n";
+    let actions = get_code_actions_at(&backend, uri, content, 2, 10);
+    let action = find_action_titled(&actions, "Generate promoted constructor")
+        .expect("should offer promoted action");
+    let edit = action.edit.as_ref().unwrap();
+    let edits = &edit.changes.as_ref().unwrap()[&uri.parse().unwrap()];
+    let deletions = edits.iter().filter(|e| e.new_text.is_empty()).count();
+    assert_eq!(
+        deletions, 1,
+        "shared declaration should be deleted once: {edits:#?}"
+    );
+
+    let result = apply_workspace_edit(content, edit);
+    assert!(!result.contains("private int $a, $b;"), "{result}");
+    assert!(
+        result.contains("private int $a,\n        private int $b,"),
+        "{result}"
     );
 }

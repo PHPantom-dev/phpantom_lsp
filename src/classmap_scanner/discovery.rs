@@ -1,23 +1,21 @@
-//! Directory walking, PSR-4/vendor package discovery, and parallel
-//! batch scanning built on top of the [`super::lexer`] fast path.
+//! Project, workspace, include-path and Drupal discovery, and the
+//! parallel batch scanning built on top of the [`super::lexer`] fast path.
 //!
 //! This file turns the byte-lexer's single-file scans into
-//! workspace-wide classmaps: walking directories (gitignore-aware or
-//! not, depending on the scenario), reading Composer's
-//! `installed.json` to locate vendor packages, and fanning file reads
-//! out across CPU cores.
+//! workspace-wide classmaps: it lists the files each scenario covers
+//! (through [`super::walk`] where the gitignore rules apply) and fans the
+//! reads out over the shared worker pool.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use memchr::memmem;
-
 use super::filters::{FollowedLinks, IndexFilters};
+use super::walk::{WalkOptions, walk_roots};
 use super::{ScanResult, WorkspaceScanResult, read_for_scan, scan_content};
 use crate::progress::ScanProgress;
 
 /// Add discovered work units to the progress total, if reporting.
-fn progress_add_total(progress: Option<&ScanProgress>, n: usize) {
+pub(super) fn progress_add_total(progress: Option<&ScanProgress>, n: usize) {
     if let Some(p) = progress {
         p.add_total(n as u64);
     }
@@ -30,25 +28,10 @@ fn progress_add_done(progress: Option<&ScanProgress>) {
     }
 }
 
-/// One file's scan result together with the path and origin it came from.
-type ScannedFile = (ScanResult, PathBuf, crate::ClassCompletionOrigin);
-
-/// A block of scanned files, tagged with the block index it was claimed
-/// under so results can be merged back in input order.
-type ScannedBlock = (usize, Vec<ScannedFile>);
-
 /// Files claimed per work-stealing block by the batch scanners.  Small
 /// enough that a block of large files cannot hold up the tail of a scan,
 /// large enough that the shared cursor is not the bottleneck.
 const SCAN_BLOCK_FILES: usize = 32;
-
-/// Return the number of available CPU cores, capped at a sensible
-/// default.  Used to size parallel scanning batches.
-fn thread_count() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-}
 
 /// Build a classmap by scanning all `.php` files under the given
 /// directories.
@@ -61,7 +44,7 @@ fn thread_count() -> usize {
 ///
 /// File scanning is parallelised across CPU cores: the directory walk
 /// collects file paths first, then files are read and scanned in
-/// parallel batches using [`std::thread::scope`].
+/// parallel batches on the shared worker pool ([`crate::parallel`]).
 ///
 /// Returns a `HashMap<String, PathBuf>` mapping fully-qualified class
 /// names to the absolute file path where they are defined.  When a
@@ -166,374 +149,6 @@ pub fn scan_psr4_directories_with_skip(
     classmap
 }
 
-/// Build a classmap from `installed.json` vendor package metadata.
-///
-/// Reads `<vendor_path>/composer/installed.json` and scans each
-/// package's autoload directories.  Supports PSR-4 and classmap
-/// entries.
-pub fn scan_vendor_packages(workspace_root: &Path, vendor_dir: &str) -> WorkspaceScanResult {
-    scan_vendor_packages_with_skip(
-        workspace_root,
-        vendor_dir,
-        &HashSet::new(),
-        &HashSet::new(),
-        &IndexFilters::empty(),
-        None,
-        None,
-    )
-}
-
-/// Classify a Composer package name into its completion origin.
-///
-/// Symfony polyfill packages (`symfony/polyfill-*`) backport PHP core
-/// classes and extension functions (e.g. `symfony/polyfill-php83`
-/// ships `\Override`), so they are treated as core stubs and sort and
-/// display like built-in PHP symbols. Everything else is an explicit
-/// dependency when it appears in the root `composer.json`, or a
-/// transitive dependency otherwise.
-pub(crate) fn classify_package_origin(
-    pkg_name: &str,
-    explicit_deps: &HashSet<String>,
-) -> crate::ClassCompletionOrigin {
-    if pkg_name.starts_with("symfony/polyfill-") {
-        crate::ClassCompletionOrigin::CoreStub
-    } else if explicit_deps.contains(pkg_name) {
-        crate::ClassCompletionOrigin::VendorExplicit
-    } else {
-        crate::ClassCompletionOrigin::VendorTransitive
-    }
-}
-
-pub(crate) fn vendor_package_roots(
-    workspace_root: &Path,
-    vendor_dir: &str,
-    explicit_deps: &HashSet<String>,
-) -> Vec<(PathBuf, crate::ClassCompletionOrigin, String)> {
-    let vendor_path = workspace_root.join(vendor_dir);
-    let Some(installed) = crate::composer::read_installed_packages(workspace_root, vendor_dir)
-    else {
-        return Vec::new();
-    };
-    let composer_dir = &installed.composer_dir;
-    let mut roots = Vec::new();
-    for package in &installed.packages {
-        let pkg_name = package
-            .get("name")
-            .and_then(|n| n.as_str())
-            .unwrap_or("unknown/unknown");
-        let origin = classify_package_origin(pkg_name, explicit_deps);
-        let pkg_path =
-            if let Some(install_path) = package.get("install-path").and_then(|p| p.as_str()) {
-                composer_dir.join(install_path)
-            } else {
-                vendor_path.join(pkg_name)
-            };
-        let pkg_path = pkg_path.canonicalize().unwrap_or(pkg_path);
-        if pkg_path.is_dir() {
-            roots.push((pkg_path, origin, pkg_name.to_string()));
-        }
-    }
-    roots.sort_by_key(|(p, _, _)| std::cmp::Reverse(p.components().count()));
-    roots
-}
-
-/// One `autoload.files` / `autoload.classmap` entry of a package, before
-/// any directory is walked.
-enum PlainSource {
-    /// A file Composer names directly.
-    File(PathBuf),
-    /// A directory whose whole tree contributes classes.
-    Dir(PathBuf),
-}
-
-/// The autoload sources a single Composer package contributes to a vendor
-/// scan, as paths only: walking them is deferred to a single
-/// [`walk_roots`] call over every package's roots at once.
-#[derive(Default)]
-struct PackageSources {
-    /// The package's `autoload.psr-4` base directories.
-    ///
-    /// The namespace prefix each maps to is not kept: a vendor scan reads
-    /// every file it finds without PSR-4 compliance filtering, so unlike
-    /// [`scan_psr4_directories_with_skip`] it has no use for the class
-    /// name the mapping expects.
-    psr4: Vec<PathBuf>,
-    /// `autoload.files` and `autoload.classmap` entries in declaration
-    /// order, plus the package's own tree when a `files` entry registers
-    /// an autoloader of its own.
-    plain: Vec<PlainSource>,
-    /// The completion-origin tier every symbol from this package gets.
-    origin: crate::ClassCompletionOrigin,
-    /// The package's own root (path, origin, package name), resolved once
-    /// here so `vendor_package_roots` doesn't need to re-read and
-    /// re-parse `installed.json` to get the same information.
-    root: Option<(PathBuf, crate::ClassCompletionOrigin, String)>,
-}
-
-/// Read one `installed.json` entry and return the autoload sources it
-/// exposes, without walking any of them.
-///
-/// Returns an empty result when the package is not installed, has no
-/// `autoload` section, or declares no PHP sources.
-fn collect_package_sources(
-    package: &serde_json::Value,
-    composer_dir: &Path,
-    vendor_path: &Path,
-    skip_paths: &HashSet<PathBuf>,
-    explicit_deps: &HashSet<String>,
-) -> PackageSources {
-    let pkg_name = package.get("name").and_then(|n| n.as_str());
-    let origin = pkg_name
-        .map(|name| classify_package_origin(name, explicit_deps))
-        .unwrap_or(crate::ClassCompletionOrigin::VendorTransitive);
-    let mut out = PackageSources {
-        origin,
-        ..Default::default()
-    };
-    // Locate the package on disk.  Composer 2's installed.json
-    // includes an `install-path` field that is relative to the
-    // `vendor/composer/` directory.  This is the authoritative
-    // location and handles path repositories, custom installers,
-    // and any other layout that doesn't follow the default
-    // `vendor/<name>/` convention.  Fall back to `vendor/<name>`
-    // only when `install-path` is absent (Composer 1 format).
-    let pkg_path = if let Some(install_path) = package.get("install-path").and_then(|p| p.as_str())
-    {
-        composer_dir.join(install_path)
-    } else if let Some(pkg_name) = pkg_name {
-        vendor_path.join(pkg_name)
-    } else {
-        return out;
-    };
-
-    let pkg_path = match pkg_path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => {
-            // Directory doesn't exist (package not installed yet).
-            if !pkg_path.is_dir() {
-                return out;
-            }
-            pkg_path
-        }
-    };
-
-    if !pkg_path.is_dir() {
-        return out;
-    }
-
-    out.root = Some((
-        pkg_path.clone(),
-        origin,
-        pkg_name.unwrap_or("unknown/unknown").to_string(),
-    ));
-
-    let Some(autoload) = package.get("autoload") else {
-        return out;
-    };
-
-    if let Some(psr4) = autoload.get("psr-4").and_then(|p| p.as_object()) {
-        for paths in psr4.values() {
-            for dir_str in value_to_strings(paths) {
-                let dir = pkg_path.join(&dir_str);
-                if dir.is_dir() {
-                    out.psr4.push(dir);
-                }
-            }
-        }
-    }
-
-    // Files entries (individual PHP files that are always loaded)
-    if let Some(files) = autoload.get("files").and_then(|f| f.as_array()) {
-        let mut has_custom_autoloader = false;
-        for entry in files {
-            if let Some(file_str) = entry.as_str() {
-                let file = pkg_path.join(file_str);
-                if file.is_file()
-                    && file.extension().is_some_and(|ext| ext == "php")
-                    && !skip_paths.contains(&file)
-                {
-                    // Check if this file registers a custom autoloader.
-                    if !has_custom_autoloader
-                        && let Ok(content) = read_for_scan(&file)
-                        && memmem::find(&content, b"spl_autoload_register").is_some()
-                    {
-                        has_custom_autoloader = true;
-                    }
-                    out.plain.push(PlainSource::File(file));
-                }
-            }
-        }
-
-        // When a files entry registers a custom autoloader via
-        // spl_autoload_register, it will load classes from the
-        // package at runtime. Since we can't execute that logic,
-        // do a full scan of the package directory to discover all
-        // classes it provides.
-        if has_custom_autoloader {
-            out.plain.push(PlainSource::Dir(pkg_path.clone()));
-        }
-    }
-
-    if let Some(cm) = autoload.get("classmap").and_then(|c| c.as_array()) {
-        for entry in cm {
-            if let Some(dir_str) = entry.as_str() {
-                let dir = pkg_path.join(dir_str);
-                if dir.is_dir() {
-                    out.plain.push(PlainSource::Dir(dir));
-                } else if dir.is_file()
-                    && dir.extension().is_some_and(|ext| ext == "php")
-                    && !skip_paths.contains(&dir)
-                {
-                    out.plain.push(PlainSource::File(dir));
-                }
-            }
-        }
-    }
-
-    out
-}
-
-/// Like [`scan_vendor_packages`] but accepts a set of absolute file
-/// paths to skip.  Files whose path appears in `skip_paths` are
-/// excluded from scanning.
-pub fn scan_vendor_packages_with_skip(
-    workspace_root: &Path,
-    vendor_dir: &str,
-    skip_paths: &HashSet<PathBuf>,
-    explicit_deps: &HashSet<String>,
-    filters: &std::sync::Arc<IndexFilters>,
-    progress: Option<&ScanProgress>,
-    followed: Option<&FollowedLinks>,
-) -> WorkspaceScanResult {
-    let vendor_path = workspace_root.join(vendor_dir);
-
-    let Some(installed) = crate::composer::read_installed_packages(workspace_root, vendor_dir)
-    else {
-        return WorkspaceScanResult::default();
-    };
-    let packages = installed.packages.as_slice();
-    // install-path values are relative to the directory containing
-    // installed.json.
-    let composer_dir = installed.composer_dir;
-
-    // Phase 1: read every package's autoload section and resolve the
-    // paths it declares, without walking any of them.  Packages are
-    // independent so this fans out over all cores; the per-package
-    // results are put back in `installed.json` order below so a duplicate
-    // FQN resolves to the same file a sequential scan would have picked.
-    let mut collected: Vec<(usize, PackageSources)> = {
-        let next_pkg = std::sync::atomic::AtomicUsize::new(0);
-        let n_threads = thread_count().min(packages.len().max(1));
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..n_threads)
-                .map(|_| {
-                    let next_pkg = &next_pkg;
-                    let composer_dir = &composer_dir;
-                    let vendor_path = &vendor_path;
-                    s.spawn(move || {
-                        let mut out: Vec<(usize, PackageSources)> = Vec::new();
-                        loop {
-                            let i = next_pkg.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            let Some(package) = packages.get(i) else {
-                                break;
-                            };
-                            let sources = collect_package_sources(
-                                package,
-                                composer_dir,
-                                vendor_path,
-                                skip_paths,
-                                explicit_deps,
-                            );
-                            if !sources.psr4.is_empty()
-                                || !sources.plain.is_empty()
-                                || sources.root.is_some()
-                            {
-                                out.push((i, sources));
-                            }
-                        }
-                        out
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .flat_map(|h| {
-                    h.join().unwrap_or_else(|_| {
-                        tracing::error!("PHPantom: thread panic in vendor package collection");
-                        Vec::new()
-                    })
-                })
-                .collect()
-        })
-    };
-    collected.sort_unstable_by_key(|(i, _)| *i);
-
-    let mut package_roots: Vec<(PathBuf, crate::ClassCompletionOrigin, String)> = collected
-        .iter_mut()
-        .filter_map(|(_, sources)| sources.root.take())
-        .collect();
-    // Match `vendor_package_roots`'s ordering: longest path first, so a
-    // nested package's root wins a prefix match before its parent's.
-    package_roots.sort_by_key(|(p, _, _)| std::cmp::Reverse(p.components().count()));
-
-    // Phase 2: walk every collected directory in one parallel pass, so
-    // the cores are shared across all packages instead of one thread per
-    // package.  The roots are laid out PSR-4 first and classmap/`files`
-    // second, matching the order phase 3 concatenates them in.
-    let opts = WalkOptions::new(
-        vec![vendor_path.clone()],
-        skip_paths,
-        std::sync::Arc::clone(filters),
-        followed,
-    );
-    let mut roots: Vec<PathBuf> = Vec::new();
-    for (_, sources) in &collected {
-        roots.extend(sources.psr4.iter().cloned());
-    }
-    for (_, sources) in &collected {
-        for source in &sources.plain {
-            if let PlainSource::Dir(dir) = source {
-                roots.push(dir.clone());
-            }
-        }
-    }
-    let mut walked = walk_roots(&roots, &opts);
-
-    // Phase 3: concatenate in `installed.json` order.  Each file's origin
-    // is already known from the package it was declared by, so it travels
-    // alongside the path and gets attached to the functions and constants
-    // discovered in the same read, instead of re-reading every file in a
-    // second pass just to classify it.
-    let mut all_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
-        Vec::with_capacity(walked.iter().map(Vec::len).sum());
-    let mut next_root = 0;
-    for (_, sources) in &collected {
-        for _ in &sources.psr4 {
-            let files = std::mem::take(&mut walked[next_root]);
-            all_files.extend(files.into_iter().map(|path| (path, sources.origin)));
-            next_root += 1;
-        }
-    }
-    for (_, sources) in &collected {
-        for source in &sources.plain {
-            match source {
-                PlainSource::File(file) => all_files.push((file.clone(), sources.origin)),
-                PlainSource::Dir(_) => {
-                    let files = std::mem::take(&mut walked[next_root]);
-                    all_files.extend(files.into_iter().map(|path| (path, sources.origin)));
-                    next_root += 1;
-                }
-            }
-        }
-    }
-
-    progress_add_total(progress, all_files.len());
-
-    let mut result = scan_files_parallel_full(&all_files, progress);
-    result.package_roots = package_roots;
-    result
-}
-
 /// Scan all `.php` files under the workspace root using the PSR-4
 /// scanner (`find_classes`), excluding hidden directories, gitignored
 /// directories, and vendor directories.
@@ -553,73 +168,29 @@ pub fn scan_workspace_fallback(
     scan_directories(&[workspace_root.to_path_buf()], vendor_dir_paths, followed)
 }
 
-/// Scan `files` in parallel, calling `emit` on each to append the
-/// `(fqcn, path)` pairs it declares, and merge the result into one
-/// classmap where the first file to declare a name wins.
+/// Scan `files` on the shared worker pool, calling `emit` on each to
+/// append the `(fqcn, path)` pairs it declares, and merge the result into
+/// one classmap where the first file to declare a name wins.
 ///
-/// Small batches (≤ 4 files) run sequentially: splitting them over
-/// threads costs more than the scan itself. `name` names the scan in the
-/// log line a panicking worker leaves behind.
+/// `name` names the workers, and the log line a panicking one leaves.
 fn scan_files_parallel<T: Sync>(
     files: &[T],
     progress: Option<&ScanProgress>,
     name: &'static str,
     emit: impl Fn(&T, &mut Vec<(String, PathBuf)>) + Sync,
 ) -> HashMap<String, PathBuf> {
-    if files.is_empty() {
-        return HashMap::new();
-    }
-
-    let merge = |batches: Vec<Vec<(String, PathBuf)>>| {
-        let total: usize = batches.iter().map(Vec::len).sum();
-        let mut classmap = HashMap::with_capacity(total);
-        for batch in batches {
-            for (fqcn, path) in batch {
-                classmap.entry(fqcn).or_insert(path);
-            }
-        }
-        classmap
-    };
-
-    if files.len() <= 4 {
-        let mut local = Vec::new();
-        for file in files {
-            progress_add_done(progress);
-            emit(file, &mut local);
-        }
-        return merge(vec![local]);
-    }
-
-    let n_threads = thread_count().min(files.len());
-    let chunk_size = files.len().div_ceil(n_threads);
-    let emit = &emit;
-
-    let results: Vec<Vec<(String, PathBuf)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = files
-            .chunks(chunk_size)
-            .map(|chunk| {
-                s.spawn(move || {
-                    let mut local: Vec<(String, PathBuf)> = Vec::new();
-                    for file in chunk {
-                        progress_add_done(progress);
-                        emit(file, &mut local);
-                    }
-                    local
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| {
-                h.join().unwrap_or_else(|_| {
-                    tracing::error!("PHPantom: thread panic in {name}");
-                    Vec::new()
-                })
-            })
-            .collect()
+    let found = crate::parallel::map_in_blocks(name, files, SCAN_BLOCK_FILES, |file| {
+        progress_add_done(progress);
+        let mut declared = Vec::new();
+        emit(file, &mut declared);
+        (!declared.is_empty()).then_some(declared)
     });
 
-    merge(results)
+    let mut classmap = HashMap::with_capacity(found.iter().map(Vec::len).sum());
+    for (fqcn, path) in found.into_iter().flatten() {
+        classmap.entry(fqcn).or_insert(path);
+    }
+    classmap
 }
 
 /// Scan a batch of files for the class names they declare.
@@ -718,93 +289,38 @@ fn merge_scanned_file(
 }
 
 /// Scan a batch of files for all symbols (classes, functions, constants)
-/// in parallel and return a [`WorkspaceScanResult`].
+/// on the shared worker pool and return a [`WorkspaceScanResult`].
 ///
 /// Each file carries its own completion-origin tier, which is attached to
 /// any function or constant discovered in it. This lets callers that know
 /// a file's package provenance up front (e.g. vendor package scanning)
 /// classify symbols in the same read/scan pass instead of re-reading every
 /// file afterwards just to determine its origin.
-fn scan_files_parallel_full(
+///
+/// File sizes vary by orders of magnitude across a vendor tree, so the
+/// workers claim [`SCAN_BLOCK_FILES`] at a time rather than an even share
+/// each, and the results are merged in input order, the same as a
+/// sequential scan.
+pub(super) fn scan_files_parallel_full(
     files: &[(PathBuf, crate::ClassCompletionOrigin)],
     progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
-    if files.is_empty() {
-        return WorkspaceScanResult::default();
-    }
-
-    // Small batches: sequential
-    if files.len() <= 4 {
-        let mut result = WorkspaceScanResult::default();
-        for (path, origin) in files {
+    let scanned = crate::parallel::map_in_blocks(
+        "scan_files_parallel_full",
+        files,
+        SCAN_BLOCK_FILES,
+        |(path, origin)| {
             progress_add_done(progress);
-            if let Ok(content) = read_for_scan(path) {
-                merge_scanned_file(&mut result, super::find_symbols(&content), path, *origin);
-            }
-        }
-        return result;
-    }
-
-    let n_threads = thread_count().min(files.len());
-
-    // Workers claim blocks from a shared cursor rather than taking a
-    // fixed slice each: file sizes vary by orders of magnitude across a
-    // vendor tree, so an even split by count leaves most workers idle
-    // behind whichever slice drew the large files.  Blocks are merged in
-    // index order below, so the result is the same as a sequential scan.
-    let n_blocks = files.len().div_ceil(SCAN_BLOCK_FILES);
-    let next_block = std::sync::atomic::AtomicUsize::new(0);
-    let mut results: Vec<ScannedBlock> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..n_threads)
-            .map(|_| {
-                let next_block = &next_block;
-                s.spawn(move || {
-                    let mut out: Vec<ScannedBlock> = Vec::new();
-                    loop {
-                        let b = next_block.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if b >= n_blocks {
-                            break;
-                        }
-                        let start = b * SCAN_BLOCK_FILES;
-                        let end = (start + SCAN_BLOCK_FILES).min(files.len());
-                        let mut local: Vec<ScannedFile> = Vec::new();
-                        for (path, origin) in &files[start..end] {
-                            progress_add_done(progress);
-                            if let Ok(content) = read_for_scan(path) {
-                                let scan = super::find_symbols(&content);
-                                if !scan.classes.is_empty()
-                                    || !scan.functions.is_empty()
-                                    || !scan.constants.is_empty()
-                                {
-                                    local.push((scan, path.clone(), *origin));
-                                }
-                            }
-                        }
-                        if !local.is_empty() {
-                            out.push((b, local));
-                        }
-                    }
-                    out
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .flat_map(|h| {
-                h.join().unwrap_or_else(|_| {
-                    tracing::error!("PHPantom: thread panic in scan_files_parallel_full");
-                    Vec::new()
-                })
-            })
-            .collect()
-    });
-    results.sort_unstable_by_key(|(b, _)| *b);
+            let content = read_for_scan(path).ok()?;
+            let scan = super::find_symbols(&content);
+            (!scan.classes.is_empty() || !scan.functions.is_empty() || !scan.constants.is_empty())
+                .then_some((scan, path, *origin))
+        },
+    );
 
     let mut result = WorkspaceScanResult::default();
-    for (_, batch) in results {
-        for (scan, path, origin) in batch {
-            merge_scanned_file(&mut result, scan, &path, origin);
-        }
+    for (scan, path, origin) in scanned {
+        merge_scanned_file(&mut result, scan, path, origin);
     }
     result
 }
@@ -832,6 +348,39 @@ pub fn scan_workspace_fallback_full(
     progress: Option<&ScanProgress>,
     followed: Option<&FollowedLinks>,
 ) -> WorkspaceScanResult {
+    scan_roots_full(
+        &[workspace_root.to_path_buf()],
+        &[],
+        skip_dirs,
+        filters,
+        progress,
+        followed,
+    )
+}
+
+/// Full-scan `project_roots` and `library_roots` in one gitignore-aware
+/// walk, tagging what each library root declares as library code.
+///
+/// The library roots are the editor's other workspace folders. They go
+/// into the same [`walk_roots`] call as the project's own root rather
+/// than a walk of their own, so the shared ancestor `.gitignore` files are
+/// compiled once, and every root is claimed up front: a symlink in one
+/// root pointing into another loses to that root's own walk instead of
+/// indexing the tree a second time under the link's spelling. Each is
+/// walked with every filter in force, the way the project's root is.
+///
+/// Without a project root (a Composer pipeline whose classmap comes from
+/// its autoload mappings), list the workspace root in `skip_dirs` so a
+/// link pointing back into it is still left to the pipeline that covers
+/// it.
+pub(crate) fn scan_roots_full(
+    project_roots: &[PathBuf],
+    library_roots: &[PathBuf],
+    skip_dirs: &HashSet<PathBuf>,
+    filters: &std::sync::Arc<IndexFilters>,
+    progress: Option<&ScanProgress>,
+    followed: Option<&FollowedLinks>,
+) -> WorkspaceScanResult {
     // Phase 1: collect file paths
     let skip_paths = HashSet::new();
     let opts = WalkOptions::new(
@@ -840,12 +389,19 @@ pub fn scan_workspace_fallback_full(
         std::sync::Arc::clone(filters),
         followed,
     );
-    let php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
-        walk_roots(&[workspace_root.to_path_buf()], &opts)
-            .into_iter()
-            .flatten()
-            .map(|path| (path, crate::ClassCompletionOrigin::Project))
-            .collect();
+    let roots: Vec<PathBuf> = project_roots.iter().chain(library_roots).cloned().collect();
+    let php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = walk_roots(&roots, &opts)
+        .into_iter()
+        .enumerate()
+        .flat_map(|(index, files)| {
+            let origin = if index < project_roots.len() {
+                crate::ClassCompletionOrigin::Project
+            } else {
+                crate::ClassCompletionOrigin::VendorExplicit
+            };
+            files.into_iter().map(move |path| (path, origin))
+        })
+        .collect();
 
     // Phase 2: scan files in parallel
     progress_add_total(progress, php_files.len());
@@ -920,6 +476,134 @@ pub fn scan_include_paths(
             .collect();
     progress_add_total(progress, php_files.len());
     scan_files_parallel_full(&php_files, progress)
+}
+
+/// Scan the stub paths for symbols, in priority order.
+///
+/// A name two paths declare is kept from the earlier one, and within one
+/// path from the first file in path order, so the result does not depend
+/// on how the walk or the scan workers were scheduled. Files are listed
+/// the way [`collect_include_files`] lists them. A directory holding
+/// phpstorm-stubs' `PhpStormStubsMap.php` is read from the map instead of
+/// being scanned.
+///
+/// A declaration its docblock marks `@removed` at or before `php_version`
+/// is left out, as it is from the embedded stubs, so a later path's
+/// declaration of the name is the one kept.
+pub(crate) fn scan_stub_paths(
+    paths: &[PathBuf],
+    filters: &std::sync::Arc<IndexFilters>,
+    php_version: crate::types::PhpVersion,
+) -> WorkspaceScanResult {
+    let origin = crate::ClassCompletionOrigin::VendorExplicit;
+    let mut result = WorkspaceScanResult::default();
+    for path in paths {
+        let mut scan = match read_phpstorm_stubs_map(path, origin) {
+            Some(scan) => scan,
+            None => {
+                let mut files = collect_include_files(std::slice::from_ref(path), filters);
+                files.sort();
+                let files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
+                    files.into_iter().map(|file| (file, origin)).collect();
+                scan_files_parallel_full(&files, None)
+            }
+        };
+        drop_removed_declarations(&mut scan, php_version);
+        result.absorb_missing(scan);
+    }
+    result
+}
+
+/// Remove from `scan` every declaration whose file marks it `@removed` at
+/// or before `php_version`.
+fn drop_removed_declarations(
+    scan: &mut WorkspaceScanResult,
+    php_version: crate::types::PhpVersion,
+) {
+    use crate::stubs::StubSymbolKind;
+
+    let mut by_file: HashMap<&Path, Vec<(StubSymbolKind, &str)>> = HashMap::new();
+    let indexes = [
+        (StubSymbolKind::Class, &scan.classmap),
+        (StubSymbolKind::Function, &scan.function_index),
+        (StubSymbolKind::Constant, &scan.constant_index),
+    ];
+    for (kind, index) in indexes {
+        for (name, path) in index {
+            by_file
+                .entry(path.as_path())
+                .or_default()
+                .push((kind, name.as_str()));
+        }
+    }
+    let files: Vec<_> = by_file.into_iter().collect();
+    let removed: Vec<(StubSymbolKind, String)> = crate::parallel::map_in_blocks(
+        "drop_removed_declarations",
+        &files,
+        SCAN_BLOCK_FILES,
+        |(path, names)| {
+            let content = crate::util::read_php_source(path)?;
+            let removed = crate::stubs::removed_stub_names(&content, php_version)?;
+            Some(
+                names
+                    .iter()
+                    .filter(|&&(kind, name)| removed.contains(kind, name))
+                    .map(|&(kind, name)| (kind, name.to_owned()))
+                    .collect::<Vec<_>>(),
+            )
+        },
+    )
+    .into_iter()
+    .flatten()
+    .collect();
+
+    for (kind, name) in removed {
+        let (index, origins) = match kind {
+            StubSymbolKind::Class => (&mut scan.classmap, &mut scan.class_origins),
+            StubSymbolKind::Function => (&mut scan.function_index, &mut scan.function_origins),
+            StubSymbolKind::Constant => (&mut scan.constant_index, &mut scan.constant_origins),
+        };
+        index.remove(&name);
+        origins.remove(&name);
+    }
+}
+
+/// Whether `dir` is a phpstorm-stubs checkout, which the stub-path scan
+/// reads from its `PhpStormStubsMap.php`.
+pub(crate) fn is_phpstorm_stubs_checkout(dir: &Path) -> bool {
+    dir.join(PHPSTORM_STUBS_MAP).is_file()
+}
+
+const PHPSTORM_STUBS_MAP: &str = "PhpStormStubsMap.php";
+
+/// The symbols of the phpstorm-stubs checkout at `dir`, read from its
+/// `PhpStormStubsMap.php`, or `None` when `dir` holds no such map.
+fn read_phpstorm_stubs_map(
+    dir: &Path,
+    origin: crate::ClassCompletionOrigin,
+) -> Option<WorkspaceScanResult> {
+    let content = std::fs::read_to_string(dir.join(PHPSTORM_STUBS_MAP)).ok()?;
+    let section = |name: &str| -> (
+        HashMap<String, PathBuf>,
+        HashMap<String, crate::ClassCompletionOrigin>,
+    ) {
+        crate::stub_map::parse_section(&content, name)
+            .into_iter()
+            .map(|(symbol, file)| ((symbol.clone(), dir.join(file)), (symbol, origin)))
+            .unzip()
+    };
+    let (classmap, class_origins) = section("CLASSES");
+    let (function_index, function_origins) = section("FUNCTIONS");
+    let (constant_index, constant_origins) = section("CONSTANTS");
+    Some(WorkspaceScanResult {
+        classmap,
+        class_origins,
+        function_index,
+        function_origins,
+        constant_index,
+        constant_origins,
+        package_roots: Vec::new(),
+    })
 }
 
 /// Scan Drupal-specific directories for PHP symbols, bypassing `.gitignore`.
@@ -1003,169 +687,6 @@ fn is_drupal_php_file(path: &Path) -> bool {
         path.extension().and_then(|e| e.to_str()),
         Some("php" | "module" | "install" | "theme" | "profile" | "inc" | "engine")
     )
-}
-
-/// Extract string values from a JSON value that is either a single
-/// string or an array of strings.
-fn value_to_strings(value: &serde_json::Value) -> Vec<String> {
-    match value {
-        serde_json::Value::String(s) => vec![s.clone()],
-        serde_json::Value::Array(arr) => arr
-            .iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// What a [`walk_roots`] call leaves out.
-struct WalkOptions<'a> {
-    /// Directories that must never be entered: vendor trees scanned
-    /// through `installed.json` instead, and monorepo subproject roots
-    /// another pipeline already covered.  Shared behind an `Arc` because
-    /// `ignore` requires the `filter_entry` closure to own its captures.
-    skip_dirs: std::sync::Arc<Vec<PathBuf>>,
-    /// Absolute file paths to leave out of the result, typically the ones
-    /// Composer's generated classmap already covers.
-    skip_paths: &'a HashSet<PathBuf>,
-    /// Compiled `[indexing]` exclude globs and extra PHP extensions.
-    filters: std::sync::Arc<IndexFilters>,
-    /// Where to report the directory symlinks this walk descends
-    /// through, so the client can be asked to watch the trees behind
-    /// them. `None` for a walk whose caller has no watchers to register
-    /// (the `analyze`, `fix`, and `format` pipelines).
-    followed: Option<&'a FollowedLinks>,
-}
-
-impl<'a> WalkOptions<'a> {
-    fn new(
-        skip_dirs: Vec<PathBuf>,
-        skip_paths: &'a HashSet<PathBuf>,
-        filters: std::sync::Arc<IndexFilters>,
-        followed: Option<&'a FollowedLinks>,
-    ) -> Self {
-        Self {
-            skip_dirs: std::sync::Arc::new(skip_dirs),
-            skip_paths,
-            filters,
-            followed,
-        }
-    }
-}
-
-/// Walk a set of directory roots across all CPU cores and return the
-/// matching files of each.
-///
-/// All the roots go into a *single* `ignore` walk, which matters twice
-/// over.  `ignore` then reads the global gitignore and compiles each
-/// shared ancestor `.gitignore` once for the whole set instead of once
-/// per root: a vendor tree has thousands of autoload roots sharing the
-/// same ancestors, and that setup cost used to be most of the scan's CPU
-/// time.  And its worker pool splits the work by *directory* over a
-/// work-stealing deque, so one enormous package (`aws/aws-sdk-php` has
-/// 2900 files under a single PSR-4 root) no longer runs on one core while
-/// the rest of the scan waits for it.
-///
-/// The result has one entry per input root, in root order, so callers
-/// keep control over the concatenation order their duplicate-symbol
-/// tie-break depends on.  Roots that are not directories yield an empty
-/// entry, and a file below two overlapping roots is reported for both.
-///
-/// Each root's files are sorted by path.  A parallel walk reaches files
-/// in whatever order the workers happen to get to them, and a first-wins
-/// classmap must not depend on that; sorting also makes the result
-/// reproducible across runs, which the readdir order it replaces was not.
-fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
-    use ignore::WalkState;
-
-    // Two PSR-4 prefixes can map to the same directory, so the walk is
-    // over the distinct roots; the attribution below still hands the
-    // files to every root that named them.
-    let mut roots_by_path: HashMap<&Path, Vec<usize>> = HashMap::new();
-    let mut distinct_roots: Vec<&Path> = Vec::new();
-    for (index, dir) in roots.iter().enumerate() {
-        if !dir.is_dir() {
-            continue;
-        }
-        match roots_by_path.entry(dir.as_path()) {
-            std::collections::hash_map::Entry::Occupied(mut e) => e.get_mut().push(index),
-            std::collections::hash_map::Entry::Vacant(e) => {
-                e.insert(vec![index]);
-                distinct_roots.push(dir);
-            }
-        }
-    }
-
-    let mut out: Vec<Vec<PathBuf>> = vec![Vec::new(); roots.len()];
-    let Some((first_root, other_roots)) = distinct_roots.split_first() else {
-        return out;
-    };
-
-    // Every root is claimed up front, so a link inside one root pointing
-    // into another is skipped in favour of that root's own walk.
-    let mut builder = super::workspace_walk_builder(
-        first_root,
-        std::sync::Arc::clone(&opts.skip_dirs),
-        std::sync::Arc::clone(&opts.filters),
-        false,
-        super::LinkClaims::new(
-            distinct_roots.iter().map(|r| r.to_path_buf()),
-            opts.followed,
-        ),
-    );
-    for dir in other_roots {
-        builder.add(dir);
-    }
-    builder.threads(thread_count());
-
-    let (tx, rx) = std::sync::mpsc::channel::<(usize, PathBuf)>();
-    let skip_paths = opts.skip_paths;
-    let filters = &opts.filters;
-    let roots_by_path = &roots_by_path;
-    builder.build_parallel().run(|| {
-        let tx = tx.clone();
-        Box::new(move |entry| {
-            let Ok(entry) = entry else {
-                return WalkState::Continue;
-            };
-            let path = entry.path();
-            let file_type = entry.file_type();
-            if file_type.is_some_and(|ft| ft.is_dir())
-                || !filters.is_php_file(path)
-                || skip_paths.contains(path)
-                // `ignore` reports the target's type for a symlink it
-                // followed, and the symlink's own for one it did not
-                // (a claimed target, a broken link), so confirm the
-                // target is a regular file before indexing it.  The
-                // tests above keep this stat off the common path.
-                || !(file_type.is_some_and(|ft| ft.is_file()) || path.is_file())
-            {
-                return WalkState::Continue;
-            }
-            // The root this entry came from is its `depth`-th ancestor.
-            // Overlapping roots (Laravel maps both `src/Illuminate` and
-            // `src/Illuminate/Collections`) are walked once each, so
-            // attributing by depth gives every root exactly the files its
-            // own walk produced.
-            if let Some(root) = path.ancestors().nth(entry.depth())
-                && let Some(indices) = roots_by_path.get(root)
-            {
-                for &index in indices {
-                    let _ = tx.send((index, path.to_path_buf()));
-                }
-            }
-            WalkState::Continue
-        })
-    });
-    drop(tx);
-
-    for (index, path) in rx {
-        out[index].push(path);
-    }
-    for files in &mut out {
-        files.sort_unstable();
-    }
-    out
 }
 
 /// Derive the class name a PSR-4 mapping expects a file to declare, from

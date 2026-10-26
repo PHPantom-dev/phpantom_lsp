@@ -1,8 +1,9 @@
 //! Column names in the PHP attributes attached to Eloquent model classes.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::completion::source::code_context::CodeContext;
 use crate::completion::source::string_argument::{StringArgumentPosition, string_argument};
 use crate::text_position::{offset_to_position, position_to_offset};
@@ -98,14 +99,10 @@ impl Backend {
             }
         }
 
-        let class_loader = self.class_loader_with(
-            &ctx.classes,
-            ctx.use_map_at(name_start as u32),
-            ctx.namespace_at(name_start as u32),
-        );
+        let class_loader = self.resolved_class_loader(ctx);
         // Recognition alone is not a version check: older Laravel installs
         // may not provide the requested attribute class at all.
-        let attribute = class_loader(&format!("\\{name}"))?;
+        let attribute = class_loader(Fqn::new(&name))?;
         if !attribute.fqn().eq_ignore_ascii_case(&name) {
             return None;
         }
@@ -129,15 +126,15 @@ impl Backend {
             })
             .map(|column| CompletionItem {
                 label: column.clone(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some("column".to_string()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range,
                     new_text: column,
                 })),
                 ..Default::default()
             })
             .collect();
-        (!items.is_empty()).then_some(CompletionResponse::Array(items))
+        (!items.is_empty()).then_some(CompletionResponse::CompletionItemList(items))
     }
 }

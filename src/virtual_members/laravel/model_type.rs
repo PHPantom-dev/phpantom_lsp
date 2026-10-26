@@ -5,8 +5,9 @@
 use std::sync::Arc;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN};
+use crate::types::ELOQUENT_COLLECTION_FQN;
 
 use super::collections::{collection_type_for, custom_collection_for_model};
 use super::{
@@ -27,10 +28,7 @@ use super::{
 ///
 /// Types holding no operator are returned as they were, which
 /// [`has_model_type_operator`] makes cheap enough to ask on every type.
-pub(crate) fn expand_model_type(
-    ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> PhpType {
+pub(crate) fn expand_model_type(ty: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> PhpType {
     if !has_model_type_operator(ty) {
         return ty.clone();
     }
@@ -59,14 +57,16 @@ pub(crate) fn expand_model_type(
             let model_name = model.base_name().or_else(|| match model.kind() {
                 TypeKind::Intersection(members) => members.iter().find_map(|member| {
                     let name = member.base_name()?;
-                    let cls = class_loader(name)?;
+                    let cls = class_loader(Fqn::new(name))?;
                     extends_eloquent_model(&cls, class_loader).then_some(name)
                 }),
                 _ => None,
             });
-            let model_class = model_name.and_then(class_loader).filter(|class| {
-                crate::virtual_members::laravel::extends_eloquent_model(class, class_loader)
-            });
+            let model_class = model_name
+                .and_then(|name| class_loader(Fqn::new(name)))
+                .filter(|class| {
+                    crate::virtual_members::laravel::extends_eloquent_model(class, class_loader)
+                });
             let Some(model_class) = model_class else {
                 resolved.push(model_type_fallback(&g.name, None, key));
                 continue;
@@ -87,7 +87,7 @@ pub(crate) fn expand_model_type(
                                 class_loader,
                                 crate::virtual_members::active_resolved_class_cache(),
                             )?;
-                            class_loader(&fqn)
+                            class_loader(Fqn::new(&fqn))
                         })
                         .collect();
                     let targets: Vec<_> = if targets.is_empty() {
@@ -100,7 +100,7 @@ pub(crate) fn expand_model_type(
                             .iter()
                             .map(|target| {
                                 let builder = custom_builder_fqn(target, class_loader)
-                                    .filter(|name| class_loader(name).is_some())
+                                    .filter(|name| class_loader(Fqn::new(name)).is_some())
                                     .unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
                                 let target_model = if target.fqn() == model_class.fqn() {
                                     model.clone()
@@ -121,7 +121,7 @@ pub(crate) fn expand_model_type(
                     ];
                     if let Some(collection) =
                         custom_collection_for_model(&model_class.fqn(), class_loader)
-                            .filter(|name| class_loader(name).is_some())
+                            .filter(|name| class_loader(Fqn::new(name)).is_some())
                     {
                         collection_type_for(&collection, &args, class_loader)
                     } else {

@@ -1,0 +1,26 @@
+// test: builtins hand back the refinement their arguments decide
+// feature: hover
+// expect_hover: $lowerBound => int<1, max>
+// expect_hover: $upperBound => int<min, 10>
+// expect_hover: $filled => list<'WHEN ?'>
+// expect_hover: $nonEmptyFill => non-empty-list<'WHEN ?'>
+// expect_hover: $joined => literal-string
+// expect_hover: $path => non-falsy-string
+// expect_hover: $fixed => numeric-string
+---
+<?php
+
+/**
+ * @param list<int> $ids
+ * @param non-empty-list<non-falsy-string> $parts
+ */
+function test(int $n, array $ids, array $parts, float $f): void {
+    $lowerBound = max(1, $n);
+    $upperBound = min($n, 10);
+    $filled = array_fill(0, count($ids), 'WHEN ?');
+    $nonEmptyFill = array_fill(0, 3, 'WHEN ?');
+    $joined = implode(' ', $filled);
+    $path = implode('\\', $parts);
+    $fixed = sprintf('%.2F', $f);
+    $<>fixed;
+}

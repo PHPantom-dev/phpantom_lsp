@@ -11,10 +11,10 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+use crate::symbol_map::{LaravelConfigResource, StringKeyKind};
 use crate::types::FileContext;
 
 mod context;
@@ -23,24 +23,30 @@ mod enumerate;
 mod tests;
 
 use context::*;
+pub(crate) use context::{ArgumentSlot, attribute_class_start, callable_before_scalar_argument};
 
 /// The icon an editor shows beside a completed string key: whatever the key
 /// names is what it should look like.
-fn string_key_item_kind(kind: &LaravelStringKind) -> CompletionItemKind {
+pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
-        LaravelStringKind::Config | LaravelStringKind::ConfigResource(_) => {
-            CompletionItemKind::PROPERTY
-        }
-        LaravelStringKind::View => CompletionItemKind::FILE,
-        LaravelStringKind::Trans => CompletionItemKind::TEXT,
-        LaravelStringKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
-        LaravelStringKind::GateAbility => CompletionItemKind::METHOD,
-        LaravelStringKind::Env => CompletionItemKind::CONSTANT,
-        LaravelStringKind::Route
-        | LaravelStringKind::Command
-        | LaravelStringKind::Section
-        | LaravelStringKind::Stack
-        | LaravelStringKind::ContainerBinding => CompletionItemKind::VALUE,
+        StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::Property,
+        StringKeyKind::View | StringKeyKind::TwigTemplate => CompletionItemKind::File,
+        StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
+        StringKeyKind::TranslationDomain => CompletionItemKind::Module,
+        StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
+        StringKeyKind::GateAbility => CompletionItemKind::Method,
+        StringKeyKind::Env => CompletionItemKind::Constant,
+        StringKeyKind::ServiceId => CompletionItemKind::Reference,
+        StringKeyKind::ContainerParameter => CompletionItemKind::Property,
+        StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
+        StringKeyKind::SymfonyEvent => CompletionItemKind::Event,
+        StringKeyKind::MessengerBus => CompletionItemKind::Reference,
+        StringKeyKind::Route
+        | StringKeyKind::SymfonyRoute
+        | StringKeyKind::Command
+        | StringKeyKind::Section
+        | StringKeyKind::Stack
+        | StringKeyKind::ContainerBinding => CompletionItemKind::Value,
     }
 }
 
@@ -73,20 +79,20 @@ impl Backend {
             crate::text_position::offset_to_position(content, span.end as usize),
         );
         let items = self
-            .string_key_candidates(&LaravelStringKind::MorphAlias, prefix)
+            .string_key_candidates(&StringKeyKind::MorphAlias, prefix)
             .iter()
             .filter(|alias| alias.starts_with(prefix))
             .map(|alias| CompletionItem {
                 label: alias.clone(),
-                kind: Some(CompletionItemKind::ENUM_MEMBER),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                kind: Some(CompletionItemKind::EnumMember),
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range,
                     new_text: alias.clone(),
                 })),
                 ..Default::default()
             })
             .collect();
-        Some(CompletionResponse::Array(items))
+        Some(CompletionResponse::CompletionItemList(items))
     }
 
     /// Every name a string key of `kind` could be, unfiltered.
@@ -100,11 +106,11 @@ impl Backend {
     /// valid, which ordinary class completion already offers, and the set of
     /// keys is open besides — a list of them would read as the whole answer
     /// when it is not.
-    fn string_key_candidates(&self, kind: &LaravelStringKind, typed_prefix: &str) -> Arc<[String]> {
+    fn string_key_candidates(&self, kind: &StringKeyKind, typed_prefix: &str) -> Arc<[String]> {
         match kind {
-            LaravelStringKind::Route => self.cached_route_names(),
-            LaravelStringKind::Config => self.cached_config_keys(),
-            LaravelStringKind::ConfigResource(resource) => {
+            StringKeyKind::Route => self.cached_route_names(),
+            StringKeyKind::Config => self.cached_config_keys(),
+            StringKeyKind::ConfigResource(resource) => {
                 // `#[Database('mysql')]` completes the keys under
                 // `database.connections.` with that prefix stripped.
                 let prefix =
@@ -147,21 +153,31 @@ impl Backend {
                     names.into()
                 }
             }
-            LaravelStringKind::View => self.cached_view_names(),
-            LaravelStringKind::Trans => self.cached_trans_keys(),
-            LaravelStringKind::Command => self.laravel_commands.read().all_names().into(),
-            LaravelStringKind::MorphAlias => {
-                let mut aliases = self.laravel_morph_map.read().all_aliases();
+            StringKeyKind::View => self.cached_view_names(),
+            StringKeyKind::Trans => self.cached_trans_keys(),
+            StringKeyKind::Command => self.laravel.commands.read().all_names().into(),
+            StringKeyKind::MorphAlias => {
+                let mut aliases = self.laravel.morph_map.read().all_aliases();
                 aliases.sort();
                 aliases.into()
             }
-            LaravelStringKind::GateAbility => self.cached_gate_abilities(),
-            LaravelStringKind::Env => {
-                crate::virtual_members::laravel::enumerate_env_keys(self).into()
-            }
-            LaravelStringKind::Section
-            | LaravelStringKind::Stack
-            | LaravelStringKind::ContainerBinding => Arc::new([]),
+            StringKeyKind::GateAbility => self.cached_gate_abilities(),
+            StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
+            StringKeyKind::ServiceId
+            | StringKeyKind::ContainerParameter
+            | StringKeyKind::SymfonyRoute
+            | StringKeyKind::TranslationDomain
+            | StringKeyKind::TwigTemplate
+            | StringKeyKind::SymfonyEvent
+            | StringKeyKind::MessengerBus => self.symfony_declared_names(*kind).into(),
+            // A translation key is completed in the domain it is looked up
+            // in, and a configuration key under the key it is nested in,
+            // which only the Symfony completion knows.
+            StringKeyKind::SymfonyTranslation
+            | StringKeyKind::SymfonyConfigKey
+            | StringKeyKind::Section
+            | StringKeyKind::Stack
+            | StringKeyKind::ContainerBinding => Arc::new([]),
         }
     }
 
@@ -265,7 +281,7 @@ impl Backend {
 
         string_key_response(
             names,
-            CompletionItemKind::FILE,
+            CompletionItemKind::File,
             content,
             sc.string_content_start,
             position,
@@ -279,7 +295,7 @@ impl Backend {
 /// rather than inserting at it, so a dotted name is not mangled by the
 /// editor's word-based filtering (which treats `.` as a boundary and would
 /// otherwise leave `users.users.profile` behind).
-fn string_key_response(
+pub(crate) fn string_key_response(
     names: Vec<String>,
     kind: CompletionItemKind,
     content: &str,
@@ -301,12 +317,12 @@ fn string_key_response(
             kind: Some(kind),
             sort_text: Some(format!("{:05}", i)),
             filter_text: Some(name.clone()),
-            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+            text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                 range: edit_range,
                 new_text: name,
             })),
             ..Default::default()
         })
         .collect();
-    Some(CompletionResponse::Array(items))
+    Some(CompletionResponse::CompletionItemList(items))
 }

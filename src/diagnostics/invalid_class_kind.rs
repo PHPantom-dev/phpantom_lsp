@@ -17,14 +17,20 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use mago_syntax::cst::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
+use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::util::short_name;
 
-use super::helpers::{FileDiagnosticContext, is_offset_in_ranges, make_diagnostic, resolve_to_fqn};
+use super::helpers::{
+    FileDiagnosticContext, classes_instantiated_by_variable, is_offset_in_ranges, make_diagnostic,
+    resolve_to_fqn,
+};
 use super::use_statements::compute_use_line_ranges;
 
 /// Diagnostic code used for invalid-class-kind diagnostics.
@@ -45,9 +51,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
-            return;
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
         self.collect_invalid_class_kind_diagnostics_with_context(&ctx, uri, content, out);
     }
 
@@ -158,6 +162,103 @@ impl Backend {
                 ));
             }
         }
+
+        self.collect_variable_instantiation_diagnostics(ctx, uri, content, out);
+    }
+
+    /// Check `new $class` against the classes the variable spells.
+    ///
+    /// Only a variable holding nothing but strings that spell classes is
+    /// judged, and only when every class it may spell is invalid: one
+    /// instantiable class among them makes the `new` legal.
+    fn collect_variable_instantiation_diagnostics(
+        &self,
+        ctx: &FileDiagnosticContext,
+        uri: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let _parse_guard = with_parse_cache(content);
+        let sites = with_parsed_program(content, "invalid_class_kind", |program, _content| {
+            let mut sites = Vec::new();
+            for statement in program.statements.iter() {
+                mago_syntax::walker::Walker::walk_statement(
+                    &VariableInstantiationWalker,
+                    statement,
+                    &mut sites,
+                );
+            }
+            sites
+        });
+        if sites.is_empty() {
+            return;
+        }
+
+        let loaders = self.file_loaders(&ctx.file);
+        for site in sites {
+            if !super::incremental::reports_site(site.start) {
+                continue;
+            }
+            let rctx = loaders.resolution_ctx_at(content, site.start);
+            let Some(classes) = classes_instantiated_by_variable(&site.var_name, &rctx) else {
+                continue;
+            };
+            let verdicts: Option<Vec<_>> = classes
+                .iter()
+                .map(|class| {
+                    check_kind_in_context(
+                        class,
+                        ClassRefContext::New,
+                        &class.fqn(),
+                        rctx.file.class_loader,
+                    )
+                })
+                .collect();
+            let Some((severity, message)) = verdicts.and_then(|v| v.into_iter().next()) else {
+                continue;
+            };
+            let Some(range) = self.offset_range_to_lsp_range(
+                uri,
+                content,
+                site.start as usize,
+                site.end as usize,
+            ) else {
+                continue;
+            };
+            out.push(make_diagnostic(
+                range,
+                severity,
+                INVALID_CLASS_KIND_CODE,
+                message,
+            ));
+        }
+    }
+}
+
+/// A `new $class` in the source: the variable and its byte span.
+struct VariableInstantiation {
+    var_name: String,
+    start: u32,
+    end: u32,
+}
+
+struct VariableInstantiationWalker;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<VariableInstantiation>>
+    for VariableInstantiationWalker
+{
+    fn walk_in_instantiation(
+        &self,
+        node: &'ast Instantiation<'arena>,
+        sites: &mut Vec<VariableInstantiation>,
+    ) {
+        if let Expression::Variable(Variable::Direct(var)) = node.class {
+            sites.push(VariableInstantiation {
+                var_name: crate::atom::bytes_to_str(var.name).to_string(),
+                start: var.span.start.offset,
+                end: var.span.end.offset,
+            });
+        }
     }
 }
 
@@ -169,7 +270,7 @@ fn check_kind_in_context(
     class: &ClassInfo,
     ctx: ClassRefContext,
     fqn: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<(DiagnosticSeverity, String)> {
     let kind = class.kind;
 
@@ -178,19 +279,19 @@ fn check_kind_in_context(
             // Cannot instantiate abstract classes, interfaces, traits, or enums.
             match kind {
                 ClassLikeKind::Interface => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("Cannot instantiate interface '{}'", fqn),
                 )),
                 ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("Cannot instantiate trait '{}'", fqn),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("Cannot instantiate enum '{}'", fqn),
                 )),
                 ClassLikeKind::Class if class.is_abstract => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("Cannot instantiate abstract class '{}'", fqn),
                 )),
                 _ => None,
@@ -200,25 +301,25 @@ fn check_kind_in_context(
             // `class A extends X` — X must be a non-final class.
             match kind {
                 ClassLikeKind::Interface => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is an interface and cannot be used in 'extends' for a class (use 'implements' instead)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a trait and cannot be used in 'extends' (use 'use' inside the class body instead)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("'{}' is an enum and cannot be extended", fqn),
                 )),
                 ClassLikeKind::Class if class.is_final => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("Cannot extend final class '{}'", fqn),
                 )),
                 _ => None,
@@ -228,21 +329,21 @@ fn check_kind_in_context(
             // `interface A extends X` — X must be an interface.
             match kind {
                 ClassLikeKind::Class => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a class, but interfaces can only extend other interfaces",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a trait, but interfaces can only extend other interfaces",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is an enum, but interfaces can only extend other interfaces",
                         fqn
@@ -255,21 +356,21 @@ fn check_kind_in_context(
             // `class A implements X` / `enum A implements X` — X must be an interface.
             match kind {
                 ClassLikeKind::Class => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a class, not an interface (use 'extends' to inherit from a class)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a trait, not an interface (use 'use' inside the class body for traits)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("'{}' is an enum, not an interface", fqn),
                 )),
                 _ => None,
@@ -279,21 +380,21 @@ fn check_kind_in_context(
             // `class A { use X; }` — X must be a trait.
             match kind {
                 ClassLikeKind::Class => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is a class, not a trait (use 'extends' to inherit from a class)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Interface => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "'{}' is an interface, not a trait (use 'implements' for interfaces)",
                         fqn
                     ),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!("'{}' is an enum, not a trait", fqn),
                 )),
                 _ => None,
@@ -303,7 +404,7 @@ fn check_kind_in_context(
             // `$x instanceof X` — traits always evaluate to false.
             if kind == ClassLikeKind::Trait {
                 Some((
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     format!(
                         "'instanceof' with trait '{}' always evaluates to false",
                         fqn
@@ -317,11 +418,11 @@ fn check_kind_in_context(
             // `catch (X $e)` — traits can never catch, non-Throwable is an error.
             match kind {
                 ClassLikeKind::Trait => Some((
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     format!("Trait '{}' in catch block will never catch anything", fqn),
                 )),
                 ClassLikeKind::Enum => Some((
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     format!(
                         "Enum '{}' cannot be caught (only classes and interfaces that implement Throwable can be caught)",
                         fqn
@@ -330,7 +431,7 @@ fn check_kind_in_context(
                 ClassLikeKind::Class | ClassLikeKind::Interface => {
                     if !is_throwable(class, class_loader) {
                         Some((
-                            DiagnosticSeverity::ERROR,
+                            DiagnosticSeverity::Error,
                             format!(
                                 "'{}' does not implement Throwable and cannot be caught",
                                 fqn
@@ -346,7 +447,7 @@ fn check_kind_in_context(
             // Traits in type-hint positions — type check always fails.
             if kind == ClassLikeKind::Trait {
                 Some((
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     format!(
                         "Trait '{}' used as a type hint will always fail type checking",
                         fqn
@@ -376,14 +477,14 @@ fn check_kind_in_context(
 /// Walks the parent class chain and interface hierarchy, using the
 /// provided class loader to resolve names.  A visited set prevents
 /// infinite loops from cyclic hierarchies.
-fn is_throwable(class: &ClassInfo, class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> bool {
+fn is_throwable(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
     let mut visited = HashSet::new();
     is_throwable_inner(class, class_loader, &mut visited)
 }
 
 fn is_throwable_inner(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     visited: &mut HashSet<String>,
 ) -> bool {
     let fqn = class.fqn().to_string();
@@ -409,7 +510,7 @@ fn is_throwable_inner(
         if iface_short == "throwable" {
             return true;
         }
-        if let Some(iface) = class_loader(iface_name)
+        if let Some(iface) = class_loader(Fqn::new(iface_name))
             && is_throwable_inner(&iface, class_loader, visited)
         {
             return true;
@@ -427,7 +528,7 @@ fn is_throwable_inner(
         {
             return true;
         }
-        if let Some(parent) = class_loader(parent_name)
+        if let Some(parent) = class_loader(Fqn::new(parent_name))
             && is_throwable_inner(&parent, class_loader, visited)
         {
             return true;

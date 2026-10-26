@@ -1,0 +1,17 @@
+// test: a loop counter computed from its own last value covers every pass
+// feature: hover
+// The counter is 0 before the first pass and one more on each later one,
+// for as many passes as the loop makes.
+// expect: int<0, max>
+// expect_hover: $after => int<0, max>
+---
+<?php
+
+function test(): void {
+    $n = 0;
+    while (rand()) {
+        echo $<>n;
+        $n = $n + 1;
+    }
+    $after = $n;
+}

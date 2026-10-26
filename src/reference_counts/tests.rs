@@ -1,8 +1,14 @@
 use super::cache::*;
 use super::*;
-use tower_lsp::lsp_types::{CodeLens, Position, Range, Url};
+use crate::references::MemberRefKind;
+use tower_lsp_server::gen_lsp_types::{CodeLens, Position, Range, Uri};
 
 const URI: &str = "file:///test.php";
+
+const METHOD: MemberSlot = MemberSlot {
+    is_static: false,
+    is_method: true,
+};
 
 fn parse_extra(backend: &Backend, uri: &str, content: &str) {
     backend
@@ -11,14 +17,13 @@ fn parse_extra(backend: &Backend, uri: &str, content: &str) {
         .insert(uri.to_string(), Arc::new(content.to_string()));
     backend.update_ast(uri, content);
     backend
-        .workspace_indexed
+        .workspace_index
+        .indexed
         .store(true, std::sync::atomic::Ordering::Release);
     // The cache exists for the warm lens a refresh-capable client is
     // shown once the background search lands, which is the path these
     // tests measure.
-    backend
-        .supports_code_lens_refresh
-        .store(true, std::sync::atomic::Ordering::Release);
+    backend.client_caps.write().code_lens_refresh = true;
 }
 
 fn parse(backend: &Backend, content: &str) {
@@ -47,7 +52,7 @@ fn count_on_line(lenses: &[CodeLens], line: u32) -> Option<String> {
 fn exact_location_cache_is_bounded_and_interns_uris() {
     let cache = MemberRefCounts::default();
     let location = Location {
-        uri: Url::parse("file:///uses.php").unwrap(),
+        uri: Uri::parse("file:///uses.php").unwrap(),
         range: Range::new(Position::new(1, 2), Position::new(1, 6)),
     };
 
@@ -55,7 +60,7 @@ fn exact_location_cache_is_bounded_and_interns_uris() {
         cache.store(
             crate::atom::atom("Order"),
             crate::atom::atom(&format!("member{index}")),
-            false,
+            METHOD,
             vec![location.clone(); MAX_LOCATIONS_PER_MEMBER],
             false,
         );
@@ -87,7 +92,7 @@ fn invalidate_member_of_a_cached_name_bumps_the_epoch() {
     cache.store(
         crate::atom::atom("Order"),
         crate::atom::atom("save"),
-        false,
+        METHOD,
         Vec::new(),
         false,
     );
@@ -105,13 +110,13 @@ fn invalidate_member_of_a_cached_name_bumps_the_epoch() {
 fn invalidate_locations_in_an_unrelated_file_does_not_bump_the_epoch() {
     let cache = MemberRefCounts::default();
     let location = Location {
-        uri: Url::parse("file:///uses.php").unwrap(),
+        uri: Uri::parse("file:///uses.php").unwrap(),
         range: Range::new(Position::new(1, 2), Position::new(1, 6)),
     };
     cache.store(
         crate::atom::atom("Order"),
         crate::atom::atom("save"),
-        false,
+        METHOD,
         vec![location],
         false,
     );
@@ -126,13 +131,13 @@ fn invalidate_locations_in_an_unrelated_file_does_not_bump_the_epoch() {
 fn invalidate_locations_in_a_cached_file_bumps_the_epoch() {
     let cache = MemberRefCounts::default();
     let location = Location {
-        uri: Url::parse("file:///uses.php").unwrap(),
+        uri: Uri::parse("file:///uses.php").unwrap(),
         range: Range::new(Position::new(1, 2), Position::new(1, 6)),
     };
     cache.store(
         crate::atom::atom("Order"),
         crate::atom::atom("save"),
-        false,
+        METHOD,
         vec![location],
         false,
     );
@@ -181,7 +186,7 @@ function persist(Order $order): void {
                 declaration_offset,
                 crate::atom::atom("Order"),
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .unwrap()
             .len(),
@@ -219,7 +224,10 @@ function later(Service $service): void {
     let backend = Backend::new_test();
     parse_extra(&backend, SERVICE_URI, SERVICE);
     parse_extra(&backend, CONSUMER_URI, CONSUMER);
-    backend.workspace_indexed.store(true, Ordering::Release);
+    backend
+        .workspace_index
+        .indexed
+        .store(true, Ordering::Release);
 
     let class_fqn = crate::atom::atom("Service");
     let save_offset = SERVICE.find("save").unwrap() as u32;
@@ -230,7 +238,7 @@ function later(Service $service): void {
                 save_offset,
                 class_fqn,
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .is_none()
     );
@@ -238,12 +246,7 @@ function later(Service $service): void {
     backend.compute_pending_member_ref_counts();
     assert!(crate::type_engine::variable::resolution::test_scope_cache_hits() > 0);
 
-    let consumer_map = backend
-        .symbol_maps
-        .read()
-        .get(CONSUMER_URI)
-        .cloned()
-        .unwrap();
+    let consumer_map = backend.symbol_map_for(CONSUMER_URI).unwrap();
     let save_span = consumer_map.member_access_indices("save")[0];
     let cancel_span = consumer_map.member_access_indices("cancel")[0];
 
@@ -272,7 +275,7 @@ function later(Service $service): void {
                 cancel_offset,
                 class_fqn,
                 crate::atom::atom("cancel"),
-                false,
+                METHOD,
             )
             .is_none()
     );
@@ -285,7 +288,7 @@ function later(Service $service): void {
                 cancel_offset,
                 class_fqn,
                 crate::atom::atom("cancel"),
-                false,
+                METHOD,
             )
             .unwrap()
             .len(),
@@ -326,13 +329,25 @@ function run(Service $service): void {
     parse_extra(&backend, CONSUMER_URI, CONSUMER);
 
     let save_offset = SERVICE.find("save").unwrap() as u32;
-    let first = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    let first = backend.member_declaration_references(
+        SERVICE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
     assert_eq!(first.len(), 1, "the access in the consumer is a reference");
 
     // Nothing but the warm entry can answer for the consumer now: it is not
     // open, and the URI has no file behind it.
     backend.open_files.write().remove(CONSUMER_URI);
-    let second = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    let second = backend.member_declaration_references(
+        SERVICE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
     assert_eq!(
         second, first,
         "a file already resolved for this member is answered from the layer"
@@ -382,7 +397,7 @@ class Consumer {
                 save_offset,
                 crate::atom::atom("Service"),
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .unwrap()
             .len(),
@@ -422,7 +437,13 @@ function run(Service $service): void {
         parse_extra(&backend, OTHER_URI, OTHER);
 
         let save_offset = SERVICE.find("save").unwrap() as u32;
-        let found = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+        let found = backend.member_declaration_references(
+            SERVICE_URI,
+            save_offset,
+            "save",
+            false,
+            MemberRefKind::Method,
+        );
         assert_eq!(found.len(), 1, "the access in the consumer is a reference");
         assert!(
             is_warm(&backend),
@@ -434,10 +455,7 @@ function run(Service $service): void {
     /// Whether the consumer's resolutions are still cached.
     fn is_warm(backend: &Backend) -> bool {
         let map = backend
-            .symbol_maps
-            .read()
-            .get(CONSUMER_URI)
-            .cloned()
+            .symbol_map_for(CONSUMER_URI)
             .expect("the consumer is parsed");
         backend.resolved_member_file(CONSUMER_URI, &map).is_some()
     }
@@ -511,18 +529,19 @@ function run(Factory $factory): void {
     let ship_offset = PRODUCT.find("ship").unwrap() as u32;
     assert_eq!(
         backend
-            .member_declaration_references(PRODUCT_URI, ship_offset, "ship", false)
+            .member_declaration_references(
+                PRODUCT_URI,
+                ship_offset,
+                "ship",
+                false,
+                MemberRefKind::Method
+            )
             .len(),
         1,
         "the chained call is a reference"
     );
 
-    let consumer_map = backend
-        .symbol_maps
-        .read()
-        .get(CONSUMER_URI)
-        .cloned()
-        .unwrap();
+    let consumer_map = backend.symbol_map_for(CONSUMER_URI).unwrap();
     assert!(
         backend
             .resolved_member_file(CONSUMER_URI, &consumer_map)
@@ -560,18 +579,19 @@ fn an_edit_to_a_function_the_receiver_came_from_drops_the_entry() {
     let ship_offset = PRODUCT.find("ship").unwrap() as u32;
     assert_eq!(
         backend
-            .member_declaration_references(PRODUCT_URI, ship_offset, "ship", false)
+            .member_declaration_references(
+                PRODUCT_URI,
+                ship_offset,
+                "ship",
+                false,
+                MemberRefKind::Method
+            )
             .len(),
         1,
         "the call chained off the helper is a reference"
     );
 
-    let consumer_map = backend
-        .symbol_maps
-        .read()
-        .get(CONSUMER_URI)
-        .cloned()
-        .unwrap();
+    let consumer_map = backend.symbol_map_for(CONSUMER_URI).unwrap();
     assert!(
         backend
             .resolved_member_file(CONSUMER_URI, &consumer_map)
@@ -608,18 +628,19 @@ fn an_edit_to_a_parent_drops_an_entry_that_only_named_the_child() {
     let save_offset = BASE.find("save").unwrap() as u32;
     assert_eq!(
         backend
-            .member_declaration_references(BASE_URI, save_offset, "save", false)
+            .member_declaration_references(
+                BASE_URI,
+                save_offset,
+                "save",
+                false,
+                MemberRefKind::Method
+            )
             .len(),
         1,
         "the inherited call is a reference to the declaration on the parent"
     );
 
-    let consumer_map = backend
-        .symbol_maps
-        .read()
-        .get(CONSUMER_URI)
-        .cloned()
-        .unwrap();
+    let consumer_map = backend.symbol_map_for(CONSUMER_URI).unwrap();
     assert!(
         backend
             .resolved_member_file(CONSUMER_URI, &consumer_map)
@@ -651,7 +672,7 @@ fn ready_only_location_lookup_does_not_queue_background_work() {
                 declaration_offset,
                 crate::atom::atom("Order"),
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .is_none()
     );
@@ -676,7 +697,7 @@ fn an_edit_that_adds_an_access_recomputes_the_count() {
                 declaration_offset,
                 crate::atom::atom("Order"),
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .expect("exact reference locations should be cached")
             .len(),
@@ -693,7 +714,7 @@ fn an_edit_that_adds_an_access_recomputes_the_count() {
                 declaration_offset,
                 crate::atom::atom("Order"),
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .is_none(),
         "stale locations must not be served to a clickable lens"
@@ -718,7 +739,7 @@ fn an_edit_that_adds_an_access_recomputes_the_count() {
                 declaration_offset,
                 crate::atom::atom("Order"),
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .expect("edited exact locations should replace the stale cache")
             .len(),
@@ -747,7 +768,7 @@ fn changing_only_a_receiver_type_invalidates_cached_locations() {
                 declaration_offset,
                 crate::atom::atom("Order"),
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .is_none()
     );
@@ -759,7 +780,7 @@ fn changing_only_a_receiver_type_invalidates_cached_locations() {
                 declaration_offset,
                 crate::atom::atom("Order"),
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .unwrap()
             .len(),
@@ -775,7 +796,7 @@ fn changing_only_a_receiver_type_invalidates_cached_locations() {
                 declaration_offset,
                 crate::atom::atom("Order"),
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .is_none(),
         "a type-only edit must not leave a clickable lens pointing at stale locations"
@@ -788,7 +809,7 @@ fn changing_only_a_receiver_type_invalidates_cached_locations() {
                 declaration_offset,
                 crate::atom::atom("Order"),
                 crate::atom::atom("save"),
-                false,
+                METHOD,
             )
             .unwrap()
             .is_empty()
@@ -814,7 +835,11 @@ fn an_edit_that_leaves_the_accesses_alone_keeps_the_count() {
 
     let cached = backend
         .member_ref_counts
-        .get(crate::atom::atom("Order"), crate::atom::atom("save"), false)
+        .get(
+            crate::atom::atom("Order"),
+            crate::atom::atom("save"),
+            METHOD,
+        )
         .expect("the computed count should survive the edit");
     assert_eq!(cached.count, 1);
     assert!(
@@ -903,7 +928,7 @@ fn an_edit_rescans_the_file_it_touched_and_keeps_the_rest() {
             ORDER.find("save").unwrap() as u32,
             crate::atom::atom("Order"),
             crate::atom::atom("save"),
-            false,
+            METHOD,
         )
         .expect("the rescan should leave a complete result");
     assert_eq!(locations.len(), 5);
@@ -930,11 +955,11 @@ fn a_result_computed_before_an_edit_is_not_marked_fresh() {
 
     // What a search finishing after an edit landed looks like: it carries
     // locations read from content the editor has already replaced.
-    backend.queue_member_references(URI, declaration_offset, class_fqn, member, false);
+    backend.queue_member_references(URI, declaration_offset, class_fqn, member, METHOD);
     backend.member_ref_counts.invalidate_locations_all();
     backend
         .member_ref_counts
-        .store(class_fqn, member, false, Vec::new(), true);
+        .store(class_fqn, member, METHOD, Vec::new(), true);
 
     assert!(
         !backend.member_ref_counts.is_fresh(&PendingCount {
@@ -942,13 +967,13 @@ fn a_result_computed_before_an_edit_is_not_marked_fresh() {
             offset: declaration_offset,
             class_fqn,
             member,
-            is_static: false,
+            slot: METHOD,
         }),
         "a result read from replaced content must stay stale"
     );
     assert!(
         backend
-            .member_ref_locations_cached(URI, declaration_offset, class_fqn, member, false)
+            .member_ref_locations_cached(URI, declaration_offset, class_fqn, member, METHOD)
             .is_none(),
         "and must not be served to a clickable lens"
     );

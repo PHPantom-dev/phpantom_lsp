@@ -10,7 +10,7 @@
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
 use phpantom_lsp::{Backend, LSP_CONCURRENCY};
 
@@ -50,7 +50,7 @@ pub fn serve_backend() -> TransportClient {
 ///
 /// The returned service owns the backend (`service.inner()`); the socket
 /// has to stay alive for as long as the backend may notify the client.
-pub fn backend_with_client() -> (LspService<Backend>, tower_lsp::ClientSocket) {
+pub fn backend_with_client() -> (LspService<Backend>, tower_lsp_server::ClientSocket) {
     LspService::build(Backend::new).finish()
 }
 

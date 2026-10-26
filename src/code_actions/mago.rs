@@ -3,7 +3,7 @@
 //! Converts fix edits attached to Mago diagnostics (`"mago-lint"` / `"mago-analyze"`)
 //! into LSP quick-fix code actions.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::single_file_edit;
@@ -41,7 +41,7 @@ impl Backend {
         _uri: &str,
         content: &str,
         params: &CodeActionParams,
-        actions: &mut Vec<CodeActionOrCommand>,
+        actions: &mut Vec<CodeActionResponse>,
     ) {
         let document_uri = &params.text_document.uri;
 
@@ -90,11 +90,8 @@ impl Backend {
                     worst_safety = safety;
                 }
 
-                let start_pos = crate::text_position::offset_to_position(content, start);
-                let end_pos = crate::text_position::offset_to_position(content, end);
-
                 text_edits.push(TextEdit {
-                    range: Range::new(start_pos, end_pos),
+                    range: crate::text_position::byte_range_to_lsp_range(content, start, end),
                     new_text,
                 });
             }
@@ -104,8 +101,8 @@ impl Backend {
             }
 
             let code_label = diag.code.as_ref().map(|c| match c {
-                NumberOrString::Number(n) => n.to_string(),
-                NumberOrString::String(s) => s.clone(),
+                Code::Int(n) => n.to_string(),
+                Code::String(s) => s.clone(),
             });
 
             let mut title = match &code_label {
@@ -127,14 +124,14 @@ impl Backend {
 
             let action = CodeAction {
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
+                kind: Some(CodeActionKind::QuickFix),
                 diagnostics: Some(vec![diag.clone()]),
                 edit: Some(single_file_edit(document_uri.clone(), text_edits)),
                 is_preferred,
                 ..Default::default()
             };
 
-            actions.push(CodeActionOrCommand::CodeAction(action));
+            actions.push(CodeActionResponse::CodeAction(action));
         }
     }
 }

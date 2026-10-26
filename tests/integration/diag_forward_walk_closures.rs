@@ -1,8 +1,9 @@
+use crate::common::message_text;
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
     slow_diagnostic_messages, type_at_marker, unknown_member_diagnostics_with_scope_cache,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -596,7 +597,7 @@ it('does a thing', function (): void {
             d.code.as_ref().is_some_and(|c| {
                 matches!(
                     c,
-                    tower_lsp::lsp_types::NumberOrString::String(s)
+                    tower_lsp_server::gen_lsp_types::Code::String(s)
                         if s == "unresolved_member_access" || s == "unknown_member"
                 )
             })
@@ -649,9 +650,9 @@ function render(array $variables): string {
     let type_errors: Vec<_> = diags
         .iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
         })
         .map(|d| d.message.clone())
         .collect();
@@ -692,9 +693,9 @@ function register(): void {
     let type_errors: Vec<_> = diags
         .iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
         })
         .map(|d| d.message.clone())
         .collect();
@@ -864,7 +865,7 @@ class Runner {
             d.code.as_ref().is_some_and(|c| {
                 matches!(
                     c,
-                    NumberOrString::String(s)
+                    Code::String(s)
                         if s == "unresolved_member_access" || s == "unknown_member"
                 )
             })
@@ -929,7 +930,7 @@ class Cases {
             d.code.as_ref().is_some_and(|c| {
                 matches!(
                     c,
-                    NumberOrString::String(s)
+                    Code::String(s)
                         if s == "unresolved_member_access" || s == "unknown_member"
                 )
             })
@@ -989,7 +990,7 @@ class Cases {
             d.code.as_ref().is_some_and(|c| {
                 matches!(
                     c,
-                    NumberOrString::String(s)
+                    Code::String(s)
                         if s == "unresolved_member_access" || s == "unknown_member"
                 )
             })
@@ -1042,7 +1043,9 @@ function handle(): void {
     let stale = text.replace("$stream->write();", "$stream->read();");
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &stale);
     assert!(
-        diags.iter().any(|d| d.message.contains("Writer")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("Writer")),
         "the superseded type must not still answer for the variable, got: {diags:?}"
     );
 }
@@ -1259,7 +1262,7 @@ class Runner
 }
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
-    let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(messages.len(), 1, "got: {messages:?}");
     assert!(
         !messages[0].contains("Beta"),
@@ -1283,7 +1286,7 @@ $a = function ($item) { $item->missing(); };
 $b = function ($item) { $item->open(); };
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
-    let messages: Vec<_> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<_> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages.len(),
         1,

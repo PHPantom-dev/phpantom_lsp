@@ -1,0 +1,8 @@
+// test: A mapped superclass's columns are checked too
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testSuperclass.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/MyBrokenSuperclass.php
+// expect_diagnostic: 15: Property PHPStan\Rules\Doctrine\ORM\MyBrokenSuperclass::$five type mapping mismatch: database can contain string but property expects int. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

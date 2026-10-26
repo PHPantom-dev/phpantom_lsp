@@ -4,41 +4,20 @@
 //! keywords — and suppresses classes, functions, and constants, which
 //! are invalid at that position.
 
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{completion_response, create_test_backend, open_php};
+use tower_lsp_server::gen_lsp_types::*;
 
 async fn completion_items(text: &str, uri: &str, line: u32, character: u32) -> Vec<CompletionItem> {
     let backend = create_test_backend();
-    let uri = Url::parse(uri).unwrap();
+    let uri = Uri::parse(uri).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, line, character, None).await;
 
     match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     }
 }
@@ -48,8 +27,8 @@ fn insert_text_of(item: &CompletionItem) -> &str {
         .as_deref()
         .or_else(|| {
             item.text_edit.as_ref().map(|te| match te {
-                CompletionTextEdit::Edit(e) => e.new_text.as_str(),
-                CompletionTextEdit::InsertAndReplace(e) => e.new_text.as_str(),
+                CompletionItemTextEdit::TextEdit(e) => e.new_text.as_str(),
+                CompletionItemTextEdit::InsertReplaceEdit(e) => e.new_text.as_str(),
             })
         })
         .unwrap_or("")
@@ -174,14 +153,14 @@ async fn class_root_suppresses_classes_functions_and_constants() {
     assert!(
         !items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::CLASS)),
+            .any(|i| i.kind == Some(CompletionItemKind::Class)),
         "class names are invalid at the class-body root, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
     assert!(
         !items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::FUNCTION)),
+            .any(|i| i.kind == Some(CompletionItemKind::Function)),
         "function names are invalid at the class-body root, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -230,21 +209,21 @@ async fn class_root_dollar_offers_only_properties() {
     // The replace range must cover the typed `$` so the declaration's own
     // `$` doesn't double up.
     match title.text_edit.as_ref().expect("text edit") {
-        CompletionTextEdit::Edit(e) => {
+        CompletionItemTextEdit::TextEdit(e) => {
             assert_eq!(e.range.start.character, 4, "range must start at the `$`");
         }
-        CompletionTextEdit::InsertAndReplace(_) => panic!("expected plain edit"),
+        CompletionItemTextEdit::InsertReplaceEdit(_) => panic!("expected plain edit"),
     }
     assert!(
         !items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::METHOD)),
+            .any(|i| i.kind == Some(CompletionItemKind::Method)),
         "methods must not be offered after `$`"
     );
     assert!(
         !items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::CONSTANT)),
+            .any(|i| i.kind == Some(CompletionItemKind::Constant)),
         "constants must not be offered after `$`"
     );
 }
@@ -324,7 +303,7 @@ async fn method_body_statement_start_is_not_class_root() {
     assert!(
         items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::FUNCTION)),
+            .any(|i| i.kind == Some(CompletionItemKind::Function)),
         "function completion must still work inside method bodies, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -344,7 +323,7 @@ async fn top_level_code_is_not_class_root() {
     assert!(
         items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::CLASS)),
+            .any(|i| i.kind == Some(CompletionItemKind::Class)),
         "top-level completion must still offer classes, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -405,7 +384,7 @@ async fn enum_root_offers_no_properties() {
     assert!(
         !items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::PROPERTY)),
+            .any(|i| i.kind == Some(CompletionItemKind::Property)),
         "enums cannot declare properties"
     );
 }
@@ -452,7 +431,7 @@ async fn class_root_fires_after_comments_docblocks_and_attributes() {
         assert!(
             !items
                 .iter()
-                .any(|i| i.kind == Some(CompletionItemKind::CLASS)),
+                .any(|i| i.kind == Some(CompletionItemKind::Class)),
             "{name}: class names must stay suppressed, got: {:?}",
             items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
         );
@@ -592,7 +571,7 @@ async fn inside_trait_use_adaptation_block_is_not_class_root() {
     assert!(
         !items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::METHOD)),
+            .any(|i| i.kind == Some(CompletionItemKind::Method)),
         "a trait-use adaptation block is not the class root, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -731,46 +710,22 @@ async fn demo_php_class_root_trigger_works() {
     text.insert_str(close, "    o\n");
 
     let backend = create_test_backend();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: Url::parse("file:///scaffolding.php").unwrap(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: scaffolding.clone(),
-            },
-        })
-        .await;
-    let demo_uri = Url::parse("file:///demo_trigger.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: demo_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.clone(),
-            },
-        })
-        .await;
+    open_php(
+        &backend,
+        &Uri::parse("file:///scaffolding.php").unwrap(),
+        &scaffolding,
+    )
+    .await;
+    let demo_uri = Uri::parse("file:///demo_trigger.php").unwrap();
+    open_php(&backend, &demo_uri, &text).await;
     let completion_at = |line: u32, character: u32| {
         let backend = &backend;
         let uri = demo_uri.clone();
         async move {
-            let result = backend
-                .completion(CompletionParams {
-                    text_document_position: TextDocumentPositionParams {
-                        text_document: TextDocumentIdentifier { uri },
-                        position: Position { line, character },
-                    },
-                    work_done_progress_params: WorkDoneProgressParams::default(),
-                    partial_result_params: PartialResultParams::default(),
-                    context: None,
-                })
-                .await
-                .unwrap();
+            let result = completion_response(backend, &uri, line, character, None).await;
             match result {
-                Some(CompletionResponse::Array(items)) => items,
-                Some(CompletionResponse::List(list)) => list.items,
+                Some(CompletionResponse::CompletionItemList(items)) => items,
+                Some(CompletionResponse::CompletionList(list)) => list.items,
                 None => Vec::new(),
             }
         }
@@ -796,7 +751,7 @@ async fn demo_php_class_root_trigger_works() {
     assert!(
         !items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::CLASS)),
+            .any(|i| i.kind == Some(CompletionItemKind::Class)),
         "demo promises no class names, got: {:?}",
         labels()
     );
@@ -934,7 +889,7 @@ async fn enum_case_name_position_offers_no_classes() {
     assert!(
         !items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::CLASS)),
+            .any(|i| i.kind == Some(CompletionItemKind::Class)),
         "an enum case name is not a class-name position, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );

@@ -9,8 +9,8 @@
 //! model.  This mirrors Laravel's `BelongsToMany::first()`.
 
 use crate::common::create_psr4_workspace;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::open_php;
+use tower_lsp_server::gen_lsp_types::*;
 
 #[tokio::test]
 async fn dnf_return_type_resolves_through_mixin_generic_chain() {
@@ -116,22 +116,13 @@ class Product extends Model {
         "src/Models/Product.php",
     ] {
         let full = dir.path().join(path);
-        let uri = Url::from_file_path(&full).unwrap();
+        let uri = Uri::from_file_path(&full).unwrap();
         let text = std::fs::read_to_string(&full).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text,
-                },
-            })
-            .await;
+        open_php(&backend, &uri, &text).await;
     }
 
     let product_path = dir.path().join("src/Models/Product.php");
-    let product_uri = Url::from_file_path(&product_path).unwrap();
+    let product_uri = Uri::from_file_path(&product_path).unwrap();
     let content = std::fs::read_to_string(&product_path).unwrap();
     let line = content.lines().position(|l| l.trim() == "$x;").unwrap() as u32;
 
@@ -143,7 +134,7 @@ class Product extends Model {
         )
         .expect("hover should resolve the chained call");
     let text = match hover.contents {
-        HoverContents::Markup(m) => m.value,
+        Contents::MarkupContent(m) => m.value,
         other => panic!("expected markup hover, got {other:?}"),
     };
 

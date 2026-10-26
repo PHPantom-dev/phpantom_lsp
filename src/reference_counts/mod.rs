@@ -28,7 +28,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tower_lsp::lsp_types::Location;
+use tower_lsp_server::gen_lsp_types::Location;
 
 use crate::Backend;
 use crate::atom::Atom;
@@ -36,7 +36,7 @@ use crate::atom::Atom;
 mod cache;
 
 use cache::{CompactLocation, EDIT_PAUSE, PendingCount};
-pub(crate) use cache::{MemberRefCounts, new_member_ref_counts};
+pub(crate) use cache::{MemberRefCounts, MemberSlot, new_member_ref_counts};
 
 impl Backend {
     /// Whether the inheritance the file's classes declare differs from the
@@ -90,9 +90,9 @@ impl Backend {
         offset: u32,
         class_fqn: Atom,
         member: Atom,
-        is_static: bool,
+        slot: MemberSlot,
     ) -> Option<Vec<Location>> {
-        self.member_ref_locations(uri, offset, class_fqn, member, is_static, true)
+        self.member_ref_locations(uri, offset, class_fqn, member, slot, true)
     }
 
     /// Fresh exact locations without queuing a background computation.
@@ -106,9 +106,9 @@ impl Backend {
         offset: u32,
         class_fqn: Atom,
         member: Atom,
-        is_static: bool,
+        slot: MemberSlot,
     ) -> Option<Vec<Location>> {
-        self.member_ref_locations(uri, offset, class_fqn, member, is_static, false)
+        self.member_ref_locations(uri, offset, class_fqn, member, slot, false)
     }
 
     fn member_ref_locations(
@@ -117,16 +117,16 @@ impl Backend {
         offset: u32,
         class_fqn: Atom,
         member: Atom,
-        is_static: bool,
+        slot: MemberSlot,
         queue_if_missing: bool,
     ) -> Option<Vec<Location>> {
-        let cached = self.member_ref_counts.get(class_fqn, member, is_static);
+        let cached = self.member_ref_counts.get(class_fqn, member, slot);
         if queue_if_missing
             && cached
                 .as_ref()
                 .is_none_or(|cached| cached.count_stale || !cached.locations_stale.is_fresh())
         {
-            self.queue_member_references(uri, offset, class_fqn, member, is_static);
+            self.queue_member_references(uri, offset, class_fqn, member, slot);
         }
         cached.and_then(|cached| {
             if cached.count_stale || !cached.locations_stale.is_fresh() {
@@ -147,14 +147,14 @@ impl Backend {
         offset: u32,
         class_fqn: Atom,
         member: Atom,
-        is_static: bool,
+        slot: MemberSlot,
     ) {
         self.member_ref_counts.pending.lock().insert(PendingCount {
             uri: Arc::from(uri),
             offset,
             class_fqn,
             member,
-            is_static,
+            slot,
         });
     }
 
@@ -167,16 +167,16 @@ impl Backend {
         offset: u32,
         class_fqn: Atom,
         member: Atom,
-        is_static: bool,
+        slot: MemberSlot,
     ) -> Vec<Location> {
         if let Some(locations) =
-            self.member_ref_locations_cached(uri, offset, class_fqn, member, is_static)
+            self.member_ref_locations_cached(uri, offset, class_fqn, member, slot)
         {
             return locations;
         }
 
         let _compute_guard = self.member_ref_counts.compute_lock.lock();
-        if let Some(cached) = self.member_ref_counts.get(class_fqn, member, is_static)
+        if let Some(cached) = self.member_ref_counts.get(class_fqn, member, slot)
             && !cached.count_stale
             && cached.locations_stale.is_fresh()
             && let Some(locations) = cached.locations
@@ -188,12 +188,13 @@ impl Backend {
         }
 
         let epoch = self.member_ref_counts.epoch.load(Ordering::Acquire);
-        let locations = self.member_declaration_references(uri, offset, &member, is_static);
+        let locations =
+            self.member_declaration_references(uri, offset, &member, slot.is_static, slot.kind());
         let invalidated_since = self.member_ref_counts.epoch.load(Ordering::Acquire) != epoch;
         self.member_ref_counts.store(
             class_fqn,
             member,
-            is_static,
+            slot,
             locations.clone(),
             invalidated_since,
         );
@@ -203,7 +204,7 @@ impl Backend {
                 offset,
                 class_fqn,
                 member,
-                is_static,
+                slot,
             });
         }
         locations
@@ -286,7 +287,7 @@ impl Backend {
             changed |= self.member_ref_counts.store(
                 item.class_fqn,
                 item.member,
-                item.is_static,
+                item.slot,
                 locations,
                 invalidated_since,
             );

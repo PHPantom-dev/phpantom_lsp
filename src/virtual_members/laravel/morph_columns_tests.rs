@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 
 use super::*;
 
@@ -201,7 +203,10 @@ class SecondTraitAliasModel {
 }
 "#,
     );
-    let loader = |name: &str| classes.get(&atom(name.trim_start_matches('\\'))).cloned();
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        classes.get(&atom(name.trim_start_matches('\\'))).cloned()
+    };
     for (model, column, expected) in [
         ("TraitModel", "trait_type", true),
         ("TraitModel", "parent_type", false),

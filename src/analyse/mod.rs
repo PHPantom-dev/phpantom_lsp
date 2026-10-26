@@ -47,7 +47,7 @@
 
 use std::path::PathBuf;
 
-use tower_lsp::lsp_types::DiagnosticSeverity;
+use tower_lsp_server::gen_lsp_types::DiagnosticSeverity;
 
 mod diagnose;
 mod output;

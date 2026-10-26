@@ -26,7 +26,7 @@
 
 use std::collections::HashSet;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::text_position::LineIndex;
@@ -85,15 +85,15 @@ struct PendingSymbol {
 /// A class-like's symbol kind and deprecation tag.
 fn class_kind_and_tags(class: &crate::types::ClassInfo) -> (SymbolKind, Option<Vec<SymbolTag>>) {
     let kind = match class.kind {
-        ClassLikeKind::Class => SymbolKind::CLASS,
-        ClassLikeKind::Interface => SymbolKind::INTERFACE,
-        ClassLikeKind::Trait => SymbolKind::CLASS,
-        ClassLikeKind::Enum => SymbolKind::ENUM,
+        ClassLikeKind::Class => SymbolKind::Class,
+        ClassLikeKind::Interface => SymbolKind::Interface,
+        ClassLikeKind::Trait => SymbolKind::Class,
+        ClassLikeKind::Enum => SymbolKind::Enum,
     };
     let tags = class
         .deprecation_message
         .as_ref()
-        .map(|_| vec![SymbolTag::DEPRECATED]);
+        .map(|_| vec![SymbolTag::Deprecated]);
     (kind, tags)
 }
 
@@ -250,11 +250,11 @@ impl Backend {
                         };
                         pending.push(PendingSymbol {
                             name: format!("{}::{}", fqn, method.name),
-                            kind: SymbolKind::METHOD,
+                            kind: SymbolKind::Method,
                             tags: method
                                 .deprecation_message()
                                 .as_ref()
-                                .map(|_| vec![SymbolTag::DEPRECATED]),
+                                .map(|_| vec![SymbolTag::Deprecated]),
                             container_name: Some(fqn.to_string()),
                             file_uri: file_uri.clone(),
                             placement: Placement::Offset(method.name_offset),
@@ -272,11 +272,11 @@ impl Backend {
                         };
                         pending.push(PendingSymbol {
                             name: format!("{}::${}", fqn, prop.name),
-                            kind: SymbolKind::PROPERTY,
+                            kind: SymbolKind::Property,
                             tags: prop
                                 .deprecation_message
                                 .as_ref()
-                                .map(|_| vec![SymbolTag::DEPRECATED]),
+                                .map(|_| vec![SymbolTag::Deprecated]),
                             container_name: Some(fqn.to_string()),
                             file_uri: file_uri.clone(),
                             placement: Placement::Offset(prop.name_offset),
@@ -294,9 +294,9 @@ impl Backend {
                         };
                         // Use ENUM_MEMBER for enum cases, CONSTANT for class constants.
                         let kind = if constant.is_enum_case {
-                            SymbolKind::ENUM_MEMBER
+                            SymbolKind::EnumMember
                         } else {
-                            SymbolKind::CONSTANT
+                            SymbolKind::Constant
                         };
                         pending.push(PendingSymbol {
                             name: format!("{}::{}", fqn, constant.name),
@@ -304,7 +304,7 @@ impl Backend {
                             tags: constant
                                 .deprecation_message
                                 .as_ref()
-                                .map(|_| vec![SymbolTag::DEPRECATED]),
+                                .map(|_| vec![SymbolTag::Deprecated]),
                             container_name: Some(fqn.to_string()),
                             file_uri: file_uri.clone(),
                             placement: Placement::Offset(constant.name_offset),
@@ -342,11 +342,11 @@ impl Backend {
 
                 pending.push(PendingSymbol {
                     name: display_name,
-                    kind: SymbolKind::FUNCTION,
+                    kind: SymbolKind::Function,
                     tags: func
                         .deprecation_message
                         .as_ref()
-                        .map(|_| vec![SymbolTag::DEPRECATED]),
+                        .map(|_| vec![SymbolTag::Deprecated]),
                     container_name: func.namespace.clone(),
                     file_uri: file_uri.clone(),
                     placement: Placement::Offset(func.name_offset),
@@ -375,7 +375,7 @@ impl Backend {
 
                 pending.push(PendingSymbol {
                     name: name.to_string(),
-                    kind: SymbolKind::CONSTANT,
+                    kind: SymbolKind::Constant,
                     tags: None,
                     container_name: namespace_from_fqn(name),
                     file_uri: info.file_uri.clone(),
@@ -429,7 +429,7 @@ impl Backend {
                         )
                     }
                     None => (
-                        SymbolKind::CLASS,
+                        SymbolKind::Class,
                         None,
                         namespace_from_fqn(fqn),
                         Placement::FileStart,
@@ -458,9 +458,12 @@ impl Backend {
 
         let mut ranked = self.locate_symbols(pending);
         ranked.sort_by(|a, b| {
-            a.tier
-                .cmp(&b.tier)
-                .then_with(|| a.symbol.name.cmp(&b.symbol.name))
+            a.tier.cmp(&b.tier).then_with(|| {
+                a.symbol
+                    .base_symbol_information
+                    .name
+                    .cmp(&b.symbol.base_symbol_information.name)
+            })
         });
 
         let symbols: Vec<SymbolInformation> = ranked.into_iter().map(|r| r.symbol).collect();
@@ -550,15 +553,17 @@ fn make_symbol(
     container_name: Option<String>,
 ) -> SymbolInformation {
     SymbolInformation {
-        name,
-        kind,
-        tags,
+        base_symbol_information: BaseSymbolInformation {
+            name,
+            kind,
+            tags,
+            container_name,
+        },
         deprecated: None,
         location: Location {
-            uri: Url::parse(file_uri).unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
+            uri: crate::util::parse_url(file_uri).unwrap_or_else(crate::util::unknown_url),
             range: Range::new(pos, pos),
         },
-        container_name,
     }
 }
 

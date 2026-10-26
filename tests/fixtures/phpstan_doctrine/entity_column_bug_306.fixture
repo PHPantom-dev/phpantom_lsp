@@ -1,0 +1,8 @@
+// test: A promoted constructor property mapped as a column
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testBug306.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/bug-306.php
+// expect_diagnostic: 21: Property PHPStan\Rules\Doctrine\ORM\Bug306\MyBrokenEntity::$one type mapping mismatch: database can contain string|null but property expects string. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

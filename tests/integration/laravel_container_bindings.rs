@@ -7,9 +7,12 @@
 //! `app('sentry')` helper form and the container's own
 //! `app()->make('sentry')` resolve to the bound class.
 
-use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace, position_of};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{
+    APP_HELPERS_PHP, consumer_class, create_psr4_workspace, goto_definition_at, open_php,
+    position_of,
+};
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -177,19 +180,10 @@ async fn hover_over_x_with_extra_files(extra: &[(&str, &str)], consumer: &str) -
     files.extend_from_slice(extra);
     files.push(("src/Consumer.php", consumer));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
 
     let idx = consumer.rfind("$x;").expect("consumer should use $x");
     let prefix = &consumer[..idx + 1];
@@ -199,7 +193,7 @@ async fn hover_over_x_with_extra_files(extra: &[(&str, &str)], consumer: &str) -
         .handle_hover(uri.as_str(), consumer, Position { line, character })
         .expect("hover should resolve");
     match &hover.contents {
-        HoverContents::Markup(markup) => markup.value.clone(),
+        Contents::MarkupContent(markup) => markup.value.clone(),
         _ => panic!("expected MarkupContent"),
     }
 }
@@ -212,26 +206,17 @@ async fn hover_over_key(extra: &[(&str, &str)], consumer: &str, key: &str) -> St
     files.extend_from_slice(extra);
     files.push(("src/Consumer.php", consumer));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
 
     let position = position_of(consumer, key);
     let hover = backend
         .handle_hover(uri.as_str(), consumer, position)
         .expect("hover should resolve");
     match &hover.contents {
-        HoverContents::Markup(markup) => markup.value.clone(),
+        Contents::MarkupContent(markup) => markup.value.clone(),
         _ => panic!("expected MarkupContent"),
     }
 }
@@ -485,26 +470,17 @@ async fn goto_definition_on_an_unbound_container_key_offers_nothing() {
 
 /// Open a consumer and run go-to-definition on the container key inside
 /// `needle`.
-async fn goto_definition_on_key(consumer: &str, needle: &str) -> Option<GotoDefinitionResponse> {
+async fn goto_definition_on_key(consumer: &str, needle: &str) -> Option<DefinitionResponse> {
     let mut files = base_files();
     files.push(("src/Consumer.php", consumer));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
 
     backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
                 position: position_of(consumer, needle),
@@ -525,9 +501,9 @@ async fn goto_definition_on_a_container_key_lands_on_its_registration() {
         .expect("the key should navigate");
 
     let locations = match response {
-        GotoDefinitionResponse::Array(locations) => locations,
-        GotoDefinitionResponse::Scalar(location) => vec![location],
-        GotoDefinitionResponse::Link(_) => panic!("expected plain locations"),
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => locations,
+        DefinitionResponse::Definition(Definition::Location(location)) => vec![location],
+        DefinitionResponse::DefinitionLinkList(_) => panic!("expected plain locations"),
     };
     let registration = &locations[0];
     assert!(
@@ -562,9 +538,9 @@ async fn goto_definition_on_a_core_alias_offers_the_class_alone() {
         .await
         .expect("the core alias should navigate");
     let locations = match response {
-        GotoDefinitionResponse::Array(locations) => locations,
-        GotoDefinitionResponse::Scalar(location) => vec![location],
-        GotoDefinitionResponse::Link(_) => panic!("expected plain locations"),
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => locations,
+        DefinitionResponse::Definition(Definition::Location(location)) => vec![location],
+        DefinitionResponse::DefinitionLinkList(_) => panic!("expected plain locations"),
     };
     assert_eq!(locations.len(), 1, "got: {locations:?}");
     assert!(
@@ -594,38 +570,17 @@ async fn concurrent_requests_all_resolve_the_same_key() {
     // each round needs alias tables nothing has built yet.
     for round in 0..8 {
         let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-        let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+        let uri = Uri::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
         backend.initialized(InitializedParams {}).await;
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: source.clone(),
-                },
-            })
-            .await;
+        open_php(&backend, &uri, &source).await;
 
         let backend = Arc::new(backend);
         let position = position_of(&source, "app');");
         let request = || {
             let backend = Arc::clone(&backend);
             let uri = uri.clone();
-            async move {
-                backend
-                    .goto_definition(GotoDefinitionParams {
-                        text_document_position_params: TextDocumentPositionParams {
-                            text_document: TextDocumentIdentifier { uri },
-                            position,
-                        },
-                        work_done_progress_params: WorkDoneProgressParams::default(),
-                        partial_result_params: PartialResultParams::default(),
-                    })
-                    .await
-                    .unwrap()
-            }
+            async move { goto_definition_at(&backend, &uri, position.line, position.character).await }
         };
 
         let (first, second, third) = tokio::join!(request(), request(), request());
@@ -662,22 +617,13 @@ class GhostServiceProvider
     files.push(("bootstrap/providers.php", PROVIDERS_WITH_GHOST_PHP));
     files.push(("src/Consumer.php", &source));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, &source).await;
 
     let response = backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
                 position: position_of(&source, "ghost');"),
@@ -690,9 +636,9 @@ class GhostServiceProvider
         .expect("the registration should still navigate");
 
     let locations = match response {
-        GotoDefinitionResponse::Array(locations) => locations,
-        GotoDefinitionResponse::Scalar(location) => vec![location],
-        GotoDefinitionResponse::Link(_) => panic!("expected plain locations"),
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => locations,
+        DefinitionResponse::Definition(Definition::Location(location)) => vec![location],
+        DefinitionResponse::DefinitionLinkList(_) => panic!("expected plain locations"),
     };
     assert_eq!(locations.len(), 1, "got: {locations:?}");
     assert!(
@@ -725,23 +671,14 @@ class Usages
     let mut files = base_files();
     files.push(("src/Usages.php", USAGES_PHP));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    let uri = Url::from_file_path(dir.path().join("src/Usages.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Usages.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: USAGES_PHP.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, USAGES_PHP).await;
 
     let locations = backend
         .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier::new(uri.clone()),
                 position: position_of(USAGES_PHP, "sentry');"),
             },

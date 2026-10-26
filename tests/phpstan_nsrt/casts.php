@@ -78,14 +78,14 @@ class Foo extends Bar
 		$intToString = (string) $intParam;
 		$intToBool = (bool) $intParam;
 		assertType('float', $intToFloat);
-		assertType('string', $intToString);
+		assertType('numeric-string', $intToString);
 		assertType('bool', $intToBool);
 
 		$floatToInt = (int) $floatParam;
 		$floatToString = (string) $floatParam;
 		$floatToBool = (bool) $floatParam;
 		assertType('int', $floatToInt);
-		assertType('string', $floatToString);
+		assertType('numeric-string', $floatToString);
 		assertType('bool', $floatToBool);
 
 		$stringToInt = (int) $strParam;
@@ -100,7 +100,7 @@ class Foo extends Bar
 		$boolToString = (string) $boolParam;
 		assertType('int', $boolToInt);
 		assertType('float', $boolToFloat);
-		assertType('string', $boolToString);
+		assertType("''|'1'", $boolToString);
 	}
 
 	public function castNullable(): void

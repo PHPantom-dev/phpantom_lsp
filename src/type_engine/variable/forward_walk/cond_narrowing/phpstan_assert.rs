@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::Fqn;
 
 /// Apply `@phpstan-assert-if-true` / `@phpstan-assert-if-false` narrowing
 /// from a function or static/instance method call used as a condition.
@@ -31,7 +32,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
     }
 
     // Unwrap parentheses and detect negation (`!func($var)`).
-    let (func_call_expr, condition_negated) = narrowing::unwrap_condition_negation(condition);
+    let (func_call_expr, condition_negated) = condition_facts::unwrap_condition_negation(condition);
 
     let call = match func_call_expr {
         Expression::Call(c) => c,
@@ -80,7 +81,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 if !applies_positively && (assertion.is_equality || skip_negations) {
                     continue;
                 }
-                let arg_vars = narrowing::find_assertion_arg_variables(
+                let arg_vars = condition_facts::find_assertion_arg_variables(
                     &func_call.argument_list,
                     &assertion.param_name,
                     &func_info.parameters,
@@ -89,7 +90,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     continue;
                 }
                 let should_exclude = assertion.negated ^ !applies_positively;
-                let asserted_type = narrowing::bind_call_templates(
+                let asserted_type = condition_facts::bind_call_templates(
                     &assertion.asserted_type,
                     &func_info.template_params,
                     &func_info.template_bindings,
@@ -116,9 +117,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             };
             // Resolve the receiver to a class, handling `self`, `static`,
             // `parent`, and subclass names.
-            let Some(class_info) = ctx
-                .written_names()
-                .static_receiver_class(static_call.class, ctx.class_loader)
+            let Some(class_info) = ctx.written_names().static_receiver_class(static_call.class)
             else {
                 return;
             };
@@ -126,10 +125,10 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             // ancestor (e.g. PHPUnit's `Assert`) are found.  Uses raw class
             // loads only, avoiding a full merge that would poison the shared
             // resolved-class cache mid-walk.
-            let (method, _) = match narrowing::find_assertion_method_in_chain(
+            let (method, _) = match condition_facts::find_assertion_method_in_chain(
                 &class_info,
                 &method_name,
-                ctx.class_loader,
+                ctx.file.class_loader,
                 &mut Vec::new(),
                 0,
             ) {
@@ -147,7 +146,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 if !applies_positively && (assertion.is_equality || skip_negations) {
                     continue;
                 }
-                let arg_vars = narrowing::find_assertion_arg_variables(
+                let arg_vars = condition_facts::find_assertion_arg_variables(
                     &static_call.argument_list,
                     &assertion.param_name,
                     &method.parameters,
@@ -156,7 +155,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     continue;
                 }
                 let should_exclude = assertion.negated ^ !applies_positively;
-                let asserted_type = narrowing::bind_call_templates(
+                let asserted_type = condition_facts::bind_call_templates(
                     &assertion.asserted_type,
                     method.template_params(),
                     method.template_bindings(),
@@ -189,7 +188,8 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             // bare local: `$this->scope->isInClass()` is the same promise
             // about the same value, and the guard is written that way
             // wherever the scope is held in a property.
-            let Some(receiver_var) = narrowing::expr_to_subject_key(method_call.object) else {
+            let Some(receiver_var) = condition_facts::expr_to_subject_key(method_call.object)
+            else {
                 return;
             };
             let method_name = match &method_call.method {
@@ -219,10 +219,10 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 // Search the trait/parent chain for the method's assertions
                 // using raw class loads only (a full merge would poison the
                 // shared resolved-class cache mid-walk).
-                let (method, _) = match narrowing::find_assertion_method_in_chain(
+                let (method, _) = match condition_facts::find_assertion_method_in_chain(
                     &receiver,
                     &method_name,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                     &mut Vec::new(),
                     0,
                 ) {
@@ -250,7 +250,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                         continue;
                     }
                     let should_exclude = assertion.negated ^ !applies_positively;
-                    let asserted_type = narrowing::bind_call_templates(
+                    let asserted_type = condition_facts::bind_call_templates(
                         &assertion.asserted_type,
                         method.template_params(),
                         method.template_bindings(),
@@ -289,7 +289,7 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                             format!("{receiver_var}->{member}"),
                         ));
                     } else {
-                        for arg_var in narrowing::find_assertion_arg_variables(
+                        for arg_var in condition_facts::find_assertion_arg_variables(
                             &method_call.argument_list,
                             &assertion.param_name,
                             &method.parameters,
@@ -357,7 +357,7 @@ fn resolve_receiver_class(
     if let TypeKind::Intersection(members) = rt.type_string.kind() {
         return members
             .iter()
-            .find_map(|member| (ctx.class_loader)(&member.to_string()));
+            .find_map(|member| (ctx.file.class_loader)(Fqn::new(&member.to_string())));
     }
-    (ctx.class_loader)(&rt.type_string.to_string())
+    (ctx.file.class_loader)(Fqn::new(&rt.type_string.to_string()))
 }

@@ -1,33 +1,30 @@
 use super::*;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::test_fixtures::{
     make_class, make_method, make_method_with_params, make_param, no_loader,
 };
-use crate::type_engine::resolver::Loaders;
+use crate::type_engine::resolver::FileCtx;
 use crate::types::TraitPrecedence;
 use crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN;
 
 fn context<'a>(
     class: &'a ClassInfo,
     content: &'a str,
-    loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    loader: &'a ResolvedClassLoader<'a>,
 ) -> ForwardWalkCtx<'a> {
-    ForwardWalkCtx {
-        current_class: class,
-        all_classes: &[],
-        content,
-        cursor_offset: content.len() as u32,
-        class_loader: loader,
-        source_class_loader: loader,
-        source_imports: None,
-        backend: None,
-        loaders: Loaders::default(),
-        resolved_class_cache: None,
-        enclosing_return_type: None,
-        top_level_scope: None,
-        in_loop: false,
-        template_markers: None,
-        cursor_scope: None,
-    }
+    ForwardWalkCtx::new(
+        FileCtx::new(
+            content,
+            &[],
+            loader,
+            crate::test_fixtures::fqn_source_loader(loader),
+        ),
+        class,
+        content.len() as u32,
+        // A test's walks are few and short, so its flow is leaked rather
+        // than threaded through every helper.
+        Box::leak(Box::default()),
+    )
 }
 
 #[test]
@@ -55,7 +52,10 @@ fn callback_declaration_ownership_respects_docblocks_trait_precedence_and_cycles
         Arc::new(excluded),
         Arc::new(make_class("Empty")),
     ];
-    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        classes.iter().find(|class| class.fqn() == name).cloned()
+    };
     let mut owner = make_class("Owner");
     owner.used_traits = vec![atom("Excluded"), atom("Empty"), atom(framework_name)];
     owner.trait_precedences.push(TraitPrecedence {
@@ -72,7 +72,10 @@ fn callback_declaration_ownership_respects_docblocks_trait_precedence_and_cycles
     let mut cycle = make_class("Cycle");
     cycle.parent_class = Some(atom("Cycle"));
     let cycle = Arc::new(cycle);
-    let loader = |name: &str| (name == "Cycle").then(|| Arc::clone(&cycle));
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        (name == "Cycle").then(|| Arc::clone(&cycle))
+    };
     assert_eq!(
         declared_relation_method(&cycle, "whereHas", &loader, 0),
         Some(false)
@@ -84,7 +87,10 @@ fn callback_declaration_ownership_respects_docblocks_trait_precedence_and_cycles
         "with",
         &context(&owner, "", &no_loader)
     ));
-    let loader = |name: &str| (name == "Owner").then(|| Arc::new(owner.clone()));
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        (name == "Owner").then(|| Arc::new(owner.clone()))
+    };
     assert!(!is_framework_relation_method(
         &receiver,
         &owner,
@@ -113,7 +119,8 @@ fn relation_callback_inference_rejects_incomplete_receivers_and_signatures() {
             ResolvedType::from_class(builder)
         },
     ] {
-        let loader = |name: &str| {
+        let loader = |name: Fqn<'_>| {
+            let name = name.as_str();
             receiver
                 .class_info
                 .as_ref()
@@ -186,7 +193,10 @@ fn eager_callbacks_require_a_known_framework_receiver_and_relations_parameter() 
             ResolvedType::from_class(renamed)
         }),
     ] {
-        let loader = |name: &str| (name == ELOQUENT_BUILDER_FQN).then(|| Arc::clone(&raw));
+        let loader = |name: Fqn<'_>| {
+            let name = name.as_str();
+            (name == ELOQUENT_BUILDER_FQN).then(|| Arc::clone(&raw))
+        };
         // A local declaration or cached class can lag behind the loader's
         // current method metadata during an edit.
         let all_classes: Vec<_> = receiver.class_info.iter().cloned().collect();
@@ -194,10 +204,11 @@ fn eager_callbacks_require_a_known_framework_receiver_and_relations_parameter() 
         for class in &all_classes {
             crate::virtual_members::resolve_class_fully_cached(class, &no_loader, &cache);
         }
+        let base = context(&empty, content, &loader);
         let ctx = ForwardWalkCtx {
-            all_classes: &all_classes,
+            file: base.file.with_source(content, &all_classes),
             resolved_class_cache: Some(&cache),
-            ..context(&empty, content, &loader)
+            ..base
         };
         let mut scope = ScopeState::new();
         scope.locals.insert(atom("$query"), vec![receiver]);
@@ -213,7 +224,7 @@ fn eager_callbacks_require_a_known_framework_receiver_and_relations_parameter() 
             content,
             &ScopeState::new(),
             &ForwardWalkCtx {
-                content,
+                file: ctx.file.with_source(content, ctx.file.all_classes),
                 ..ctx.with_cursor_offset(content.len() as u32)
             },
         );
@@ -240,23 +251,17 @@ fn assert_no_eager_context(content: &str, scope: &ScopeState, ctx: &ForwardWalkC
 
 /// A resolution context with no class or file around it, for the
 /// relation query helpers.
-fn resolution_context(loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> ResolutionCtx<'_> {
-    ResolutionCtx {
-        current_class: None,
-        all_classes: &[],
-        content: "",
-        cursor_offset: 0,
-        class_loader: loader,
-        source_class_loader: loader,
-        source_imports: None,
-        backend: None,
-        laravel_macro_this_resolver: None,
-        resolved_class_cache: None,
-        function_loader: None,
-        scope_var_resolver: None,
-        is_in_static_method: false,
-        preserve_static: false,
-    }
+fn resolution_context<'a>(loader: &'a ResolvedClassLoader<'a>) -> ResolutionCtx<'a> {
+    ResolutionCtx::new(
+        FileCtx::new(
+            "",
+            &[],
+            loader,
+            crate::test_fixtures::fqn_source_loader(loader),
+        ),
+        None,
+        0,
+    )
 }
 
 #[test]
@@ -292,10 +297,13 @@ fn builder_receiver_recovers_model_from_instantiated_methods() {
     model.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     let model = Arc::new(model);
     let base = Arc::new(make_class(ELOQUENT_MODEL_FQN));
-    let loader = |name: &str| match name.trim_start_matches('\\') {
-        "App\\Product" => Some(Arc::clone(&model)),
-        ELOQUENT_MODEL_FQN => Some(Arc::clone(&base)),
-        _ => None,
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        match name.trim_start_matches('\\') {
+            "App\\Product" => Some(Arc::clone(&model)),
+            ELOQUENT_MODEL_FQN => Some(Arc::clone(&base)),
+            _ => None,
+        }
     };
     for (method, return_type) in [
         ("getModel", "App\\Product"),
@@ -330,10 +338,13 @@ fn unresolved_morph_relations_use_base_builder_without_discarding_candidates() {
     product.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
     let product = Arc::new(product);
     let model = Arc::new(make_class(ELOQUENT_MODEL_FQN));
-    let loader = |name: &str| match name {
-        "App\\Product" => Some(Arc::clone(&product)),
-        ELOQUENT_MODEL_FQN => Some(Arc::clone(&model)),
-        _ => None,
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        match name {
+            "App\\Product" => Some(Arc::clone(&product)),
+            ELOQUENT_MODEL_FQN => Some(Arc::clone(&model)),
+            _ => None,
+        }
     };
     let receivers = [ResolvedType::from_arc(Arc::clone(&model))];
     for (candidates, expected) in [

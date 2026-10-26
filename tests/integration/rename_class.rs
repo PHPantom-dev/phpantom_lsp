@@ -4,14 +4,14 @@ use crate::common::{
     apply_edits, create_test_backend, doc_change_edits_for_uri, edits_for_uri, extract_rename_file,
     initialize_with_resource_operations, open_php, prepare_rename, rename, rename_result,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Class Rename ───────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn rename_class_same_file() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -44,7 +44,7 @@ async fn rename_class_same_file() {
 #[tokio::test]
 async fn rename_class_from_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -76,7 +76,7 @@ async fn rename_class_from_declaration() {
 #[tokio::test]
 async fn prepare_rename_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {}\n",
@@ -88,10 +88,14 @@ async fn prepare_rename_class() {
     let response = prepare_rename(&backend, &uri, 1, 7).await;
     assert!(response.is_some());
 
-    if let Some(PrepareRenameResponse::RangeWithPlaceholder { placeholder, .. }) = response {
+    if let Some(PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+        placeholder,
+        ..
+    })) = response
+    {
         assert_eq!(placeholder, "Foo");
     } else {
-        panic!("Expected RangeWithPlaceholder response");
+        panic!("Expected PrepareRenamePlaceholder response");
     }
 }
 
@@ -102,8 +106,8 @@ async fn rename_class_updates_use_import() {
     // Renaming a class should update the `use` statement FQN (last segment)
     // as well as all in-code references.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Task.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -163,8 +167,8 @@ async fn rename_class_preserves_explicit_alias() {
     // When a file imports the class with an explicit alias, the alias
     // should be preserved and in-code references should NOT be renamed.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Controller.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Controller.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -219,9 +223,9 @@ async fn rename_class_with_collision_adds_alias() {
     // When renaming would produce a short name that collides with an
     // existing import, an alias should be introduced.
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///src/OldName.php").unwrap();
-    let uri_b = Url::parse("file:///src/NewName.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+    let uri_a = Uri::parse("file:///src/OldName.php").unwrap();
+    let uri_b = Uri::parse("file:///src/NewName.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Usage.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace Ns\\A;\n", "\n", "class OldName {}\n",);
 
@@ -282,7 +286,7 @@ async fn rename_class_with_collision_adds_alias() {
 #[tokio::test]
 async fn rename_class_does_not_rename_self_static_parent() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -367,7 +371,7 @@ async fn rename_class_does_not_rename_self_static_parent() {
 async fn rename_class_same_file_no_use_statement() {
     // Renaming a class in the same file (no use statement) should still work.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -418,7 +422,7 @@ async fn rename_class_rewrites_differently_cased_references() {
     // PHP resolves class names case-insensitively, so `new WIDGET()` is a
     // reference to `Widget` and has to be rewritten with the rest.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {}\n",
@@ -458,8 +462,8 @@ async fn rename_from_a_differently_cased_reference_uses_the_declared_name() {
     let backend = create_test_backend();
     initialize_with_resource_operations(&backend).await;
 
-    let uri_decl = Url::parse("file:///src/Widget.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/Widget.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Usage.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -509,8 +513,8 @@ async fn rename_class_updates_use_import_from_reference_site() {
     // Trigger rename from a reference site (not the declaration) and
     // verify the use statement is still updated.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/Animal.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Zoo.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/Animal.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Zoo.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -559,8 +563,8 @@ async fn rename_class_cross_file_use_import_multiple_refs() {
     // A file with multiple references to the renamed class (via use
     // import) should have all references and the use statement updated.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/Repo.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Service.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/Repo.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Service.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -627,8 +631,8 @@ async fn rename_class_updates_group_import_member() {
     // Renaming a class imported through a multi-member group statement
     // should rewrite only that member, leaving its siblings alone.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Task.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -673,8 +677,8 @@ async fn rename_class_updates_wrapped_group_import_member() {
     // The same as above, but the group is wrapped over several lines the
     // way a long member list usually is.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Task.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -718,8 +722,8 @@ async fn rename_class_collapses_a_single_member_group_import() {
     // A one-member group has nothing left to keep, so it is rewritten as
     // a plain `use` statement rather than an empty `{}`.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Task.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -759,8 +763,8 @@ async fn rename_class_move_within_group_prefix_updates_member() {
     // A move that stays under the group's shared prefix rewrites the
     // member's relative name in place.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Task.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -807,8 +811,8 @@ async fn rename_class_move_out_of_group_prefix_splits_the_import() {
     // cannot stay a member of that group: it is dropped from the group
     // (keeping the sibling) and re-added as its own `use` statement.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Task.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -864,8 +868,8 @@ async fn rename_class_updates_a_brace_less_comma_import_list() {
     // (`use Foo\Bar, Baz\Qux;`) is a group in spirit even without the
     // `{}` syntax: only the renamed item should change.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Task.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -911,8 +915,8 @@ async fn rename_class_fqn_inline_reference() {
     // When a file uses the class via an inline FQN (no use statement),
     // only the last segment should be renamed.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/Item.php").unwrap();
-    let uri_usage = Url::parse("file:///src/other.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/Item.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/other.php").unwrap();
 
     let text_decl = concat!("<?php\n", "namespace Shop;\n", "\n", "class Item {}\n",);
 
@@ -946,8 +950,8 @@ async fn rename_class_declaration_updates_in_same_namespace() {
     // Two files in the same namespace — references use the short name
     // without a use statement.  The rename should just update the short name.
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///src/Foo.php").unwrap();
-    let uri_b = Url::parse("file:///src/Bar.php").unwrap();
+    let uri_a = Uri::parse("file:///src/Foo.php").unwrap();
+    let uri_b = Uri::parse("file:///src/Bar.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace App;\n", "\n", "class Foo {}\n",);
 
@@ -1015,7 +1019,7 @@ class Consumer {
 /// Renames the class declared at `needle` in [`EVERY_KIND_OF_CLASS_REFERENCE`].
 async fn rename_class_in_every_kind_fixture(needle: &str, new_name: &str) -> String {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = EVERY_KIND_OF_CLASS_REFERENCE;
     open_php(&backend, &uri, text).await;
     let (line, character) = crate::common::line_char_of(text, needle);
@@ -1059,9 +1063,9 @@ async fn rename_class_rewrites_each_namespace_blocks_own_import() {
     // Each block's import is rewritten against that block's own imports:
     // the new short name only collides in the block that imports it.
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///src/OldName.php").unwrap();
-    let uri_b = Url::parse("file:///src/NewName.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+    let uri_a = Uri::parse("file:///src/OldName.php").unwrap();
+    let uri_b = Uri::parse("file:///src/NewName.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Usage.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace Ns\\A;\n", "\n", "class OldName {}\n");
     let text_b = concat!("<?php\n", "namespace Ns\\B;\n", "\n", "class NewName {}\n");
@@ -1110,8 +1114,8 @@ async fn class_move_adds_the_import_to_the_block_that_needs_it() {
     // new import; the block that already imported it has that import
     // rewritten instead.
     let backend = create_test_backend();
-    let uri_decl = Url::parse("file:///src/Widget.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/Widget.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Usage.php").unwrap();
 
     let text_decl = concat!("<?php\n", "namespace Acme;\n", "\n", "class Widget {}\n");
     let text_usage = concat!(
@@ -1155,7 +1159,7 @@ async fn class_move_rewrites_the_block_that_declares_the_class() {
     // Both blocks declare `Foo`; the move names the second one, so the
     // first block's `namespace` statement has to stay as it is.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace A { class Foo {} }\n",
@@ -1182,7 +1186,7 @@ async fn class_move_rewrites_the_block_that_declares_the_class() {
 #[tokio::test]
 async fn class_move_from_the_first_block_leaves_the_second_block_alone() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace A { class Foo {} }\n",
@@ -1211,7 +1215,7 @@ async fn class_move_out_of_a_named_block_after_a_global_block_rewrites_the_named
     // The global block has no `namespace` name to find, so the class the
     // move names is not the first `Foo` in the file.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace { class Foo {} }\n",
@@ -1238,7 +1242,7 @@ async fn class_move_out_of_a_named_block_after_a_global_block_rewrites_the_named
 #[tokio::test]
 async fn class_move_rewrites_the_statement_of_the_unbraced_section_that_declares_the_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace A;\n",
@@ -1271,7 +1275,7 @@ async fn class_move_rewrites_the_block_of_a_namespace_that_is_declared_twice() {
     // Naming the namespace does not say which of its blocks holds the
     // class, so the class's own position has to.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace A { class Foo {} }\n",
@@ -1299,8 +1303,8 @@ async fn class_move_rewrites_the_block_of_a_namespace_that_is_declared_twice() {
 /// `line` to `C\Foo`, and return the file as the move leaves it.
 async fn move_foo_beside_b_helper(text: &str, line: u32) -> String {
     let backend = create_test_backend();
-    let uri_helper = Url::parse("file:///src/B/Helper.php").unwrap();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri_helper = Uri::parse("file:///src/B/Helper.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
 
     open_php(
         &backend,
@@ -1504,7 +1508,7 @@ async fn class_move_imports_a_sibling_declared_in_another_block_of_the_file() {
     // What a block declares travels with it; what another block of the
     // same namespace declares stays behind.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace B {\n",
@@ -1641,7 +1645,7 @@ async fn class_move_imports_the_siblings_into_the_one_line_block_that_declares_t
 /// message the move is refused with.
 async fn refusal_moving_foo(text: &str, line: u32) -> String {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
 
     open_php(&backend, &uri, text).await;
 
@@ -1761,7 +1765,7 @@ async fn class_move_is_not_refused_for_a_define_call_beside_the_class() {
     // `define('LIMIT', 1)` names its constant in full, so the `namespace`
     // statement has no say in it.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace A;\n",
@@ -1796,7 +1800,7 @@ async fn class_move_carries_a_class_declared_in_every_branch_of_a_conditional() 
     // Both declarations are the one class, so the statement that moves the
     // first one moves the second with it.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace A;\n",
@@ -1833,7 +1837,7 @@ async fn class_move_carries_a_class_declared_in_every_branch_of_a_conditional() 
 #[tokio::test]
 async fn class_move_out_of_a_braced_global_block_names_the_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = "<?php\nnamespace { class Foo {} }\n";
 
     open_php(&backend, &uri, text).await;
@@ -1849,7 +1853,7 @@ async fn class_move_out_of_a_braced_global_block_names_the_block() {
 #[tokio::test]
 async fn class_move_out_of_a_braced_global_block_imports_for_its_former_siblings() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace {\n",
@@ -1859,7 +1863,7 @@ async fn class_move_out_of_a_braced_global_block_imports_for_its_former_siblings
 
     open_php(
         &backend,
-        &Url::parse("file:///src/Helper.php").unwrap(),
+        &Uri::parse("file:///src/Helper.php").unwrap(),
         "<?php\nclass Helper {}\n",
     )
     .await;

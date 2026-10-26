@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::{Atom, atom};
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::*;
 
@@ -298,7 +299,7 @@ fn infer_body_return_type(
     // that offset would land on the wrong location.  Resolve the class
     // that actually declares the method and read *its* file.
     let declaring_class = backend.find_or_load_class(class_fqn).map(|receiver| {
-        let loader = |name: &str| backend.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| backend.find_or_load_class(&name);
         crate::hover::find_declaring_class(
             &receiver,
             &method.name,
@@ -396,6 +397,85 @@ fn infer_body_return_type(
     Some(inferred)
 }
 
+/// Infer the return type of a free function that declares none by
+/// scanning its body.
+///
+/// The function counterpart of [`try_infer_body_return_type`], sharing its
+/// memo, re-entry guard and depth cap, so a function and a method calling
+/// each other without return types stop at the same bound.  A function
+/// takes its slot in those keys with an empty class half, which no class
+/// FQN can collide with.
+///
+/// Returns `None` for a function with no source to read (a stub), on
+/// re-entry, past the depth cap, or when the body says nothing better than
+/// `mixed` or `void`.
+pub(crate) fn try_infer_function_body_return_type(
+    backend: &Backend,
+    func: &FunctionInfo,
+) -> Option<PhpType> {
+    if func.name_offset == 0 {
+        return None;
+    }
+    let fqn = match func.namespace.as_deref() {
+        Some(ns) if !ns.is_empty() => atom(&format!("{ns}\\{}", func.name)),
+        _ => func.name,
+    };
+    let visited_key = (atom(""), fqn);
+    let memo_key = (visited_key.0, visited_key.1, Box::<[PhpType]>::default());
+
+    crate::type_engine::memoized_bounded_inference(
+        &BODY_INFER_MEMO,
+        &BODY_INFER_VISITED,
+        crate::type_engine::BoundedInference::BodyReturn,
+        MAX_BODY_INFER_DEPTH,
+        memo_key,
+        visited_key,
+        || {
+            infer_function_body_return_type(backend, func, &fqn)
+                .filter(|t| !t.is_mixed() && !t.is_void())
+        },
+    )
+}
+
+/// Scan a free function's body for its return type.
+fn infer_function_body_return_type(
+    backend: &Backend,
+    func: &FunctionInfo,
+    fqn: &str,
+) -> Option<PhpType> {
+    #[cfg(test)]
+    TEST_BODY_INFERENCES.with(|count| count.set(count.get() + 1));
+
+    let file_uri = backend
+        .symbols
+        .global_functions
+        .read()
+        .get(fqn)
+        .map(|(uri, _)| uri.clone())?;
+    if file_uri.starts_with(crate::stubs::STUB_FUNCTION_URI_PREFIX) {
+        return None;
+    }
+    crate::type_engine::body_reads::record(&file_uri, func.name_offset);
+
+    let content = backend.get_file_content_arc(&file_uri)?;
+    if func.name_offset as usize >= content.len() {
+        return None;
+    }
+    let _parse_guard = crate::parser::with_parse_cache_arc(Arc::clone(&content));
+
+    let result = backend.infer_return_type_at(&file_uri, &content, func.name_offset, false)?;
+    let inferred = result.effective.unwrap_or(result.native);
+
+    // A bare `@template` name read off the body says no more than `mixed`;
+    // only the call site's arguments could fill it in.
+    let template_params: Vec<String> = func.template_params.iter().map(|p| p.to_string()).collect();
+    if inferred.references_any_template_param(&template_params) {
+        return None;
+    }
+
+    Some(inferred)
+}
+
 // ── Bundled request-scope activation ────────────────────────────────────────
 
 /// The request-scoped memos the type engine keeps, activated as a unit.
@@ -416,13 +496,12 @@ pub(crate) struct TypeEngineCaches {
 /// Activate every request-scoped type-engine memo for the current
 /// thread, returning one RAII guard that clears them all on drop.
 ///
-/// Called from [`Backend::with_file_content`], which every LSP handler
-/// goes through, and from the few entry points that fetch their own file
-/// content (completion, completion/code-action resolve, the diagnostic
-/// pass, and the `analyse` CLI).  Nested activation is a no-op, so an
-/// inner pass cannot clobber the memos an outer one installed.
+/// Every LSP request enters these through [`RequestScope`]; the
+/// diagnostic pass and the `analyse` CLI activate them directly.  Nested
+/// activation is a no-op, so an inner pass cannot clobber the memos an
+/// outer one installed.
 ///
-/// [`Backend::with_file_content`]: Backend::with_file_content
+/// [`RequestScope`]: crate::backend::requests::RequestScope
 pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
     TypeEngineCaches {
         _callable_target: with_callable_target_cache(),

@@ -62,7 +62,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_container_key_span(
         return;
     };
     emit_laravel_string_span(
-        crate::symbol_map::LaravelStringKind::ContainerBinding,
+        crate::symbol_map::StringKeyKind::ContainerBinding,
         is_write,
         index,
         argument_list,

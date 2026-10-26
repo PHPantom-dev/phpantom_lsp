@@ -66,6 +66,24 @@ keyword_types! {
     parent_ => "parent",
     /// `numeric` pseudo-type.
     numeric => "numeric",
+    /// `non-empty-string` type.
+    non_empty_string => "non-empty-string",
+    /// `non-falsy-string` type.
+    non_falsy_string => "non-falsy-string",
+    /// `literal-string` type.
+    literal_string => "literal-string",
+    /// `non-empty-literal-string` type.
+    non_empty_literal_string => "non-empty-literal-string",
+    /// `numeric-string` type.
+    numeric_string => "numeric-string",
+    /// `lowercase-string` type.
+    lowercase_string => "lowercase-string",
+    /// `non-empty-lowercase-string` type.
+    non_empty_lowercase_string => "non-empty-lowercase-string",
+    /// `uppercase-string` type.
+    uppercase_string => "uppercase-string",
+    /// `non-empty-uppercase-string` type.
+    non_empty_uppercase_string => "non-empty-uppercase-string",
     /// Internal `__empty` sentinel used during type narrowing to represent
     /// a fully-filtered-out union member.
     empty_sentinel => "__empty",
@@ -122,8 +140,11 @@ impl PhpType {
     }
 
     /// `class-string<T>`, or bare `class-string` when `inner` is `None`.
+    ///
+    /// The class of an enum case is its enum, so a `T` bound to a case
+    /// names the enum here.
     pub fn class_string(inner: Option<PhpType>) -> PhpType {
-        TypeKind::ClassString(inner).into()
+        TypeKind::ClassString(inner.map(|inner| inner.enum_cases_as_enums())).into()
     }
 
     /// `Foo::class`: exactly the name of `class`.
@@ -131,10 +152,32 @@ impl PhpType {
         TypeKind::ClassNameLiteral(PhpType::class_string(Some(PhpType::named(class)))).into()
     }
 
+    /// `Suit::Hearts`: the case `case` of the enum `enum_name`.
+    pub fn enum_case(enum_name: Atom, case: Atom) -> PhpType {
+        TypeKind::EnumCase(PhpType::named(enum_name), case).into()
+    }
+
     /// `interface-string<T>`, or bare `interface-string` when `inner` is
     /// `None`.
     pub fn interface_string(inner: Option<PhpType>) -> PhpType {
-        TypeKind::InterfaceString(inner).into()
+        TypeKind::InterfaceString(inner.map(|inner| inner.enum_cases_as_enums())).into()
+    }
+
+    /// This type with every enum case among its alternatives read as the
+    /// whole enum it is one of: `Suit::Hearts|null` is `Suit|null`.
+    pub fn enum_cases_as_enums(&self) -> PhpType {
+        if let TypeKind::EnumCase(enum_type, _) = self.raw_kind() {
+            return enum_type.clone();
+        }
+        match self.kind() {
+            TypeKind::Union(members) if members.iter().any(|m| m.as_enum_case().is_some()) => {
+                PhpType::union(members.iter().map(PhpType::enum_cases_as_enums).collect())
+            }
+            TypeKind::Nullable(inner) if inner.as_enum_case().is_some() => {
+                PhpType::nullable(inner.enum_cases_as_enums())
+            }
+            _ => self.clone(),
+        }
     }
 
     /// Index access (`T[K]`).
@@ -194,8 +237,9 @@ impl PhpType {
         if normalize::absorb_non_empty_refinements(&mut members) && members.len() == 1 {
             return members.into_iter().next().unwrap();
         }
+        normalize::absorb_int_ranges(&mut members);
         normalize::absorb_subsumed_shapes(&mut members);
-        normalize::absorb_exact_class_names(&mut members);
+        normalize::absorb_exact_values(&mut members);
         if members.len() == 1 {
             return members.into_iter().next().unwrap();
         }

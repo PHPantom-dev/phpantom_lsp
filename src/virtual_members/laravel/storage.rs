@@ -48,6 +48,7 @@ use super::macros::{
     closure_signature, expr_source_text, resolve_hint_target_fqn, resolve_target_fqn,
     string_literal_value,
 };
+use super::method_refinement::refine_methods;
 use super::patches::{FILESYSTEM_ADAPTER_FQN, FILESYSTEM_CONTRACT_FQN, STORAGE_FACADE_FQN};
 
 /// FQN of the concrete manager class `Storage::disk()` and friends forward
@@ -94,39 +95,13 @@ pub(crate) fn patch_storage_disk_type(backend: &Backend, loaded: Arc<ClassInfo>)
         return loaded;
     };
 
-    let mut patched = (*loaded).clone();
-    let mut changed = false;
-
-    for method in patched.methods.make_mut().iter_mut() {
-        if !DISK_RETURNING_METHODS.contains(&method.name.as_str()) {
-            continue;
-        }
-        if refine_disk_return_type(Arc::make_mut(method), &adapter) {
-            changed = true;
-        }
-    }
-
     // `Storage`'s disk-returning methods exist only as `@method` tags on the
     // facade's class docblock, not as real methods.
-    if let Some(doc) = patched.doc_members.as_ref()
-        && doc
-            .methods
-            .iter()
-            .any(|m| DISK_RETURNING_METHODS.contains(&m.name.as_str()))
-    {
-        let mut doc = (**doc).clone();
-        for method in &mut doc.methods {
-            if !DISK_RETURNING_METHODS.contains(&method.name.as_str()) {
-                continue;
-            }
-            if refine_disk_return_type(Arc::make_mut(method), &adapter) {
-                changed = true;
-            }
-        }
-        patched.doc_members = Some(Arc::new(doc));
-    }
-
-    if changed { Arc::new(patched) } else { loaded }
+    refine_methods(
+        loaded,
+        |name| DISK_RETURNING_METHODS.contains(&name),
+        |method| refine_disk_return_type(method, &adapter),
+    )
 }
 
 /// Replace a method's return type with the concrete disk type, but only when
@@ -156,15 +131,16 @@ fn refine_disk_return_type(method: &mut MethodInfo, adapter: &PhpType) -> bool {
 /// [`Backend::refresh_laravel_storage_drivers`]), so an edit takes effect
 /// without a restart.
 fn configured_disk_type(backend: &Backend) -> Option<PhpType> {
-    if let Some(cached) = backend.storage_disk_type_cache.read().as_ref() {
+    if let Some(cached) = backend.laravel.storage_disk_type_cache.read().as_ref() {
         return cached.clone();
     }
     let trees = backend.cached_config_trees();
     let resolved = trees
         .iter()
         .find(|(prefix, _)| prefix == "filesystems")
-        .and_then(|(_, tree)| disk_union(tree, &backend.laravel_storage_drivers.read()));
-    *backend.storage_disk_type_cache.write() = Some(resolved.clone());
+        .and_then(|(_, tree)| disk_union(tree, &backend.laravel.storage_drivers.read()));
+    *backend.laravel.storage_disk_type_cache.write() = Some(resolved.clone());
+    backend.laravel.note_config_facts_change();
     resolved
 }
 

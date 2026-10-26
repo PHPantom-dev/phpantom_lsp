@@ -1,6 +1,5 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{completion_response, create_psr4_workspace, create_test_backend, open_php};
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Multi-line @return tag tests ───────────────────────────────────────────
 //
@@ -89,7 +88,7 @@ async fn test_multiline_return_does_not_break_sibling_methods() {
     );
 
     // The "current" file calls collect([])->
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use Illuminate\\Support\\Collection;\n",
@@ -103,38 +102,17 @@ async fn test_multiline_return_does_not_break_sibling_methods() {
         "\n",
         "collect([])->\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `collect([])->`  on line 10
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 10,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 10, 14, None).await;
     assert!(result.is_some(), "Completion should resolve collect([])->");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -153,11 +131,11 @@ async fn test_multiline_return_does_not_break_sibling_methods() {
                 method_names
             );
         }
-        CompletionResponse::List(list) => {
+        CompletionResponse::CompletionList(list) => {
             let method_names: Vec<&str> = list
                 .items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -211,7 +189,7 @@ async fn test_multiline_return_type_parsed_correctly() {
         )],
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Builder;\n",
@@ -219,38 +197,17 @@ async fn test_multiline_return_type_parsed_correctly() {
         "$b = new Builder();\n",
         "$b->fresh()->\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$b->fresh()->`
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 4, 14, None).await;
     assert!(result.is_some(), "Completion should resolve $b->fresh()->");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -264,11 +221,11 @@ async fn test_multiline_return_type_parsed_correctly() {
                 method_names
             );
         }
-        CompletionResponse::List(list) => {
+        CompletionResponse::CompletionList(list) => {
             let method_names: Vec<&str> = list
                 .items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -287,7 +244,7 @@ async fn test_multiline_return_type_parsed_correctly() {
 async fn test_malformed_docblock_return_falls_back_to_native_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_fallback.php").unwrap();
+    let uri = Uri::parse("file:///test_fallback.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Result {\n",
@@ -307,41 +264,20 @@ async fn test_malformed_docblock_return_falls_back_to_native_type() {
         "$svc = new Service();\n",
         "$svc->process()->\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$svc->process()->` on line 16
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 16,
-                character: 18,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 16, 18, None).await;
     assert!(
         result.is_some(),
         "Completion should fall back to native Result type when docblock is broken"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -350,11 +286,11 @@ async fn test_malformed_docblock_return_falls_back_to_native_type() {
                 method_names
             );
         }
-        CompletionResponse::List(list) => {
+        CompletionResponse::CompletionList(list) => {
             let method_names: Vec<&str> = list
                 .items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -403,7 +339,7 @@ async fn test_broken_static_generic_recovers_to_self() {
         )],
     );
 
-    let uri = Url::parse("file:///test_static_recovery.php").unwrap();
+    let uri = Uri::parse("file:///test_static_recovery.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Builder;\n",
@@ -411,40 +347,19 @@ async fn test_broken_static_generic_recovers_to_self() {
         "$b = new Builder();\n",
         "$b->broken()->\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 4, 15, None).await;
     assert!(
         result.is_some(),
         "Completion should recover static from static< and resolve to Builder"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -458,11 +373,11 @@ async fn test_broken_static_generic_recovers_to_self() {
                 method_names
             );
         }
-        CompletionResponse::List(list) => {
+        CompletionResponse::CompletionList(list) => {
             let method_names: Vec<&str> = list
                 .items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(

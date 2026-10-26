@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::completion::use_edit::UseBlockInfo;

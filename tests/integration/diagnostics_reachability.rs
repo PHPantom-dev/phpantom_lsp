@@ -6,7 +6,7 @@
 //! however wrong it would be in live code.
 
 use crate::common::create_test_backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Every slow diagnostic reported for `text`, with the reachability
 /// filter applied: the same set the editor and the `analyse` CLI see.
@@ -23,7 +23,7 @@ fn codes(backend: &phpantom_lsp::Backend, uri: &str, text: &str) -> Vec<String> 
     slow_diagnostics(backend, uri, text)
         .iter()
         .filter_map(|d| match d.code.as_ref() {
-            Some(NumberOrString::String(s)) => Some(s.clone()),
+            Some(Code::String(s)) => Some(s.clone()),
             _ => None,
         })
         .collect()
@@ -324,7 +324,7 @@ class Runner {
     assert!(
         !out.iter().any(|d| matches!(
             d.code.as_ref(),
-            Some(NumberOrString::String(s)) if s == "unused_import"
+            Some(Code::String(s)) if s == "unused_import"
         )),
         "an import the dead branch names is still imported: {out:?}"
     );

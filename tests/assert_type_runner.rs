@@ -19,6 +19,13 @@
 //! `datatest_stable`. Lines containing `assertNativeType` are ignored
 //! (PHPantom does not track native vs PHPDoc types separately).
 //!
+//! The fixtures ported from PHPStan's Symfony and Doctrine extensions
+//! (`tests/phpstan_symfony/data/`, `tests/phpstan_doctrine/data/`) need a
+//! project around them: the framework classes, and the configuration a
+//! booted application would answer from. A fixture inside a directory
+//! holding a `composer.json` is opened in a backend rooted at that
+//! directory (see `tests/support/fixture_project.rs`).
+//!
 //! To skip an assertion that PHPantom cannot yet handle, add `// SKIP`
 //! on the same line as the `assertType()` call.
 //!
@@ -32,10 +39,13 @@
 //! absorbed by a lenient comparison.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
+
+#[path = "support/fixture_project.rs"]
+mod fixture_project;
 
 // ─── Assertion extraction ───────────────────────────────────────────────────
 
@@ -607,6 +617,8 @@ fn normalize_type(ty: &str) -> String {
         .replace("negative-int", "int<min, -1>")
         .replace("array<mixed, mixed>", "array")
         .replace("array<mixed>", "array")
+        .replace("iterable<mixed, mixed>", "iterable")
+        .replace("iterable<mixed>", "iterable")
         .replace("non-empty-array<int|string, ", "non-empty-array<")
         .replace("non-empty-array<array-key, ", "non-empty-array<");
     canonicalize_union_spelling(&strip_nested_grouping_parens(
@@ -1290,17 +1302,8 @@ fn normalize_generator_params(ty: &str) -> String {
 /// Extract plain text from a Hover response.
 fn extract_hover_text(hover: &Hover) -> String {
     match &hover.contents {
-        HoverContents::Markup(mc) => mc.value.clone(),
-        HoverContents::Scalar(MarkedString::String(s)) => s.clone(),
-        HoverContents::Scalar(MarkedString::LanguageString(ls)) => ls.value.clone(),
-        HoverContents::Array(items) => items
-            .iter()
-            .map(|ms| match ms {
-                MarkedString::String(s) => s.clone(),
-                MarkedString::LanguageString(ls) => ls.value.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Contents::MarkupContent(mc) => mc.value.clone(),
+        other => panic!("expected a markup hover, got {other:?}"),
     }
 }
 
@@ -1360,20 +1363,30 @@ fn extract_type_from_hover(hover_text: &str, var_name: &str) -> Option<String> {
 
 // ─── Test runner ────────────────────────────────────────────────────────────
 
-fn create_assert_type_backend() -> Backend {
-    Backend::new_test_with_full_stubs()
+/// A backend for the fixture at `path`, rooted at its project when it has
+/// one (see [`fixture_project`]).
+fn create_assert_type_backend(path: &Path) -> Backend {
+    match project_root_of(path) {
+        Some(root) => fixture_project::project_backend(&root),
+        None => Backend::new_test_with_full_stubs(),
+    }
+}
+
+/// The nearest directory above `path`, below `tests/`, that holds a
+/// `composer.json`: the fixture project `path` belongs to.
+fn project_root_of(path: &Path) -> Option<PathBuf> {
+    fixture_project::absolute_path(path)
+        .ancestors()
+        .skip(1)
+        .take_while(|dir| dir.file_name().is_some_and(|name| name != "tests"))
+        .find(|dir| dir.join("composer.json").is_file())
+        .map(Path::to_path_buf)
 }
 
 fn fixture_uri(path: &Path) -> String {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .expect("assert-type runner should have a current directory")
-            .join(path)
-    };
+    let absolute = fixture_project::absolute_path(path);
 
-    Url::from_file_path(&absolute)
+    Uri::from_file_path(&absolute)
         .expect("assert-type fixture path should convert to a file URI")
         .to_string()
 }
@@ -1391,7 +1404,7 @@ fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> 
     let (transformed, locations) = transform_source(&content, &assertions);
 
     // Create backend and open the file.
-    let backend = create_assert_type_backend();
+    let backend = create_assert_type_backend(path);
     let uri = fixture_uri(path);
     // Register the transformed source as the open document, the way
     // `didOpen` does. Anything that re-reads the file (the body of a
@@ -1503,4 +1516,6 @@ fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> 
 datatest_stable::harness! {
 { test = run_assert_type, root = "tests/phpstan_nsrt", pattern = r"\.php$" },
 { test = run_assert_type, root = "tests/psalm_assertions", pattern = r"\.php$" },
-{ test = run_assert_type, root = "tests/phpstan_data", pattern = r"\.php$" },}
+{ test = run_assert_type, root = "tests/phpstan_data", pattern = r"\.php$" },
+{ test = run_assert_type, root = "tests/phpstan_symfony/data", pattern = r"\.php$" },
+{ test = run_assert_type, root = "tests/phpstan_doctrine/data", pattern = r"\.php$" },}

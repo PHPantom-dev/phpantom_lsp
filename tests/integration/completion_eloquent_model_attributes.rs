@@ -1,8 +1,8 @@
 //! Column-name arguments in the PHP attributes on Eloquent model classes.
 
 use crate::common::{complete_at, create_psr4_workspace, labels, position_after};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "require": { "laravel/framework": "^12.0" },
@@ -78,7 +78,7 @@ async fn complete(marked: &str, installed: bool) -> Vec<CompletionItem> {
     }
     let (backend, dir) = create_psr4_workspace(COMPOSER, &files);
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/Models/User.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/Models/User.php")).unwrap();
     complete_at(&backend, &uri, &source, position.line, position.character).await
 }
 
@@ -102,7 +102,7 @@ async fn eloquent_model_attributes_complete_installed_column_lists() {
             let source = model(&format!("#[{attribute}({arguments})]"));
             let items = complete(&source, true).await;
             assert_eq!(labels(&items), vec!["name"], "{source}");
-            assert_eq!(items[0].kind, Some(CompletionItemKind::FIELD));
+            assert_eq!(items[0].kind, Some(CompletionItemKind::Field));
         }
     }
 }
@@ -193,7 +193,7 @@ async fn eloquent_model_attribute_completion_replaces_literal_and_skips_siblings
     let items = complete(&marked, true).await;
     assert_eq!(labels(&items), vec!["name"]);
     let source = marked.replacen('|', "", 1);
-    let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+    let Some(CompletionItemTextEdit::TextEdit(edit)) = &items[0].text_edit else {
         panic!("column completion must replace the literal contents");
     };
     assert_eq!(edit.new_text, "name");

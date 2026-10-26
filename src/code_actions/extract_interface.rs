@@ -7,13 +7,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::cursor_context::{ClassLikeContextKind, CursorContext, find_cursor_context};
 use super::make_code_action_data;
 use crate::Backend;
 use crate::atom::atom;
 use crate::class_lookup::find_class_at_offset;
+use crate::code_actions::render_docblock;
 use crate::signature_render::{detect_class_indent, shorten_single_type};
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
@@ -28,14 +29,11 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         // The action creates a file, which only a client that accepts the
         // `create` resource operation can apply.
-        if !self
-            .supports_file_create
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if !self.caps().file_create {
             return;
         }
 
@@ -85,15 +83,16 @@ impl Backend {
             serde_json::Value::Null,
         );
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title: "Extract interface".to_string(),
-            kind: Some(CodeActionKind::REFACTOR_EXTRACT),
+            kind: Some(CodeActionKind::RefactorExtract),
             diagnostics: None,
             edit: None,
             command: None,
             is_preferred: Some(false),
             disabled: None,
             data: Some(data),
+            tags: None,
         }));
     }
 
@@ -151,11 +150,11 @@ impl Backend {
         });
 
         // Determine new file path (same directory as original).
-        let doc_url = Url::parse(uri).ok()?;
-        let file_path = doc_url.to_file_path().ok()?;
+        let doc_url = crate::util::parse_url(uri)?;
+        let file_path = crate::util::url_to_path(&doc_url)?;
         let dir = file_path.parent()?;
         let new_file_path = dir.join(format!("{}.php", interface_name));
-        let new_file_uri = Url::from_file_path(&new_file_path).ok()?;
+        let new_file_uri = crate::util::path_to_url(&new_file_path)?;
 
         let implements_edit = build_implements_edit(content, current_class, &interface_name)?;
 
@@ -231,17 +230,21 @@ fn generate_interface_source(params: &InterfaceGenParams<'_>) -> String {
 
     // Class-level docblock with @template tags.
     if !class_templates.is_empty() {
-        src.push_str("/**\n");
-        for tmpl in *class_templates {
-            // Include the bound if available.
-            if let Some(bound) = class.template_param_bounds.get(&atom(tmpl)) {
-                let bound_str = shorten_single_type(&bound.to_string(), use_map, file_namespace);
-                src.push_str(&format!(" * @template {} of {}\n", tmpl, bound_str));
-            } else {
-                src.push_str(&format!(" * @template {}\n", tmpl));
-            }
-        }
-        src.push_str(" */\n");
+        let lines: Vec<String> = class_templates
+            .iter()
+            .map(|tmpl| {
+                // Include the bound if available.
+                match class.template_param_bounds.get(&atom(tmpl)) {
+                    Some(bound) => format!(
+                        "@template {} of {}",
+                        tmpl,
+                        shorten_single_type(&bound.to_string(), use_map, file_namespace)
+                    ),
+                    None => format!("@template {}", tmpl),
+                }
+            })
+            .collect();
+        src.push_str(&render_docblock("", &lines, "\n"));
     }
 
     src.push_str(&format!("interface {}\n{{\n", interface_name));
@@ -284,16 +287,16 @@ fn build_method_docblock(
 
     // Description.
     if let Some(ref desc) = method.description {
-        lines.push(format!(" * {}", desc));
+        lines.push(desc.to_string());
     }
 
     // @template tags for method-level templates.
     for tmpl in method.template_params() {
         if let Some(bound) = method.template_param_bounds().get(tmpl) {
             let bound_str = shorten_single_type(&bound.to_string(), use_map, file_namespace);
-            lines.push(format!(" * @template {} of {}", tmpl, bound_str));
+            lines.push(format!("@template {} of {}", tmpl, bound_str));
         } else {
-            lines.push(format!(" * @template {}", tmpl));
+            lines.push(format!("@template {}", tmpl));
         }
     }
 
@@ -307,7 +310,7 @@ fn build_method_docblock(
                 .is_some_and(|n| n.to_string() == hint.to_string());
             // Only emit @param if docblock type differs from native type.
             if !native_matches {
-                lines.push(format!(" * @param {} {}", hint_str, param.name));
+                lines.push(format!("@param {} {}", hint_str, param.name));
             }
         }
     }
@@ -320,7 +323,7 @@ fn build_method_docblock(
             .is_some_and(|n| n.to_string() == ret.to_string());
         if !native_matches {
             let ret_str = shorten_single_type(&ret.to_string(), use_map, file_namespace);
-            lines.push(format!(" * @return {}", ret_str));
+            lines.push(format!("@return {}", ret_str));
         }
     }
 
@@ -328,17 +331,7 @@ fn build_method_docblock(
         return String::new();
     }
 
-    let mut doc = String::new();
-    doc.push_str(indent);
-    doc.push_str("/**\n");
-    for line in &lines {
-        doc.push_str(indent);
-        doc.push_str(line);
-        doc.push('\n');
-    }
-    doc.push_str(indent);
-    doc.push_str(" */\n");
-    doc
+    render_docblock(indent, &lines, "\n")
 }
 
 /// Format parameter list for interface method signature.

@@ -1,18 +1,8 @@
-// ─── Forward walk entry point ───────────────────────────────────────────────
-
-use std::cell::RefCell;
+// ─── Loop nesting depth ─────────────────────────────────────────────────────
 
 use mago_syntax::cst::{Expression, Literal};
 
-use super::ScopeState;
-
-thread_local! {
-    /// Tracks the current loop nesting depth (foreach, while, for,
-    /// do-while).  Used to reduce the number of loop iterations for
-    /// deeply nested loops, preventing the exponential blowup that
-    /// occurs when loop iteration interacts with if-branch merging.
-    static LOOP_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-}
+use super::{ScopeState, WalkFlow};
 
 /// Maximum loop nesting depth before loop bodies are skipped entirely.
 /// PHP code rarely nests loops beyond 6 levels; this is a hard safety net.
@@ -22,23 +12,18 @@ pub(crate) const MAX_LOOP_DEPTH: u32 = 6;
 /// being walked.
 ///
 /// The depth is restored when the guard drops, so a panic that unwinds
-/// out of a loop body (request handlers catch it and the worker thread
-/// lives on) does not leave the thread believing it is still inside the
-/// loop, which would clamp every later walk's fixed-point passes and,
-/// past [`MAX_LOOP_DEPTH`], skip every loop body on that thread.
-pub(crate) struct LoopDepthGuard {
+/// out of a loop body leaves the walk's depth where the loop found it.
+pub(crate) struct LoopDepthGuard<'f> {
+    flow: &'f WalkFlow,
     depth: u32,
 }
 
-impl LoopDepthGuard {
+impl<'f> LoopDepthGuard<'f> {
     /// Enter one more level of loop nesting.
-    pub(crate) fn enter() -> Self {
-        let depth = LOOP_DEPTH.with(|c| {
-            let v = c.get() + 1;
-            c.set(v);
-            v
-        });
-        Self { depth }
+    pub(crate) fn enter(flow: &'f WalkFlow) -> Self {
+        let depth = flow.loop_depth.get() + 1;
+        flow.loop_depth.set(depth);
+        Self { flow, depth }
     }
 
     /// The nesting depth this guard entered (1 for an outermost loop).
@@ -47,9 +32,9 @@ impl LoopDepthGuard {
     }
 }
 
-impl Drop for LoopDepthGuard {
+impl Drop for LoopDepthGuard<'_> {
     fn drop(&mut self) {
-        LOOP_DEPTH.with(|c| c.set(self.depth - 1));
+        self.flow.loop_depth.set(self.depth - 1);
     }
 }
 
@@ -69,17 +54,6 @@ pub(crate) fn clamp_iterations_for_depth(max_iterations: u32, loop_depth: u32) -
 }
 
 // ─── Loop exit edges ────────────────────────────────────────────────────────
-
-thread_local! {
-    /// One frame per enclosing breakable structure (loop or `switch`),
-    /// innermost last.  A `break`/`continue` writes the scope it leaves
-    /// with into the frame its level names, and the structure that owns
-    /// the frame folds those states into its own join.
-    ///
-    /// Set and cleared within a single synchronous walk, like
-    /// [`LOOP_DEPTH`] above.
-    static EXIT_EDGES: RefCell<Vec<ExitEdges>> = const { RefCell::new(Vec::new()) };
-}
 
 /// The scope states that jump out of one breakable structure.
 #[derive(Default)]
@@ -101,36 +75,38 @@ pub(crate) struct ExitEdges {
 /// closes its frame, so the frames of the structures around it stay
 /// aligned with the walk that owns them.
 #[must_use]
-pub(crate) struct ExitFrameGuard {
+pub(crate) struct ExitFrameGuard<'f> {
+    flow: &'f WalkFlow,
     popped: bool,
 }
 
-impl ExitFrameGuard {
+impl<'f> ExitFrameGuard<'f> {
     /// Open an exit-edge frame for a body about to be walked.
-    pub(crate) fn push() -> Self {
-        EXIT_EDGES.with(|frames| frames.borrow_mut().push(ExitEdges::default()));
-        Self { popped: false }
+    pub(crate) fn push(flow: &'f WalkFlow) -> Self {
+        flow.exit_edges.borrow_mut().push(ExitEdges::default());
+        Self {
+            flow,
+            popped: false,
+        }
     }
 
     /// Close the frame and return what jumped out of it.
     pub(crate) fn pop(mut self) -> ExitEdges {
         self.popped = true;
-        EXIT_EDGES.with(|frames| frames.borrow_mut().pop().unwrap_or_default())
+        self.flow.exit_edges.borrow_mut().pop().unwrap_or_default()
     }
 }
 
-impl Drop for ExitFrameGuard {
+impl Drop for ExitFrameGuard<'_> {
     fn drop(&mut self) {
         if self.popped {
             return;
         }
         // Unwinding through a borrow (a panic inside `record_exit_edge`)
         // must not become a second panic here.
-        EXIT_EDGES.with(|frames| {
-            if let Ok(mut frames) = frames.try_borrow_mut() {
-                frames.pop();
-            }
-        });
+        if let Ok(mut frames) = self.flow.exit_edges.try_borrow_mut() {
+            frames.pop();
+        }
     }
 }
 
@@ -139,13 +115,11 @@ impl Drop for ExitFrameGuard {
 /// A loop body is walked several times to propagate loop-carried types;
 /// only the last walk's edges describe the loop, so each walk starts from
 /// a clean frame.
-pub(crate) fn clear_exit_frame() {
-    EXIT_EDGES.with(|frames| {
-        if let Some(frame) = frames.borrow_mut().last_mut() {
-            frame.breaks.clear();
-            frame.continues.clear();
-        }
-    });
+pub(crate) fn clear_exit_frame(flow: &WalkFlow) {
+    if let Some(frame) = flow.exit_edges.borrow_mut().last_mut() {
+        frame.breaks.clear();
+        frame.continues.clear();
+    }
 }
 
 /// Fold the innermost frame's `continue` states into `scope` and remove
@@ -154,14 +128,13 @@ pub(crate) fn clear_exit_frame() {
 /// A `continue` rejoins the loop at the end of the body, so its state is
 /// an alternative to the fall-through both for the next iteration and for
 /// the exit condition that follows.
-pub(crate) fn drain_continue_edges(scope: &mut ScopeState) {
-    let edges = EXIT_EDGES.with(|frames| {
-        frames
-            .borrow_mut()
-            .last_mut()
-            .map(|frame| std::mem::take(&mut frame.continues))
-            .unwrap_or_default()
-    });
+pub(crate) fn drain_continue_edges(flow: &WalkFlow, scope: &mut ScopeState) {
+    let edges = flow
+        .exit_edges
+        .borrow_mut()
+        .last_mut()
+        .map(|frame| std::mem::take(&mut frame.continues))
+        .unwrap_or_default();
     merge_exit_edges(scope, &edges);
 }
 
@@ -171,25 +144,28 @@ pub(crate) fn drain_continue_edges(scope: &mut ScopeState) {
 /// A level naming more structures than are open (or one written as
 /// something other than an integer literal) is attributed to the
 /// outermost open frame, which is the closest reachable approximation.
-pub(crate) fn record_exit_edge(level: Option<u32>, is_break: bool, scope: &ScopeState) {
+pub(crate) fn record_exit_edge(
+    flow: &WalkFlow,
+    level: Option<u32>,
+    is_break: bool,
+    scope: &ScopeState,
+) {
     if scope.unreachable {
         return;
     }
-    EXIT_EDGES.with(|frames| {
-        let mut frames = frames.borrow_mut();
-        let depth = frames.len();
-        if depth == 0 {
-            return;
-        }
-        let level = level.unwrap_or(1).max(1) as usize;
-        let index = depth.saturating_sub(level);
-        let frame = &mut frames[index];
-        if is_break {
-            frame.breaks.push(scope.clone());
-        } else {
-            frame.continues.push(scope.clone());
-        }
-    });
+    let mut frames = flow.exit_edges.borrow_mut();
+    let depth = frames.len();
+    if depth == 0 {
+        return;
+    }
+    let level = level.unwrap_or(1).max(1) as usize;
+    let index = depth.saturating_sub(level);
+    let frame = &mut frames[index];
+    if is_break {
+        frame.breaks.push(scope.clone());
+    } else {
+        frame.continues.push(scope.clone());
+    }
 }
 
 /// The integer level of a `break`/`continue`, when it is written as a

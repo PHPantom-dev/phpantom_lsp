@@ -20,11 +20,11 @@ mod changes;
 mod find;
 mod rewrite;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::php_type::PhpType;
-use crate::text_position::offset_to_position;
+use crate::text_position::byte_range_to_lsp_range;
 
 use changes::{analyse_body, check_needs_update};
 use find::find_function_with_docblock_from_context;
@@ -89,6 +89,8 @@ struct FunctionWithDocblock {
     indent: String,
     /// LSP position of the docblock start (for throws analysis).
     docblock_position: Position,
+    /// Byte offset of the start of the declaration the docblock documents.
+    decl_offset: u32,
 }
 
 impl DocParam {
@@ -122,9 +124,9 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
-        let doc_uri: Url = match uri.parse() {
+        let doc_uri: Uri = match uri.parse() {
             Ok(u) => u,
             Err(_) => return,
         };
@@ -152,6 +154,7 @@ impl Backend {
 
         let ctx = self.file_context_at(uri, cursor_offset);
         let class_loader = self.class_loader(&ctx);
+        let resolved_class_loader = self.resolved_class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
 
         let facts = analyse_body(
@@ -159,6 +162,7 @@ impl Backend {
             content,
             &ctx.classes,
             &class_loader,
+            &resolved_class_loader,
             Some(self),
             Some(&function_loader),
             &ctx.use_map,
@@ -169,31 +173,32 @@ impl Backend {
             return;
         }
 
-        let new_docblock =
-            build_updated_docblock(&info, &facts, &class_loader, &ctx.use_map, &ctx.namespace);
+        let new_docblock = build_updated_docblock(
+            &info,
+            &facts,
+            &class_loader,
+            &resolved_class_loader,
+            &ctx.use_map,
+            &ctx.namespace,
+        );
         if new_docblock == info.docblock_text {
             return;
         }
 
-        let start_pos = offset_to_position(content, info.docblock_start);
-        let end_pos = offset_to_position(content, info.docblock_end);
-
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title: "Update docblock to match signature".to_string(),
-            kind: Some(CodeActionKind::QUICKFIX),
+            kind: Some(CodeActionKind::QuickFix),
             diagnostics: None,
             edit: Some(crate::code_actions::single_edit(
                 doc_uri,
-                Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
+                byte_range_to_lsp_range(content, info.docblock_start, info.docblock_end),
                 new_docblock,
             )),
             command: None,
             is_preferred: Some(true),
             disabled: None,
             data: None,
+            tags: None,
         }));
     }
 }

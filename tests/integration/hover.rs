@@ -3,10 +3,11 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
     create_test_backend_with_full_stubs, create_test_backend_with_function_stubs,
-    create_test_backend_with_stdclass_stub, hover_at, hover_text, markup_hover_at, open_php,
+    create_test_backend_with_stdclass_stub, hover_at, hover_response, hover_text, markup_hover_at,
+    open_php,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Multi-namespace hover ──────────────────────────────────────────────────
 
@@ -153,7 +154,7 @@ class Service {
 #[tokio::test]
 async fn hover_variable_from_untyped_method_reads_that_methods_body() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let content = r#"<?php
 class Pen { public function first() { return 1; } public function second() { return new Pen(); } }
 class Ink {
@@ -1902,8 +1903,6 @@ class Product {
 /// The answer must not depend on how far indexing has got.
 #[tokio::test]
 async fn hover_answers_a_file_that_was_never_opened_or_indexed() {
-    use tower_lsp::LanguageServer;
-
     let (backend, dir) = create_psr4_workspace(
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[(
@@ -1932,20 +1931,9 @@ $product->saleMinor();
     // Deliberately no `initialized()` and no `did_open`: the file exists
     // only on disk, exactly as it does for a request that beats the
     // index to it.
-    let uri = Url::from_file_path(dir.path().join("src/Product.php")).unwrap();
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 16,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
+    let uri = Uri::from_file_path(dir.path().join("src/Product.php")).unwrap();
+    let hover = hover_response(&backend, &uri, 16, 14)
         .await
-        .unwrap()
         .expect("hover on a file the server has not parsed yet");
 
     let text = hover_text(&hover);
@@ -5447,6 +5435,64 @@ oldFormat();
 }
 
 #[test]
+fn hover_see_links_to_the_named_class_not_one_sharing_its_short_name() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Billing/Invoice.php",
+            "<?php\nnamespace App\\Billing;\nclass Invoice {\n    public function total(): int { return 0; }\n}\n",
+        )],
+    );
+    let uri = "file:///report.php";
+    let content = r#"<?php
+namespace App\Legacy {
+class Invoice {}
+}
+namespace App {
+/** @see \App\Billing\Invoice::total() */
+function report(): void {}
+report();
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 2).expect("expected hover on report");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("src/Billing/Invoice.php#L4)"),
+        "@see should link into App\\Billing\\Invoice's file, got: {text}"
+    );
+}
+
+#[test]
+fn hover_see_resolves_through_the_declaring_files_imports() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Billing/Invoice.php",
+                "<?php\nnamespace App\\Billing;\nclass Invoice {\n    public function total(): int { return 0; }\n}\n",
+            ),
+            (
+                "src/Reports.php",
+                "<?php\nnamespace App;\nuse App\\Billing\\Invoice;\nclass Reports {\n    /** @see Invoice::total() */\n    public function run(): void {}\n}\n",
+            ),
+        ],
+    );
+    // The hovered call sits in a file with none of `Reports.php`'s imports.
+    let uri = "file:///main.php";
+    let content = r#"<?php
+(new \App\Reports())->run();
+"#;
+
+    let hover = hover_at(&backend, uri, content, 1, 23).expect("expected hover on run");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("[`Invoice::total()`](") && text.contains("src/Billing/Invoice.php#L4)"),
+        "@see should resolve Invoice through Reports.php's use import, got: {text}"
+    );
+}
+
+#[test]
 fn hover_see_unresolvable_symbol_falls_back_to_inline_code() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
@@ -6209,6 +6255,30 @@ function test(Printer $p) {
         "should show printLine method info, got: {}",
         text
     );
+}
+
+#[test]
+fn hover_partial_application_shows_the_parameters_left_open() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Repo {
+    public function make(int $id, string $class): object { return new $class(); }
+}
+function test(Repo $r) {
+    $make = $r->make(1, ?);
+    $all = $r->make(...);
+    $make;
+    $all;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 7, 6).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(text.contains("Closure(string): object"), "got: {text}");
+    let hover = hover_at(&backend, uri, content, 8, 6).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(text.contains("Closure(int, string): object"), "got: {text}");
 }
 
 // ─── Origin indicator tests ─────────────────────────────────────────────────
@@ -9741,6 +9811,31 @@ function test() {
             text.contains(&format!("{var} = {expected}\n")),
             "{var} should be {expected}, got: {text}"
         );
+    }
+}
+
+/// A reparse that leaves every class signature alone keeps the resolved
+/// child class cached, so `parent::` in an inherited initializer must still
+/// be read on the class that declares it, not on the child.
+#[test]
+fn hover_inherited_parent_constant_survives_reparse() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class G { const X = 1; }
+class P extends G { const X = 2; const Y = parent::X; }
+class C extends P {}
+function test() {
+    $y = C::Y;
+    echo $y;
+}
+"#;
+
+    let col = content.lines().nth(6).unwrap().find("$y").unwrap() as u32 + 1;
+    for _ in 0..2 {
+        let hover = hover_at(&backend, uri, content, 6, col).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(text.contains("$y = 1\n"), "$y should be 1, got: {text}");
     }
 }
 
@@ -15048,7 +15143,7 @@ local_helper();
 
 #[tokio::test]
 async fn hover_vendor_class_shows_package_provenance() {
-    use tower_lsp::LanguageServer;
+    use tower_lsp_server::LanguageServer;
 
     let dir = tempfile::tempdir().expect("failed to create temp dir");
     std::fs::write(
@@ -16830,4 +16925,26 @@ echo $_SERVER;
             "line {line}: superglobals are arrays in every scope, got: {text}"
         );
     }
+}
+
+/// An untyped function's return type is read off its body, both for a
+/// variable holding its result and for the function's own hover.
+#[tokio::test]
+async fn hover_untyped_function_shows_inferred_return_type() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let content = r#"<?php
+class Pen {}
+function makePen() { return new Pen(); }
+function run(): void {
+    $pen = makePen();
+}
+"#;
+    open_php(&backend, &uri, content).await;
+
+    let text = markup_hover_at(&backend, &uri, 4, 6).await;
+    assert!(text.contains("Pen"), "should resolve to Pen: {text}");
+
+    let text = markup_hover_at(&backend, &uri, 4, 13).await;
+    assert!(text.contains("`Pen` *(inferred)*"), "{text}");
 }

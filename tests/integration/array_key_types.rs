@@ -1,9 +1,10 @@
 //! Key and element types read off arrays: what a `foreach` binds, what a
 //! list-destructuring position picks, and what the key-reading builtins
 //! report for an array whose key type the caller established.
+use crate::common::message_text;
 
 use crate::common::{create_test_backend_with_full_stubs, type_at_marker};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Assert the marked type of every `(marker, expected)` pair in one file.
 fn assert_marked_types(content: &str, expected: &[(&str, &str)]) {
@@ -260,7 +261,7 @@ function spelledOut($declared): void
     backend.collect_argument_type_diagnostics(uri, content, &mut diagnostics);
     let messages: Vec<String> = diagnostics
         .into_iter()
-        .map(|d| format!("{}: {}", d.range.start.line, d.message))
+        .map(|d| format!("{}: {}", d.range.start.line, message_text(&d.message)))
         .collect();
     assert!(
         messages.iter().any(|m| m.starts_with("16:")),
@@ -371,7 +372,7 @@ function probe(array $config, array $guarded): void
     backend.collect_argument_type_diagnostics(uri, content, &mut diagnostics);
     let messages: Vec<String> = diagnostics
         .into_iter()
-        .map(|d| format!("{}: {}", d.range.start.line, d.message))
+        .map(|d| format!("{}: {}", d.range.start.line, message_text(&d.message)))
         .collect();
     assert!(
         messages.is_empty(),
@@ -446,7 +447,10 @@ function declaredElement(array $config): array
     backend.update_ast(uri, content);
     let mut diagnostics = Vec::new();
     backend.collect_return_type_diagnostics(uri, content, &mut diagnostics);
-    let messages: Vec<String> = diagnostics.into_iter().map(|d| d.message).collect();
+    let messages: Vec<String> = diagnostics
+        .into_iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
     assert!(
         messages.iter().any(|m| m.contains("list<int|string>")),
         "a spelled-out `int` beside the invented union is still enforced: {messages:?}"
@@ -506,7 +510,7 @@ function declaredKey(array $declared): void
     backend.collect_argument_type_diagnostics(uri, content, &mut diagnostics);
     let messages: Vec<String> = diagnostics
         .into_iter()
-        .map(|d| format!("{}: {}", d.range.start.line, d.message))
+        .map(|d| format!("{}: {}", d.range.start.line, message_text(&d.message)))
         .collect();
     assert!(
         messages.iter().any(|m| m.starts_with("26:")),
@@ -656,11 +660,11 @@ class Helper {
     let unresolved: Vec<String> = diagnostics
         .into_iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "unresolved_member_access"),
-            )
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unresolved_member_access"))
         })
-        .map(|d| d.message)
+        .map(|d| message_text(&d.message).to_string())
         .collect();
     assert!(
         unresolved.is_empty(),
@@ -790,5 +794,62 @@ function f(array $inside, array $entries, int $i): void {
             ("INSIDE", "list<array<string, string>>"),
             ("ENTRIES", "array<int, string>"),
         ],
+    );
+}
+
+/// `array<string, mixed>&array{at: Carbon}` is an open-ended array that has
+/// at least `at`. Reading `at` yields the shape's answer, which every member
+/// agrees with, rather than nothing. A shape is sealed, so a key read
+/// dynamically can only address the entries it lists.
+#[test]
+fn an_offset_read_on_an_intersection_of_arrays_takes_the_shape_entry() {
+    let content = r#"<?php
+class Carbon {
+    public function toIso8601String(): string { return ''; }
+}
+
+/**
+ * @param array<string, mixed>&array{at: Carbon} $entry
+ * @param array<string, int>&array{n: positive-int} $counts
+ */
+function f(array $entry, array $counts, string $k): string {
+    $at = $entry['at'];
+    $n = $counts['n'];
+    $any = $counts[$k];
+    echo /*AT*/$at, /*N*/$n, /*ANY*/$any;
+    return $entry['at']->toIso8601String();
+}
+"#;
+    assert_marked_types(
+        content,
+        &[
+            ("AT", "Carbon"),
+            ("N", "positive-int"),
+            ("ANY", "positive-int"),
+        ],
+    );
+
+    let backend = create_test_backend_with_full_stubs();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///intersection_offset.php";
+    backend.update_ast(uri, content);
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri, content, &mut diagnostics);
+    let unresolved: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|d| {
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unresolved_member_access"))
+        })
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "the offset read resolves to Carbon: {unresolved:?}"
     );
 }

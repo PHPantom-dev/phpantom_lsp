@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use super::ancestry::ClassLoader;
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::ClassInfo;
 
@@ -61,7 +62,7 @@ pub(crate) fn extract_generic_args_from_ancestor(
         return Some(g.args.clone());
     }
 
-    let cls = class_loader(class_name)?;
+    let cls = class_loader(Fqn::new(class_name))?;
 
     // The argument's own type arguments are what its `@extends`/
     // `@implements` names stand for: `ClassStringType<class-string<Foo>>`
@@ -114,7 +115,7 @@ fn ancestor_generic_args(
     }
 
     for ancestor_name in cls.parent_class.iter().chain(cls.interfaces.iter()) {
-        let Some(ancestor) = class_loader(ancestor_name) else {
+        let Some(ancestor) = class_loader(Fqn::new(ancestor_name)) else {
             continue;
         };
         let next_subs =
@@ -197,7 +198,10 @@ mod tests {
         let mut values = make_class("Values");
         values.extends_generics = vec![("Container".into(), vec![PhpType::parse("Item")])];
         let classes = [Arc::new(first), Arc::new(second), Arc::new(values)];
-        let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+        let loader = |name: Fqn<'_>| {
+            let name = name.as_str();
+            classes.iter().find(|class| class.fqn() == name).cloned()
+        };
         assert_eq!(
             extract_generic_arg_from_ancestor(&PhpType::parse("First"), "Container", 0, &loader),
             Some(PhpType::parse("Item")),
@@ -217,7 +221,10 @@ mod tests {
                 Arc::new(class)
             })
             .collect();
-        let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+        let loader = |name: Fqn<'_>| {
+            let name = name.as_str();
+            classes.iter().find(|class| class.fqn() == name).cloned()
+        };
         assert!(
             extract_generic_arg_from_ancestor(&PhpType::parse("Level0"), "Container", 0, &loader)
                 .is_none()

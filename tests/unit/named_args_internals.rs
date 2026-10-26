@@ -7,7 +7,7 @@ use phpantom_lsp::atom::atom;
 use phpantom_lsp::completion::named_args::*;
 use phpantom_lsp::php_type::PhpType;
 use phpantom_lsp::types::ParameterInfo;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── position_to_char_offset ─────────────────────────────────────
 
@@ -598,7 +598,7 @@ fn completions_have_variable_kind() {
     };
 
     let items = build_named_arg_completions(&ctx, &params);
-    assert_eq!(items[0].kind, Some(CompletionItemKind::VARIABLE));
+    assert_eq!(items[0].kind, Some(CompletionItemKind::Variable));
 }
 
 #[test]

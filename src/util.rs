@@ -19,9 +19,9 @@
 //! find variables, call expressions, balanced parentheses, `new`
 //! expressions, etc.) live in [`crate::type_engine::subject_extraction`].
 use std::panic::{self, AssertUnwindSafe, UnwindSafe};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Run `f` inside [`panic::catch_unwind`], logging and swallowing any
 /// panic.
@@ -87,17 +87,17 @@ pub(crate) fn catch_panic_unwind_safe<T>(
 /// This **must** be used instead of `format!("file://{}", path.display())`
 /// everywhere in the codebase.  The `format!` approach produces raw,
 /// un-encoded paths (e.g. `file:///home/user/My Project/Foo.php`) while
-/// LSP clients send URIs through the `Url` type which percent-encodes
+/// LSP clients send URIs through the `Uri` type which percent-encodes
 /// special characters (e.g. `file:///home/user/My%20Project/Foo.php`).
-/// When both forms end up as keys in `symbol_maps`, the same file is
+/// When both forms end up as keys in `Backend::files`, the same file is
 /// indexed twice and every Find References result is duplicated.
 ///
-/// Falls back to the raw `format!` form only when `Url::from_file_path`
+/// Falls back to the raw `format!` form only when `Uri::from_file_path`
 /// fails (non-absolute paths on some platforms), which should never
 /// happen in practice.
 pub(crate) fn path_to_uri(path: &Path) -> String {
     // Canonicalize relative paths to absolute so that
-    // `Url::from_file_path` never fails due to a missing leading `/`.
+    // `Uri::from_file_path` never fails due to a missing leading `/`.
     let abs_path;
     let effective = if path.is_relative() {
         abs_path = std::env::current_dir()
@@ -107,9 +107,86 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
     } else {
         path
     };
-    Url::from_file_path(effective)
+    path_to_url(effective)
         .map(|u| u.to_string())
-        .unwrap_or_else(|()| format!("file://{}", effective.display()))
+        .unwrap_or_else(|| format!("file://{}", effective.display()))
+}
+
+/// Read a PHP source file from disk, decoding it the way the workspace
+/// scan does.
+///
+/// Invalid UTF-8 (a Latin-1 or Windows-1252 file) is replaced rather than
+/// rejected, so a class the scan indexed from such a file can also be
+/// loaded.  A read failure is logged the first time it happens for a
+/// path and returns `None`.
+pub(crate) fn read_php_source(path: &Path) -> Option<String> {
+    static REPORTED: std::sync::LazyLock<parking_lot::Mutex<std::collections::HashSet<PathBuf>>> =
+        std::sync::LazyLock::new(Default::default);
+
+    match std::fs::read(path) {
+        Ok(bytes) => Some(match String::from_utf8(bytes) {
+            Ok(text) => text,
+            Err(err) => String::from_utf8_lossy(err.as_bytes()).into_owned(),
+        }),
+        Err(err) => {
+            if REPORTED.lock().insert(path.to_path_buf()) {
+                tracing::warn!("could not read {}: {err}", path.display());
+            }
+            None
+        }
+    }
+}
+
+/// The `file://` URL of `path`, or `None` when the path is not absolute.
+///
+/// This, [`dir_path_to_url`], [`url_to_path`], [`uri_to_path`] and
+/// [`parse_url`] are the only places that convert between file paths, URI
+/// strings and URLs, so a change of URL type touches these functions
+/// rather than every caller.
+/// The text of a diagnostic message, whether the producer sent a plain
+/// string or (LSP 3.18) markup.
+pub(crate) fn message_text(message: &Message) -> &str {
+    match message {
+        Message::String(text) => text,
+        Message::MarkupContent(markup) => &markup.value,
+    }
+}
+
+pub(crate) fn path_to_url(path: &Path) -> Option<Uri> {
+    Uri::from_file_path(path).ok()
+}
+
+/// The `file://` URL of the directory `path`, with the trailing `/` that
+/// makes relative URLs resolve inside it, or `None` when the path is not
+/// absolute.
+pub(crate) fn dir_path_to_url(path: &Path) -> Option<Uri> {
+    Uri::from_directory_path(path).ok()
+}
+
+/// Parse a URI string into a URL, or `None` when it is malformed.
+pub(crate) fn parse_url(uri: &str) -> Option<Uri> {
+    Uri::parse(uri).ok()
+}
+
+/// The placeholder URL for a symbol whose own URI does not parse.
+pub(crate) fn unknown_url() -> Uri {
+    Uri::parse("file:///unknown").expect("constant URL parses")
+}
+
+/// The file a URL names, or `None` when it is not a `file://` URL.
+pub(crate) fn url_to_path(url: &Uri) -> Option<PathBuf> {
+    url.to_file_path().ok()
+}
+
+/// The file a URI string names, or `None` when it does not parse or is
+/// not a `file://` URI.
+pub(crate) fn uri_to_path(uri: &str) -> Option<PathBuf> {
+    url_to_path(&parse_url(uri)?)
+}
+
+/// The URI prefix every file under the directory `dir` starts with.
+pub(crate) fn dir_uri_prefix(dir: &Path) -> String {
+    format!("{}/", path_to_uri(dir))
 }
 
 /// The canonical spelling of `path`, for comparing against paths recorded
@@ -133,8 +210,8 @@ pub(crate) fn canonical_path_for_comparison(path: &Path) -> std::path::PathBuf {
 
 /// The URI of the file at `internal_path` inside the phar at `phar_path`,
 /// e.g. `phar:///path/to/phpstan.phar/src/Type/Type.php`.
-pub(crate) fn phar_entry_uri(phar_path: &Path, internal_path: &str) -> String {
-    format!("phar://{}/{}", phar_path.display(), internal_path)
+pub(crate) fn phar_entry_uri(phar_path: &Path, internal_path: &Path) -> String {
+    format!("phar://{}/{}", phar_path.display(), internal_path.display())
 }
 
 /// Drop the entries `keep` marks `false`, in place.

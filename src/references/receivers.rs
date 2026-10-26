@@ -14,7 +14,7 @@ use super::*;
 
 use std::cell::OnceCell;
 
-use tower_lsp::lsp_types::Range;
+use tower_lsp_server::gen_lsp_types::Range;
 
 use crate::atom::Atom;
 use crate::references::member_scope::MemberScope;
@@ -316,7 +316,7 @@ impl Backend {
         });
         if needs_variable_scopes {
             let class_loaders = self.resolved_class_loaders(&file_ctx);
-            let class_loaders = class_loaders.as_dyn();
+            let class_loaders = class_loaders.as_dyn_resolved();
             let source_class_loaders = self.class_loaders(&file_ctx);
             let source_class_loaders = source_class_loaders.as_dyn();
             let function_loader = self.function_loader(&file_ctx);
@@ -468,7 +468,7 @@ impl Backend {
         if self.skip_reference_index {
             return false;
         }
-        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
             return false;
         };
         if symbol_map.member_access_indices.is_empty() {

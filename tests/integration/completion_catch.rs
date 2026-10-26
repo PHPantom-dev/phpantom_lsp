@@ -13,7 +13,7 @@
 //!    `\Throwable` / `\Exception` / `\Error` are filtered out.
 
 use crate::common::{complete_at, create_test_backend};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Extract catch-suggestion items (detail = "Exception thrown in try block").
 fn catch_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
@@ -35,7 +35,7 @@ fn find_item<'a>(items: &'a [CompletionItem], label: &str) -> Option<&'a Complet
 #[tokio::test]
 async fn test_catch_specific_throw_includes_throwable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_throwable.php").unwrap();
+    let uri = Uri::parse("file:///catch_throwable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ValidationException extends \\RuntimeException {}\n",
@@ -72,7 +72,7 @@ async fn test_catch_specific_throw_includes_throwable() {
 #[tokio::test]
 async fn test_catch_propagated_throws_includes_throwable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_propagated.php").unwrap();
+    let uri = Uri::parse("file:///catch_propagated.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ApiException extends \\RuntimeException {}\n",
@@ -111,7 +111,7 @@ async fn test_catch_propagated_throws_includes_throwable() {
 #[tokio::test]
 async fn test_catch_inline_throws_includes_throwable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_inline.php").unwrap();
+    let uri = Uri::parse("file:///catch_inline.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class CatchInlineDemo {\n",
@@ -145,7 +145,7 @@ async fn test_catch_inline_throws_includes_throwable() {
 #[tokio::test]
 async fn test_catch_multiple_throws_all_plus_throwable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_multi.php").unwrap();
+    let uri = Uri::parse("file:///catch_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class CatchMultiDemo {\n",
@@ -184,7 +184,7 @@ async fn test_catch_multiple_throws_all_plus_throwable() {
 #[tokio::test]
 async fn test_catch_throwable_sorts_after_specific() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_sort.php").unwrap();
+    let uri = Uri::parse("file:///catch_sort.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class CatchSortDemo {\n",
@@ -225,7 +225,7 @@ async fn test_catch_throwable_sorts_after_specific() {
 #[tokio::test]
 async fn test_catch_fallback_filters_non_exception_classes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_filter.php").unwrap();
+    let uri = Uri::parse("file:///catch_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ValidationException extends \\RuntimeException {}\n",
@@ -270,7 +270,7 @@ async fn test_catch_fallback_filters_non_exception_classes() {
 #[tokio::test]
 async fn test_catch_fallback_includes_throwable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_fallback_th.php").unwrap();
+    let uri = Uri::parse("file:///catch_fallback_th.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class FallbackDemo {\n",
@@ -301,7 +301,7 @@ async fn test_catch_fallback_includes_throwable() {
 #[tokio::test]
 async fn test_catch_fallback_includes_known_exception() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_known_exc.php").unwrap();
+    let uri = Uri::parse("file:///catch_known_exc.php").unwrap();
     // Define a class that clearly extends Exception — the parent chain
     // terminates at Exception which is a known Throwable root.
     let text = concat!(
@@ -343,7 +343,7 @@ async fn test_catch_fallback_includes_known_exception() {
 #[tokio::test]
 async fn test_catch_fallback_includes_error_descendants() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_error_desc.php").unwrap();
+    let uri = Uri::parse("file:///catch_error_desc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class CustomError extends \\Error {}\n",
@@ -378,7 +378,7 @@ async fn test_catch_fallback_includes_error_descendants() {
 #[tokio::test]
 async fn test_catch_fallback_partial_filtering() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_partial.php").unwrap();
+    let uri = Uri::parse("file:///catch_partial.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AppException extends \\Exception {}\n",
@@ -425,7 +425,7 @@ async fn test_catch_fallback_partial_filtering() {
 #[tokio::test]
 async fn test_catch_fallback_excludes_unknown_parent() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_unknown.php").unwrap();
+    let uri = Uri::parse("file:///catch_unknown.php").unwrap();
     let text = concat!(
         "<?php\n",
         // This extends a class we don't have in our ast_map
@@ -465,7 +465,7 @@ async fn test_catch_fallback_excludes_unknown_parent() {
 #[tokio::test]
 async fn test_catch_fallback_chained_inheritance() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_chain.php").unwrap();
+    let uri = Uri::parse("file:///catch_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class DomainException extends \\Exception {}\n",
@@ -507,7 +507,7 @@ async fn test_catch_fallback_chained_inheritance() {
 #[tokio::test]
 async fn test_catch_with_throws_returns_only_smart_items() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_smart_only.php").unwrap();
+    let uri = Uri::parse("file:///catch_smart_only.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SomeService {}\n",
@@ -551,7 +551,7 @@ async fn test_catch_with_throws_returns_only_smart_items() {
 #[tokio::test]
 async fn test_throwable_not_injected_outside_catch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///no_catch.php").unwrap();
+    let uri = Uri::parse("file:///no_catch.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class MyClass {\n",
@@ -578,7 +578,7 @@ async fn test_throwable_not_injected_outside_catch() {
 #[tokio::test]
 async fn test_catch_throws_on_private_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_private.php").unwrap();
+    let uri = Uri::parse("file:///catch_private.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ServiceException extends \\Exception {}\n",
@@ -617,7 +617,7 @@ async fn test_catch_throws_on_private_method() {
 #[tokio::test]
 async fn test_catch_fallback_throwable_present_with_class_items() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_fallback_mix.php").unwrap();
+    let uri = Uri::parse("file:///catch_fallback_mix.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AppException extends \\Exception {}\n",
@@ -663,7 +663,7 @@ async fn test_catch_fallback_throwable_present_with_class_items() {
 #[tokio::test]
 async fn test_catch_second_clause_still_has_throwable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_second.php").unwrap();
+    let uri = Uri::parse("file:///catch_second.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ExcA extends \\Exception {}\n",
@@ -704,7 +704,7 @@ async fn test_catch_second_clause_still_has_throwable() {
 #[tokio::test]
 async fn test_catch_fallback_no_duplicate_throwable_with_use_import() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_dedup.php").unwrap();
+    let uri = Uri::parse("file:///catch_dedup.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo;\n",
@@ -751,7 +751,7 @@ async fn test_catch_fallback_no_duplicate_throwable_with_use_import() {
 #[tokio::test]
 async fn test_throw_new_filters_non_exception_classes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throw_new_filter.php").unwrap();
+    let uri = Uri::parse("file:///throw_new_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class NormalService {}\n",
@@ -788,7 +788,7 @@ async fn test_throw_new_filters_non_exception_classes() {
 #[tokio::test]
 async fn test_throw_new_no_constants_or_functions() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throw_new_no_const.php").unwrap();
+    let uri = Uri::parse("file:///throw_new_no_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AppException extends \\Exception {}\n",
@@ -805,7 +805,7 @@ async fn test_throw_new_no_constants_or_functions() {
     for item in &items {
         assert_eq!(
             item.kind,
-            Some(CompletionItemKind::CLASS),
+            Some(CompletionItemKind::Class),
             "throw new should only suggest classes, got {:?} for '{}'",
             item.kind,
             item.label
@@ -825,7 +825,7 @@ async fn test_throw_new_no_constants_or_functions() {
 #[tokio::test]
 async fn test_regular_new_still_shows_all_classes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///regular_new.php").unwrap();
+    let uri = Uri::parse("file:///regular_new.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class NormalService {}\n",
@@ -851,7 +851,7 @@ async fn test_regular_new_still_shows_all_classes() {
 #[tokio::test]
 async fn test_throw_new_with_use_import() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throw_new_use.php").unwrap();
+    let uri = Uri::parse("file:///throw_new_use.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -885,7 +885,7 @@ async fn test_throw_new_with_use_import() {
 #[tokio::test]
 async fn test_throw_new_extra_whitespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throw_new_ws.php").unwrap();
+    let uri = Uri::parse("file:///throw_new_ws.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class CustomError extends \\Error {}\n",
@@ -919,7 +919,7 @@ async fn test_throw_new_extra_whitespace() {
 #[tokio::test]
 async fn test_catch_fallback_includes_throwable_interface() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_iface.php").unwrap();
+    let uri = Uri::parse("file:///catch_iface.php").unwrap();
     // Define a custom interface that extends \Throwable and a class
     // that implements it.  Both should appear in catch completions.
     let text = concat!(
@@ -966,7 +966,7 @@ async fn test_catch_fallback_includes_throwable_interface() {
 #[tokio::test]
 async fn test_catch_fallback_includes_abstract_exception() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_abstract.php").unwrap();
+    let uri = Uri::parse("file:///catch_abstract.php").unwrap();
     let text = concat!(
         "<?php\n",
         "abstract class AbstractBaseException extends \\Exception {}\n",
@@ -1003,7 +1003,7 @@ async fn test_catch_fallback_includes_abstract_exception() {
 #[tokio::test]
 async fn test_catch_fallback_interface_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///catch_iface_chain.php").unwrap();
+    let uri = Uri::parse("file:///catch_iface_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface BaseAppException extends \\Throwable {}\n",

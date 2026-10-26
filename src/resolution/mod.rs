@@ -1,25 +1,44 @@
-//! Cross-file class and function resolution.
+//! Cross-file class, function, and constant resolution.
 //!
-//! This module contains the heavyweight name-resolution logic that is
-//! shared by the completion handler, definition resolver, and
-//! named-argument resolution.
+//! This module contains the heavyweight name-resolution logic that every
+//! feature shares: completion, hover, go-to-definition, diagnostics, and
+//! the type engine.
 //!
 //! # Resolution pipeline
 //!
+//! Each of the three lookups first asks the stub paths (`[stubs]` in
+//! `.phpantom.toml` and the editor's stub directory): a name one of them
+//! declares means that declaration, whatever else declares it.
+//!
 //! ## Class resolution ([`Backend::find_or_load_class`](crate::Backend::find_or_load_class))
 //!
-//!   0. **Class index** — direct FQN → URI lookup (covers non-PSR-4 classes
-//!      and Composer classmap entries)
-//!   1. **uri_classes_index scan** — search all already-parsed files by short name,
-//!      with namespace verification when a qualified name is requested
-//!   2. **PSR-4 resolution** — convert namespace to file path and parse
-//!   3. **Embedded stubs** — built-in PHP classes/interfaces bundled in
-//!      the binary (e.g. `UnitEnum`, `BackedEnum`, `Iterator`)
+//! - **Phase 0, already-parsed files** — O(1) FQN lookup in the parsed
+//!   classes
+//! - **Phase 0.5, built-in names** — a global-namespace name the embedded
+//!   stubs know resolves to the stub, ahead of any polyfill in vendor
+//! - **Phase 1, class index** — direct FQN → URI lookup (covers non-PSR-4
+//!   classes and Composer classmap entries)
+//! - **Phase 2, PSR-4 resolution** — convert namespace to file path and
+//!   parse
+//! - **Phase 3, embedded stubs** — built-in PHP classes/interfaces bundled
+//!   in the binary (e.g. `UnitEnum`, `BackedEnum`, `Iterator`)
 //!
 //! ## Function resolution ([`Backend::find_or_load_function`](crate::Backend::find_or_load_function))
 //!
-//!   1. **global_functions** — user code + already-cached stubs
-//!   2. **Embedded stubs** — built-in PHP functions from phpstorm-stubs
+//! - **Phase 1, `global_functions`** — user code + already-cached stubs
+//! - **Phase 1.5, autoload function index** — parse the file the
+//!   byte-level scan found the function in
+//! - **Phase 1.75, autoload files** — parse the remaining autoload files,
+//!   for functions declared inside a `function_exists()` guard
+//! - **Phase 2, embedded stubs** — built-in PHP functions from
+//!   phpstorm-stubs
+//!
+//! ## Constant resolution ([`Backend::lookup_global_constant`](crate::Backend::lookup_global_constant))
+//!
+//!   The same order as functions: parsed defines, the autoload constant
+//!   index, the remaining autoload files, then the embedded stubs.  The
+//!   first three are [`Backend::find_or_load_define`](crate::Backend::find_or_load_define),
+//!   which go-to-definition shares.
 //!
 //! ## Name resolution ([`Backend::class_loader_with`](crate::Backend::class_loader_with), [`Backend::resolve_function_name`](crate::Backend::resolve_function_name))
 //!
@@ -43,15 +62,21 @@
 //!   first.
 //! - [`functions`]: [`Backend::find_or_load_function`](crate::Backend::find_or_load_function) and name lookups
 //!   against the index.
+//! - [`constants`]: the constant counterpart,
+//!   [`Backend::lookup_global_constant`](crate::Backend::lookup_global_constant).
 //! - [`loaders`]: the loader closures handed to the type engine.
+//! - [`external_stubs`]: loading what the stub paths declare.
 
 mod classes;
+mod constants;
+mod external_stubs;
 mod functions;
 mod inflight;
 mod lazy_parse;
 mod loaders;
 
-pub(crate) use classes::needs_linking;
+pub(crate) use classes::{ClassLoadHooks, needs_linking};
+pub(crate) use constants::{DefineSearch, unversioned_php_version_constant_type};
 pub(crate) use inflight::ParseInflight;
 pub(crate) use loaders::FileLoaders;
 

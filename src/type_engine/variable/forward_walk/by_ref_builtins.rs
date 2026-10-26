@@ -169,7 +169,8 @@ pub(super) fn process_extract_call<'b>(
         None => Some(ExtractMode::Overwrite),
         Some(flags) => extract_flags_value(flags).and_then(ExtractMode::from_flags),
     };
-    let prefix = prefix_arg.and_then(crate::type_engine::types::narrowing::string_literal_value);
+    let prefix =
+        prefix_arg.and_then(crate::type_engine::type_ops::condition_facts::string_literal_value);
     let mode = match mode {
         Some(mode) if !unpacked && (prefix.is_some() || !mode.is_prefixed()) => mode,
         _ => {
@@ -347,12 +348,15 @@ pub(super) fn seed_by_ref_parameters<'b>(
         let is_spread = param.is_variadic && arg_is_unpacked(arg_list, arg_expr);
 
         let already_in_scope = !scope.get(&var_name).is_empty();
+        // An explicit `@param-out` states what the callee writes, so the
+        // argument's type from before the call has no say in the result. A
+        // plain hint only bounds what the callee may write, and precision
+        // it does not contradict survives the call.
+        let keep_existing = param.param_out_type.is_none();
         let mut seeded = false;
-        if let Some(out_hint) = effective_out_type(param, param_index, template_owner, ctx.backend)
+        if let Some(out_hint) =
+            effective_out_type(param, param_index, template_owner, ctx.file.backend)
         {
-            if out_hint.references_any_name(callee_templates) {
-                continue;
-            }
             // A PHPStan conditional out type (`@param-out ($arg is null ?
             // A&I : A) $arg`) is call-site-agnostic up to this point; only
             // this call's own arguments say which branch it actually takes.
@@ -372,11 +376,16 @@ pub(super) fn seed_by_ref_parameters<'b>(
                     parameters,
                     template_owner,
                     arg_list,
-                    ctx.content,
+                    ctx.file.content,
                     &var_ctx.as_resolution_ctx(),
                     Some(&call_var_resolver),
                 )
             };
+            // Checked once the call has picked a branch, since the branch it
+            // takes (`array` in `$x is array ? array : T`) may name none.
+            if out_hint.references_any_name(callee_templates) {
+                continue;
+            }
             // A variadic parameter's stored PHPDoc type may describe the
             // collected argument array (`string[] &$values`), while each
             // call-site variable is one element of that collection. Native
@@ -401,8 +410,8 @@ pub(super) fn seed_by_ref_parameters<'b>(
                 crate::type_engine::type_resolution::type_hint_to_classes_typed(
                     &effective_hint,
                     &ctx.current_class.fqn(),
-                    ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
                 )
             };
             if is_spread && (primitive_hint || !classes.is_empty()) {
@@ -420,6 +429,7 @@ pub(super) fn seed_by_ref_parameters<'b>(
                     .unwrap_or_else(PhpType::int);
                 let value_type = existing_joined
                     .as_ref()
+                    .filter(|_| keep_existing)
                     .and_then(PhpType::iterable_element_type)
                     .filter(|value| !value.is_null())
                     .filter(|value| value.is_subtype_of(&effective_hint))
@@ -449,7 +459,7 @@ pub(super) fn seed_by_ref_parameters<'b>(
                 // hint already covers, minus its literal precision, and fall
                 // back to the hint only when the two genuinely disagree.
                 let existing = scope.get(&var_name);
-                let refined = (!existing.is_empty())
+                let refined = (keep_existing && !existing.is_empty())
                     .then(|| ResolvedType::types_joined(existing))
                     // An empty array shape (`$matches = [];` before
                     // `preg_match_all(…, $matches)`) records no element
@@ -559,8 +569,8 @@ fn preg_flag_bits<'b>(
     let var_ctx =
         ctx.var_ctx_for_with_scope("", ctx.cursor_offset, &scope_resolver, Some(scope.proofs()));
     let flags =
-        crate::type_engine::variable::foreach_resolution::resolve_expression_type(expr, &var_ctx)
+        crate::type_engine::variable::iterable_elements::resolve_expression_type(expr, &var_ctx)
             .as_ref()
-            .and_then(crate::type_engine::types::const_fold::literal_int_value)?;
+            .and_then(crate::type_engine::type_ops::const_fold::literal_int_value)?;
     crate::type_engine::regex_shape::flags_are_modelled(flags).then_some(flags)
 }

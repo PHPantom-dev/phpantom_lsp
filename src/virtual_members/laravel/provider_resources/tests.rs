@@ -293,6 +293,77 @@ fn config_registrations_require_a_key() {
     );
 }
 
+/// A config registration whose file or namespace the scan cannot name still
+/// tells the config-key diagnostic that the configuration is incomplete.
+#[test]
+fn config_registrations_that_cannot_be_read_are_recorded() {
+    let scan = |register: &str| {
+        let content = format!(
+            "<?php\nclass AppServiceProvider {{\n    public function register(): void {{\n        {register}\n    }}\n}}\n"
+        );
+        extract_provider_resources(
+            &content,
+            Path::new("/ws/app/Providers/AppServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        )
+    };
+
+    let unread = scan("$this->mergeConfigFrom($this->configPath(), 'bakery');");
+    assert!(unread.config_files.is_empty());
+    assert_eq!(unread.unread_config_namespaces, vec!["bakery".to_string()]);
+    assert!(!unread.open_config_namespace);
+
+    let open = scan("$this->mergeConfigFrom(base_path('config/bakery.php'), $this->key);");
+    assert!(open.config_files.is_empty());
+    assert!(open.open_config_namespace);
+
+    // Laravel rejects a `null` key outright, so it registers nothing.
+    let null = scan("$this->mergeConfigFrom(base_path('config/bakery.php'), null);");
+    assert!(!null.open_config_namespace);
+}
+
+/// `hasConfigFile()` takes one name or an array of them; one computed at
+/// runtime leaves the configuration open.
+#[test]
+fn package_tools_config_files_are_read_from_every_name() {
+    let scan = |chain: &str| {
+        let content = format!(
+            "<?php\nclass BillingServiceProvider extends PackageServiceProvider {{\n    public function configurePackage(Package $package): void {{\n        $package{chain};\n    }}\n}}\n"
+        );
+        extract_provider_resources(
+            &content,
+            Path::new("/ws/vendor/acme/billing/src/BillingServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        )
+    };
+    let namespaces = |resources: &ProviderResources| {
+        resources
+            .config_files
+            .iter()
+            .map(|file| file.namespace.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let default = scan("->name('laravel-billing')->hasConfigFile()");
+    assert_eq!(namespaces(&default), vec!["billing"]);
+
+    let listed = scan("->name('laravel-billing')->hasConfigFile(['billing', 'invoices'])");
+    assert_eq!(namespaces(&listed), vec!["billing", "invoices"]);
+    assert!(!listed.open_config_namespace);
+
+    let computed = scan("->name('laravel-billing')->hasConfigFile($this->configName())");
+    assert!(computed.config_files.is_empty());
+    assert!(computed.open_config_namespace);
+
+    let unnamed = scan("->name($this->packageName())->hasConfigFile()");
+    assert!(unnamed.config_files.is_empty());
+    assert!(unnamed.open_config_namespace);
+}
+
 /// A registration may name its file through any of Laravel's path helpers,
 /// and `lang_path()` follows the framework into `resources/lang` when a
 /// project still keeps its translations there.

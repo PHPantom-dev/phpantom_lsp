@@ -5,11 +5,12 @@
 //! that inserts a `@throws` tag into the method docblock and (when
 //! needed) adds a `use` import for the exception class.
 
+use crate::common::message_text;
 use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_at,
     inject_phpstan_diag, resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── Basic: adds @throws into existing multi-line docblock ───────────────────
 
@@ -42,7 +43,7 @@ class FooController {
     let actions = get_code_actions_at(&backend, uri, content, 8, 10);
     let action = find_action(&actions, "Add @throws").expect("should offer Add @throws action");
 
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
     assert!(
         action.title.contains("BarException"),
@@ -492,12 +493,7 @@ class BadgeHelper {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .filter(|d| {
-                d.code
-                    == Some(NumberOrString::String(
-                        "missingType.checkedException".into(),
-                    ))
-            })
+            .filter(|d| d.code == Some(Code::String("missingType.checkedException".into())))
             .collect()
     };
     assert!(
@@ -565,12 +561,7 @@ class BadgeHelper {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .filter(|d| {
-                d.code
-                    == Some(NumberOrString::String(
-                        "missingType.checkedException".into(),
-                    ))
-            })
+            .filter(|d| d.code == Some(Code::String("missingType.checkedException".into())))
             .collect()
     };
     assert_eq!(
@@ -579,7 +570,7 @@ class BadgeHelper {
         "only the InvalidArgumentException diagnostic should remain"
     );
     assert!(
-        remaining[0].message.contains("InvalidArgumentException"),
+        message_text(&remaining[0].message).contains("InvalidArgumentException"),
         "remaining diagnostic should be for InvalidArgumentException"
     );
 }
@@ -637,12 +628,7 @@ class BadgeHelper {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .filter(|d| {
-                d.code
-                    == Some(NumberOrString::String(
-                        "missingType.checkedException".into(),
-                    ))
-            })
+            .filter(|d| d.code == Some(Code::String("missingType.checkedException".into())))
             .collect()
     };
     assert_eq!(

@@ -25,7 +25,7 @@
 
 use std::fmt::Write;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::blade::outline::OutlineEntry;
@@ -90,7 +90,7 @@ impl Backend {
                     symbols.push(DocumentSymbol {
                         name: short.to_string(),
                         detail: info.value.clone(),
-                        kind: SymbolKind::CONSTANT,
+                        kind: SymbolKind::Constant,
                         tags: None,
                         deprecated: None,
                         range,
@@ -117,7 +117,7 @@ impl Backend {
         if symbols.is_empty() {
             None
         } else {
-            Some(DocumentSymbolResponse::Nested(symbols))
+            Some(DocumentSymbolResponse::DocumentSymbolList(symbols))
         }
     }
 
@@ -149,7 +149,9 @@ impl Backend {
         if symbols.is_empty() {
             return None;
         }
-        Some(DocumentSymbolResponse::Nested(nest_by_containment(symbols)))
+        Some(DocumentSymbolResponse::DocumentSymbolList(
+            nest_by_containment(symbols),
+        ))
     }
 
     /// Translate a symbol built from the virtual PHP back to the
@@ -252,10 +254,10 @@ fn class_to_symbol(class: &ClassInfo, idx: &LineIndex<'_>) -> Option<DocumentSym
     }
 
     let kind = match class.kind {
-        ClassLikeKind::Class => SymbolKind::CLASS,
-        ClassLikeKind::Interface => SymbolKind::INTERFACE,
-        ClassLikeKind::Trait => SymbolKind::CLASS, // no dedicated trait kind in LSP
-        ClassLikeKind::Enum => SymbolKind::ENUM,
+        ClassLikeKind::Class => SymbolKind::Class,
+        ClassLikeKind::Interface => SymbolKind::Interface,
+        ClassLikeKind::Trait => SymbolKind::Class, // no dedicated trait kind in LSP
+        ClassLikeKind::Enum => SymbolKind::Enum,
     };
 
     let range_start = idx.position(class.keyword_offset as usize);
@@ -316,7 +318,7 @@ fn class_to_symbol(class: &ClassInfo, idx: &LineIndex<'_>) -> Option<DocumentSym
 
     let detail = build_class_detail(class);
     let tags = if class.deprecation_message.is_some() {
-        Some(vec![SymbolTag::DEPRECATED])
+        Some(vec![SymbolTag::Deprecated])
     } else {
         None
     };
@@ -411,7 +413,7 @@ fn member_symbol(
         name,
         detail,
         kind,
-        tags: deprecated.then(|| vec![SymbolTag::DEPRECATED]),
+        tags: deprecated.then(|| vec![SymbolTag::Deprecated]),
         deprecated: None,
         range: Range::new(start, idx.position(decl_end)),
         selection_range,
@@ -423,9 +425,9 @@ fn member_symbol(
 #[allow(deprecated)]
 fn method_to_symbol(method: &MethodInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
     let kind = if method.name == "__construct" {
-        SymbolKind::CONSTRUCTOR
+        SymbolKind::Constructor
     } else {
-        SymbolKind::METHOD
+        SymbolKind::Method
     };
     member_symbol(
         (
@@ -451,7 +453,7 @@ fn property_to_symbol(prop: &PropertyInfo, idx: &LineIndex<'_>) -> Option<Docume
             prop.name_offset,
             prop.name.len() + 1,
         ),
-        SymbolKind::PROPERTY,
+        SymbolKind::Property,
         prop.type_hint_str(),
         prop.deprecation_message.is_some(),
         idx,
@@ -463,10 +465,10 @@ fn property_to_symbol(prop: &PropertyInfo, idx: &LineIndex<'_>) -> Option<Docume
 #[allow(deprecated)]
 fn constant_to_symbol(constant: &ConstantInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
     let (kind, detail) = if constant.is_enum_case {
-        (SymbolKind::ENUM_MEMBER, constant.enum_value.clone())
+        (SymbolKind::EnumMember, constant.enum_value.clone())
     } else {
         (
-            SymbolKind::CONSTANT,
+            SymbolKind::Constant,
             constant.type_hint_str().or_else(|| constant.value.clone()),
         )
     };
@@ -490,7 +492,7 @@ fn constant_to_symbol(constant: &ConstantInfo, idx: &LineIndex<'_>) -> Option<Do
 fn function_to_symbol(func: &FunctionInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
     member_symbol(
         (func.name.to_string(), func.name_offset, func.name.len()),
-        SymbolKind::FUNCTION,
+        SymbolKind::Function,
         build_function_detail(func),
         func.deprecation_message.is_some(),
         idx,
@@ -612,7 +614,7 @@ mod tests {
         DocumentSymbol {
             name: name.to_string(),
             detail: None,
-            kind: SymbolKind::NAMESPACE,
+            kind: SymbolKind::Namespace,
             tags: None,
             deprecated: None,
             range,

@@ -1,6 +1,7 @@
+use crate::common::message_text;
 use crate::common::{create_psr4_workspace, open_php};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "autoload": { "psr-4": {
@@ -111,7 +112,7 @@ class Example extends Model { use HasUuids; }",
         let content = format!(
             "<?php declare(strict_types=1);\nuse App\\Models\\Example;\nfunction accepts(Example $model): {expected} {{ return $model->{key}; }}\nfunction rejects(Example $model): {wrong} {{ return $model->{key}; }}\n$model = new Example();\n$model->{key};\n"
         );
-        let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+        let uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
         open_php(&backend, &uri, &content).await;
 
         let mut diagnostics = Vec::new();
@@ -120,10 +121,10 @@ class Example extends Model { use HasUuids; }",
         assert_eq!(diagnostics[0].range.start.line, 3);
         assert_eq!(
             diagnostics[0].code,
-            Some(NumberOrString::String("type_mismatch_return".into()))
+            Some(Code::String("type_mismatch_return".into()))
         );
         assert_eq!(
-            diagnostics[0].message,
+            message_text(&diagnostics[0].message),
             format!("Return type {expected} is incompatible with declared return type {wrong}")
         );
 
@@ -139,7 +140,7 @@ class Example extends Model { use HasUuids; }",
             .await
             .unwrap()
             .expect("primary-key hover");
-        let HoverContents::Markup(hover) = hover.contents else {
+        let Contents::MarkupContent(hover) = hover.contents else {
             panic!("expected markup hover")
         };
         assert!(
@@ -151,7 +152,7 @@ class Example extends Model { use HasUuids; }",
 
         let completion = backend
             .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
+                text_document_position_params: TextDocumentPositionParams {
                     position: Position::new(5, 8),
                     ..position
                 },
@@ -163,8 +164,8 @@ class Example extends Model { use HasUuids; }",
             .unwrap()
             .expect("model completion");
         let items = match completion {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         let keys: Vec<_> = items.iter().filter(|item| item.label == key).collect();
         assert_eq!(keys.len(), 1, "{declaration}: {items:?}");
@@ -195,14 +196,14 @@ async fn unique_ids_refresh_when_an_inherited_trait_changes() {
             ),
         ],
     );
-    let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
     let content = "<?php declare(strict_types=1);\nfunction keyOf(\\App\\Models\\Example $model): string { return $model->id; }\n";
     open_php(&backend, &uri, content).await;
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
-    let trait_uri = Url::from_file_path(dir.path().join("src/Concerns/Identified.php")).unwrap();
+    let trait_uri = Uri::from_file_path(dir.path().join("src/Concerns/Identified.php")).unwrap();
     open_php(
         &backend,
         &trait_uri,
@@ -212,7 +213,7 @@ async fn unique_ids_refresh_when_an_inherited_trait_changes() {
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert_eq!(
-        diagnostics[0].message,
+        message_text(&diagnostics[0].message),
         "Return type int is incompatible with declared return type string"
     );
 }

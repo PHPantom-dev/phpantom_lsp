@@ -15,11 +15,12 @@
 //! invalidation, classes from unedited files stay cached and the second
 //! pass is significantly faster.
 
+use crate::common::message_text;
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
 };
 use std::time::Instant;
-use tower_lsp::lsp_types::NumberOrString;
+use tower_lsp_server::gen_lsp_types::Code;
 
 /// Regression test for variable-type-caching in deprecated diagnostics.
 ///
@@ -133,7 +134,7 @@ class Consumer {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
         .collect();
 
@@ -149,9 +150,9 @@ class Consumer {
             .collect::<Vec<_>>()
     );
     assert!(
-        unknown_member[0].message.contains("nonexistent"),
+        message_text(&unknown_member[0].message).contains("nonexistent"),
         "Diagnostic should be about 'nonexistent', got: {}",
-        unknown_member[0].message
+        message_text(&unknown_member[0].message)
     );
 }
 
@@ -195,7 +196,7 @@ class Worker {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
         .collect();
 
@@ -210,9 +211,9 @@ class Worker {
             .collect::<Vec<_>>()
     );
     assert!(
-        unknown_member[0].message.contains("doesNotExist"),
+        message_text(&unknown_member[0].message).contains("doesNotExist"),
         "Diagnostic should be about 'doesNotExist', got: {}",
-        unknown_member[0].message
+        message_text(&unknown_member[0].message)
     );
 }
 
@@ -256,7 +257,7 @@ class TimePeriod {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
         .collect();
 
@@ -310,7 +311,7 @@ class Vet {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
         .collect();
 
@@ -375,7 +376,7 @@ final class DecimalCast implements CastsAttributes {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, NumberOrString::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -497,7 +498,7 @@ function test(Animal $pet): string {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, NumberOrString::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -544,7 +545,7 @@ function test(UserContract $user, ?int $dept_id): int {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, NumberOrString::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -591,7 +592,7 @@ function describe(Dog|Cat $pet): string {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, NumberOrString::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -635,7 +636,7 @@ function describe(Base $item): string {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, NumberOrString::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -722,9 +723,9 @@ class RefundCallback {
     let relevant: Vec<_> = out
         .iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "unresolved_member_access"),
-            )
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unresolved_member_access"))
         })
         .collect();
 
@@ -2222,7 +2223,7 @@ class Controller {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, NumberOrString::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -2277,7 +2278,7 @@ class Walker {
         .iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, NumberOrString::String(s) if s == "unknown_member" || s == "unresolved_member_access")
+                matches!(c, Code::String(s) if s == "unknown_member" || s == "unresolved_member_access")
             })
         })
         .collect();
@@ -2523,9 +2524,9 @@ fn conditional_array_writes_stay_bounded() {
     );
     let last_key = format!("k{}?:", WRITES - 1);
     assert!(
-        out[0].message.contains(&last_key),
+        message_text(&out[0].message).contains(&last_key),
         "expected the shape to keep every key, got: {}",
-        out[0].message
+        message_text(&out[0].message)
     );
 
     // Budget: 8 s in debug, 1 s in release.  This measures ~1 s and ~0.15 s
@@ -2586,14 +2587,14 @@ fn conditional_dynamic_writes_stay_bounded() {
         out.len(),
         1,
         "expected one diagnostic, got: {:?}",
-        out.iter().map(|d| &d.message).collect::<Vec<_>>()
+        out.iter()
+            .map(|d| message_text(&d.message))
+            .collect::<Vec<_>>()
     );
     assert!(
-        out[0]
-            .message
-            .contains("array<int, non-empty-array<string, int>>"),
+        message_text(&out[0].message).contains("array<int, non-empty-array<string, int>>"),
         "expected the shapes folded into one array type, got: {}",
-        out[0].message
+        message_text(&out[0].message)
     );
 
     // Budget: 8 s in debug, 1 s in release.  This measures ~0.1 s in
@@ -2718,7 +2719,7 @@ fn switch_assigning_many_distinct_literals() {
     // The mismatch spells out the joined type, which has to carry every
     // case's value as well as the default's.
     assert_eq!(out.len(), 1, "expected one argument type mismatch");
-    let message = &out[0].message;
+    let message = message_text(&out[0].message);
     assert!(
         message.contains("'Country 0'|")
             && message.contains(&format!("'Country {}'|", CASES - 1))
@@ -2774,7 +2775,7 @@ fn elseif_chain_assigning_many_distinct_literals() {
     eprintln!();
 
     assert_eq!(out.len(), 1, "expected one argument type mismatch");
-    let message = &out[0].message;
+    let message = message_text(&out[0].message);
     assert!(
         message.contains("'Country 0'|")
             && message.contains(&format!("'Country {}'|", ARMS - 1))

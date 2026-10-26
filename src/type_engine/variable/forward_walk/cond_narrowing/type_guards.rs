@@ -53,7 +53,9 @@ pub(crate) fn apply_type_guard_on_operands(
     let var_names = condition_subject_keys(condition, scope);
     for operand in &operands {
         for var_name in &var_names {
-            if let Some((kind, negated)) = narrowing::try_extract_type_guard(operand, var_name) {
+            if let Some((kind, negated)) =
+                condition_facts::try_extract_type_guard(operand, var_name)
+            {
                 // When the guard is negated (e.g. `!is_object($x)`),
                 // flip the inclusion/exclusion logic: the truthy branch
                 // of a negated guard means the variable is NOT the
@@ -61,7 +63,7 @@ pub(crate) fn apply_type_guard_on_operands(
                 let effective_truthy = if negated { !truthy } else { truthy };
                 let splits_iterable = matches!(
                     kind,
-                    narrowing::TypeGuardKind::Array | narrowing::TypeGuardKind::Object
+                    condition_facts::TypeGuardKind::Array | condition_facts::TypeGuardKind::Object
                 );
                 let mut results = splits_iterable
                     .then(|| {
@@ -80,23 +82,23 @@ pub(crate) fn apply_type_guard_on_operands(
                         scope.set(
                             var_name,
                             vec![ResolvedType::from_type_string(
-                                narrowing::guard_kind_to_narrowed_type(kind),
+                                condition_facts::guard_kind_to_narrowed_type(kind),
                             )],
                         );
                     }
                     continue;
                 }
                 if effective_truthy {
-                    narrowing::apply_type_guard_inclusion(
+                    condition_facts::apply_type_guard_inclusion(
                         kind,
                         &mut results,
-                        Some(ctx.class_loader),
+                        Some(ctx.file.class_loader),
                     );
                 } else {
-                    narrowing::apply_type_guard_exclusion(
+                    condition_facts::apply_type_guard_exclusion(
                         kind,
                         &mut results,
-                        Some(ctx.class_loader),
+                        Some(ctx.file.class_loader),
                     );
                 }
                 if results.is_empty() {
@@ -173,7 +175,7 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
     for operand in &operands {
         for var_name in &var_names {
             if let Some((target, negated)) =
-                narrowing::try_extract_class_string_guard(operand, var_name)
+                condition_facts::try_extract_class_string_guard(operand, var_name)
             {
                 let effective_truthy = if negated { !truthy } else { truthy };
                 if !effective_truthy {
@@ -246,7 +248,7 @@ fn names_only_subclasses_of(ty: &PhpType, fqn: &str, ctx: &ForwardWalkCtx<'_>) -
                 .map(|name| name.into_owned()),
         };
         named.is_some_and(|name| {
-            crate::class_lookup::is_subtype_of_names(&name, fqn, ctx.class_loader)
+            crate::class_lookup::is_subtype_of_names(&name, fqn, ctx.file.class_loader)
         })
     })
 }

@@ -153,6 +153,11 @@ pub fn declares_impure(info: &DocblockInfo) -> bool {
 /// Returns `None` when no `@removed` tag is present or the version
 /// cannot be parsed.
 pub fn extract_removed_version(docblock: &str) -> Option<PhpVersion> {
+    // Asked of every declaration's docblock and found in almost none, so
+    // the parse is skipped where the tag cannot be.
+    if !docblock.contains("@removed") {
+        return None;
+    }
     let info = parse_docblock_for_tags(docblock)?;
     // `@removed` is not a tag the parser models, so it arrives as
     // `TagKind::Other`.  We match by name instead.
@@ -191,6 +196,15 @@ pub fn extract_see_references_from_info(info: &DocblockInfo) -> Vec<String> {
     info.tags_by_kind(TagKind::See)
         .map(|tag| tag.description.trim().to_owned())
         .filter(|desc| !desc.is_empty())
+        .collect()
+}
+
+/// [`extract_see_references_from_info`] as the [`SeeRef`]s a declaration
+/// stores, their classes still to be qualified.
+pub fn extract_see_refs_from_info(info: &DocblockInfo) -> Vec<crate::types::SeeRef> {
+    extract_see_references_from_info(info)
+        .into_iter()
+        .map(crate::types::SeeRef::from)
         .collect()
 }
 

@@ -1,8 +1,8 @@
 use std::fs;
 
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::common::collect_diagnostics_with;
 

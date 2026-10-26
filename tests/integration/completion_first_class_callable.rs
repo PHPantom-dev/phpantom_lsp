@@ -1,16 +1,17 @@
 use std::collections::HashMap;
 
 use crate::common::{
-    complete_at, create_psr4_workspace, create_test_backend, method_names, property_names,
+    complete_at, create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
+    method_names, property_names,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Function first-class callable ──────────────────────────────────────────
 
 #[tokio::test]
 async fn test_first_class_callable_function_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_func.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_func.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -47,7 +48,7 @@ async fn test_first_class_callable_function_return_type() {
 #[tokio::test]
 async fn test_first_class_callable_instance_method_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_method.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_method.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -87,7 +88,7 @@ async fn test_first_class_callable_instance_method_return_type() {
 #[tokio::test]
 async fn test_first_class_callable_this_method_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_this.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_this.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -124,7 +125,7 @@ async fn test_first_class_callable_this_method_return_type() {
 #[tokio::test]
 async fn test_first_class_callable_static_method_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_static.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_static.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -155,7 +156,7 @@ async fn test_first_class_callable_static_method_return_type() {
 #[tokio::test]
 async fn test_first_class_callable_self_static_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_self.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_self.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -186,7 +187,7 @@ async fn test_first_class_callable_self_static_method() {
 #[tokio::test]
 async fn test_first_class_callable_chained_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_chain.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_chain.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -226,7 +227,7 @@ async fn test_first_class_callable_chained_call() {
 #[tokio::test]
 async fn test_first_class_callable_assigned_result() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_assign.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_assign.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -302,7 +303,7 @@ async fn test_first_class_callable_cross_file() {
         ],
     );
 
-    let uri = Url::from_file_path(_dir.path().join("src/Service.php")).unwrap();
+    let uri = Uri::from_file_path(_dir.path().join("src/Service.php")).unwrap();
 
     let items = complete_at(&backend, &uri, service_src, 5, 15).await;
     let names = method_names(&items);
@@ -323,7 +324,7 @@ async fn test_first_class_callable_cross_file() {
 #[tokio::test]
 async fn test_first_class_callable_nullsafe_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_nullsafe.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_nullsafe.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -369,7 +370,7 @@ async fn test_first_class_callable_resolves_to_closure() {
     // backend may not have a Closure stub loaded, we define a minimal
     // one inline.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_closure_members.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_closure_members.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -397,7 +398,7 @@ async fn test_first_class_callable_resolves_to_closure() {
 #[tokio::test]
 async fn test_first_class_callable_top_level() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_top_level.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_top_level.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -424,7 +425,7 @@ async fn test_first_class_callable_top_level() {
 #[tokio::test]
 async fn test_first_class_callable_reassignment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_reassign.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_reassign.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -467,7 +468,7 @@ async fn test_first_class_callable_reassignment() {
 #[tokio::test]
 async fn test_first_class_callable_result_property_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_prop.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_prop.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -509,7 +510,7 @@ async fn test_first_class_callable_result_property_access() {
 #[tokio::test]
 async fn test_first_class_callable_static_method_returning_nullable_self() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_nullable_self.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_nullable_self.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -546,7 +547,7 @@ async fn test_first_class_callable_static_method_returning_nullable_self() {
 #[tokio::test]
 async fn test_first_class_callable_instance_method_returning_self() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_self_return.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_self_return.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -575,7 +576,7 @@ async fn test_first_class_callable_instance_method_returning_self() {
 #[tokio::test]
 async fn test_first_class_callable_static_method_returning_static() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_static_return.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_static_return.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -613,7 +614,7 @@ async fn test_closure_literal_resolves_to_closure() {
     // A closure literal `function() { … }` assigned to a variable should
     // resolve to the Closure class, offering members like bindTo and call.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_literal_members.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_literal_members.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -643,7 +644,7 @@ async fn test_arrow_function_resolves_to_closure() {
     // An arrow function `fn() => …` assigned to a variable should also
     // resolve to the Closure class.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/arrow_fn_members.php").unwrap();
+    let uri = Uri::parse("file:///test/arrow_fn_members.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -672,7 +673,7 @@ async fn test_closure_literal_bindto_chain() {
     // `$fn->bindTo($obj)` returns ?Closure, so chaining should continue
     // on the Closure class.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_bindto_chain.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_bindto_chain.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -709,7 +710,7 @@ async fn test_closure_no_params_resolves_to_closure() {
     // Even a bare closure with no params / no return type should resolve
     // to the Closure class.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_bare.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_bare.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -736,7 +737,7 @@ async fn test_closure_no_params_resolves_to_closure() {
 async fn test_closure_with_use_resolves_to_closure() {
     // A closure with a `use ($x)` clause should still resolve to Closure.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_use_clause.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_use_clause.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -763,7 +764,7 @@ async fn test_closure_with_use_resolves_to_closure() {
 async fn test_arrow_function_no_return_type_resolves_to_closure() {
     // Arrow function without an explicit return type still resolves to Closure.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/arrow_no_return.php").unwrap();
+    let uri = Uri::parse("file:///test/arrow_no_return.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -791,7 +792,7 @@ async fn test_closure_top_level_resolves_to_closure() {
     // Closure literal at the top level (outside any class) should also
     // resolve to the Closure class.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_top_level.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_top_level.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -852,7 +853,7 @@ async fn test_closure_literal_in_namespace_resolves_via_stubs() {
     class_stubs.insert("Closure", CLOSURE_STUB);
     let backend = phpantom_lsp::Backend::new_test_with_stubs(class_stubs);
 
-    let uri = tower_lsp::lsp_types::Url::parse("file:///test/ns_closure.php").unwrap();
+    let uri = tower_lsp_server::gen_lsp_types::Uri::parse("file:///test/ns_closure.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -892,7 +893,7 @@ async fn test_arrow_function_in_namespace_resolves_via_stubs() {
     class_stubs.insert("Closure", CLOSURE_STUB);
     let backend = phpantom_lsp::Backend::new_test_with_stubs(class_stubs);
 
-    let uri = tower_lsp::lsp_types::Url::parse("file:///test/ns_arrow.php").unwrap();
+    let uri = tower_lsp_server::gen_lsp_types::Uri::parse("file:///test/ns_arrow.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -923,7 +924,7 @@ async fn test_first_class_callable_in_namespace_resolves_via_stubs() {
     class_stubs.insert("Closure", CLOSURE_STUB);
     let backend = phpantom_lsp::Backend::new_test_with_stubs(class_stubs);
 
-    let uri = tower_lsp::lsp_types::Url::parse("file:///test/ns_fcc.php").unwrap();
+    let uri = tower_lsp_server::gen_lsp_types::Uri::parse("file:///test/ns_fcc.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -955,7 +956,7 @@ async fn test_first_class_callable_in_namespace_resolves_via_stubs() {
 #[tokio::test]
 async fn test_first_class_callable_immediate_static_invocation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_immediate_static.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_immediate_static.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -988,7 +989,7 @@ async fn test_first_class_callable_immediate_static_invocation() {
 #[tokio::test]
 async fn test_first_class_callable_immediate_instance_invocation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_immediate_instance.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_immediate_instance.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1023,7 +1024,7 @@ async fn test_first_class_callable_immediate_instance_invocation() {
 #[tokio::test]
 async fn test_first_class_callable_immediate_self_invocation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_immediate_self.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_immediate_self.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1052,7 +1053,7 @@ async fn test_first_class_callable_immediate_self_invocation() {
 #[tokio::test]
 async fn test_first_class_callable_immediate_function_invocation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_immediate_func.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_immediate_func.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1082,7 +1083,7 @@ async fn test_first_class_callable_dynamic_instance_method_name() {
     // resolves through the method that literal names, same as writing
     // `$obj->inner(...)` directly.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_dynamic_method.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_dynamic_method.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1113,7 +1114,7 @@ async fn test_first_class_callable_dynamic_static_method_name() {
     // `Class::$name(...)` where `$name` holds a known string literal
     // resolves through the static method that literal names.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_dynamic_static.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_dynamic_static.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1147,7 +1148,7 @@ async fn test_first_class_callable_invokable_object() {
     // `$obj(...)` on an object whose class declares `__invoke()` resolves
     // through that method's return type.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fcc_invokable.php").unwrap();
+    let uri = Uri::parse("file:///test/fcc_invokable.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1174,4 +1175,151 @@ async fn test_first_class_callable_invokable_object() {
         "Expected getValue in {:?}",
         names,
     );
+}
+
+// ─── Closure::fromCallable() ────────────────────────────────────────────────
+
+/// The methods offered on `$c()->` after `$c = \Closure::fromCallable(<arg>)`,
+/// written inside `namespace App` so callable strings have to be read as
+/// fully qualified names.
+async fn from_callable_invocation_methods(arg: &str) -> Vec<String> {
+    let backend = create_test_backend_with_closure_stub();
+    let uri = Uri::parse("file:///test/from_callable.php").unwrap();
+
+    let src = format!(
+        concat!(
+            "<?php\n",
+            "namespace App;\n",
+            "class User {{\n",
+            "    public function getName(): string {{ return ''; }}\n",
+            "}}\n",
+            "class Repo {{\n",
+            "    public function find(): User {{ return new User(); }}\n",
+            "    public static function make(): User {{ return new User(); }}\n",
+            "}}\n",
+            "class Finder {{\n",
+            "    public function __invoke(): User {{ return new User(); }}\n",
+            "}}\n",
+            "function makeUser(): User {{ return new User(); }}\n",
+            "function run(Repo $repo): void {{\n",
+            "    $c = \\Closure::fromCallable({});\n",
+            "    $c()->\n",
+            "}}\n",
+        ),
+        arg
+    );
+
+    // Line 15: `    $c()->`  cursor after `->`
+    let items = complete_at(&backend, &uri, &src, 15, 10).await;
+    method_names(&items)
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn test_closure_from_callable_keeps_the_callee_return_type() {
+    for arg in [
+        "[$repo, 'find']",
+        "[Repo::class, 'make']",
+        "'App\\\\makeUser'",
+        "'App\\\\Repo::make'",
+        "new Finder()",
+        "$repo->find(...)",
+        "fn(): User => new User()",
+        "callback: [$repo, 'find']",
+    ] {
+        let names = from_callable_invocation_methods(arg).await;
+        assert!(
+            names.iter().any(|n| n == "getName"),
+            "Expected getName after fromCallable({arg}) in {names:?}",
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_closure_from_callable_does_not_call_an_instance_method_statically() {
+    // PHP throws rather than call an instance method through the class name.
+    for arg in ["[Repo::class, 'find']", "'App\\\\Repo::find'"] {
+        let names = from_callable_invocation_methods(arg).await;
+        assert!(
+            !names.iter().any(|n| n == "getName"),
+            "Expected no getName after fromCallable({arg}) in {names:?}",
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_member_access_on_a_closure_invoked_in_place() {
+    for call in [
+        "$repo->find(...)()",
+        "makeFinder()()",
+        "(fn(): User => new User())()",
+        "\\Closure::fromCallable([$repo, 'find'])()",
+    ] {
+        let backend = create_test_backend_with_closure_stub();
+        let uri = Uri::parse("file:///test/invoked_in_place.php").unwrap();
+        let src = format!(
+            concat!(
+                "<?php\n",
+                "class User {{\n",
+                "    public function getName(): string {{ return ''; }}\n",
+                "}}\n",
+                "class Repo {{\n",
+                "    public function find(): User {{ return new User(); }}\n",
+                "}}\n",
+                "/** @return \\Closure(): User */\n",
+                "function makeFinder(): \\Closure {{ return fn() => new User(); }}\n",
+                "function run(Repo $repo): void {{\n",
+                "    {}->\n",
+                "}}\n",
+            ),
+            call
+        );
+        let items = complete_at(&backend, &uri, &src, 10, 4 + call.len() as u32 + 2).await;
+        assert!(
+            method_names(&items).contains(&"getName"),
+            "Expected getName after {call}->, got {:?}",
+            method_names(&items),
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_member_access_on_a_partial_application_invoked_in_place() {
+    for call in [
+        "$repo->find(?, 1)(5)",
+        "$repo->make(?, User::class)(5)",
+        "$repo->make(1, ?)(User::class)",
+    ] {
+        let backend = create_test_backend_with_closure_stub();
+        let uri = Uri::parse("file:///test/partial_invoked_in_place.php").unwrap();
+        let src = format!(
+            concat!(
+                "<?php\n",
+                "class User {{\n",
+                "    public function getName(): string {{ return ''; }}\n",
+                "}}\n",
+                "class Repo {{\n",
+                "    public function find(int $id, int $tenant): User {{ return new User(); }}\n",
+                "    /**\n",
+                "     * @template T of object\n",
+                "     * @param class-string<T> $class\n",
+                "     * @return T\n",
+                "     */\n",
+                "    public function make(int $id, string $class): object {{ return new $class(); }}\n",
+                "}}\n",
+                "function run(Repo $repo): void {{\n",
+                "    {}->\n",
+                "}}\n",
+            ),
+            call
+        );
+        let items = complete_at(&backend, &uri, &src, 14, 4 + call.len() as u32 + 2).await;
+        assert!(
+            method_names(&items).contains(&"getName"),
+            "Expected getName after {call}->, got {:?}",
+            method_names(&items),
+        );
+    }
 }

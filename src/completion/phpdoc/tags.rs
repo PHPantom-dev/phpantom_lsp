@@ -1,7 +1,7 @@
 //! The PHPDoc and PHPStan tags offered after `@`, grouped by the kind of
 //! declaration a docblock documents.
 
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind};
+use tower_lsp_server::gen_lsp_types::{CompletionItem, CompletionItemKind};
 
 use super::DocblockContext;
 
@@ -325,7 +325,7 @@ pub(super) fn generic_tag_item(def: &TagDef) -> CompletionItem {
     };
     CompletionItem {
         label: def.label.unwrap_or(def.tag).to_string(),
-        kind: Some(CompletionItemKind::KEYWORD),
+        kind: Some(CompletionItemKind::Keyword),
         detail: Some(def.detail.to_string()),
         insert_text: Some(strip_at(def.tag).to_string()),
         filter_text: Some(def.tag.to_string()),

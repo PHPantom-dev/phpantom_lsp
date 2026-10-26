@@ -1,17 +1,20 @@
 //! Code Lens (`textDocument/codeLens`) support.
 //!
-//! Shows reference and implementation counts plus override/implement
-//! annotations.
+//! Shows reference and implementation counts, override/implement
+//! annotations, the links between a Doctrine entity and its repository,
+//! and the links between a Messenger message and its handlers.
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::definition::implementation::member_implementation_providers;
 use crate::definition::member::MemberKind;
 use crate::inheritance::find_declaring_ancestor;
+use crate::reference_counts::MemberSlot;
 use crate::reference_index::ReferenceIndexKey;
 use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::text_position::{LineIndex, offset_to_position};
@@ -66,15 +69,17 @@ impl Backend {
     /// Handle a `textDocument/codeLens` request.
     ///
     /// Returns reference lenses for PHP declarations, implementation
-    /// lenses for interfaces and abstract classes and their methods, and
+    /// lenses for interfaces and abstract classes and their methods,
     /// navigation lenses for methods that override or implement an
-    /// ancestor declaration.
+    /// ancestor declaration, in a Doctrine project the lenses that link an
+    /// entity and its repository, and in a Symfony project the ones that
+    /// link a Messenger message and its handlers.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
             let map = self.symbols.uri_classes_index.read();
             map.get(uri).cloned().unwrap_or_default()
         };
-        let symbol_map = self.symbol_maps.read().get(uri).cloned();
+        let symbol_map = self.symbol_map_for(uri);
 
         // One line table for the whole request: every lens converts at
         // least one offset from this content, and `offset_to_position` is
@@ -82,7 +87,9 @@ impl Backend {
         let index = LineIndex::new(content);
 
         let mut lenses = Vec::new();
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
+        let is_doctrine = self.is_doctrine_project();
+        let is_symfony = self.is_symfony_project();
 
         for class in &classes {
             let class_fqn = class.fqn();
@@ -114,6 +121,14 @@ impl Backend {
                 lenses.push(lens);
             }
 
+            if is_doctrine && class.kind == ClassLikeKind::Class {
+                self.push_doctrine_lenses(class, &index, &mut lenses);
+            }
+
+            if is_symfony {
+                self.push_messenger_lenses(uri, class, &index, &mut lenses);
+            }
+
             for method in &class.methods {
                 if method.name_offset == 0
                     || method.is_virtual
@@ -141,7 +156,10 @@ impl Backend {
                         method.name_offset,
                         class_fqn,
                         method.name,
-                        method.is_static,
+                        MemberSlot {
+                            is_static: method.is_static,
+                            is_method: true,
+                        },
                     )
                 {
                     lenses.push(lens);
@@ -170,7 +188,7 @@ impl Backend {
                     let icon = if proto.is_interface { "◆" } else { "↑" };
                     let title = format!("{} {}::{}", icon, proto.ancestor_name, method.name);
 
-                    let target_uri: Url = match proto.file_uri.parse() {
+                    let target_uri: Uri = match proto.file_uri.parse() {
                         Ok(u) => u,
                         Err(_) => continue,
                     };
@@ -199,7 +217,10 @@ impl Backend {
                     property.name_offset,
                     class_fqn,
                     crate::atom::atom(member_name),
-                    property.is_static,
+                    MemberSlot {
+                        is_static: property.is_static,
+                        is_method: false,
+                    },
                 ) {
                     lenses.push(lens);
                 }
@@ -215,7 +236,10 @@ impl Backend {
                     constant.name_offset,
                     class_fqn,
                     constant.name,
-                    true,
+                    MemberSlot {
+                        is_static: true,
+                        is_method: false,
+                    },
                 ) {
                     lenses.push(lens);
                 }
@@ -268,7 +292,7 @@ impl Backend {
         }
 
         let candidate_count = self.indexed_reference_count(key)?;
-        let origin_url = Url::parse(origin_uri).ok()?;
+        let origin_url = crate::util::parse_url(origin_uri)?;
         let position = index.position(declaration_offset as usize);
         let range = Range::new(
             Position::new(position.line, 0),
@@ -304,7 +328,7 @@ impl Backend {
         declaration_offset: u32,
         class_fqn: Atom,
         member: Atom,
-        is_static: bool,
+        slot: MemberSlot,
     ) -> Option<CodeLens> {
         if declaration_offset == 0 {
             return None;
@@ -316,7 +340,7 @@ impl Backend {
         {
             candidate_count += self.indexed_member_reference_count(&magic.use_name)?;
         }
-        let origin_url = Url::parse(origin_uri).ok()?;
+        let origin_url = crate::util::parse_url(origin_uri)?;
         let position = index.position(declaration_offset as usize);
         let range = Range::new(
             Position::new(position.line, 0),
@@ -334,25 +358,17 @@ impl Backend {
             });
         }
 
-        let supports_refresh = self
-            .supports_code_lens_refresh
-            .load(std::sync::atomic::Ordering::Acquire);
+        let supports_refresh = self.caps().code_lens_refresh;
         let cached_locations = if supports_refresh {
             self.member_ref_locations_cached(
                 origin_uri,
                 declaration_offset,
                 class_fqn,
                 member,
-                is_static,
+                slot,
             )
         } else {
-            self.member_ref_locations_ready(
-                origin_uri,
-                declaration_offset,
-                class_fqn,
-                member,
-                is_static,
-            )
+            self.member_ref_locations_ready(origin_uri, declaration_offset, class_fqn, member, slot)
         };
         if let Some(locations) = cached_locations {
             return Some(CodeLens {
@@ -378,6 +394,7 @@ impl Backend {
                     // No handler: the placeholder is text, not an action.
                     command: String::new(),
                     arguments: None,
+                    tooltip: None,
                 }),
                 data: None,
             });
@@ -393,13 +410,14 @@ impl Backend {
                 "offset": declaration_offset,
                 "classFqn": class_fqn.as_str(),
                 "member": member.as_str(),
-                "isStatic": is_static,
+                "isStatic": slot.is_static,
+                "isMethod": slot.is_method,
             })),
         })
     }
 
     fn reference_lens_command(
-        origin_uri: Url,
+        origin_uri: Uri,
         origin_position: Position,
         locations: Vec<Location>,
     ) -> Command {
@@ -413,7 +431,7 @@ impl Backend {
     }
 
     fn implementation_lens_command(
-        origin_uri: Url,
+        origin_uri: Uri,
         origin_position: Position,
         locations: Vec<Location>,
     ) -> Command {
@@ -429,7 +447,7 @@ impl Backend {
     /// A lens command titled with the number of `locations`, which opens
     /// them as a list when clicked.
     fn locations_lens_command(
-        origin_uri: Url,
+        origin_uri: Uri,
         origin_position: Position,
         locations: Vec<Location>,
         singular: &str,
@@ -444,6 +462,7 @@ impl Backend {
                 serde_json::json!(origin_position),
                 serde_json::json!(locations),
             ]),
+            tooltip: None,
         }
     }
 
@@ -453,12 +472,13 @@ impl Backend {
     fn implementation_lens_descendants(
         &self,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<Vec<Arc<ClassInfo>>> {
         if !(class.kind == ClassLikeKind::Interface || class.is_abstract)
             || class.keyword_offset == 0
             || !self
-                .workspace_indexed
+                .workspace_index
+                .indexed
                 .load(std::sync::atomic::Ordering::Acquire)
         {
             return None;
@@ -493,7 +513,7 @@ impl Backend {
             return Some(CodeLens {
                 range,
                 command: Some(Self::implementation_lens_command(
-                    Url::parse(origin_uri).ok()?,
+                    crate::util::parse_url(origin_uri)?,
                     position,
                     Vec::new(),
                 )),
@@ -523,8 +543,8 @@ impl Backend {
         class_fqn: &str,
         member: Option<&str>,
     ) -> Option<Vec<Location>> {
-        let class_loader = |name: &str| self.find_or_load_class(name);
-        let class = class_loader(class_fqn)?;
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
+        let class = class_loader(Fqn::new(class_fqn))?;
         let descendants = self.implementation_descendants(&class, class_fqn, &class_loader, true);
         Some(match member {
             None => self.class_implementation_locations(uri, content, &class, &descendants),
@@ -581,13 +601,16 @@ impl Backend {
                         .and_then(|offset| u32::try_from(offset).ok())?;
                     let class_fqn = data.get("classFqn").and_then(serde_json::Value::as_str)?;
                     let member = data.get("member").and_then(serde_json::Value::as_str)?;
-                    let is_static = data.get("isStatic").and_then(serde_json::Value::as_bool)?;
+                    let slot = MemberSlot {
+                        is_static: data.get("isStatic").and_then(serde_json::Value::as_bool)?,
+                        is_method: data.get("isMethod").and_then(serde_json::Value::as_bool)?,
+                    };
                     Some(self.resolve_member_ref_locations(
                         uri,
                         offset,
                         crate::atom::atom(class_fqn),
                         crate::atom::atom(member),
-                        is_static,
+                        slot,
                     ))
                 }
                 "phpImplementations" => {
@@ -600,7 +623,7 @@ impl Backend {
         let Some(locations) = locations.flatten() else {
             return lens;
         };
-        let Ok(origin_uri) = Url::parse(uri) else {
+        let Some(origin_uri) = crate::util::parse_url(uri) else {
             return lens;
         };
 
@@ -610,6 +633,118 @@ impl Backend {
             Self::reference_lens_command(origin_uri, position, locations)
         });
         lens
+    }
+
+    /// The lenses linking a Doctrine entity to its repository, or a
+    /// repository back to its entity, on the class declaration line.
+    fn push_doctrine_lenses(
+        &self,
+        class: &ClassInfo,
+        index: &LineIndex,
+        lenses: &mut Vec<CodeLens>,
+    ) {
+        if class.keyword_offset == 0 {
+            return;
+        }
+        let entities = self.doctrine_entity_fqns_for_repository(class);
+        let (label, targets) = if entities.is_empty() {
+            (
+                "Doctrine repository",
+                self.doctrine_repository_fqns_for_entity(&class.fqn()),
+            )
+        } else {
+            ("Doctrine entity", entities)
+        };
+        if targets.is_empty() {
+            return;
+        }
+
+        let line = index.line_of(class.keyword_offset as usize);
+        let position = Position {
+            line: line as u32,
+            character: line_indent(index, line),
+        };
+        for target in targets {
+            let Some(location) = self.class_declaration_location(&target) else {
+                continue;
+            };
+            let title = format!("{label}: {}", crate::util::short_name(&target));
+            lenses.push(CodeLens {
+                range: Range {
+                    start: position,
+                    end: position,
+                },
+                command: Some(self.build_code_lens_command(
+                    title,
+                    location.uri,
+                    location.range.start,
+                )),
+                data: None,
+            });
+        }
+    }
+
+    /// The lenses linking a Messenger message to the handlers that receive
+    /// it, on the class declaration line, and a handler method to the
+    /// message it handles, on the method's.
+    fn push_messenger_lenses(
+        &self,
+        uri: &str,
+        class: &ClassInfo,
+        index: &LineIndex,
+        lenses: &mut Vec<CodeLens>,
+    ) {
+        if class.keyword_offset == 0 {
+            return;
+        }
+        let mut push = |offset: u32, title: String, location: Location| {
+            let line = index.line_of(offset as usize);
+            let position = Position {
+                line: line as u32,
+                character: line_indent(index, line),
+            };
+            lenses.push(CodeLens {
+                range: Range {
+                    start: position,
+                    end: position,
+                },
+                command: Some(self.build_code_lens_command(
+                    title,
+                    location.uri,
+                    location.range.start,
+                )),
+                data: None,
+            });
+        };
+
+        for (message, method) in self.symfony_handled_messages(uri, class.fqn()) {
+            let Some(location) = self.class_declaration_location(&message) else {
+                continue;
+            };
+            let offset = class
+                .methods
+                .iter()
+                .find(|candidate| candidate.name.eq_ignore_ascii_case(&method))
+                .map_or(class.keyword_offset, |method| method.name_offset);
+            let title = format!("Messenger message: {}", crate::util::short_name(&message));
+            push(offset, title, location);
+        }
+
+        if class.kind == ClassLikeKind::Interface || class.kind == ClassLikeKind::Class {
+            for handler in self.symfony_message_handlers(class) {
+                let Some(location) = self
+                    .class_member_declaration_location(&handler.handler, &handler.method, false)
+                    .or_else(|| self.class_declaration_location(&handler.handler))
+                else {
+                    continue;
+                };
+                let title = format!(
+                    "Messenger handler: {}",
+                    crate::util::short_name(&handler.handler)
+                );
+                push(class.keyword_offset, title, location);
+            }
+        }
     }
 
     /// Build the "which tests cover this class" lens for a class
@@ -658,7 +793,7 @@ impl Backend {
             self.build_code_lens_command(title, location.uri.clone(), location.range.start)
         } else {
             let title = format!("Tests: {} tests", locations.len());
-            let current_uri: Url = match uri.parse() {
+            let current_uri: Uri = match uri.parse() {
                 Ok(u) => u,
                 Err(_) => return None,
             };
@@ -670,6 +805,7 @@ impl Backend {
                     serde_json::json!(range.start),
                     serde_json::json!(locations.iter().map(|(_, l)| l.clone()).collect::<Vec<_>>()),
                 ]),
+                tooltip: None,
             }
         };
 
@@ -702,7 +838,7 @@ impl Backend {
         } else {
             offset_to_position(&self.get_file_content(test_uri)?, offset)
         };
-        let uri: Url = test_uri.parse().ok()?;
+        let uri: Uri = test_uri.parse().ok()?;
 
         Some(Location {
             uri,
@@ -724,7 +860,7 @@ impl Backend {
         current_uri: &str,
         current_content: &str,
     ) -> Option<Prototype> {
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let declares = |candidate: &ClassInfo| {
             candidate
                 .methods
@@ -759,17 +895,15 @@ impl Backend {
     pub(crate) fn build_code_lens_command(
         &self,
         title: String,
-        uri: Url,
+        uri: Uri,
         position: Position,
     ) -> Command {
-        if self
-            .supports_show_document
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if self.caps().show_document {
             return Command {
                 title,
                 command: "phpantom.navigateToPrototype".to_string(),
                 arguments: Some(vec![serde_json::json!(uri), serde_json::json!(position)]),
+                tooltip: None,
             };
         }
 
@@ -788,6 +922,7 @@ impl Backend {
                 serde_json::json!(position),
                 serde_json::json!([location]),
             ]),
+            tooltip: None,
         }
     }
 

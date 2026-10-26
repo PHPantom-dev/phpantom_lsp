@@ -1,4 +1,5 @@
-//! External formatter runners: php-cs-fixer, Laravel Pint and phpcbf.
+//! External formatter runners: php-cs-fixer, Laravel Pint, phpcbf and
+//! blade-formatter.
 //!
 //! Every tool runs through [`crate::process::run_command_with_timeout`],
 //! which never inherits the server's stdin (so a child cannot steal bytes
@@ -8,8 +9,10 @@
 //! project rules; a tool that formats stdin (Pint) is told the real path
 //! with `--stdin-filename` for the same reason.  Every tool runs with the
 //! workspace root as its working directory: Pint reads `pint.json` from
-//! there (and, for Blade, the project's `node_modules`), not from the
-//! directory the language server happened to be started in.
+//! there (and, for Blade, the project's `node_modules`), and
+//! blade-formatter, given stdin, looks for its `.bladeformatterrc` from
+//! there, not from the directory the language server happened to be
+//! started in.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -37,7 +40,7 @@ enum Invocation {
 impl Tool {
     fn invocation(self) -> Invocation {
         match self {
-            Tool::Pint => Invocation::Stdin,
+            Tool::Pint | Tool::BladeFormatter => Invocation::Stdin,
             Tool::PhpCsFixer | Tool::Phpcbf => Invocation::SiblingFile,
         }
     }
@@ -56,13 +59,14 @@ impl Tool {
                 file_path.into(),
             ],
             Tool::Phpcbf => vec!["--no-colors".into(), "-q".into(), file_path.into()],
+            Tool::BladeFormatter => vec!["--stdin".into()],
         }
     }
 
     /// Whether `code` is an exit code the tool uses for a successful run.
     fn succeeded(self, code: i32) -> bool {
         match self {
-            Tool::Pint => code == 0,
+            Tool::Pint | Tool::BladeFormatter => code == 0,
             // php-cs-fixer exit codes (bitmask):
             //   0 = OK
             //   1 = general error / PHP version issue
@@ -227,15 +231,20 @@ fn execute(
         stdin,
     )?;
     if tool.tool.succeeded(output.code) {
-        Ok(output)
-    } else {
-        Err(format!(
-            "{} exited with code {} (stderr: {})",
-            tool.tool.name(),
-            output.code,
-            output.stderr.trim()
-        ))
+        return Ok(output);
     }
+    // blade-formatter reports a template it cannot parse on stdout.
+    let (stream, detail) = match output.stderr.trim() {
+        "" => ("stdout", output.stdout.trim()),
+        stderr => ("stderr", stderr),
+    };
+    Err(format!(
+        "{} exited with code {} ({}: {})",
+        tool.tool.name(),
+        output.code,
+        stream,
+        detail
+    ))
 }
 
 /// Write content to a temporary file in the same directory as `original`

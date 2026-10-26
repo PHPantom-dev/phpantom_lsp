@@ -1,5 +1,5 @@
 use super::*;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 fn detect_at_end<'a>(content: &'a str, value: &str) -> Option<LaravelStringKeyContext<'a>> {
     let cursor = content.rfind(value)? + value.len();
@@ -15,8 +15,8 @@ fn storage_source(expression: &str) -> String {
 
 fn completion_response_items(response: CompletionResponse) -> Vec<CompletionItem> {
     match response {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     }
 }
 
@@ -27,9 +27,9 @@ fn completion_response_items(response: CompletionResponse) -> Vec<CompletionItem
 fn the_kinds_completed_elsewhere_offer_no_candidates() {
     let backend = crate::test_fixtures::make_backend();
     for kind in [
-        LaravelStringKind::Section,
-        LaravelStringKind::Stack,
-        LaravelStringKind::ContainerBinding,
+        StringKeyKind::Section,
+        StringKeyKind::Stack,
+        StringKeyKind::ContainerBinding,
     ] {
         assert!(
             backend.string_key_candidates(&kind, "").is_empty(),
@@ -41,7 +41,7 @@ fn the_kinds_completed_elsewhere_offer_no_candidates() {
 #[test]
 fn configured_resource_candidates_include_database_roles_and_null_drivers() {
     let backend = crate::test_fixtures::make_backend();
-    backend.laravel_string_key_cache.write().config_keys = Some(Arc::from([
+    backend.laravel.string_key_cache.write().config_keys = Some(Arc::from([
         "cache.stores.redis".to_string(),
         "database.connections.mysql".to_string(),
         "queue.connections.sync".to_string(),
@@ -49,7 +49,7 @@ fn configured_resource_candidates_include_database_roles_and_null_drivers() {
 
     assert_eq!(
         backend
-            .string_key_candidates(&LaravelStringKind::Config, "")
+            .string_key_candidates(&StringKeyKind::Config, "")
             .as_ref(),
         [
             "cache.stores.redis",
@@ -60,7 +60,7 @@ fn configured_resource_candidates_include_database_roles_and_null_drivers() {
     assert_eq!(
         backend
             .string_key_candidates(
-                &LaravelStringKind::ConfigResource(LaravelConfigResource::DatabaseConnection,),
+                &StringKeyKind::ConfigResource(LaravelConfigResource::DatabaseConnection,),
                 "mysql::",
             )
             .as_ref(),
@@ -72,7 +72,7 @@ fn configured_resource_candidates_include_database_roles_and_null_drivers() {
     ] {
         assert_eq!(
             backend
-                .string_key_candidates(&LaravelStringKind::ConfigResource(resource), "")
+                .string_key_candidates(&StringKeyKind::ConfigResource(resource), "")
                 .as_ref(),
             expected,
         );
@@ -82,28 +82,22 @@ fn configured_resource_candidates_include_database_roles_and_null_drivers() {
 /// Whatever a key names decides the icon beside it.
 #[test]
 fn a_string_key_is_iconed_by_what_it_names() {
-    use tower_lsp::lsp_types::CompletionItemKind;
+    use tower_lsp_server::gen_lsp_types::CompletionItemKind;
     for (kind, expected) in [
-        (LaravelStringKind::Config, CompletionItemKind::PROPERTY),
+        (StringKeyKind::Config, CompletionItemKind::Property),
         (
-            LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
-            CompletionItemKind::PROPERTY,
+            StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore),
+            CompletionItemKind::Property,
         ),
-        (LaravelStringKind::View, CompletionItemKind::FILE),
-        (LaravelStringKind::Trans, CompletionItemKind::TEXT),
-        (
-            LaravelStringKind::MorphAlias,
-            CompletionItemKind::ENUM_MEMBER,
-        ),
-        (LaravelStringKind::GateAbility, CompletionItemKind::METHOD),
-        (LaravelStringKind::Route, CompletionItemKind::VALUE),
-        (LaravelStringKind::Command, CompletionItemKind::VALUE),
-        (LaravelStringKind::Section, CompletionItemKind::VALUE),
-        (LaravelStringKind::Stack, CompletionItemKind::VALUE),
-        (
-            LaravelStringKind::ContainerBinding,
-            CompletionItemKind::VALUE,
-        ),
+        (StringKeyKind::View, CompletionItemKind::File),
+        (StringKeyKind::Trans, CompletionItemKind::Text),
+        (StringKeyKind::MorphAlias, CompletionItemKind::EnumMember),
+        (StringKeyKind::GateAbility, CompletionItemKind::Method),
+        (StringKeyKind::Route, CompletionItemKind::Value),
+        (StringKeyKind::Command, CompletionItemKind::Value),
+        (StringKeyKind::Section, CompletionItemKind::Value),
+        (StringKeyKind::Stack, CompletionItemKind::Value),
+        (StringKeyKind::ContainerBinding, CompletionItemKind::Value),
     ] {
         assert_eq!(string_key_item_kind(&kind), expected, "for {kind:?}");
     }
@@ -117,7 +111,7 @@ fn detects_route_call() {
     let col = line_text.find("user.").unwrap() as u32 + 5;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect route() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::Route));
+    assert!(matches!(ctx.kind, StringKeyKind::Route));
     assert_eq!(ctx.prefix, "user.");
 }
 
@@ -125,7 +119,7 @@ fn detects_route_call() {
 fn detects_instance_route_call() {
     let content = "<?php\nredirect()->route('user.');\n";
     let ctx = detect_at_end(content, "user.").expect("should detect ->route() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::Route));
+    assert!(matches!(ctx.kind, StringKeyKind::Route));
     assert_eq!(ctx.prefix, "user.");
 }
 
@@ -147,34 +141,28 @@ fn rejects_route_on_an_unrelated_receiver() {
 #[test]
 fn later_arguments_complete_what_their_position_names() {
     for (call, expected) in [
-        ("View::renderWhen($ok, 'emails.", LaravelStringKind::View),
-        ("View::renderEach('emails.", LaravelStringKind::View),
-        (
-            "view()->renderUnless($ok, 'emails.",
-            LaravelStringKind::View,
-        ),
-        ("Route::view('/about', 'emails.", LaravelStringKind::View),
+        ("View::renderWhen($ok, 'emails.", StringKeyKind::View),
+        ("View::renderEach('emails.", StringKeyKind::View),
+        ("view()->renderUnless($ok, 'emails.", StringKeyKind::View),
+        ("Route::view('/about', 'emails.", StringKeyKind::View),
         (
             "$this->authorizeForUser($user, 'emails.",
-            LaravelStringKind::GateAbility,
+            StringKeyKind::GateAbility,
         ),
         (
             "$query->whereHasMorph('commentable', ['emails.",
-            LaravelStringKind::MorphAlias,
+            StringKeyKind::MorphAlias,
         ),
         (
             "Comment::whereHasMorph('commentable', 'emails.",
-            LaravelStringKind::MorphAlias,
+            StringKeyKind::MorphAlias,
         ),
         (
             "$request->routeIs('admin.*', 'emails.",
-            LaravelStringKind::Route,
+            StringKeyKind::Route,
         ),
-        (
-            "Gate::any(['update', 'emails.",
-            LaravelStringKind::GateAbility,
-        ),
-        ("config()->get('emails.", LaravelStringKind::Config),
+        ("Gate::any(['update', 'emails.", StringKeyKind::GateAbility),
+        ("config()->get('emails.", StringKeyKind::Config),
     ] {
         let content = format!("<?php\n{call}");
         let ctx =
@@ -203,7 +191,7 @@ fn detects_to_route_call() {
     let col = line_text.find("home").unwrap() as u32 + 2;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect to_route() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::Route));
+    assert!(matches!(ctx.kind, StringKeyKind::Route));
     assert_eq!(ctx.prefix, "ho");
 }
 
@@ -223,7 +211,7 @@ fn detects_the_route_helpers_beyond_the_route_function() {
         let col = content.lines().nth(1).unwrap().len() as u32;
         let ctx = detect_laravel_string_key_context(&content, Position::new(1, col))
             .unwrap_or_else(|| panic!("should detect `{call}` as a route context"));
-        assert!(matches!(ctx.kind, LaravelStringKind::Route), "for `{call}`");
+        assert!(matches!(ctx.kind, StringKeyKind::Route), "for `{call}`");
         assert_eq!(ctx.prefix, "orders.", "for `{call}`");
     }
 }
@@ -236,7 +224,7 @@ fn detects_the_list_and_environment_call_shapes() {
     let col = content.lines().nth(1).unwrap().len() as u32;
     let ctx = detect_laravel_string_key_context(content, Position::new(1, col))
         .expect("should detect getMany() as a config context");
-    assert!(matches!(ctx.kind, LaravelStringKind::Config));
+    assert!(matches!(ctx.kind, StringKeyKind::Config));
     assert_eq!(ctx.prefix, "app.");
 
     for call in ["Env::get('APP_", "env('APP_"] {
@@ -244,7 +232,7 @@ fn detects_the_list_and_environment_call_shapes() {
         let col = content.lines().nth(1).unwrap().len() as u32;
         let ctx = detect_laravel_string_key_context(&content, Position::new(1, col))
             .unwrap_or_else(|| panic!("should detect `{call}` as an environment context"));
-        assert!(matches!(ctx.kind, LaravelStringKind::Env), "for `{call}`");
+        assert!(matches!(ctx.kind, StringKeyKind::Env), "for `{call}`");
         assert_eq!(ctx.prefix, "APP_", "for `{call}`");
     }
 }
@@ -254,19 +242,19 @@ fn detects_the_list_and_environment_call_shapes() {
 #[test]
 fn static_calls_complete_what_the_symbol_map_recognises() {
     for (call, expected) in [
-        ("View::first(['emails.", LaravelStringKind::View),
-        ("Response::view('emails.", LaravelStringKind::View),
+        ("View::first(['emails.", StringKeyKind::View),
+        ("Response::view('emails.", StringKeyKind::View),
         (
             "\\Illuminate\\Support\\Facades\\View::make('emails.",
-            LaravelStringKind::View,
+            StringKeyKind::View,
         ),
         (
             "\\Illuminate\\Support\\Env::get('emails.",
-            LaravelStringKind::Env,
+            StringKeyKind::Env,
         ),
         (
             "Post::getActualClassNameForMorph('emails.",
-            LaravelStringKind::MorphAlias,
+            StringKeyKind::MorphAlias,
         ),
     ] {
         let content = format!("<?php\n{call}");
@@ -292,7 +280,7 @@ fn detects_the_redirect_to_route_attribute() {
     let col = content.lines().nth(2).unwrap().len() as u32;
     let ctx = detect_laravel_string_key_context(content, Position::new(2, col))
         .expect("should detect the attribute as a route context");
-    assert!(matches!(ctx.kind, LaravelStringKind::Route));
+    assert!(matches!(ctx.kind, StringKeyKind::Route));
     assert_eq!(ctx.prefix, "lo");
 
     let unimported = "<?php\n#[RedirectToRoute('lo";
@@ -318,7 +306,7 @@ fn detects_the_blade_render_directive_markers() {
         let col = line_text.find("partials.").unwrap() as u32 + 9;
         let ctx = detect_laravel_string_key_context(&content, Position::new(1, col));
         let ctx = ctx.unwrap_or_else(|| panic!("should detect {marker} context"));
-        assert!(matches!(ctx.kind, LaravelStringKind::View));
+        assert!(matches!(ctx.kind, StringKeyKind::View));
         assert_eq!(ctx.prefix, "partials.");
     }
 }
@@ -330,13 +318,13 @@ fn detects_the_blade_render_directive_markers() {
 #[test]
 fn detects_the_blade_markers_that_list_their_names_in_an_array() {
     for (marker, value, kind) in [
-        ("blade_view_directive", "partials.", LaravelStringKind::View),
+        ("blade_view_directive", "partials.", StringKeyKind::View),
         (
             "blade_component_directive",
             "partials.",
-            LaravelStringKind::View,
+            StringKeyKind::View,
         ),
-        ("blade_can_directive", "upd", LaravelStringKind::GateAbility),
+        ("blade_can_directive", "upd", StringKeyKind::GateAbility),
     ] {
         let content = format!("<?php\n{marker}(['{value}']);\n");
         let cursor = content.find(value).unwrap() + value.len();
@@ -358,7 +346,7 @@ fn detects_artisan_call_command() {
     let col = line_text.find("app:").unwrap() as u32 + 4;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect Artisan::call() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::Command));
+    assert!(matches!(ctx.kind, StringKeyKind::Command));
 }
 
 #[test]
@@ -369,7 +357,7 @@ fn detects_this_call_command() {
     let col = line_text.find("app:").unwrap() as u32 + 4;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect $this->call() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::Command));
+    assert!(matches!(ctx.kind, StringKeyKind::Command));
 }
 
 #[test]
@@ -393,7 +381,7 @@ fn detects_gate_facade_ability() {
     let col = line_text.find("upd").unwrap() as u32 + 3;
     let ctx = detect_laravel_string_key_context(content, Position::new(1, col))
         .expect("should detect Gate::allows() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::GateAbility));
+    assert!(matches!(ctx.kind, StringKeyKind::GateAbility));
     assert_eq!(ctx.prefix, "upd");
 }
 
@@ -433,7 +421,7 @@ fn detects_every_ability_call_shape() {
         let ctx = detect_laravel_string_key_context(&content, Position::new(1, col))
             .unwrap_or_else(|| panic!("`{call}` should offer abilities"));
         assert!(
-            matches!(ctx.kind, LaravelStringKind::GateAbility),
+            matches!(ctx.kind, StringKeyKind::GateAbility),
             "`{call}` should offer abilities, got {:?}",
             ctx.kind
         );
@@ -448,7 +436,7 @@ fn detects_user_can_ability() {
     let col = line_text.find("upd").unwrap() as u32 + 3;
     let ctx = detect_laravel_string_key_context(content, Position::new(1, col))
         .expect("should detect $user->can() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::GateAbility));
+    assert!(matches!(ctx.kind, StringKeyKind::GateAbility));
 }
 
 #[test]
@@ -483,7 +471,7 @@ fn detects_config_call() {
     let col = line_text.find("app.").unwrap() as u32 + 4;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect config() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::Config));
+    assert!(matches!(ctx.kind, StringKeyKind::Config));
     assert_eq!(ctx.prefix, "app.");
 }
 
@@ -495,7 +483,7 @@ fn detects_config_static_get() {
     let col = line_text.find("app.").unwrap() as u32 + 4;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect Config::get() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::Config));
+    assert!(matches!(ctx.kind, StringKeyKind::Config));
     assert_eq!(ctx.prefix, "app.");
 }
 
@@ -512,7 +500,7 @@ fn detects_static_config_typed_getters() {
         let content = format!("<?php\nConfig::{method}('app.name');\n");
         let ctx = detect_at_end(&content, "app.name")
             .unwrap_or_else(|| panic!("should detect Config::{method}() context"));
-        assert_eq!(ctx.kind, LaravelStringKind::Config);
+        assert_eq!(ctx.kind, StringKeyKind::Config);
     }
 }
 
@@ -522,14 +510,14 @@ fn detects_static_config_mutators_and_translation_queries() {
         let content = format!("<?php\nConfig::{method}('app.providers');\n");
         let ctx = detect_at_end(&content, "app.providers")
             .unwrap_or_else(|| panic!("should detect Config::{method}() context"));
-        assert_eq!(ctx.kind, LaravelStringKind::Config);
+        assert_eq!(ctx.kind, StringKeyKind::Config);
     }
 
     for method in ["get", "has", "hasForLocale", "choice"] {
         let content = format!("<?php\nLang::{method}('messages.saved');\n");
         let ctx = detect_at_end(&content, "messages.saved")
             .unwrap_or_else(|| panic!("should detect Lang::{method}() context"));
-        assert_eq!(ctx.kind, LaravelStringKind::Trans);
+        assert_eq!(ctx.kind, StringKeyKind::Trans);
     }
 }
 
@@ -539,12 +527,12 @@ fn storage_argument_scanning_preserves_existing_static_contexts() {
         (
             "DB::connection('primary')",
             "primary",
-            LaravelStringKind::ConfigResource(LaravelConfigResource::DatabaseConnection),
+            StringKeyKind::ConfigResource(LaravelConfigResource::DatabaseConnection),
         ),
         (
             "Model::getActualClassNameForMorph('post')",
             "post",
-            LaravelStringKind::MorphAlias,
+            StringKeyKind::MorphAlias,
         ),
     ] {
         let content = format!("<?php\n{expression};\n");
@@ -571,7 +559,7 @@ fn detects_storage_disk_scalar_methods_and_named_arguments() {
             .unwrap_or_else(|| panic!("should detect `{expression}` as a disk context"));
         assert!(matches!(
             ctx.kind,
-            LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+            StringKeyKind::ConfigResource(LaravelConfigResource::StorageDisk)
         ));
         assert_eq!(ctx.prefix, "arch", "prefix for `{expression}`");
     }
@@ -585,7 +573,7 @@ fn detects_storage_disk_scalar_methods_and_named_arguments() {
             .unwrap_or_else(|| panic!("should detect `{expression}` as a disk context"));
         assert!(matches!(
             ctx.kind,
-            LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+            StringKeyKind::ConfigResource(LaravelConfigResource::StorageDisk)
         ));
     }
 }
@@ -615,7 +603,7 @@ fn detects_each_direct_config_resource_family() {
         let content = format!("<?php\n{expression};\n");
         let ctx = detect_at_end(&content, "name")
             .unwrap_or_else(|| panic!("should detect `{expression}`"));
-        assert_eq!(ctx.kind, LaravelStringKind::ConfigResource(expected));
+        assert_eq!(ctx.kind, StringKeyKind::ConfigResource(expected));
     }
 }
 
@@ -625,7 +613,7 @@ fn auth_middleware_completion_replaces_only_the_current_guard() {
     let ctx = detect_at_end(content, "admin").expect("auth middleware guard context");
     assert_eq!(
         ctx.kind,
-        LaravelStringKind::ConfigResource(LaravelConfigResource::AuthGuard)
+        StringKeyKind::ConfigResource(LaravelConfigResource::AuthGuard)
     );
     assert_eq!(ctx.prefix, "admin");
     assert_eq!(
@@ -819,7 +807,7 @@ fn storage_facade_completion_respects_import_bindings_in_namespaces() {
     ] {
         for class_name in ["Storage", "Disks"] {
             let content = format!("<?php\nnamespace App;\n{import}\n{class_name}::disk('arch');\n");
-            let expected = (class_name == local_name).then_some(LaravelStringKind::ConfigResource(
+            let expected = (class_name == local_name).then_some(StringKeyKind::ConfigResource(
                 LaravelConfigResource::StorageDisk,
             ));
             assert_eq!(
@@ -890,7 +878,7 @@ fn detects_every_forget_disk_array_value_and_spelling() {
             .unwrap_or_else(|| panic!("should detect `{value}` in `{expression}`"));
             assert!(matches!(
                 ctx.kind,
-                LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+                StringKeyKind::ConfigResource(LaravelConfigResource::StorageDisk)
             ));
             assert_eq!(ctx.prefix, value);
         }
@@ -900,7 +888,7 @@ fn detects_every_forget_disk_array_value_and_spelling() {
 #[test]
 fn forget_disk_array_completion_filters_and_edits_the_current_value() {
     let backend = crate::Backend::new_test();
-    backend.laravel_string_key_cache.write().config_keys = Some(
+    backend.laravel.string_key_cache.write().config_keys = Some(
         vec![
             "cache.stores.archive".to_string(),
             "filesystems.disks.archive".to_string(),
@@ -926,7 +914,7 @@ fn forget_disk_array_completion_filters_and_edits_the_current_value() {
     );
     assert_eq!(
         items[0].text_edit,
-        Some(CompletionTextEdit::Edit(TextEdit {
+        Some(CompletionItemTextEdit::TextEdit(TextEdit {
             range: Range::new(
                 crate::text_position::offset_to_position(content, cursor - 2),
                 position,
@@ -938,9 +926,11 @@ fn forget_disk_array_completion_filters_and_edits_the_current_value() {
 
 #[test]
 fn completion_response_item_helper_accepts_list_responses() {
-    let items = completion_response_items(CompletionResponse::List(CompletionList {
+    let items = completion_response_items(CompletionResponse::CompletionList(CompletionList {
         is_incomplete: false,
         items: vec![CompletionItem::default()],
+        apply_kind: None,
+        item_defaults: None,
     }));
     assert_eq!(items.len(), 1);
 }
@@ -961,7 +951,7 @@ fn forget_disk_arrays_complete_values_but_not_associative_keys() {
     let value = detect_at_end(content, "archive").expect("the array value is a disk name");
     assert!(matches!(
         value.kind,
-        LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+        StringKeyKind::ConfigResource(LaravelConfigResource::StorageDisk)
     ));
     assert_eq!(value.prefix, "archive");
 }
@@ -1008,7 +998,7 @@ Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive'
         .expect("balanced nested expressions must not hide the outer array");
     assert!(matches!(
         ctx.kind,
-        LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+        StringKeyKind::ConfigResource(LaravelConfigResource::StorageDisk)
     ));
 
     assert!(callable_before_scalar_argument("Storage::disk(:").is_none());
@@ -1059,7 +1049,7 @@ fn detects_view_call() {
     let col = line_text.find("users.").unwrap() as u32 + 6;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect view() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::View));
+    assert!(matches!(ctx.kind, StringKeyKind::View));
 }
 
 #[test]
@@ -1070,7 +1060,7 @@ fn detects_trans_double_underscore() {
     let col = line_text.find("messages.").unwrap() as u32 + 9;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect __() context");
-    assert!(matches!(ctx.kind, LaravelStringKind::Trans));
+    assert!(matches!(ctx.kind, StringKeyKind::Trans));
 }
 
 #[test]
@@ -1081,7 +1071,7 @@ fn detects_empty_prefix() {
     let col = line_text.find("''").unwrap() as u32 + 1;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect empty prefix");
-    assert!(matches!(ctx.kind, LaravelStringKind::Route));
+    assert!(matches!(ctx.kind, StringKeyKind::Route));
     assert_eq!(ctx.prefix, "");
 }
 
@@ -1114,7 +1104,7 @@ fn detects_config_attribute_with_import() {
     let col = line_text.find("app.timezone").unwrap() as u32 + 12;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect #[Config()] with verified import");
-    assert!(matches!(ctx.kind, LaravelStringKind::Config));
+    assert!(matches!(ctx.kind, StringKeyKind::Config));
     assert_eq!(ctx.prefix, "app.timezone");
 }
 
@@ -1142,7 +1132,7 @@ fn unrelated_attribute_does_not_break_detection() {
         ctx.is_some(),
         "route('') must be detected even when #[Override] exists earlier in the file"
     );
-    assert!(matches!(ctx.unwrap().kind, LaravelStringKind::Route));
+    assert!(matches!(ctx.unwrap().kind, StringKeyKind::Route));
 }
 
 #[test]
@@ -1153,7 +1143,7 @@ fn detects_fqn_config_attribute() {
     let col = line_text.find("app.").unwrap() as u32 + 4;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect FQN #[Config()] attribute");
-    assert!(matches!(ctx.kind, LaravelStringKind::Config));
+    assert!(matches!(ctx.kind, StringKeyKind::Config));
     assert_eq!(ctx.prefix, "app.");
 }
 
@@ -1193,7 +1183,7 @@ public function copy(Request $request): RedirectResponse\n\
         col,
     );
     let ctx = ctx.unwrap();
-    assert!(matches!(ctx.kind, LaravelStringKind::Route));
+    assert!(matches!(ctx.kind, StringKeyKind::Route));
 }
 
 #[test]
@@ -1226,7 +1216,7 @@ fn route_completion_end_to_end() {
         response.is_some(),
         "try_laravel_string_key_completion should return Some for route('')"
     );
-    if let Some(CompletionResponse::Array(items)) = response {
+    if let Some(CompletionResponse::CompletionItemList(items)) = response {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             labels.contains(&"home"),

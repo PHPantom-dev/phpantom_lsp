@@ -7,10 +7,11 @@
 //! and the first `$query` parameter removed.
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use std::sync::Arc;
 
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{ClassInfo, MethodExtras, MethodInfo};
+use crate::types::{MethodExtras, MethodInfo};
 use crate::util::short_name;
 
 use super::ELOQUENT_BUILDER_FQN;
@@ -157,9 +158,9 @@ pub(super) fn build_scope_methods(method: &MethodInfo) -> [MethodInfo; 2] {
 /// keeping the chain on the Builder rather than jumping to the model.
 pub fn build_scope_methods_for_builder(
     model_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Vec<Arc<MethodInfo>> {
-    let model_class = match class_loader(model_name) {
+    let model_class = match class_loader(Fqn::new(model_name)) {
         Some(c) => c,
         None => {
             return Vec::new();
@@ -185,7 +186,7 @@ pub fn build_scope_methods_for_builder(
     // `static` means the model, so substituting `static` → `User`
     // produces `\...\Builder<User>`, keeping the chain on the builder.
     let model_type = PhpType::named(atom(model_name));
-    let subs = super::self_ref_subs(model_type);
+    let subs = super::self_ref_subs(model_type.clone());
 
     let mut methods = Vec::new();
 
@@ -211,6 +212,26 @@ pub fn build_scope_methods_for_builder(
             let [instance_method, _static_method] = build_scope_methods(method);
 
             let mut m = instance_method;
+
+            // On the Builder, `self` in a parameter would otherwise name
+            // the Builder instead of the model that declares the scope.
+            if m.parameters.iter().any(|p| {
+                p.type_hint.as_ref().is_some_and(PhpType::contains_self_ref)
+                    || p.native_type_hint
+                        .as_ref()
+                        .is_some_and(PhpType::contains_self_ref)
+            }) {
+                let mut parameters = m.parameters.to_vec();
+                for p in &mut parameters {
+                    for hint in [&mut p.type_hint, &mut p.native_type_hint]
+                        .into_iter()
+                        .flatten()
+                    {
+                        *hint = hint.replace_self_with_type(&model_type);
+                    }
+                }
+                m.parameters = parameters.into();
+            }
 
             if let Some(ref mut ret) = m.return_type {
                 *ret = ret.substitute(&subs);

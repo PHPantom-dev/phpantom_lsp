@@ -14,9 +14,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{
+use tower_lsp_server::gen_lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Location, Position,
-    Range, SymbolKind as LspSymbolKind, Url,
+    Range, SymbolKind as LspSymbolKind,
 };
 
 use crate::Backend;
@@ -478,7 +478,7 @@ fn build_callable(
     data: serde_json::Value,
     body: Option<(u32, u32)>,
 ) -> Option<PhpCallable> {
-    let uri = Url::parse(uri).ok()?;
+    let uri = crate::util::parse_url(uri)?;
     let name_start = name_offset as usize;
     let selection_range = byte_range_to_lsp_range(content, name_start, name_start + name.len());
     let range = Range::new(
@@ -514,7 +514,7 @@ fn build_method_callable(
         uri,
         content,
         (&method.name, method.name_offset),
-        LspSymbolKind::METHOD,
+        LspSymbolKind::Method,
         Some(class_fqn.clone()),
         serde_json::json!({
             "kind": "php",
@@ -537,7 +537,7 @@ fn build_function_callable(
         uri,
         content,
         (&function.name, function.name_offset),
-        LspSymbolKind::FUNCTION,
+        LspSymbolKind::Function,
         function.namespace.clone(),
         serde_json::json!({
             "kind": "php",
@@ -716,7 +716,7 @@ function caller(): void { helper(); }
 "#;
         let backend = parse(content);
         let caller = prepare_at(&backend, content, "function caller");
-        assert_eq!(caller.kind, LspSymbolKind::FUNCTION);
+        assert_eq!(caller.kind, LspSymbolKind::Function);
         assert_eq!(
             outgoing_names(&backend, &caller),
             vec!["helper".to_string()]

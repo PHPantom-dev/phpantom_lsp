@@ -1,13 +1,13 @@
 use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async fn prepare_at(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
 ) -> Vec<CallHierarchyItem> {
@@ -60,7 +60,7 @@ fn sorted(mut names: Vec<String>) -> Vec<String> {
 #[tokio::test]
 async fn prepare_answers_on_a_method_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///prepare.php").unwrap();
+    let uri = Uri::parse("file:///prepare.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Worker {\n",
@@ -72,7 +72,7 @@ async fn prepare_answers_on_a_method_declaration() {
     let items = prepare_at(&backend, &uri, 2, 22).await;
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].name, "run");
-    assert_eq!(items[0].kind, SymbolKind::METHOD);
+    assert_eq!(items[0].kind, SymbolKind::Method);
     assert_eq!(items[0].detail.as_deref(), Some("Worker"));
     assert_eq!(items[0].uri, uri);
 }
@@ -80,7 +80,7 @@ async fn prepare_answers_on_a_method_declaration() {
 #[tokio::test]
 async fn prepare_answers_from_a_call_site() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///from_call_site.php").unwrap();
+    let uri = Uri::parse("file:///from_call_site.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Worker {\n",
@@ -100,7 +100,7 @@ async fn prepare_answers_from_a_call_site() {
 #[tokio::test]
 async fn prepare_declines_outside_any_callable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///outside.php").unwrap();
+    let uri = Uri::parse("file:///outside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Worker {\n",
@@ -123,7 +123,7 @@ async fn outgoing_calls_cross_a_psr4_file_boundary() {
     )];
     let (backend, _dir) = create_psr4_workspace(composer, files);
 
-    let uri = Url::parse("file:///main.php").unwrap();
+    let uri = Uri::parse("file:///main.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Mailer;\n",
@@ -158,8 +158,8 @@ async fn outgoing_calls_cross_a_psr4_file_boundary() {
 #[tokio::test]
 async fn incoming_calls_cross_a_file_boundary() {
     let backend = create_test_backend();
-    let mailer_uri = Url::parse("file:///Mailer.php").unwrap();
-    let service_uri = Url::parse("file:///Service.php").unwrap();
+    let mailer_uri = Uri::parse("file:///Mailer.php").unwrap();
+    let service_uri = Uri::parse("file:///Service.php").unwrap();
 
     open_php(
         &backend,
@@ -203,7 +203,7 @@ async fn incoming_calls_cross_a_file_boundary() {
 #[tokio::test]
 async fn an_item_from_a_previous_answer_can_be_expanded_again() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///roundtrip.php").unwrap();
+    let uri = Uri::parse("file:///roundtrip.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Worker {\n",
@@ -233,7 +233,7 @@ async fn an_item_from_a_previous_answer_can_be_expanded_again() {
 #[tokio::test]
 async fn a_foreign_item_is_declined_rather_than_guessed_at() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreign.php").unwrap();
+    let uri = Uri::parse("file:///foreign.php").unwrap();
     open_php(
         &backend,
         &uri,
@@ -243,7 +243,7 @@ async fn a_foreign_item_is_declined_rather_than_guessed_at() {
 
     let foreign = CallHierarchyItem {
         name: "run".to_string(),
-        kind: SymbolKind::METHOD,
+        kind: SymbolKind::Method,
         tags: None,
         detail: None,
         uri: uri.clone(),
@@ -261,7 +261,7 @@ async fn a_foreign_item_is_declined_rather_than_guessed_at() {
 #[tokio::test]
 async fn a_recursive_function_is_its_own_caller() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///recursive.php").unwrap();
+    let uri = Uri::parse("file:///recursive.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function countdown(int $n): void {\n",
@@ -271,7 +271,7 @@ async fn a_recursive_function_is_its_own_caller() {
     open_php(&backend, &uri, text).await;
 
     let item = prepare_at(&backend, &uri, 1, 12).await.remove(0);
-    assert_eq!(item.kind, SymbolKind::FUNCTION);
+    assert_eq!(item.kind, SymbolKind::Function);
 
     let calls = incoming(&backend, &item).await;
     assert_eq!(calls.len(), 1);

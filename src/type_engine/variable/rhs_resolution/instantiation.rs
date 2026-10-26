@@ -8,6 +8,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -53,8 +54,8 @@ pub(super) fn resolve_rhs_instantiation(
         let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_name,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
 
         // ── Reflected property construction ─────────────────────
@@ -70,7 +71,7 @@ pub(super) fn resolve_rhs_instantiation(
             let arg_texts =
                 crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
                     arg_list,
-                    ctx.content,
+                    ctx.file.content,
                 );
             let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
             let reflected = crate::type_engine::call_resolution::resolve_reflected_property_at_new(
@@ -98,8 +99,8 @@ pub(super) fn resolve_rhs_instantiation(
             .then(|| {
                 crate::type_engine::type_resolution::lookup_class_declaration(
                     &fqn,
-                    ctx.all_classes,
-                    ctx.class_loader,
+                    ctx.file.all_classes,
+                    ctx.file.class_loader,
                 )
             })
             .flatten();
@@ -112,7 +113,7 @@ pub(super) fn resolve_rhs_instantiation(
                 .map(|arg_list| {
                     crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
                         arg_list,
-                        ctx.content,
+                        ctx.file.content,
                     )
                 })
                 .unwrap_or_default();
@@ -134,37 +135,23 @@ pub(super) fn resolve_rhs_instantiation(
         return ResolvedType::from_classes_with_hint(classes, parsed_name);
     }
 
-    // ── `new $var` where `$var` holds a class name ──────────────
-    // `$f = Foo::class; new $f`, a `class-string<Foo>` parameter, or a
-    // string naming a class builds the class it names.
-    if let Expression::Variable(Variable::Direct(dv)) = inst.class {
-        // `new $class` on a `class-string<T>` of a bounded template builds
-        // a `T`, whatever classes its bound resolves to.
-        let var_types = resolve_var_types(bytes_to_str(dv.name), ctx, ctx.cursor_offset);
-        if let [only] = var_types.as_slice()
-            && let TypeKind::ClassString(Some(inner)) = only.type_string.kind()
-            && inner.as_template_param().is_some()
-        {
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                inner,
-                &ctx.current_class.fqn(),
-                ctx.all_classes,
-                ctx.class_loader,
-            );
-            if !classes.is_empty() {
-                return ResolvedType::from_classes_with_hint(classes, inner.clone());
-            }
+    // ── `new $var` / `new (<expr>)` where the operand holds a class name ──
+    // `$f = Foo::class; new $f`, a `class-string<Foo>` parameter,
+    // `new (Foo::class)`, or a string naming a class builds the class it
+    // names.
+    let operand_types = match inst.class {
+        Expression::Variable(Variable::Direct(dv)) => {
+            resolve_var_types(bytes_to_str(dv.name), ctx, ctx.cursor_offset)
         }
+        operand => super::resolve_rhs_expression(operand, ctx),
+    };
 
-        let classes = crate::type_engine::variable::class_string_resolution::classes_named_by(
-            &var_types, ctx,
-        );
-        if !classes.is_empty() {
-            return ResolvedType::from_classes(classes);
-        }
-    }
-
-    vec![]
+    crate::type_engine::variable::class_string_resolution::instances_built_by_new(
+        &operand_types,
+        &ctx.current_class.fqn(),
+        ctx.file.all_classes,
+        ctx.file.class_loader,
+    )
 }
 
 /// Bind a template a `class-string<Wrapper<T>>` hint names, from the class
@@ -181,7 +168,7 @@ pub(crate) fn class_string_generic_binding(
         &class,
         wrapper_name,
         tpl_position,
-        rctx.class_loader,
+        rctx.file.class_loader,
     )
 }
 
@@ -197,7 +184,7 @@ pub(crate) fn class_string_generic_binding(
 pub(crate) fn remap_inherited_ctor_subs(
     child: &ClassInfo,
     raw_subs: &HashMap<String, PhpType>,
-    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> HashMap<String, PhpType> {
     // Walk up the extends chain to find the class that originally declares
     // the constructor, building a cumulative mapping from ancestor template
@@ -221,7 +208,7 @@ pub(crate) fn remap_inherited_ctor_subs(
             Some(ref p) => *p,
             None => break,
         };
-        let parent = match class_loader(&parent_name) {
+        let parent = match class_loader(Fqn::new(&parent_name)) {
             Some(p) => p,
             None => break,
         };

@@ -87,6 +87,7 @@ pub(crate) mod laravel_string_keys;
 pub(crate) mod laravel_translation_args;
 pub mod named_args;
 pub(crate) mod resolve;
+pub(crate) mod symfony_string_keys;
 pub(crate) mod target;
 pub(crate) mod use_edit;
 

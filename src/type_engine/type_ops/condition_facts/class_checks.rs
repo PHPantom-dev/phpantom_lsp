@@ -1,0 +1,944 @@
+//! `instanceof`-style narrowing: extraction of `instanceof`, `is_a`,
+//! `get_class` / `::class` identity checks, and the compound `&&` / `||`
+//! instanceof forms, plus application onto candidate class lists.
+
+use std::sync::Arc;
+
+use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
+use crate::php_type::{PhpType, TypeKind};
+use crate::types::{ClassInfo, ResolvedType};
+
+use mago_syntax::cst::*;
+
+use super::super::conditional::extract_class_string_from_expr;
+use crate::type_engine::resolver::{VarResolutionCtx, WrittenNames};
+
+use super::*;
+
+/// Narrow `results` to include only classes matching `cls_name`.
+///
+/// When `exact` is `false` (the common `instanceof` / `is_a()` case),
+/// existing results that are already subtypes of the narrowing class are
+/// kept as-is because they are more specific and already satisfy the
+/// check.  For example, if results = `[Zoo]` and we narrow to
+/// `ZooBase`, `Zoo extends ZooBase` means `Zoo` is already more specific
+/// so it is preserved.
+///
+/// When `exact` is `true` (`get_class($x) === Foo::class` or
+/// `$x::class === Foo::class`), the variable is narrowed to exactly
+/// that class regardless of the current results.
+///
+/// Always returns `true`: every path through this function reaches a
+/// definite conclusion about the variable's type (including the
+/// unresolvable-target case, which definitely concludes "untyped").
+/// Callers feeding the result through [`ResolvedType::apply_narrowing`]
+/// use this to drop leftover non-class entries (e.g. `mixed`) that the
+/// instanceof check has proven cannot hold, even when the narrowed
+/// class was already present in the pre-narrowing union.
+pub(in crate::type_engine) fn apply_instanceof_inclusion(
+    ty: &PhpType,
+    exact: bool,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<Arc<ClassInfo>>,
+) -> bool {
+    include_resolved_classes(
+        super::resolve::resolve_narrowing_target(ty, ctx),
+        exact,
+        ctx,
+        results,
+    )
+}
+
+/// [`apply_instanceof_inclusion`] over classes already resolved.
+fn include_resolved_classes(
+    resolved: Vec<Arc<ClassInfo>>,
+    exact: bool,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<Arc<ClassInfo>>,
+) -> bool {
+    let narrowed = resolved;
+    if narrowed.is_empty() {
+        // No class for the check to name, and a class list has no way to
+        // hold one it cannot load.  Callers that track type strings go
+        // through [`include_instance_of`], which keeps the name instead.
+        results.clear();
+        return true;
+    }
+
+    // For non-exact checks (instanceof / is_a), keep existing results
+    // that are already subtypes of the narrowing class.  For example,
+    // if results = [Zoo] and we narrow to ZooBase, Zoo extends ZooBase
+    // so Zoo is already more specific — keep it.
+    if !exact {
+        let already_subtypes: Vec<Arc<ClassInfo>> = results
+            .iter()
+            .filter(|r| {
+                narrowed.iter().any(|n| {
+                    crate::class_lookup::is_subtype_of_names(
+                        &r.fqn(),
+                        &n.fqn(),
+                        ctx.file.class_loader,
+                    )
+                })
+            })
+            .cloned()
+            .collect();
+
+        if !already_subtypes.is_empty() {
+            // All kept results are already subtypes of the narrowing
+            // class, so the instanceof check is satisfied without
+            // widening.
+            *results = already_subtypes;
+            return true;
+        }
+    }
+
+    // When the narrowed class is a subtype of (i.e. more specific than)
+    // an existing result, replace with the narrowed type.  For example,
+    // results = [Animal] narrowed to Dog (Dog extends Animal) → [Dog].
+    if !exact {
+        let narrowed_is_more_specific = narrowed.iter().any(|n| {
+            results.iter().any(|r| {
+                crate::class_lookup::is_subtype_of_names(&n.fqn(), &r.fqn(), ctx.file.class_loader)
+            })
+        });
+
+        if !narrowed_is_more_specific && results.len() == 1 {
+            // Neither direction holds — the types are unrelated.
+            // This only makes sense as an intersection when the
+            // variable has a single definite type (not a union from
+            // conditional branches) and at least one side is an
+            // interface, because a concrete object can implement an
+            // interface without it appearing in the declared class
+            // hierarchy (e.g. mock objects, dynamic proxies).
+            //
+            // When `results` is a union (len > 1) the instanceof
+            // filters the union rather than intersecting, so we fall
+            // through to the replacement path below.
+            let any_interface = narrowed
+                .iter()
+                .chain(results.iter())
+                .any(|c| c.kind == crate::types::ClassLikeKind::Interface);
+
+            if any_interface {
+                // Keep both (intersection semantics) so that members
+                // from all types are available.
+                for cls in narrowed {
+                    if !results.iter().any(|c| c.fqn() == cls.fqn()) {
+                        results.push(cls);
+                    }
+                }
+                return true;
+            }
+        }
+    }
+
+    // Exact identity check, or narrowed type is more specific —
+    // replace with the narrowed type.
+    results.clear();
+    for cls in narrowed {
+        ClassInfo::push_unique_arc(results, cls);
+    }
+    true
+}
+
+/// Remove the resolved classes for `ty` from `results`.
+///
+/// A failed check rules out the class it names *and every subtype of it*:
+/// a value that is not an `Identifier` cannot be a `VarLikeIdentifier`
+/// either, so the else branch of `instanceof Identifier` must drop both.
+/// Comparing names alone left the subclass behind and reported the union
+/// as still holding it.
+///
+/// Always returns `false`: exclusion only rules out one possibility and
+/// never concludes the variable's full type, so leftover non-class
+/// entries (e.g. `mixed`) that [`ResolvedType::apply_narrowing`] tracks
+/// separately must survive.
+pub(in crate::type_engine) fn apply_instanceof_exclusion(
+    ty: &PhpType,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<Arc<ClassInfo>>,
+) -> bool {
+    exclude_resolved_classes(
+        super::resolve::resolve_narrowing_target(ty, ctx),
+        ctx,
+        results,
+    )
+}
+
+/// [`apply_instanceof_exclusion`] over classes already resolved.
+fn exclude_resolved_classes(
+    resolved: Vec<Arc<ClassInfo>>,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<Arc<ClassInfo>>,
+) -> bool {
+    let excluded = resolved;
+    if !excluded.is_empty() {
+        results.retain(|r| {
+            !excluded.iter().any(|e| {
+                e.name == r.name
+                    || crate::class_lookup::is_subtype_of_names(
+                        &r.fqn(),
+                        &e.fqn(),
+                        ctx.file.class_loader,
+                    )
+            })
+        });
+    }
+    false
+}
+
+/// Narrow `results` to what passes `instanceof ty`, the type-string
+/// counterpart of [`apply_instanceof_inclusion`].
+///
+/// A class that cannot be loaded still has a name, and the check proves
+/// the value carries it: the alternatives naming it are kept, and when
+/// none does the value is that class, with no `ClassInfo` behind it.
+/// Clearing the subject instead, as the class-list form has to, would
+/// leave the branch untyped and empty the variable once branches join.
+pub(in crate::type_engine) fn include_instance_of(
+    ty: &PhpType,
+    exact: bool,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ResolvedType>,
+) {
+    let resolved = super::resolve::resolve_narrowing_target(ty, ctx);
+    if let Some(name) = unloadable_check_target(ty, &resolved) {
+        let mut kept: Vec<ResolvedType> = Vec::new();
+        for rt in results.iter() {
+            if rt.class_info.as_ref().is_some_and(|c| {
+                crate::class_lookup::is_subtype_of_names(&c.fqn(), name, ctx.file.class_loader)
+            }) {
+                ResolvedType::push_unique(&mut kept, rt.clone());
+                continue;
+            }
+            let naming: Vec<PhpType> = rt
+                .type_string
+                .union_members()
+                .into_iter()
+                .filter_map(|m| m.non_null_type().unwrap_or_else(|| m.clone()).into())
+                .filter(|m: &PhpType| names_class(m, name))
+                .collect();
+            if !naming.is_empty() {
+                ResolvedType::push_unique(
+                    &mut kept,
+                    ResolvedType::from_type_string(PhpType::union(naming)),
+                );
+            }
+        }
+        if kept.is_empty() {
+            kept.push(ResolvedType::from_type_string(ty.clone()));
+        }
+        *results = kept;
+        return;
+    }
+    ResolvedType::apply_narrowing(results, |classes| {
+        include_resolved_classes(resolved, exact, ctx, classes)
+    });
+}
+
+/// Remove what fails `instanceof ty` from `results`, the type-string
+/// counterpart of [`apply_instanceof_exclusion`].
+///
+/// A class that cannot be loaded is ruled out by name, along with every
+/// loaded class that names it as an ancestor.
+pub(in crate::type_engine) fn exclude_instance_of(
+    ty: &PhpType,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ResolvedType>,
+) {
+    let resolved = super::resolve::resolve_narrowing_target(ty, ctx);
+    if let Some(name) = unloadable_check_target(ty, &resolved) {
+        results.retain_mut(|rt| {
+            if rt.class_info.as_ref().is_some_and(|c| {
+                crate::class_lookup::is_subtype_of_names(&c.fqn(), name, ctx.file.class_loader)
+            }) {
+                return false;
+            }
+            let members = rt.type_string.union_members();
+            let kept: Vec<PhpType> = members
+                .iter()
+                .filter(|m| !names_class(&m.non_null_type().unwrap_or_else(|| (**m).clone()), name))
+                .map(|m| (*m).clone())
+                .collect();
+            if kept.len() == members.len() {
+                return true;
+            }
+            if kept.is_empty() {
+                return false;
+            }
+            rt.type_string = PhpType::union(kept);
+            true
+        });
+        return;
+    }
+    ResolvedType::apply_narrowing(results, |classes| {
+        exclude_resolved_classes(resolved, ctx, classes)
+    });
+}
+
+/// The class `ty` names when it resolved to no class, or `None` when it
+/// resolved or is not a class name at all.
+fn unloadable_check_target<'t>(ty: &'t PhpType, resolved: &[Arc<ClassInfo>]) -> Option<&'t str> {
+    if !resolved.is_empty() || ty.is_keyword() {
+        return None;
+    }
+    match ty.kind() {
+        TypeKind::Named(name) => Some(name.as_ref()),
+        _ => None,
+    }
+}
+
+/// Whether `member` is the class `name`, allowing either spelling to be
+/// the short name of the other: the check may name the class as written
+/// while the subject's type carries it resolved.
+fn names_class(member: &PhpType, name: &str) -> bool {
+    let TypeKind::Named(member_name) = member.kind() else {
+        return false;
+    };
+    let a = member_name.trim_start_matches('\\');
+    let b = name.trim_start_matches('\\');
+    let short_of = |long: &str, short: &str| {
+        long.len() > short.len()
+            && long.as_bytes()[long.len() - short.len() - 1] == b'\\'
+            && long[long.len() - short.len()..].eq_ignore_ascii_case(short)
+    };
+    a.eq_ignore_ascii_case(b)
+        || (!b.contains('\\') && short_of(a, b))
+        || (!a.contains('\\') && short_of(b, a))
+}
+
+/// If `expr` is `$var instanceof <value>` — an `instanceof` whose
+/// right-hand side is a value rather than a literal class name — return
+/// that right-hand side and whether the check is negated.
+///
+/// PHP resolves `$x instanceof $class` against whatever `$class` holds:
+/// a `class-string` names the class directly, and an object stands for
+/// its own class.  Which it is takes a type resolution the extractors in
+/// this module have no context for, so the expression is handed back for
+/// the caller to resolve.
+pub(in crate::type_engine) fn try_extract_dynamic_instanceof<'b>(
+    expr: &'b Expression<'b>,
+    var_name: &str,
+) -> Option<(&'b Expression<'b>, bool)> {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            try_extract_dynamic_instanceof(inner.expression, var_name)
+        }
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            try_extract_dynamic_instanceof(prefix.operand, var_name)
+                .map(|(rhs, negated)| (rhs, !negated))
+        }
+        Expression::Binary(bin) if bin.operator.is_instanceof() => {
+            if expr_to_subject_key(bin.lhs).as_deref() != Some(var_name) {
+                return None;
+            }
+            match bin.rhs {
+                // A literal class name needs no resolution, and is what
+                // `try_extract_instanceof` already reads.
+                Expression::Identifier(_)
+                | Expression::Self_(_)
+                | Expression::Static(_)
+                | Expression::Parent(_) => None,
+                rhs => Some((rhs, false)),
+            }
+        }
+        // `is_a($x, $class)` is the same check spelled as a call.  With
+        // `allow_string` it also admits a class name, which is not an
+        // object check at all, so only the two-argument form counts; a
+        // written `Foo::class` is `try_extract_instanceof_with_negation`'s.
+        Expression::Call(Call::Function(call)) => {
+            let Expression::Identifier(ident) = call.function else {
+                return None;
+            };
+            if !bytes_to_str(ident.value())
+                .trim_start_matches('\\')
+                .eq_ignore_ascii_case("is_a")
+            {
+                return None;
+            }
+            let args: Vec<_> = call.argument_list.arguments.iter().collect();
+            if args.len() < 2 || args.get(2).is_some_and(|a| !argument_value(a).is_false()) {
+                return None;
+            }
+            if expr_to_subject_key(argument_value(args[0])).as_deref() != Some(var_name) {
+                return None;
+            }
+            let class = argument_value(args[1]);
+            if extract_class_string_from_expr(class).is_some()
+                || string_literal_value(class).is_some()
+            {
+                return None;
+            }
+            Some((class, false))
+        }
+        _ => None,
+    }
+}
+
+/// If `expr` is `$var instanceof ClassName` and the variable name
+/// matches `var_name`, return the class name.
+///
+/// Handles parenthesised expressions recursively so that
+/// `($var instanceof Foo)` also works.
+pub(in crate::type_engine) fn try_extract_instanceof<'b>(
+    expr: &'b Expression<'b>,
+    var_name: &str,
+    names: &WrittenNames<'_>,
+) -> Option<PhpType> {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            try_extract_instanceof(inner.expression, var_name, names)
+        }
+        Expression::Binary(bin) if bin.operator.is_instanceof() => {
+            // LHS must be our variable or property access
+            let lhs_name = expr_to_subject_key(bin.lhs)?;
+            if lhs_name != var_name {
+                return None;
+            }
+            // RHS is the class name
+            match bin.rhs {
+                Expression::Identifier(ident) => {
+                    Some(names.class_type(bytes_to_str(ident.value())))
+                }
+                Expression::Self_(_) => Some(PhpType::named(atom("self"))),
+                Expression::Static(_) => Some(PhpType::named(atom("static"))),
+                Expression::Parent(_) => Some(PhpType::named(atom("parent"))),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Like `try_extract_instanceof` but also detects negation.
+///
+/// Returns `Some((class_name, negated))` where `negated` is `true`
+/// when the expression is `!($var instanceof ClassName)` or
+/// `!$var instanceof ClassName` (PHP precedence: `instanceof` binds
+/// tighter than `!`, so both forms are equivalent).
+///
+/// Also handles:
+///   - `is_a($var, ClassName::class)` — treated as equivalent to instanceof
+///   - `get_class($var) === ClassName::class` or `==` — exact class match
+///   - `$var::class === ClassName::class` or `==` — exact class match
+///
+/// Handles arbitrary parenthesisation.
+/// Result of extracting an instanceof-style check from an expression.
+///
+/// - `class_name`: the class being checked against
+/// - `negated`: `true` when the check is negated (e.g. `!($x instanceof Foo)`)
+/// - `exact`: `true` for exact class identity checks (`get_class($x) === Foo::class`,
+///   `$x::class === Foo::class`) where subclasses should NOT be preserved.
+///   `false` for `instanceof` / `is_a()` checks where a more-specific subtype
+///   in the current results should be kept.
+/// - `allow_string`: `true` for `is_a($x, Foo::class, true)` — the third
+///   argument means the check also passes when `$x` is a `class-string<Foo>`,
+///   so a string alternative in the subject's current type must survive the
+///   narrowing rather than being replaced by the checked class.
+#[derive(Clone)]
+pub(in crate::type_engine) struct InstanceofExtraction {
+    /// The narrowed type (e.g. `PhpType::named(atom("ClassName"))`).
+    pub class_type: PhpType,
+    pub negated: bool,
+    pub exact: bool,
+    pub allow_string: bool,
+}
+
+pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
+    expr: &'b Expression<'b>,
+    var_name: &str,
+    names: &WrittenNames<'_>,
+) -> Option<InstanceofExtraction> {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            try_extract_instanceof_with_negation(inner.expression, var_name, names)
+        }
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            // `!expr` — recurse so that `!!expr` (double negation) and
+            // deeper chains like `!!!expr` are handled correctly: each
+            // `!` flips the negation flag.
+            try_extract_instanceof_with_negation(prefix.operand, var_name, names).map(|mut e| {
+                e.negated = !e.negated;
+                e
+            })
+        }
+        _ => {
+            try_extract_instanceof(expr, var_name, names)
+                .map(|cls_type| InstanceofExtraction {
+                    class_type: cls_type,
+                    negated: false,
+                    exact: false,
+                    allow_string: false,
+                })
+                .or_else(|| {
+                    // `is_a($var, ClassName::class)` — equivalent to instanceof
+                    try_extract_is_a(expr, var_name, names).map(|(cls_type, allow_string)| {
+                        InstanceofExtraction {
+                            class_type: cls_type,
+                            negated: false,
+                            exact: false,
+                            allow_string,
+                        }
+                    })
+                })
+                .or_else(|| {
+                    // `get_class($var) === ClassName::class` or
+                    // `$var::class === ClassName::class` — exact class match
+                    try_extract_class_identity_check(expr, var_name, names).map(
+                        |(cls_type, neg)| InstanceofExtraction {
+                            class_type: cls_type,
+                            negated: neg,
+                            exact: true,
+                            allow_string: false,
+                        },
+                    )
+                })
+        }
+    }
+}
+
+/// Detect `is_a($var, ClassName::class)` — semantically equivalent to
+/// `$var instanceof ClassName`.
+///
+/// Returns the class name and whether the third argument (`$allow_string`)
+/// is literally `true`: `is_a($x, Foo::class, true)` also passes when `$x`
+/// is a `class-string<Foo>`, so a string alternative on the subject must
+/// survive the narrowing rather than being replaced by `Foo` alone.
+fn try_extract_is_a<'b>(
+    expr: &'b Expression<'b>,
+    var_name: &str,
+    names: &WrittenNames<'_>,
+) -> Option<(PhpType, bool)> {
+    let expr = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    if let Expression::Call(Call::Function(func_call)) = expr {
+        let func_name = match func_call.function {
+            Expression::Identifier(ident) => bytes_to_str(ident.value()),
+            _ => return None,
+        };
+        if !crate::util::strip_fqn_prefix(func_name).eq_ignore_ascii_case("is_a") {
+            return None;
+        }
+        let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
+        if args.len() < 2 {
+            return None;
+        }
+        // First argument must be our variable
+        let first_expr = match &args[0] {
+            Argument::Positional(pos) => pos.value,
+            Argument::Named(named) => named.value,
+        };
+        if expr_to_subject_key(first_expr).as_deref() != Some(var_name) {
+            return None;
+        }
+        // Second argument should be ClassName::class
+        let second_expr = match &args[1] {
+            Argument::Positional(pos) => pos.value,
+            Argument::Named(named) => named.value,
+        };
+        let allow_string = args.get(2).is_some_and(|arg| argument_value(arg).is_true());
+        extract_class_string_from_expr(second_expr).map(|n| (names.class_type(&n), allow_string))
+    } else {
+        None
+    }
+}
+
+/// Extract the unquoted value of a string literal expression.
+///
+/// Returns `None` for anything that is not a plain string literal
+/// (interpolated strings, concatenations, variables, ...).
+pub(in crate::type_engine) fn string_literal_value(expr: &Expression<'_>) -> Option<String> {
+    use mago_syntax::cst::Literal;
+    match expr {
+        Expression::Literal(Literal::String(s)) => {
+            // `value` is the unquoted content; fall back to stripping
+            // quotes from `raw`.
+            match s.value {
+                Some(bytes) => Some(literal_bytes_to_str(bytes)?.to_string()),
+                None => {
+                    let raw_str = bytes_to_str(s.raw);
+                    Some(
+                        crate::text_scan::unquote_php_string(raw_str)
+                            .unwrap_or(raw_str)
+                            .to_string(),
+                    )
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Extract the value expression from a positional or named argument.
+pub(in crate::type_engine) fn argument_value<'b>(arg: &'b Argument<'b>) -> &'b Expression<'b> {
+    match arg {
+        Argument::Positional(pos) => pos.value,
+        Argument::Named(named) => named.value,
+    }
+}
+
+/// Detect `get_class($var) === ClassName::class` (or `==`) and
+/// `$var::class === ClassName::class` (or `==`).
+///
+/// Returns `Some((class_name, negated))` where `negated` is `true`
+/// for `!==` and `!=` operators.
+fn try_extract_class_identity_check<'b>(
+    expr: &'b Expression<'b>,
+    var_name: &str,
+    names: &WrittenNames<'_>,
+) -> Option<(PhpType, bool)> {
+    let expr = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    if let Expression::Binary(bin) = expr {
+        let negated = match &bin.operator {
+            BinaryOperator::Identical(_) | BinaryOperator::Equal(_) => false,
+            BinaryOperator::NotIdentical(_) | BinaryOperator::NotEqual(_) => true,
+            _ => return None,
+        };
+        // Try both orders: class-check == ClassName::class and
+        // ClassName::class == class-check
+        if let Some(cls) = match_class_identity_pair(bin.lhs, bin.rhs, var_name, names) {
+            return Some((cls, negated));
+        }
+        if let Some(cls) = match_class_identity_pair(bin.rhs, bin.lhs, var_name, names) {
+            return Some((cls, negated));
+        }
+    }
+    None
+}
+
+/// Helper for `try_extract_class_identity_check`.
+///
+/// Checks if `lhs` is a class-identity expression for `var_name`
+/// (`get_class($var)` or `$var::class`) and `rhs` is a
+/// `ClassName::class` constant.
+fn match_class_identity_pair<'b>(
+    lhs: &'b Expression<'b>,
+    rhs: &'b Expression<'b>,
+    var_name: &str,
+    names: &WrittenNames<'_>,
+) -> Option<PhpType> {
+    if class_identity_subject_key(lhs).as_deref() != Some(var_name) {
+        return None;
+    }
+    extract_class_string_from_expr(rhs).map(|n| names.class_type(&n))
+}
+
+/// The subject an expression asks the runtime class of, as a narrowing
+/// key: `get_class($x)` and `$x::class` both name `$x`.
+///
+/// The two spellings are the same question, and either side of an
+/// identity comparison can hold it, so the callers that need to know
+/// *which* value a `=== Foo::class` test speaks about share this one
+/// answer.
+pub(in crate::type_engine) fn class_identity_subject_key(expr: &Expression<'_>) -> Option<String> {
+    let expr = match expr {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    match expr {
+        Expression::Call(Call::Function(func_call)) => {
+            let Expression::Identifier(ident) = func_call.function else {
+                return None;
+            };
+            if !crate::util::strip_fqn_prefix(bytes_to_str(ident.value()))
+                .eq_ignore_ascii_case("get_class")
+            {
+                return None;
+            }
+            let first_arg = func_call.argument_list.arguments.iter().next()?;
+            expr_to_subject_key(match first_arg {
+                Argument::Positional(pos) => pos.value,
+                Argument::Named(named) => named.value,
+            })
+        }
+        _ => expr_to_subject_key(crate::parser::class_fetch_target(expr)?),
+    }
+}
+
+/// Extract the variable a `match` subject of the form `$var::class`
+/// tests, so the arms' `Foo::class` conditions can narrow it.
+///
+/// Returns `None` for `match (true)` (narrowed from the conditions
+/// themselves) and for subjects that are not a plain variable's class,
+/// such as `$this->kind::class`.  The name is returned without the `$`,
+/// matching how the narrowing helpers take variable names.
+pub(in crate::type_engine) fn match_class_subject_var<'b>(
+    subject: &'b Expression<'b>,
+) -> Option<&'b str> {
+    let subject = match subject {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    match crate::parser::class_fetch_target(subject)? {
+        Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name)),
+        _ => None,
+    }
+}
+
+/// The class a `match ($x::class)` arm condition names, if any.
+///
+/// Every condition on an arm names one alternative the subject may be, so
+/// an arm's conditions together describe a union.
+pub(in crate::type_engine) fn class_match_condition_class(
+    condition: &Expression<'_>,
+    names: &WrittenNames<'_>,
+) -> Option<PhpType> {
+    let condition = match condition {
+        Expression::Parenthesized(inner) => inner.expression,
+        other => other,
+    };
+    extract_class_string_from_expr(condition).map(|n| names.class_type(&n))
+}
+
+// ── Compound instanceof helpers ─────────────────────────────────
+
+/// Extract all instanceof class names from a compound `||` condition.
+///
+/// For `$x instanceof A || $x instanceof B || $x instanceof C`,
+/// returns `Some(["A", "B", "C"])`.  Returns `None` if the expression
+/// is not a chain of `||`-connected instanceof checks on `var_name`.
+pub(in crate::type_engine) fn try_extract_compound_or_instanceof<'b>(
+    expr: &'b Expression<'b>,
+    var_name: &str,
+    names: &WrittenNames<'_>,
+) -> Option<Vec<PhpType>> {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            try_extract_compound_or_instanceof(inner.expression, var_name, names)
+        }
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+            ) =>
+        {
+            let mut classes = Vec::new();
+            collect_or_instanceof_classes(expr, var_name, names, &mut classes);
+            if classes.is_empty() {
+                None
+            } else {
+                Some(classes)
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Recursively walk a tree of `||` binary expressions, collecting
+/// instanceof class names for `var_name`.
+fn collect_or_instanceof_classes<'b>(
+    expr: &'b Expression<'b>,
+    var_name: &str,
+    names: &WrittenNames<'_>,
+    out: &mut Vec<PhpType>,
+) {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            collect_or_instanceof_classes(inner.expression, var_name, names, out);
+        }
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+            ) =>
+        {
+            collect_or_instanceof_classes(bin.lhs, var_name, names, out);
+            collect_or_instanceof_classes(bin.rhs, var_name, names, out);
+        }
+        _ => {
+            if let Some(cls_type) = try_extract_instanceof(expr, var_name, names)
+                && !out.contains(&cls_type)
+            {
+                out.push(cls_type);
+            }
+        }
+    }
+}
+
+/// Narrow `ty` to the values an `instanceof`-style check keeps (or, when
+/// the check is negated, the ones it rejects).
+///
+/// Each member of the union answers on its own: one that already names a
+/// subtype of the checked class is the more specific of the two and
+/// stays as it is, one the checked class is a subtype of narrows to the
+/// class, one that could share an instance with it (a class that can
+/// still be extended, checked against an interface) becomes the
+/// intersection of the two, and one that is unrelated (or not an object
+/// at all) cannot pass and is dropped.
+///
+/// Returns `None` when nothing can be said — no class loader, a class
+/// name that does not resolve, a `self`/`static`/`parent` reference the
+/// enclosing scope alone could resolve, or a check every member already
+/// satisfies.
+pub(in crate::type_engine) fn narrow_type_by_instanceof(
+    ty: &PhpType,
+    extraction: &InstanceofExtraction,
+    class_loader: GuardClassLoader<'_>,
+) -> Option<PhpType> {
+    let loader = class_loader?;
+    let class_name = extraction.class_type.class_name()?;
+    if extraction.class_type.is_self_like() || class_name.eq_ignore_ascii_case("parent") {
+        return None;
+    }
+    loader(Fqn::new(class_name))?;
+
+    let members = instanceof_union_members(ty);
+    let kept: Vec<PhpType> = members
+        .iter()
+        .filter_map(|member| {
+            if extraction.negated {
+                (!instanceof_rules_out(member, extraction, class_name, loader))
+                    .then(|| member.clone())
+            } else {
+                instanceof_member(member, extraction, class_name, loader)
+            }
+        })
+        .collect();
+
+    if kept.is_empty() || kept == members {
+        return None;
+    }
+    // A lone survivor is that type, not a union of one: `PhpType::union`
+    // only collapses a single member when it deduplicated to get there.
+    match kept.len() {
+        1 => kept.into_iter().next(),
+        _ => Some(PhpType::union(kept)),
+    }
+}
+
+/// The alternatives a value of `ty` can take, with `?T` spelled out as
+/// the `T|null` it stands for and `iterable` as `array|Traversable`, so
+/// each half is judged separately.
+fn instanceof_union_members(ty: &PhpType) -> Vec<PhpType> {
+    if let Some(split) = ty.split_iterable() {
+        return split.union_members().into_iter().cloned().collect();
+    }
+    match ty.kind() {
+        TypeKind::Nullable(inner) => vec![inner.clone(), PhpType::null()],
+        TypeKind::Union(members) => members.to_vec(),
+        _ => vec![ty.clone()],
+    }
+}
+
+/// The class a union member names, whether it was written bare (`Foo`) or
+/// with type arguments (`Foo<T>`).
+///
+/// [`PhpType::class_name`] answers only for the bare spelling, so a
+/// generic member would otherwise look like one that names no class at
+/// all and be replaced by the checked class, dropping its arguments.
+fn member_class_name(member: &PhpType) -> Option<&str> {
+    member
+        .base_name()
+        .filter(|n| crate::php_type::is_class_like_name(n))
+}
+
+/// Whether a negated check rules a single union member out entirely.
+///
+/// `!($v instanceof Foo)` rejects every instance of `Foo`, subclasses
+/// included. An exact identity check (`get_class($v) !== Foo::class`)
+/// rejects only `Foo` itself: a subclass's `get_class()` names the
+/// subclass, so it passes the comparison and survives.
+fn instanceof_rules_out(
+    member: &PhpType,
+    extraction: &InstanceofExtraction,
+    class_name: &str,
+    loader: &ResolvedClassLoader<'_>,
+) -> bool {
+    if !extraction.exact {
+        return crate::class_lookup::is_subtype_of_named(member, class_name, loader);
+    }
+    let Some(member_name) = member_class_name(member) else {
+        return false;
+    };
+    // The two names may be spelled differently (short vs qualified), so
+    // compare what they resolve to rather than how they were written.
+    match loader(Fqn::new(member_name)) {
+        Some(cls) => loader(Fqn::new(class_name)).is_some_and(|checked| cls.fqn() == checked.fqn()),
+        None => {
+            member_name.eq_ignore_ascii_case(class_name.strip_prefix('\\').unwrap_or(class_name))
+        }
+    }
+}
+
+/// What a positive `instanceof` check leaves of a single union member,
+/// or `None` when the member cannot pass it.
+fn instanceof_member(
+    member: &PhpType,
+    extraction: &InstanceofExtraction,
+    class_name: &str,
+    loader: &ResolvedClassLoader<'_>,
+) -> Option<PhpType> {
+    if !member.is_object_like() {
+        // `null`, a scalar and an array all fail `instanceof` outright.
+        return None;
+    }
+    // A member that names no class of its own (`object`, `mixed`) is
+    // whatever the check proves.
+    let Some(member_name) = member_class_name(member).filter(|n| loader(Fqn::new(n)).is_some())
+    else {
+        return Some(extraction.class_type.clone());
+    };
+    // An exact identity check (`get_class($v) === Foo::class`) admits the
+    // class itself and nothing below it, so a member naming a subclass
+    // cannot pass.
+    if extraction.exact {
+        return crate::class_lookup::is_subtype_of_names(class_name, member_name, loader)
+            .then(|| extraction.class_type.clone());
+    }
+    if crate::class_lookup::is_subtype_of_named(member, class_name, loader) {
+        return Some(member.clone());
+    }
+    if crate::class_lookup::is_subtype_of_names(class_name, member_name, loader) {
+        return Some(extraction.class_type.clone());
+    }
+    let member_cls = loader(Fqn::new(member_name))?;
+    let checked_cls = loader(Fqn::new(class_name))?;
+    can_share_instance(&member_cls, &checked_cls).then(|| {
+        class_first_intersection(
+            (member.clone(), &member_cls),
+            (extraction.class_type.clone(), &checked_cls),
+        )
+    })
+}
+
+/// Whether one object can be an instance of both `a` and `b` when neither
+/// extends the other.
+///
+/// That takes an interface on at least one side: a subclass of a class
+/// that can still be extended may implement any interface, and one object
+/// may implement any two.  Two classes never share an instance, and a
+/// final class or an enum already lists every interface it will have.
+pub(in crate::type_engine) fn can_share_instance(a: &ClassInfo, b: &ClassInfo) -> bool {
+    use crate::types::ClassLikeKind;
+    let extendable = |c: &ClassInfo| match c.kind {
+        ClassLikeKind::Interface => true,
+        ClassLikeKind::Class => !c.is_final,
+        ClassLikeKind::Trait | ClassLikeKind::Enum => false,
+    };
+    (a.kind == ClassLikeKind::Interface || b.kind == ClassLikeKind::Interface)
+        && extendable(a)
+        && extendable(b)
+}
+
+/// `a&b` with a class ahead of an interface, which is how the value is
+/// usually described (`Model&HasFactory`), and `a` first otherwise.
+pub(in crate::type_engine) fn class_first_intersection(
+    a: (PhpType, &ClassInfo),
+    b: (PhpType, &ClassInfo),
+) -> PhpType {
+    use crate::types::ClassLikeKind;
+    let (first, second) =
+        if a.1.kind == ClassLikeKind::Interface && b.1.kind != ClassLikeKind::Interface {
+            (b.0, a.0)
+        } else {
+            (a.0, b.0)
+        };
+    PhpType::intersection(vec![first, second])
+}

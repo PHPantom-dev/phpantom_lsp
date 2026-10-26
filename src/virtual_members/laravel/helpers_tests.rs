@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::test_fixtures::{make_class, no_loader};
 use crate::types::ClassInfo;
 use std::sync::Arc;
@@ -24,7 +25,8 @@ fn direct_child_of_model() {
     user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -45,7 +47,8 @@ fn indirect_child_of_model() {
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         let name = name.strip_prefix('\\').unwrap_or(name);
         match name {
             "App\\Models\\User" => Some(Arc::new(base.clone())),

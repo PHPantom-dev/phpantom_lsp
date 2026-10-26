@@ -20,6 +20,11 @@
       "type": "object",
       "description": "Toggle individual diagnostic providers.",
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Show diagnostics in the editor at all. Set to false to report nothing: no native diagnostics (syntax errors included), no external tool runs, and no workspace pass. The analyze command ignores this setting.",
+          "default": true
+        },
         "unresolved-member-access": {
           "type": "boolean",
           "description": "Report member access (->, ?->, ::) on subjects whose type could not be resolved. Useful for discovering gaps in type coverage but produces too many diagnostics on codebases without comprehensive type annotations.",
@@ -33,6 +38,11 @@
         "report-magic-properties": {
           "type": "boolean",
           "description": "Report unknown property access on classes with __get when virtual properties are defined (via @property docblock tags, Laravel Eloquent column inference, or other providers). Matches PHPStan's reportMagicProperties behaviour.",
+          "default": false
+        },
+        "partial-union-members": {
+          "type": "boolean",
+          "description": "Report a member access on a union when only some of its classes declare the member, since the access fails whenever one of the others arrives. Matches PHPStan's checkUnionTypes (level 7).",
           "default": false
         },
         "downgrade-nullable-argument-mismatch": {
@@ -115,6 +125,20 @@
         }
       }
     },
+    "stubs": {
+      "type": "object",
+      "description": "Stub files whose declarations win over every other declaration of the same name.",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Stub files and directories, relative to the workspace root unless absolute. A class, function, or constant declared here is what the name means, whatever the project, its dependencies, or PHP's built-in stubs declare under it. Directories are walked recursively, hidden and gitignored entries included, and entries that do not exist are ignored. Earlier entries win over later ones. Stub files are never analysed or edited. Use indexing.include instead for code that should only fill gaps.",
+          "default": []
+        }
+      }
+    },
     "semantic_tokens": {
       "type": "object",
       "description": "Controls LSP semantic token highlighting.",
@@ -183,6 +207,18 @@
         "pint": {
           "type": "string",
           "description": "Command or path to run Laravel Pint. Unset: auto-detect from composer.json require-dev. Empty string: disable Pint. Any other value: use as the command."
+        },
+        "pint-blade": {
+          "type": "boolean",
+          "description": "Whether .blade.php files are formatted by Pint's Pint/laravel_blade rule. Unset: follow the workspace pint.json. true: send them to Pint with --blade. false: never."
+        },
+        "blade-formatter": {
+          "type": "string",
+          "description": "Command or path to run blade-formatter on .blade.php files. Unset: use node_modules/.bin/blade-formatter when package.json lists blade-formatter, the workspace root has a .bladeformatterrc.json or .bladeformatterrc, and Pint does not format Blade. Empty string: never. Any other value: always, even over Pint."
+        },
+        "blade-php": {
+          "type": "boolean",
+          "description": "Whether the built-in Blade formatter also formats the PHP a template carries. Unset: leave every fragment as written. true: format it. No effect when Blade files go to Pint or blade-formatter."
         },
         "php-cs-fixer": {
           "type": "string",

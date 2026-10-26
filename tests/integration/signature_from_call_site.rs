@@ -18,6 +18,7 @@
 //! so asserting the absence of diagnostics would pass either way.
 
 use crate::common::create_test_backend_with_full_stubs;
+use crate::common::message_text;
 
 /// Every diagnostic the slow pipeline reports for `php`, as messages.
 fn diagnostics(php: &str) -> Vec<String> {
@@ -26,7 +27,9 @@ fn diagnostics(php: &str) -> Vec<String> {
     backend.update_ast(uri, php);
     let mut out = Vec::new();
     backend.collect_slow_diagnostics(uri, php, &mut out);
-    out.iter().map(|d| d.message.clone()).collect()
+    out.iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
 }
 
 fn assert_clean(php: &str) {

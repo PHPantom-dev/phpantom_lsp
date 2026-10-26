@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::atom;
-use crate::class_lookup::{is_class_keyword, is_self_or_static};
+use crate::class_lookup::{Fqn, is_class_keyword, is_self_or_static};
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::*;
@@ -15,7 +15,7 @@ use super::literals::qualify_class_keyword;
 
 /// Resolve a `ClassName::Member` expression to a type.
 ///
-/// Handles enum cases (`MyEnum::Case` → `MyEnum`) and class constants
+/// Handles enum cases (`MyEnum::Case` → that case) and class constants
 /// (`Foo::BAR` → the constant's type hint, or the type inferred from
 /// the constant's initializer value for untyped constants).  Of the
 /// expressions that continue past the member with `->`, only a case's
@@ -38,23 +38,22 @@ pub(crate) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
 
     let cls = static_access_class(class_part, ctx)?;
 
-    // Enum cases resolve to the enum type itself.  A constant declared on
-    // the enum is read like any other class constant below.
-    if cls.kind == ClassLikeKind::Enum
-        && cls
-            .constants
-            .iter()
-            .find(|c| c.name == _member)
-            .is_none_or(|c| c.is_enum_case)
-    {
-        return Some(PhpType::named(cls.fqn()));
+    // An enum case is its own type, one of the enum's.  A constant declared
+    // on the enum is read like any other class constant below, and a member
+    // the enum does not declare is still something the enum holds.
+    if cls.kind == ClassLikeKind::Enum {
+        match cls.constants.iter().find(|c| c.name == _member) {
+            Some(c) if c.is_enum_case => return Some(PhpType::enum_case(cls.fqn(), c.name)),
+            None => return Some(PhpType::named(cls.fqn())),
+            Some(_) => {}
+        }
     }
 
     // Class constants: use the declared type hint when available,
     // otherwise infer a type from the initializer value.
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         &cls,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     class_constant_type(&merged, _member, ctx)
@@ -112,7 +111,9 @@ fn static_access_class(class_part: &str, ctx: &ResolutionCtx<'_>) -> Option<Arc<
     } else {
         ctx.written_names().resolve_class(class_part)
     };
-    (ctx.class_loader)(class_name.strip_prefix('\\').unwrap_or(&class_name))
+    (ctx.file.class_loader)(Fqn::new(
+        class_name.strip_prefix('\\').unwrap_or(&class_name),
+    ))
 }
 
 /// The type a class constant holds, read from its initializer where that
@@ -139,11 +140,9 @@ pub(crate) fn class_constant_type(
     // under a key of its own; `folded_class_constant_type` claims the
     // plain `Class::NAME` one for its own fold.
     if let Some(ref val) = constant.value
-        && let Some(_guard) = crate::type_engine::types::const_fold::FoldGuard::acquire(&format!(
-            "{}::{} initializer",
-            merged.fqn(),
-            member
-        ))
+        && let Some(_guard) = crate::type_engine::type_ops::const_fold::FoldGuard::acquire(
+            &format!("{}::{} initializer", merged.fqn(), member),
+        )
     {
         // The initialiser was written in the declaring class's file, so the
         // reader's imports have no say in it: the classes it names were
@@ -153,12 +152,12 @@ pub(crate) fn class_constant_type(
         // on which class that is, so the hierarchy is searched for no other.
         let declaring = val
             .contains("::")
-            .then(|| constant_declaring_class(merged, constant, ctx.class_loader))
+            .then(|| constant_declaring_class(merged, constant, ctx.file.class_loader))
             .flatten();
         let owner = declaring.as_deref().unwrap_or(merged);
         let ctx = &ResolutionCtx {
+            file: ctx.file.with_imports(None),
             current_class: Some(owner),
-            source_imports: None,
             ..*ctx
         };
         let resolve = |text: &str| {
@@ -195,11 +194,14 @@ pub(crate) fn class_constant_type(
 /// The class `self` names inside `constant`'s initialiser, when that is an
 /// ancestor of `merged` rather than `merged` itself.
 ///
-/// Inheritance shares a constant by `Arc`, so the declaring class is the one
-/// whose own constants hold that same `Arc`. A constant declared on a trait
-/// is the class's that uses the trait, as PHP copies it in. `None` when
-/// `merged` declares the constant itself, or when no ancestor can be shown
-/// to.
+/// The declaring class is the nearest one, in PHP's lookup order, whose own
+/// constants include one of that name, which is the declaration the merge
+/// kept. The name is compared rather than the `Arc`: `merged` may come from
+/// the resolved-class cache, which outlives a reparse that leaves the class
+/// signatures as they were, so its constants can be older copies of the ones
+/// the loader returns now. A constant declared on a trait is the class's
+/// that uses the trait, as PHP copies it in. `None` when `merged` declares
+/// the constant itself, or when no ancestor can be shown to.
 fn constant_declaring_class(
     merged: &ClassInfo,
     constant: &Arc<ConstantInfo>,
@@ -207,13 +209,13 @@ fn constant_declaring_class(
 ) -> Option<Arc<ClassInfo>> {
     use crate::inheritance::ancestry::{ancestors, find_declaring_ancestor, find_declaring_trait};
 
-    let declares = |c: &ClassInfo| c.constants.iter().any(|k| Arc::ptr_eq(k, constant));
+    let declares = |c: &ClassInfo| c.constants.iter().any(|k| k.name == constant.name);
     let declares_or_uses = |c: &ClassInfo| {
         declares(c) || find_declaring_trait(&c.used_traits, class_loader, &declares).is_some()
     };
     // `merged` carries every inherited constant, so whether it declares this
     // one is read off the class as it was parsed.
-    if class_loader(&merged.fqn()).is_none_or(|own| declares_or_uses(&own)) {
+    if class_loader(Fqn::new(&merged.fqn())).is_none_or(|own| declares_or_uses(&own)) {
         return None;
     }
     if let Some((_, parent)) = ancestors(merged, class_loader).find(|(_, p)| declares_or_uses(p)) {
@@ -258,7 +260,7 @@ pub(crate) fn folded_class_constant_type(
     let resolve =
         |text: &str| Backend::resolve_arg_text_to_type(&qualify_class_keyword(text, class), ctx);
     let key = format!("{}::{}", class.fqn(), const_name);
-    crate::type_engine::types::const_fold::folded_constant_type(&key, value, &resolve)
+    crate::type_engine::type_ops::const_fold::folded_constant_type(&key, value, &resolve)
 }
 
 /// The literal value a global constant holds, folded from an initialiser that
@@ -270,5 +272,5 @@ pub(crate) fn folded_global_constant_type(
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let resolve = |text: &str| Backend::resolve_arg_text_to_type(text, ctx);
-    crate::type_engine::types::const_fold::folded_constant_type(name, value, &resolve)
+    crate::type_engine::type_ops::const_fold::folded_constant_type(name, value, &resolve)
 }

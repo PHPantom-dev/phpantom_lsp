@@ -24,14 +24,12 @@
 //! (`resolve_add_iterable_type`) infers the element type from the
 //! function body and computes the workspace edit.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::CodeActionData;
-use crate::code_actions::cursor_context::FunctionKinds;
-use crate::code_actions::make_code_action_data;
+use crate::code_actions::phpstan::fix_return_type::{Anchor, target_function};
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{FunctionDocblock, function_docblock_at_line};
+use crate::code_actions::{CodeActionData, FunctionDocblock, deferred_quickfix};
 use crate::php_type::{PhpType, TypeKind};
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -100,11 +98,9 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
-
-        let lines: Vec<&str> = content.lines().collect();
 
         for diag in &phpstan_diags {
             let Some(identifier) = phpstan_identifier(diag) else {
@@ -116,45 +112,29 @@ impl Backend {
             }
 
             // Only handle the "return type" variant.
-            let iterable_type_parsed = match extract_iterable_return_type(&diag.message) {
-                Some(t) => t,
-                None => continue,
-            };
+            let iterable_type_parsed =
+                match extract_iterable_return_type(crate::util::message_text(&diag.message)) {
+                    Some(t) => t,
+                    None => continue,
+                };
             let iterable_type = iterable_type_parsed.to_string();
 
             let diag_line = diag.range.start.line as usize;
 
-            // The diagnostic is on the function declaration line itself
-            // (or a modifier line above it — handled in the `else` below).
-            let func_line = if diag_line < lines.len()
-                && (lines[diag_line].contains("function ")
-                    || lines[diag_line].contains("function("))
-            {
-                diag_line
-            } else {
-                // The diagnostic might be on a modifier line (public,
-                // static, etc.) — search forward for the function keyword.
-                let end = (diag_line + 6).min(lines.len());
-                let found = lines
-                    .iter()
-                    .enumerate()
-                    .take(end)
-                    .skip(diag_line)
-                    .find(|(_, line)| line.contains("function ") || line.contains("function("));
-                match found {
-                    Some((i, _)) => i,
-                    None => continue,
-                }
-            };
-
-            let Some(docblock) =
-                function_docblock_at_line(content, func_line, FunctionKinds::Named)
-            else {
+            // The diagnostic is on the function's declaration: the line
+            // of the `function` keyword or of an attribute or modifier
+            // before it.
+            let Some(target) = target_function(
+                content,
+                diag_line,
+                Anchor::Declaration,
+                crate::util::message_text(&diag.message),
+            ) else {
                 continue;
             };
 
             // Skip if there is already a @return tag with a generic type.
-            if has_structured_return_tag(&docblock) {
+            if has_structured_return_tag(&target.docblock) {
                 continue;
             }
 
@@ -162,23 +142,19 @@ impl Backend {
             let title = "Add @return type".to_string();
 
             let extra = serde_json::json!({
-                "diagnostic_line": diag_line,
                 "iterable_type": &iterable_type,
-                "func_line": func_line,
+                "message": &diag.message,
             });
 
-            let data = make_code_action_data(ACTION_KIND, uri, &params.range, extra);
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(deferred_quickfix(
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(data),
-            }));
+                ACTION_KIND,
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                extra,
+            ));
         }
     }
 
@@ -196,30 +172,32 @@ impl Backend {
         content: &str,
     ) -> Option<WorkspaceEdit> {
         let iterable_type = data.extra.get("iterable_type")?.as_str()?;
-        let func_line = data.extra.get("func_line")?.as_u64()? as usize;
+        let diag_line = data.extra.get("diagnostic_line")?.as_u64()? as usize;
+        let message = data.extra.get("message")?.as_str()?;
+        let target = target_function(content, diag_line, Anchor::Declaration, message)?;
 
         // Infer the element type from the function body.
         let element_args = self
-            .infer_iterable_element_type(&data.uri, content, func_line, iterable_type)
+            .infer_iterable_element_type(&data.uri, content, target.start, iterable_type)
             .unwrap_or_else(|| vec![PhpType::mixed()]);
 
         let return_type = build_return_type(iterable_type, element_args).to_string();
 
-        let docblock = function_docblock_at_line(content, func_line, FunctionKinds::Named)?;
+        let docblock = &target.docblock;
         let edit = match docblock.replace_return_type_edit(content, &return_type) {
             Some(edit) => edit,
             None => docblock.add_return_tag_edit(content, &return_type),
         };
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 
-    /// Infer the element type of an iterable return by scanning the
-    /// function body.
+    /// Infer the element type of an iterable return by scanning the body
+    /// of the function declared at `offset`.
     ///
-    /// Delegates to [`infer_return_type_for_function`](Self::infer_return_type_for_function)
-    /// in `fix_return_type.rs` to get the effective return type.
+    /// Delegates to [`infer_return_type_at`](Self::infer_return_type_at)
+    /// in `fix_return_type` to get the effective return type.
     /// When the inferred type is a generic iterable (e.g. `list<string>`,
     /// `array<int, User>`), the inner type parameter(s) are extracted
     /// and returned as a `Vec<PhpType>`.
@@ -229,10 +207,10 @@ impl Backend {
         &self,
         uri: &str,
         content: &str,
-        func_line: usize,
+        offset: u32,
         iterable_type: &str,
     ) -> Option<Vec<PhpType>> {
-        let inferred = self.infer_return_type_for_function(uri, content, func_line, false)?;
+        let inferred = self.infer_return_type_at(uri, content, offset, false)?;
 
         // Prefer the effective type (richer, e.g. `list<string>`),
         // falling back to the native type. A literal array infers as a
@@ -288,34 +266,12 @@ pub(crate) fn is_add_iterable_type_stale(content: &str, diag_line: usize, messag
         return false;
     }
 
-    let lines: Vec<&str> = content.lines().collect();
-
-    if diag_line >= lines.len() {
+    if content.lines().nth(diag_line).is_none() {
         return true; // line doesn't exist any more → stale
     }
 
-    // Find the function keyword line (the diagnostic is on the
-    // function declaration or a modifier line).
-    let func_line =
-        if lines[diag_line].contains("function ") || lines[diag_line].contains("function(") {
-            diag_line
-        } else {
-            // Search forward for the function keyword.
-            let end = (diag_line + 6).min(lines.len());
-            let found = lines
-                .iter()
-                .enumerate()
-                .take(end)
-                .skip(diag_line)
-                .find(|(_, line)| line.contains("function ") || line.contains("function("));
-            match found {
-                Some((l, _)) => l,
-                None => return false,
-            }
-        };
-
-    function_docblock_at_line(content, func_line, FunctionKinds::Named)
-        .is_some_and(|docblock| has_structured_return_tag(&docblock))
+    target_function(content, diag_line, Anchor::Declaration, message)
+        .is_some_and(|target| has_structured_return_tag(&target.docblock))
 }
 
 /// Whether the function's `@return` tag already gives its type a
@@ -474,9 +430,13 @@ mod tests {
 
     // ── Locating the docblock ──────────────────────────────────────
 
-    /// The docblock of the function declared on `line` of `php`.
+    /// The docblock of the method declared on `line` of `php`.
     fn docblock_at(php: &str, line: usize) -> FunctionDocblock {
-        function_docblock_at_line(php, line, FunctionKinds::Named).unwrap()
+        let msg =
+            "Method Foo::foo() return type has no value type specified in iterable type array.";
+        target_function(php, line, Anchor::Declaration, msg)
+            .unwrap()
+            .docblock
     }
 
     #[test]

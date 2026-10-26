@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::inheritance::resolve_property_type_hint;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
@@ -57,7 +58,12 @@ fn is_all_string_type(ty: &PhpType) -> bool {
 #[derive(Clone, Debug)]
 pub(crate) enum SubjectOutcome {
     /// Subject resolved to one or more classes.
-    Resolved(Vec<Arc<ClassInfo>>),
+    Resolved {
+        classes: Vec<Arc<ClassInfo>>,
+        /// How `classes` group into the alternatives of the subject's
+        /// type.
+        branches: UnionBranches,
+    },
     /// Subject resolved to a scalar type — member access is always a
     /// runtime crash.  The `PhpType` is the resolved scalar type
     /// (e.g. `int`, `string`, `bool|int`) with null stripped.
@@ -80,6 +86,113 @@ pub(crate) enum SubjectOutcome {
     Untyped,
 }
 
+/// How the classes of a [`SubjectOutcome::Resolved`] group into the
+/// alternatives of the subject's type.
+///
+/// Each class is an alternative of its own unless it is part of an
+/// intersection: `(A&I)|B` resolves to the classes `A`, `I` and `B`, but
+/// the value is either one object that is both `A` and `I`, or a `B`.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct UnionBranches {
+    /// For each class, the index of the alternative it belongs to.  Empty
+    /// when every class is an alternative of its own, which is every type
+    /// without an intersection in it.
+    branch_of: Vec<u32>,
+    /// The alternatives that are an intersection the resolver could not
+    /// load every part of.
+    incomplete: Vec<u32>,
+}
+
+/// One alternative of a resolved subject's type.
+pub(crate) struct UnionBranch<'a> {
+    /// The classes the alternative's value is an instance of: one, or
+    /// every loaded part of an intersection.
+    pub classes: Vec<&'a Arc<ClassInfo>>,
+    /// Whether `classes` is every part of the alternative.  False for an
+    /// intersection one of whose parts could not be loaded.
+    pub complete: bool,
+}
+
+impl UnionBranches {
+    fn of(resolved: &[ResolvedType]) -> Self {
+        // An intersection's classes are tagged with the whole intersection
+        // as their type string, so classes sharing one belong together.
+        let mut keys: Vec<Option<&PhpType>> = Vec::new();
+        let mut branch_of = Vec::new();
+        let mut any_intersection = false;
+        for rt in resolved.iter().filter(|rt| rt.class_info.is_some()) {
+            let key = intersection_of(&rt.type_string);
+            any_intersection |= key.is_some();
+            let index = match key.and_then(|k| keys.iter().position(|o| *o == Some(k))) {
+                Some(index) => index,
+                None => {
+                    keys.push(key);
+                    keys.len() - 1
+                }
+            };
+            branch_of.push(index as u32);
+        }
+        if !any_intersection {
+            return Self::default();
+        }
+        let incomplete = keys
+            .iter()
+            .enumerate()
+            .filter_map(|(index, key)| {
+                let TypeKind::Intersection(parts) = (*key)?.kind() else {
+                    return None;
+                };
+                let loaded = branch_of.iter().filter(|&&b| b as usize == index).count();
+                (loaded < parts.len()).then_some(index as u32)
+            })
+            .collect();
+        Self {
+            branch_of,
+            incomplete,
+        }
+    }
+
+    /// The alternatives `classes` (the outcome's own) group into.
+    pub(crate) fn split<'a>(&self, classes: &'a [Arc<ClassInfo>]) -> Vec<UnionBranch<'a>> {
+        if self.branch_of.is_empty() {
+            return classes
+                .iter()
+                .map(|c| UnionBranch {
+                    classes: vec![c],
+                    complete: true,
+                })
+                .collect();
+        }
+        let count = self.branch_of.iter().max().map_or(0, |&m| m as usize + 1);
+        let mut branches: Vec<UnionBranch<'a>> = (0..count as u32)
+            .map(|index| UnionBranch {
+                classes: Vec::new(),
+                complete: !self.incomplete.contains(&index),
+            })
+            .collect();
+        for (class, &index) in classes.iter().zip(&self.branch_of) {
+            branches[index as usize].classes.push(class);
+        }
+        branches
+    }
+}
+
+/// The intersection `ty` is, apart from `null`.
+fn intersection_of(ty: &PhpType) -> Option<&PhpType> {
+    match ty.kind() {
+        TypeKind::Intersection(_) => Some(ty),
+        TypeKind::Nullable(inner) => intersection_of(inner),
+        TypeKind::Union(members) => {
+            let mut non_null = members.iter().filter(|m| !m.is_null());
+            match (non_null.next(), non_null.next()) {
+                (Some(only), None) => intersection_of(only),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Resolve a subject to a [`SubjectOutcome`] in a single pass.
 ///
 /// This is the unified entry point for diagnostic subject resolution.
@@ -99,9 +212,15 @@ pub(crate) fn resolve_subject_outcome(
     let resolved = resolve_target_classes(subject, access_kind, ctx);
     if !resolved.is_empty() {
         // ── Check for class-bearing entries ──────────────────────
-        let arced: Vec<Arc<ClassInfo>> = ResolvedType::into_arced_classes(resolved.clone());
+        let arced: Vec<Arc<ClassInfo>> = resolved
+            .iter()
+            .filter_map(|rt| rt.class_info.clone())
+            .collect();
         if !arced.is_empty() {
-            return SubjectOutcome::Resolved(arced);
+            return SubjectOutcome::Resolved {
+                branches: UnionBranches::of(&resolved),
+                classes: arced,
+            };
         }
 
         // ── All entries are type-string-only (no class info) ────
@@ -134,11 +253,14 @@ pub(crate) fn resolve_subject_outcome(
                 name: crate::atom::atom("stdClass"),
                 ..ClassInfo::default()
             });
-            return SubjectOutcome::Resolved(vec![synthetic]);
+            return SubjectOutcome::Resolved {
+                classes: vec![synthetic],
+                branches: UnionBranches::default(),
+            };
         }
 
         // Non-scalar, non-class type — check for unresolvable class.
-        if let Some(unresolved) = check_unresolvable_class_name(&joined, ctx.class_loader) {
+        if let Some(unresolved) = check_unresolvable_class_name(&joined, ctx.file.class_loader) {
             return SubjectOutcome::UnresolvableClass(unresolved);
         }
         return SubjectOutcome::Untyped;
@@ -165,17 +287,20 @@ pub(crate) fn resolve_subject_outcome(
         // A call declared `object|null` resolves to no candidate at all,
         // unlike the native `?object` which is caught above.
         if declared_call_return_type(callee, access_kind, ctx, &is_nullable_object).is_some() {
-            return SubjectOutcome::Resolved(vec![Arc::new(ClassInfo {
-                name: crate::atom::atom("stdClass"),
-                ..ClassInfo::default()
-            })]);
+            return SubjectOutcome::Resolved {
+                classes: vec![Arc::new(ClassInfo {
+                    name: crate::atom::atom("stdClass"),
+                    ..ClassInfo::default()
+                })],
+                branches: UnionBranches::default(),
+            };
         }
         // Try unresolvable class detection for function calls.
         if let SubjectExpr::FunctionCall(fn_name) = callee.as_ref()
             && let Some(fl) = ctx.function_loader
             && let Some(func_info) = fl(fn_name.as_str(), 0)
             && let Some(ref raw_type) = func_info.return_type
-            && let Some(unresolved) = check_unresolvable_class_name(raw_type, ctx.class_loader)
+            && let Some(unresolved) = check_unresolvable_class_name(raw_type, ctx.file.class_loader)
         {
             return SubjectOutcome::UnresolvableClass(unresolved);
         }
@@ -185,9 +310,14 @@ pub(crate) fn resolve_subject_outcome(
     if let SubjectExpr::PropertyChain { base, property } = &expr {
         let base_arcs = resolved_to_arcs(resolve_target_classes_expr(base, access_kind, ctx));
         for cls in &base_arcs {
-            let merged =
-                resolve_class_fully_maybe_cached(cls, ctx.class_loader, ctx.resolved_class_cache);
-            if let Some(parsed) = resolve_property_type_hint(&merged, property, ctx.class_loader) {
+            let merged = resolve_class_fully_maybe_cached(
+                cls,
+                ctx.file.class_loader,
+                ctx.resolved_class_cache,
+            );
+            if let Some(parsed) =
+                resolve_property_type_hint(&merged, property, ctx.file.class_loader)
+            {
                 if parsed.all_members_primitive_scalar() {
                     let scalar = parsed.non_null_type().unwrap_or(parsed);
                     if access_kind != AccessKind::DoubleColon || !is_all_string_type(&scalar) {
@@ -207,7 +337,8 @@ pub(crate) fn resolve_subject_outcome(
             crate::type_engine::variable::resolution::resolve_variable_php_type(
                 ctx.var_query(var_name),
             )
-        && let Some(unresolved) = check_unresolvable_class_name(&resolved_type, ctx.class_loader)
+        && let Some(unresolved) =
+            check_unresolvable_class_name(&resolved_type, ctx.file.class_loader)
     {
         return SubjectOutcome::UnresolvableClass(unresolved);
     }
@@ -303,7 +434,7 @@ fn declared_return_type_of(
 ) -> Option<PhpType> {
     for cls in classes {
         let resolved =
-            resolve_class_fully_maybe_cached(cls, ctx.class_loader, ctx.resolved_class_cache);
+            resolve_class_fully_maybe_cached(cls, ctx.file.class_loader, ctx.resolved_class_cache);
         if let Some(m) = resolved.get_method_ci(method)
             && let Some(ref hint) = m.return_type
             && accept(hint)
@@ -323,7 +454,7 @@ fn declared_return_type_of(
 /// that resolve successfully.
 fn check_unresolvable_class_name(
     raw_type: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     if raw_type.all_members_scalar() || raw_type.is_mixed() {
         return None;
@@ -332,7 +463,7 @@ fn check_unresolvable_class_name(
     let effective = raw_type.non_null_type().unwrap_or_else(|| raw_type.clone());
     let base = effective.base_name()?;
 
-    if class_loader(base).is_none() {
+    if class_loader(Fqn::new(base)).is_none() {
         Some(PhpType::named(atom(base)))
     } else {
         None

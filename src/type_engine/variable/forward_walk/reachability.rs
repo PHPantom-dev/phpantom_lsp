@@ -11,55 +11,36 @@
 //! Diagnostics care about a stronger thing: nothing inside a branch that
 //! cannot run should be judged at all. Every collector walks spans of its
 //! own and has no idea which of them the control flow can reach, so the
-//! ranges are collected here while a pass is running and applied once to
-//! the pass's output.
+//! diagnostic pass's walk of the file collects the ranges in its
+//! [`WalkFlow`], and they are applied once to the pass's output.
 
 use std::sync::Arc;
 
 use super::*;
 use crate::atom::{Atom, bytes_to_str};
-use crate::type_engine::types::narrowing::find_method_in_chain_where;
-use crate::type_engine::types::narrowing::{argument_value, string_literal_value};
+use crate::class_lookup::Fqn;
+use crate::type_engine::type_ops::condition_facts::find_method_in_chain_where;
+use crate::type_engine::type_ops::condition_facts::{argument_value, string_literal_value};
 use crate::types::ClassInfo;
-
-thread_local! {
-    /// Byte ranges of the branches a decidable guard rules out in the
-    /// file the running diagnostic pass is walking.  `None` outside such
-    /// a pass, which is when nothing records and nothing reads.
-    static UNREACHABLE_RANGES: RefCell<Option<Vec<(u32, u32)>>> = const { RefCell::new(None) };
-}
-
-/// Start collecting the ranges the walk proves unreachable.
-pub(crate) fn begin_unreachable_collection() {
-    UNREACHABLE_RANGES.with(|cell| *cell.borrow_mut() = Some(Vec::new()));
-}
-
-/// Stop collecting and discard what was collected.
-pub(crate) fn end_unreachable_collection() {
-    UNREACHABLE_RANGES.with(|cell| *cell.borrow_mut() = None);
-}
 
 /// Record a byte range the walk proved cannot run.
 ///
-/// A no-op when no collection is in progress, so the walker can call it
+/// A no-op when the walk is not collecting, so the walker can call it
 /// unconditionally.  Also a no-op while a nested walk started by
 /// [`suspend_snapshot_recording`](super::suspend_snapshot_recording) is in
-/// progress: that walk can be over a different function's body entirely
-/// (return-type inference of a called method, possibly in another file),
-/// and its statement offsets must not be treated as unreachable ranges in
-/// the outer file being checked. See
-/// [`snapshot_recording_suspended`](super::snapshot_recording_suspended).
-pub(crate) fn record_unreachable_range(range: (u32, u32)) {
+/// progress: that walk can be a loop's discovery pass, whose types have not
+/// settled yet, and a guard it finds decidable may not be once they have.
+/// See [`snapshot_recording_suspended`](super::snapshot_recording_suspended).
+pub(crate) fn record_unreachable_range(flow: &WalkFlow, range: (u32, u32)) {
     if snapshot_recording_suspended() {
         return;
     }
-    UNREACHABLE_RANGES.with(|cell| {
-        if let Some(ranges) = cell.borrow_mut().as_mut()
-            && !ranges.contains(&range)
-        {
+    if let Some(ranges) = &flow.unreachable {
+        let mut ranges = ranges.borrow_mut();
+        if !ranges.contains(&range) {
             ranges.push(range);
         }
-    });
+    }
 }
 
 /// Record the span a sequence of statements covers as unreachable.
@@ -68,6 +49,7 @@ pub(crate) fn record_unreachable_range(range: (u32, u32)) {
 /// statements rather than one block, so their extent is the first
 /// statement's start to the last one's end.
 pub(crate) fn record_statements_unreachable<'b>(
+    flow: &WalkFlow,
     mut statements: impl Iterator<Item = &'b Statement<'b>>,
 ) {
     let Some(first) = statements.next() else {
@@ -77,13 +59,7 @@ pub(crate) fn record_statements_unreachable<'b>(
     let end = statements
         .last()
         .map_or(first.span().end.offset, |last| last.span().end.offset);
-    record_unreachable_range((start, end));
-}
-
-/// The ranges recorded so far, or an empty vector when nothing is
-/// collecting.
-pub(crate) fn unreachable_ranges() -> Vec<(u32, u32)> {
-    UNREACHABLE_RANGES.with(|cell| cell.borrow().clone().unwrap_or_default())
+    record_unreachable_range(flow, (start, end));
 }
 
 /// Which branches of an `if` chain a decidable guard rules out.
@@ -231,7 +207,7 @@ fn method_exists_value(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Optio
     find_method_in_chain_where(
         &subject,
         &method,
-        ctx.class_loader,
+        ctx.file.class_loader,
         &|_| true,
         &mut visited,
         0,
@@ -252,9 +228,8 @@ fn static_class_of(expr: &Expression<'_>, ctx: &ForwardWalkCtx<'_>) -> Option<Ar
             if !crate::parser::is_class_fetch(access) {
                 return None;
             }
-            ctx.written_names()
-                .static_receiver_class(access.class, ctx.class_loader)
+            ctx.written_names().static_receiver_class(access.class)
         }
-        _ => string_literal_value(expr).and_then(|name| (ctx.class_loader)(&name)),
+        _ => string_literal_value(expr).and_then(|name| (ctx.file.class_loader)(Fqn::new(&name))),
     }
 }

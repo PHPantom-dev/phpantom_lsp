@@ -7,7 +7,7 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, extract_edits, find_action, get_code_actions_at,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Extract the inserted text from a code action's workspace edit.
 /// The concatenated replacement text of every edit an action carries.
@@ -563,10 +563,10 @@ fn implements_interface_from_another_file() {
     );
 
     // Build URIs from the actual temp-directory paths.
-    let iface_uri = Url::from_file_path(dir.path().join("src/Contracts/Renderable.php"))
+    let iface_uri = Uri::from_file_path(dir.path().join("src/Contracts/Renderable.php"))
         .unwrap()
         .to_string();
-    let class_uri = Url::from_file_path(dir.path().join("src/Views/Page.php"))
+    let class_uri = Uri::from_file_path(dir.path().join("src/Views/Page.php"))
         .unwrap()
         .to_string();
 

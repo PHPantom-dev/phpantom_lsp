@@ -47,7 +47,7 @@ pub(crate) fn record_assertion_variable<'b>(
                 break;
             }
             if let Some(extraction) =
-                narrowing::try_extract_instanceof_with_negation(operand, &subject, &names)
+                condition_facts::try_extract_instanceof_with_negation(operand, &subject, &names)
             {
                 checks.push(VarAssertion {
                     subject: atom(&subject),
@@ -93,20 +93,22 @@ fn or_chain_alternatives(
             {
                 walk(bin.lhs, subject, names, out) && walk(bin.rhs, subject, names, out)
             }
-            _ => match narrowing::try_extract_instanceof_with_negation(expr, subject, names) {
-                Some(extraction) if !extraction.negated => {
-                    if !out.contains(&extraction.class_type) {
-                        out.push(extraction.class_type);
+            _ => {
+                match condition_facts::try_extract_instanceof_with_negation(expr, subject, names) {
+                    Some(extraction) if !extraction.negated => {
+                        if !out.contains(&extraction.class_type) {
+                            out.push(extraction.class_type);
+                        }
+                        true
                     }
-                    true
+                    _ => false,
                 }
-                _ => false,
-            },
+            }
         }
     }
 
     let is_or_chain = matches!(
-        narrowing::fold_negation_pairs(expr),
+        condition_facts::fold_negation_pairs(expr),
         Expression::Binary(bin) if matches!(bin.operator, BinaryOperator::Or(_) | BinaryOperator::LowOr(_))
     );
     if !is_or_chain {
@@ -129,7 +131,7 @@ pub(in crate::type_engine) struct AliasExtraction {
     /// Scope key the check narrows.
     pub subject: String,
     /// The check itself, with the operand's own negation folded in.
-    pub extraction: narrowing::InstanceofExtraction,
+    pub extraction: condition_facts::InstanceofExtraction,
     /// The further classes an `||` chain allows.  Empty for a check that
     /// names a single class.
     pub alternatives: Vec<PhpType>,
@@ -169,7 +171,7 @@ pub(in crate::type_engine) fn assertion_alias_extractions(
         .iter()
         .map(|c| AliasExtraction {
             subject: c.subject.to_string(),
-            extraction: narrowing::InstanceofExtraction {
+            extraction: condition_facts::InstanceofExtraction {
                 class_type: c.class_type.clone(),
                 negated: c.negated != negated,
                 exact: c.exact,

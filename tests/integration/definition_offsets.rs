@@ -1,6 +1,5 @@
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{create_test_backend, goto_definition_at, open_php};
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Tests: Stored byte offsets and offset_to_position ──────────────────────
 
@@ -10,7 +9,7 @@ use tower_lsp::lsp_types::*;
 async fn test_parsed_members_have_nonzero_name_offset() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_offsets.php").unwrap();
+    let uri = Uri::parse("file:///test_offsets.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Greeter {\n",
@@ -28,15 +27,7 @@ async fn test_parsed_members_have_nonzero_name_offset() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -81,7 +72,7 @@ async fn test_parsed_members_have_nonzero_name_offset() {
 async fn test_keyword_offset_populated_for_all_class_kinds() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_keyword_offsets.php").unwrap();
+    let uri = Uri::parse("file:///test_keyword_offsets.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class MyClass {\n",
@@ -102,15 +93,7 @@ async fn test_keyword_offset_populated_for_all_class_kinds() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -168,7 +151,7 @@ async fn test_keyword_offset_populated_for_all_class_kinds() {
 async fn test_name_offset_points_to_correct_token() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_name_tokens.php").unwrap();
+    let uri = Uri::parse("file:///test_name_tokens.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Demo {\n",
@@ -179,15 +162,7 @@ async fn test_name_offset_points_to_correct_token() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -235,7 +210,7 @@ async fn test_name_offset_points_to_correct_token() {
 async fn test_enum_case_name_offset() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_enum_case_offset.php").unwrap();
+    let uri = Uri::parse("file:///test_enum_case_offset.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Color {\n",
@@ -245,15 +220,7 @@ async fn test_enum_case_name_offset() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -277,7 +244,7 @@ async fn test_enum_case_name_offset() {
 async fn test_promoted_property_name_offset() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_promoted.php").unwrap();
+    let uri = Uri::parse("file:///test_promoted.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Point {\n",
@@ -289,15 +256,7 @@ async fn test_promoted_property_name_offset() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -336,7 +295,7 @@ async fn test_promoted_property_name_offset() {
 async fn test_offset_to_position_matches_text_search() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_offset_pos.php").unwrap();
+    let uri = Uri::parse("file:///test_offset_pos.php").unwrap();
     let text = concat!(
         "<?php\n",
         "abstract class AbstractHandler {\n",
@@ -351,37 +310,17 @@ async fn test_offset_to_position_matches_text_search() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "MAX_RETRIES" in `self::MAX_RETRIES` on line 8
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 8,
-                character: 45,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 8, 45).await;
     assert!(
         result.is_some(),
         "Should resolve self::MAX_RETRIES to its declaration"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             // "const MAX_RETRIES" is on line 2
             assert_eq!(
@@ -393,27 +332,16 @@ async fn test_offset_to_position_matches_text_search() {
     }
 
     // Also test method go-to-definition
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            // Place cursor on "retryCount" in `$this->retryCount` on line 8
-            position: Position {
-                line: 8,
-                character: 25,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
 
-    let result = backend.goto_definition(params).await.unwrap();
+    // Place cursor on "retryCount" in `$this->retryCount` on line 8
+    let result = goto_definition_at(&backend, &uri, 8, 25).await;
     assert!(
         result.is_some(),
         "Should resolve $this->retryCount to its declaration"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             // "protected int $retryCount" is on line 3
             assert_eq!(
@@ -435,7 +363,7 @@ async fn test_offset_to_position_matches_text_search() {
 async fn test_class_name_inside_string_does_not_false_match() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_string_false_match.php").unwrap();
+    let uri = Uri::parse("file:///test_string_false_match.php").unwrap();
     // The string literal on line 3 contains "class Greeter" — this should
     // NOT be treated as a class definition.
     let text = concat!(
@@ -458,15 +386,7 @@ async fn test_class_name_inside_string_does_not_false_match() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // The real `class Greeter` is on line 7, NOT line 3 (which is inside
     // a string).  Verify keyword_offset points to line 7.
@@ -489,26 +409,14 @@ async fn test_class_name_inside_string_does_not_false_match() {
     );
 
     // Verify go-to-definition for `new Greeter()` on line 14 lands on line 7
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 14,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 14, 14).await;
     assert!(
         result.is_some(),
         "Should resolve Greeter to its declaration"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 7,
@@ -525,7 +433,7 @@ async fn test_class_name_inside_string_does_not_false_match() {
 async fn test_member_name_in_heredoc_does_not_false_match() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_heredoc.php").unwrap();
+    let uri = Uri::parse("file:///test_heredoc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -544,37 +452,17 @@ async fn test_member_name_in_heredoc_does_not_false_match() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "write" in `$logger->write('test')` on line 13
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 13,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 13, 15).await;
     assert!(
         result.is_some(),
         "Should resolve $logger->write() to its declaration"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             // The real `public function write(...)` is on line 2, not line 6
             assert_eq!(
@@ -591,7 +479,7 @@ async fn test_member_name_in_heredoc_does_not_false_match() {
 async fn test_trait_member_offset() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_trait_offset.php").unwrap();
+    let uri = Uri::parse("file:///test_trait_offset.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Timestampable {\n",
@@ -600,15 +488,7 @@ async fn test_trait_member_offset() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -644,7 +524,7 @@ async fn test_trait_member_offset() {
 async fn test_offsets_with_comments_heredocs_and_strings() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_stress.php").unwrap();
+    let uri = Uri::parse("file:///test_stress.php").unwrap();
     let text = concat!(
         "<?php\n",
         "// class FakeClass { const FAKE = 1; }\n",
@@ -668,15 +548,7 @@ async fn test_offsets_with_comments_heredocs_and_strings() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -718,7 +590,7 @@ async fn test_offsets_with_comments_heredocs_and_strings() {
 async fn test_backed_enum_case_offsets() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_backed_enum.php").unwrap();
+    let uri = Uri::parse("file:///test_backed_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Suit: string {\n",
@@ -729,15 +601,7 @@ async fn test_backed_enum_case_offsets() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -769,7 +633,7 @@ async fn test_backed_enum_case_offsets() {
 async fn test_interface_constant_definition_via_offset() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_iface_const.php").unwrap();
+    let uri = Uri::parse("file:///test_iface_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Configurable {\n",
@@ -784,15 +648,7 @@ async fn test_interface_constant_definition_via_offset() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -816,7 +672,7 @@ async fn test_interface_constant_definition_via_offset() {
 async fn test_anonymous_class_keyword_offset_is_zero() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_anon_class.php").unwrap();
+    let uri = Uri::parse("file:///test_anon_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Outer {\n",
@@ -830,15 +686,7 @@ async fn test_anonymous_class_keyword_offset_is_zero() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let classes = backend
         .get_classes_for_uri(uri.as_str())
@@ -879,40 +727,18 @@ async fn test_anonymous_class_keyword_offset_is_zero() {
 #[tokio::test]
 async fn test_goto_definition_on_a_function_declaration_offers_usages() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///function_declaration.php").unwrap();
+    let uri = Uri::parse("file:///function_declaration.php").unwrap();
     let content = "<?php\nfunction helper(): void {}\n\nhelper();\n";
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, content).await;
 
     // Click on "helper" in `function helper(): void {}` on line 1.
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 1,
-                character: 11,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend
-        .goto_definition(params)
+    let result = goto_definition_at(&backend, &uri, 1, 11)
         .await
-        .unwrap()
         .expect("a function declaration should answer with itself");
 
     match result {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -920,7 +746,7 @@ async fn test_goto_definition_on_a_function_declaration_offers_usages() {
                 location.range
             );
         }
-        GotoDefinitionResponse::Array(locations) => {
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => {
             assert_eq!(locations.len(), 1, "got {:?}", locations);
             assert_eq!(locations[0].range.start.line, 1, "got {:?}", locations);
         }

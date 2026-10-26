@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use tower_lsp::lsp_types::{CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString, Url};
+use tower_lsp_server::gen_lsp_types::{Code, CodeDescription, Diagnostic, DiagnosticSeverity};
 
 use crate::config::PhpmdConfig;
 
@@ -324,12 +324,12 @@ fn parse_phpmd_violation(violation: &serde_json::Value) -> Option<Diagnostic> {
     let code = violation
         .get("rule")
         .and_then(|r| r.as_str())
-        .map(|r| NumberOrString::String(r.to_string()));
+        .map(|r| Code::String(r.to_string()));
 
     let code_description = violation
         .get("externalInfoUrl")
         .and_then(|u| u.as_str())
-        .and_then(|u| Url::parse(u).ok())
+        .and_then(crate::util::parse_url)
         .map(|href| CodeDescription { href });
 
     // A violation spans `beginLine..endLine`, which for a method- or
@@ -338,11 +338,11 @@ fn parse_phpmd_violation(violation: &serde_json::Value) -> Option<Diagnostic> {
     // only the line the violation starts on is marked, as for PHPStan.
     Some(Diagnostic {
         range: crate::process::full_line_range(lsp_line),
-        severity: Some(DiagnosticSeverity::WARNING),
+        severity: Some(DiagnosticSeverity::Warning),
         code,
         code_description,
         source: Some("phpmd".to_string()),
-        message: message.to_string(),
+        message: message.to_string().into(),
         related_information: None,
         tags: None,
         data: None,
@@ -393,15 +393,15 @@ mod tests {
         assert_eq!(diags.len(), 2);
 
         assert_eq!(
-            diags[0].message,
+            crate::util::message_text(&diags[0].message),
             "Avoid unused local variables such as '$x'."
         );
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("UnusedLocalVariable".to_string()))
+            Some(Code::String("UnusedLocalVariable".to_string()))
         );
         assert_eq!(diags[0].source.as_deref(), Some("phpmd"));
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
         assert_eq!(
             diags[0].code_description.as_ref().map(|d| d.href.as_str()),
             Some("https://phpmd.org/rules/unusedcode.html#unusedlocalvariable")
@@ -454,7 +454,10 @@ mod tests {
         let map = parse_phpmd_json_workspace(json, Path::new("/proj")).unwrap();
         // Clean files are dropped; relative paths resolve against the root.
         assert_eq!(map.len(), 2);
-        assert_eq!(map[Path::new("/proj/app/A.php")][0].message, "Bad A");
+        assert_eq!(
+            crate::util::message_text(&map[Path::new("/proj/app/A.php")][0].message),
+            "Bad A"
+        );
         assert_eq!(map[Path::new("/proj/app/B.php")][0].range.start.line, 7);
     }
 

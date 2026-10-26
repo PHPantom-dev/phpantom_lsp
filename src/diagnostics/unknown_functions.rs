@@ -16,7 +16,7 @@
 //!   (`isset`, `unset`, `empty`, `eval`, `exit`, `die`, `list`,
 //!   `print`, `echo`, `include`, `require`, etc.) are skipped.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
@@ -66,9 +66,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
-            return;
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
         self.collect_unknown_function_diagnostics_with_context(&ctx, uri, content, out);
     }
 
@@ -194,7 +192,7 @@ impl Backend {
 
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 UNKNOWN_FUNCTION_CODE,
                 message,
             ));

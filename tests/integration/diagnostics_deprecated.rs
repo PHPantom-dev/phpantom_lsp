@@ -1,11 +1,11 @@
+use crate::common::message_text;
 use crate::common::{
-    create_test_backend, create_test_backend_with_full_stubs,
-    create_test_backend_with_function_stubs, find_actions_containing,
+    completion_response, create_test_backend, create_test_backend_with_full_stubs,
+    create_test_backend_with_function_stubs, find_actions_containing, open_php,
 };
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -48,14 +48,14 @@ fn all_diagnostics(backend: &phpantom_lsp::Backend, uri: &str, text: &str) -> Ve
 fn has_deprecated_tag(d: &Diagnostic) -> bool {
     d.tags
         .as_ref()
-        .is_some_and(|tags| tags.contains(&DiagnosticTag::DEPRECATED))
+        .is_some_and(|tags| tags.contains(&DiagnosticTag::Deprecated))
 }
 
 /// Assert that a diagnostic has the `Unnecessary` tag.
 fn has_unnecessary_tag(d: &Diagnostic) -> bool {
     d.tags
         .as_ref()
-        .is_some_and(|tags| tags.contains(&DiagnosticTag::UNNECESSARY))
+        .is_some_and(|tags| tags.contains(&DiagnosticTag::Unnecessary))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -86,7 +86,8 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("OldHelper") && d.message.contains("deprecated")),
+            .any(|d| message_text(&d.message).contains("OldHelper")
+                && message_text(&d.message).contains("deprecated")),
         "Expected a deprecated diagnostic for OldHelper, got: {:?}",
         deprecated
     );
@@ -114,7 +115,7 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("Use NewApi instead")),
+            .any(|d| message_text(&d.message).contains("Use NewApi instead")),
         "Expected deprecation message to include reason, got: {:?}",
         deprecated
     );
@@ -171,7 +172,8 @@ class App {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("sendLegacy") && d.message.contains("deprecated")),
+            .any(|d| message_text(&d.message).contains("sendLegacy")
+                && message_text(&d.message).contains("deprecated")),
         "Expected deprecated diagnostic for $m->sendLegacy(), got: {:?}",
         deprecated
     );
@@ -225,7 +227,8 @@ class Config {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("oldSetting") && d.message.contains("deprecated")),
+            .any(|d| message_text(&d.message).contains("oldSetting")
+                && message_text(&d.message).contains("deprecated")),
         "Expected deprecated diagnostic for $oldSetting, got: {:?}",
         deprecated
     );
@@ -256,7 +259,8 @@ class Status {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("OLD_STATUS") && d.message.contains("deprecated")),
+            .any(|d| message_text(&d.message).contains("OLD_STATUS")
+                && message_text(&d.message).contains("deprecated")),
         "Expected deprecated diagnostic for OLD_STATUS, got: {:?}",
         deprecated
     );
@@ -281,7 +285,9 @@ class Child extends OldBase {}
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("OldBase")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("OldBase")),
         "Expected deprecated diagnostic for OldBase in extends clause, got: {:?}",
         deprecated
     );
@@ -306,7 +312,9 @@ class Consumer {
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("OldType")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("OldType")),
         "Expected deprecated diagnostic for OldType in param type hint, got: {:?}",
         deprecated
     );
@@ -335,7 +343,7 @@ class Consumer {
     for d in &deprecated {
         assert_eq!(
             d.severity,
-            Some(DiagnosticSeverity::HINT),
+            Some(DiagnosticSeverity::Hint),
             "Deprecated diagnostics should have HINT severity"
         );
         assert!(
@@ -375,7 +383,9 @@ class Consumer {
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("make")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("make")),
         "Expected deprecated diagnostic for Factory::make(), got: {:?}",
         deprecated
     );
@@ -427,7 +437,7 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message == "'Legacy' is deprecated"),
+            .any(|d| message_text(&d.message) == "'Legacy' is deprecated"),
         "Expected message to be exactly \"'Legacy' is deprecated\", got: {:?}",
         deprecated.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
@@ -455,7 +465,9 @@ class Consumer {}
     let unnecessary: Vec<_> = diags.iter().filter(|d| has_unnecessary_tag(d)).collect();
 
     assert!(
-        unnecessary.iter().any(|d| d.message.contains("Foo\\Bar")),
+        unnecessary
+            .iter()
+            .any(|d| message_text(&d.message).contains("Foo\\Bar")),
         "Expected unused import diagnostic for Foo\\Bar, got: {:?}",
         unnecessary
     );
@@ -479,7 +491,7 @@ class Consumer {}
     for d in &unnecessary {
         assert_eq!(
             d.severity,
-            Some(DiagnosticSeverity::HINT),
+            Some(DiagnosticSeverity::Hint),
             "Unused import diagnostics should have HINT severity"
         );
         assert!(
@@ -517,7 +529,10 @@ class Consumer {
     let foo_diag = diags
         .iter()
         .filter(|d| has_unnecessary_tag(d))
-        .find(|d| d.message.contains("Vendor\\Foo") && !d.message.contains("FooBar"))
+        .find(|d| {
+            message_text(&d.message).contains("Vendor\\Foo")
+                && !message_text(&d.message).contains("FooBar")
+        })
         .expect("expected unused import diagnostic for Vendor\\Foo");
 
     assert_eq!(
@@ -724,9 +739,9 @@ class Consumer {
         unnecessary
     );
     assert!(
-        unnecessary[0].message.contains("Foo\\UnusedClass"),
+        message_text(&unnecessary[0].message).contains("Foo\\UnusedClass"),
         "Expected the unused import to be Foo\\UnusedClass, got: {}",
-        unnecessary[0].message
+        message_text(&unnecessary[0].message)
     );
 }
 
@@ -907,7 +922,9 @@ class Child extends Base {
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("oldMethod")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("oldMethod")),
         "Expected deprecated diagnostic for parent::oldMethod(), got: {:?}",
         deprecated
     );
@@ -1129,12 +1146,15 @@ class TypeHintGtdDemo {
     // GtdAccessException is imported but never referenced — should be flagged.
     // Exception and Stringable are also imported but not referenced — should be flagged.
     // GtdNotFoundException IS referenced in the catch clause — should NOT be flagged.
-    let flagged_msgs: Vec<&str> = unnecessary.iter().map(|d| d.message.as_str()).collect();
+    let flagged_msgs: Vec<&str> = unnecessary
+        .iter()
+        .map(|d| message_text(&d.message))
+        .collect();
 
     assert!(
         unnecessary
             .iter()
-            .any(|d| d.message.contains("GtdAccessException")),
+            .any(|d| message_text(&d.message).contains("GtdAccessException")),
         "GtdAccessException is unused and should be flagged, got: {:?}",
         flagged_msgs
     );
@@ -1142,7 +1162,7 @@ class TypeHintGtdDemo {
     assert!(
         !unnecessary
             .iter()
-            .any(|d| d.message.contains("GtdNotFoundException")),
+            .any(|d| message_text(&d.message).contains("GtdNotFoundException")),
         "GtdNotFoundException IS used in catch clause and should NOT be flagged, got: {:?}",
         flagged_msgs
     );
@@ -1257,7 +1277,7 @@ class Consumer {
     assert!(
         unnecessary
             .iter()
-            .any(|d| d.message.contains("Foo\\UserProfile")),
+            .any(|d| message_text(&d.message).contains("Foo\\UserProfile")),
         "Unused aliased import should be flagged, got: {:?}",
         unnecessary
     );
@@ -1286,7 +1306,8 @@ old_helper();
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("old_helper") && d.message.contains("deprecated")),
+            .any(|d| message_text(&d.message).contains("old_helper")
+                && message_text(&d.message).contains("deprecated")),
         "Expected a deprecated diagnostic for old_helper(), got: {:?}",
         deprecated
     );
@@ -1309,8 +1330,8 @@ old_helper();
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("old_helper")
-                && d.message.contains("Use new_helper() instead")),
+            .any(|d| message_text(&d.message).contains("old_helper")
+                && message_text(&d.message).contains("Use new_helper() instead")),
         "Expected a deprecated diagnostic with reason for old_helper(), got: {:?}",
         deprecated
     );
@@ -1331,8 +1352,10 @@ old_helper();
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("old_helper")
-            && d.message.contains("Use anonymous functions instead")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("old_helper")
+                && message_text(&d.message).contains("Use anonymous functions instead")),
         "Expected a deprecated diagnostic with positional reason, got: {:?}",
         deprecated
     );
@@ -1361,8 +1384,8 @@ class Mailer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("sendLegacy")
-                && d.message.contains("Use sendAsync() instead")),
+            .any(|d| message_text(&d.message).contains("sendLegacy")
+                && message_text(&d.message).contains("Use sendAsync() instead")),
         "Expected a deprecated diagnostic for sendLegacy(), got: {:?}",
         deprecated
     );
@@ -1389,7 +1412,8 @@ class Mailer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("sendLegacy") && d.message.contains("deprecated")),
+            .any(|d| message_text(&d.message).contains("sendLegacy")
+                && message_text(&d.message).contains("deprecated")),
         "Expected a deprecated diagnostic for sendLegacy(), got: {:?}",
         deprecated
     );
@@ -1418,7 +1442,8 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("OldApi") && d.message.contains("Use NewApi instead")),
+            .any(|d| message_text(&d.message).contains("OldApi")
+                && message_text(&d.message).contains("Use NewApi instead")),
         "Expected a deprecated diagnostic for OldApi, got: {:?}",
         deprecated
     );
@@ -1447,8 +1472,8 @@ class Document {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("encoding")
-                && d.message.contains("The property is deprecated")),
+            .any(|d| message_text(&d.message).contains("encoding")
+                && message_text(&d.message).contains("The property is deprecated")),
         "Expected a deprecated diagnostic for encoding property, got: {:?}",
         deprecated
     );
@@ -1475,7 +1500,8 @@ class Document {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("config") && d.message.contains("deprecated")),
+            .any(|d| message_text(&d.message).contains("config")
+                && message_text(&d.message).contains("deprecated")),
         "Expected a deprecated diagnostic for config property, got: {:?}",
         deprecated
     );
@@ -1502,8 +1528,10 @@ class Config {
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("ATTR_OLD")
-            && d.message.contains("Use ATTR_EMULATE_PREPARES instead")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("ATTR_OLD")
+                && message_text(&d.message).contains("Use ATTR_EMULATE_PREPARES instead")),
         "Expected a deprecated diagnostic for ATTR_OLD constant, got: {:?}",
         deprecated
     );
@@ -1536,14 +1564,14 @@ class Mailer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("Use sendModern() instead")),
+            .any(|d| message_text(&d.message).contains("Use sendModern() instead")),
         "Expected docblock @deprecated message to take priority, got: {:?}",
         deprecated
     );
     assert!(
         !deprecated
             .iter()
-            .any(|d| d.message.contains("Attribute message")),
+            .any(|d| message_text(&d.message).contains("Attribute message")),
         "Attribute message should NOT appear when docblock has @deprecated, got: {:?}",
         deprecated
     );
@@ -1572,7 +1600,8 @@ class Config {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("OLD_MODE") && d.message.contains("since PHP 7.4")),
+            .any(|d| message_text(&d.message).contains("OLD_MODE")
+                && message_text(&d.message).contains("since PHP 7.4")),
         "Expected 'since PHP 7.4' in deprecated message, got: {:?}",
         deprecated
     );
@@ -1583,7 +1612,7 @@ class Config {
 #[tokio::test]
 async fn completion_marks_attribute_deprecated_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_completion_attr_deprecated.php").unwrap();
+    let uri = Uri::parse("file:///test_completion_attr_deprecated.php").unwrap();
     let text = r#"<?php
 class Mailer {
     #[Deprecated(reason: "Use sendAsync() instead")]
@@ -1597,32 +1626,11 @@ class Mailer {
 }
 "#;
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 8,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let items = match backend.completion(completion_params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+    let items = match completion_response(&backend, &uri, 8, 15, None).await {
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         _ => vec![],
     };
 
@@ -1633,7 +1641,7 @@ class Mailer {
             .unwrap()
             .tags
             .as_ref()
-            .is_some_and(|t| t.contains(&CompletionItemTag::DEPRECATED)),
+            .is_some_and(|t| t.contains(&CompletionItemTag::Deprecated)),
         "sendLegacy should be tagged deprecated in completion"
     );
 
@@ -1647,7 +1655,7 @@ class Mailer {
             .unwrap()
             .tags
             .as_ref()
-            .is_some_and(|t| t.contains(&CompletionItemTag::DEPRECATED)),
+            .is_some_and(|t| t.contains(&CompletionItemTag::Deprecated)),
         "sendAsync should NOT be tagged deprecated"
     );
 }
@@ -1673,8 +1681,8 @@ unsafe_function();
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("unsafe_function")
-                && d.message.contains("Use safe_replacement() instead")),
+            .any(|d| message_text(&d.message).contains("unsafe_function")
+                && message_text(&d.message).contains("Use safe_replacement() instead")),
         "Expected a deprecated diagnostic with native message for unsafe_function(), got: {:?}",
         deprecated
     );
@@ -1701,8 +1709,8 @@ class Service {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("process")
-                && d.message.contains("Use processV2() instead")),
+            .any(|d| message_text(&d.message).contains("process")
+                && message_text(&d.message).contains("Use processV2() instead")),
         "Expected a deprecated diagnostic with native message: for process(), got: {:?}",
         deprecated
     );
@@ -1729,8 +1737,8 @@ class Config {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("OLD_LIMIT")
-                && d.message.contains("Use NEW_LIMIT instead")),
+            .any(|d| message_text(&d.message).contains("OLD_LIMIT")
+                && message_text(&d.message).contains("Use NEW_LIMIT instead")),
         "Expected a deprecated diagnostic for OLD_LIMIT constant, got: {:?}",
         deprecated
     );
@@ -1761,14 +1769,16 @@ class Demo {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("jbMethod") && d.message.contains("JetBrains style")),
+            .any(|d| message_text(&d.message).contains("jbMethod")
+                && message_text(&d.message).contains("JetBrains style")),
         "JetBrains-style #[Deprecated(reason:)] should produce a diagnostic, got: {:?}",
         deprecated
     );
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("nativeMethod") && d.message.contains("Native PHP style")),
+            .any(|d| message_text(&d.message).contains("nativeMethod")
+                && message_text(&d.message).contains("Native PHP style")),
         "Native-style #[\\Deprecated(message:)] should produce a diagnostic, got: {:?}",
         deprecated
     );
@@ -1805,7 +1815,8 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("process") && d.message.contains("deprecated")),
+            .any(|d| message_text(&d.message).contains("process")
+                && message_text(&d.message).contains("deprecated")),
         "Expected deprecated diagnostic for $svc->process(), got: {:?}",
         deprecated
     );
@@ -1816,7 +1827,7 @@ class Consumer {
     assert!(
         !deprecated
             .iter()
-            .any(|d| d.message.starts_with("'Service::processV2'")),
+            .any(|d| message_text(&d.message).starts_with("'Service::processV2'")),
         "processV2 should NOT be marked deprecated, got: {:?}",
         deprecated
     );
@@ -1849,7 +1860,8 @@ class Reader {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("oldSetting") && d.message.contains("deprecated")),
+            .any(|d| message_text(&d.message).contains("oldSetting")
+                && message_text(&d.message).contains("deprecated")),
         "Expected deprecated diagnostic for $cfg->oldSetting, got: {:?}",
         deprecated
     );
@@ -1859,7 +1871,7 @@ class Reader {
     assert!(
         !deprecated
             .iter()
-            .any(|d| d.message.starts_with("'Config::newSetting'")),
+            .any(|d| message_text(&d.message).starts_with("'Config::newSetting'")),
         "newSetting should NOT be marked deprecated, got: {:?}",
         deprecated
     );
@@ -1891,8 +1903,8 @@ class App {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("log")
-                && d.message.contains("Use logStructured() instead")),
+            .any(|d| message_text(&d.message).contains("log")
+                && message_text(&d.message).contains("Use logStructured() instead")),
         "Expected deprecated diagnostic with attribute message for $logger->log(), got: {:?}",
         deprecated
     );
@@ -1921,7 +1933,8 @@ class Handler {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("sendLegacy") && d.message.contains("deprecated")),
+            .any(|d| message_text(&d.message).contains("sendLegacy")
+                && message_text(&d.message).contains("deprecated")),
         "Expected deprecated diagnostic for $mailer->sendLegacy() (param type hint), got: {:?}",
         deprecated
     );
@@ -2010,7 +2023,8 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("oldMethod") && d.message.contains("Use modernMethod()")),
+            .any(|d| message_text(&d.message).contains("oldMethod")
+                && message_text(&d.message).contains("Use modernMethod()")),
         "Real #[\\Deprecated] should still produce a diagnostic, got: {:?}",
         deprecated
     );
@@ -2237,7 +2251,7 @@ $pdo->sqliteCreateFunction('foo', function () {});
 "#;
 
     let diags = deprecated_diagnostics(&backend, uri, text);
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
 
     assert!(
         messages
@@ -2318,8 +2332,9 @@ fn replace_deprecated_function_call_action_offered() {
         actions
             .iter()
             .map(|a| match a {
-                tower_lsp::lsp_types::CodeActionOrCommand::CodeAction(ca) => ca.title.clone(),
-                tower_lsp::lsp_types::CodeActionOrCommand::Command(c) => c.title.clone(),
+                tower_lsp_server::gen_lsp_types::CodeActionResponse::CodeAction(ca) =>
+                    ca.title.clone(),
+                tower_lsp_server::gen_lsp_types::CodeActionResponse::Command(c) => c.title.clone(),
             })
             .collect::<Vec<_>>()
     );
@@ -2507,19 +2522,23 @@ class Consumer {
     let unnecessary: Vec<_> = diags.iter().filter(|d| has_unnecessary_tag(d)).collect();
 
     assert!(
-        !unnecessary.iter().any(|d| d.message.contains("TraitA")),
+        !unnecessary
+            .iter()
+            .any(|d| message_text(&d.message).contains("TraitA")),
         "TraitA used in class body trait-use should not be flagged, got: {:?}",
         unnecessary
     );
     assert!(
-        !unnecessary.iter().any(|d| d.message.contains("TraitB")),
+        !unnecessary
+            .iter()
+            .any(|d| message_text(&d.message).contains("TraitB")),
         "TraitB used in class body trait-use should not be flagged, got: {:?}",
         unnecessary
     );
     assert!(
         unnecessary
             .iter()
-            .any(|d| d.message.contains("UnusedClass")),
+            .any(|d| message_text(&d.message).contains("UnusedClass")),
         "UnusedClass should still be flagged as unused, got: {:?}",
         unnecessary
     );
@@ -2639,7 +2658,8 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("see:") && d.message.contains("NewHelper")),
+            .any(|d| message_text(&d.message).contains("see:")
+                && message_text(&d.message).contains("NewHelper")),
         "Expected @see reference in deprecated diagnostic message, got: {:?}",
         deprecated
     );
@@ -2672,9 +2692,11 @@ class App {
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("sendLegacy")
-            && d.message.contains("see:")
-            && d.message.contains("Mailer::sendAsync()")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("sendLegacy")
+                && message_text(&d.message).contains("see:")
+                && message_text(&d.message).contains("Mailer::sendAsync()")),
         "Expected @see reference in deprecated method diagnostic, got: {:?}",
         deprecated
     );
@@ -2709,7 +2731,8 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("See:") && d.message.contains("NewClass")),
+            .any(|d| message_text(&d.message).contains("See:")
+                && message_text(&d.message).contains("NewClass")),
         "Expected 'See: NewClass' in diagnostic for bare @deprecated + @see, got: {:?}",
         deprecated
     );
@@ -2747,7 +2770,8 @@ class App {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("see:") && d.message.contains("number_of()")),
+            .any(|d| message_text(&d.message).contains("see:")
+                && message_text(&d.message).contains("number_of()")),
         "Expected @see references in deprecated method diagnostic, got: {:?}",
         deprecated
     );
@@ -2775,13 +2799,15 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("Use NewApi instead")),
+            .any(|d| message_text(&d.message).contains("Use NewApi instead")),
         "Expected deprecation reason without 'see:' when no @see tags, got: {:?}",
         deprecated
     );
     // Should NOT contain "see:" since there are no @see tags
     assert!(
-        deprecated.iter().all(|d| !d.message.contains("see:")),
+        deprecated
+            .iter()
+            .all(|d| !message_text(&d.message).contains("see:")),
         "Should not contain 'see:' when no @see tags, got: {:?}",
         deprecated
     );
@@ -2811,7 +2837,8 @@ class App {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("See:") && d.message.contains("newFunction()")),
+            .any(|d| message_text(&d.message).contains("See:")
+                && message_text(&d.message).contains("newFunction()")),
         "Expected @see reference in deprecated function diagnostic, got: {:?}",
         deprecated
     );
@@ -2844,9 +2871,11 @@ class App {
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("oldSetting")
-            && d.message.contains("see:")
-            && d.message.contains("Config::$newSetting")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("oldSetting")
+                && message_text(&d.message).contains("see:")
+                && message_text(&d.message).contains("Config::$newSetting")),
         "Expected @see reference in deprecated property diagnostic, got: {:?}",
         deprecated
     );
@@ -2878,9 +2907,11 @@ class App {
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("OLD_FLAG")
-            && d.message.contains("See:")
-            && d.message.contains("Features::NEW_FLAG")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("OLD_FLAG")
+                && message_text(&d.message).contains("See:")
+                && message_text(&d.message).contains("Features::NEW_FLAG")),
         "Expected @see reference in deprecated constant diagnostic, got: {:?}",
         deprecated
     );
@@ -2985,7 +3016,9 @@ class Worker implements OldContract {
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("OldContract")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("OldContract")),
         "Expected deprecated diagnostic for OldContract in implements clause, got: {:?}",
         deprecated
     );
@@ -3032,7 +3065,8 @@ class Second {
     assert!(
         deprecated
             .iter()
-            .all(|d| !d.message.contains("safeMethod") && !d.message.contains("notDeprecated")),
+            .all(|d| !message_text(&d.message).contains("safeMethod")
+                && !message_text(&d.message).contains("notDeprecated")),
         "Non-deprecated methods should not be flagged, got: {:?}",
         deprecated
     );
@@ -3076,7 +3110,7 @@ class Beta {
         deprecated
     );
     assert!(
-        deprecated[0].message.contains("oldWay"),
+        message_text(&deprecated[0].message).contains("oldWay"),
         "Expected the deprecated diagnostic to mention oldWay, got: {:?}",
         deprecated[0].message
     );
@@ -3254,7 +3288,7 @@ class Probe {
         deprecated
     );
     assert!(
-        deprecated[0].message.contains("HttpRequest::get"),
+        message_text(&deprecated[0].message).contains("HttpRequest::get"),
         "Expected the diagnostic to name HttpRequest::get, got: {:?}",
         deprecated[0]
     );
@@ -3289,7 +3323,7 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("deprecatedMethod")),
+            .any(|d| message_text(&d.message).contains("deprecatedMethod")),
         "Expected a deprecated diagnostic for deprecatedMethod() reached through getHelper(), got: {:?}",
         deprecated
     );
@@ -3320,7 +3354,7 @@ class Consumer {
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("deprecatedMethod")),
+            .any(|d| message_text(&d.message).contains("deprecatedMethod")),
         "Expected a deprecated diagnostic for deprecatedMethod() reached through $this->helper, got: {:?}",
         deprecated
     );
@@ -3349,7 +3383,7 @@ makeHelper()->deprecatedMethod();
     assert!(
         deprecated
             .iter()
-            .any(|d| d.message.contains("deprecatedMethod")),
+            .any(|d| message_text(&d.message).contains("deprecatedMethod")),
         "Expected a deprecated diagnostic for deprecatedMethod() reached through makeHelper(), got: {:?}",
         deprecated
     );
@@ -3524,7 +3558,9 @@ function callDirectly(Shape $shape): bool
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("hasProperty")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("hasProperty")),
         "A call to the deprecated interface method from outside the \
          overriding method should still be flagged, got: {:?}",
         deprecated
@@ -3597,7 +3633,9 @@ class Bar {
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("oldMethod")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("oldMethod")),
         "A same-named method on an unrelated class must still be flagged, got: {:?}",
         deprecated
     );
@@ -3636,7 +3674,9 @@ class Child extends Base {
     let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
 
     assert!(
-        deprecated.iter().any(|d| d.message.contains("oldMethod")),
+        deprecated
+            .iter()
+            .any(|d| message_text(&d.message).contains("oldMethod")),
         "A sibling method must still be flagged even though the class \
          overrides the deprecated method elsewhere, got: {:?}",
         deprecated

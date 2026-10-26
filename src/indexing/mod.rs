@@ -6,8 +6,16 @@
 //!
 //! - [`init`] — the three workspace-shape initializers (single Composer
 //!   project, monorepo, no-Composer).
-//! - [`scan`] — vendor registration and Composer-derived index (re)builds,
-//!   autoload-file and PHAR scanning.
+//! - [`scan`] — vendor registration, Composer-derived index (re)builds and
+//!   autoload-file scanning.
+//! - [`phar`] — indexing the classes inside the PHAR archives an autoload
+//!   file loads.
+//! - [`library_paths`] — the `[indexing] include` paths every pipeline
+//!   indexes last.
+//! - [`stub_paths`] — the `[stubs]` paths and the editor's stub
+//!   directory, whose declarations win over every other.
+//! - [`extra_roots`] — the editor's other workspace folders, indexed
+//!   beside the project as library code.
 //! - [`preload`] — autoload preloading and the `ensure_workspace_indexed*`
 //!   parallel parse pipeline.
 //! - [`watch`] — applying `didChangeWatchedFiles` batches to the indexes.
@@ -18,11 +26,15 @@
 
 use std::path::{Path, PathBuf};
 
+mod extra_roots;
 mod init;
+mod library_paths;
+mod phar;
 pub(crate) mod preload;
 mod reconcile;
 mod reindex;
 mod scan;
+pub(crate) mod stub_paths;
 mod watch;
 
 /// Return the path as supplied plus its canonical spelling when the

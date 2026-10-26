@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::config::Config;
@@ -111,7 +111,7 @@ impl Backend {
             };
 
             // ── Step 3: resolve the tool's binary ───────────────────
-            let file_path = match uri.parse::<Url>().ok().and_then(|u| u.to_file_path().ok()) {
+            let file_path = match crate::util::uri_to_path(&uri) {
                 Some(p) => p,
                 None => continue,
             };

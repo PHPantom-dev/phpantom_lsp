@@ -8,9 +8,9 @@
 //! registration, and a provider loses to one that extends it, regardless of
 //! which of them is scanned first.
 
-use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace, open_php};
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -194,19 +194,10 @@ async fn hover_over_x(providers: &'static str, consumer: &str) -> String {
     let mut files = base_files(providers);
     files.push(("src/Consumer.php", consumer));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, consumer).await;
 
     let idx = consumer.rfind("$x;").expect("consumer should use $x");
     let prefix = &consumer[..idx + 1];
@@ -216,7 +207,7 @@ async fn hover_over_x(providers: &'static str, consumer: &str) -> String {
         .handle_hover(uri.as_str(), consumer, Position { line, character })
         .expect("hover should resolve");
     match &hover.contents {
-        HoverContents::Markup(markup) => markup.value.clone(),
+        Contents::MarkupContent(markup) => markup.value.clone(),
         _ => panic!("expected MarkupContent"),
     }
 }

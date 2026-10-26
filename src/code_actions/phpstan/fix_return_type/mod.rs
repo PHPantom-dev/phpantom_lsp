@@ -32,36 +32,33 @@
 //!
 //! ## Module layout
 //!
+//! - [`target`] — the function a diagnostic is about, found in the parsed
+//!   file, with the positions the fixes edit.
 //! - [`inference`] — return-type inference from function bodies
 //!   (return-statement scanning, literal inference).
-//! - [`edits`] — `TextEdit` builders for the fixes, plus the
-//!   source-navigation helpers they share.
+//! - [`edits`] — `TextEdit` builders for the fixes.
 //! - [`message_parse`] — extraction of type names from PHPStan
 //!   diagnostic messages.
 
 mod edits;
 mod inference;
 mod message_parse;
+mod target;
 
 pub(crate) use inference::enrichment_return_type;
+pub(in crate::code_actions::phpstan) use target::{Anchor, target_function};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::find_function_keyword_line as find_func_keyword_line;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 use crate::php_type::PhpType;
 
 use edits::{
     build_change_return_type_edits_to, build_strip_return_expr_edit,
-    build_update_return_type_edits, build_update_return_type_edits_split,
-    find_function_open_brace_line, gather_between_paren_and_brace, has_return_type_between,
-    read_current_return_type, should_use_own_inference,
-};
-pub(in crate::code_actions::phpstan) use edits::{
-    find_close_paren_before_brace, find_open_brace_from_declaration, find_return_type_edit,
-    native_return_type, paren_function_docblock,
+    build_update_return_type_edits, build_update_return_type_edits_split, read_current_return_type,
+    should_use_own_inference,
 };
 use message_parse::{
     RETURN_EMPTY_MSG_FRAGMENT, RETURN_VOID_MSG_SUFFIX, extract_actual_type,
@@ -110,7 +107,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -123,36 +120,36 @@ impl Backend {
 
             match identifier {
                 RETURN_VOID_ID => {
-                    if !diag.message.ends_with(RETURN_VOID_MSG_SUFFIX) {
+                    if !crate::util::message_text(&diag.message).ends_with(RETURN_VOID_MSG_SUFFIX) {
                         continue;
                     }
-
-                    // Verify the strip-expression fix is applicable.
-                    if build_strip_return_expr_edit(content, diag_line).is_none() {
+                    let Some(target) = target_function(
+                        content,
+                        diag_line,
+                        Anchor::Return,
+                        crate::util::message_text(&diag.message),
+                    ) else {
                         continue;
-                    }
+                    };
 
                     // ── Fix 1: Strip return expression ──────────────
-                    let extra = serde_json::json!({
-                        "diagnostic_line": diag_line,
-                        "identifier": RETURN_VOID_ID,
-                    });
+                    // An arrow function has no `return` to strip.
+                    if build_strip_return_expr_edit(content, &target).is_some() {
+                        let extra = serde_json::json!({
+                            "identifier": RETURN_VOID_ID,
+                            "message": &diag.message,
+                        });
 
-                    out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                        title: "Remove return statement".to_string(),
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![diag.clone()]),
-                        edit: None,
-                        command: None,
-                        is_preferred: Some(false),
-                        disabled: None,
-                        data: Some(make_code_action_data(
+                        out.push(deferred_quickfix(
+                            "Remove return statement".to_string(),
                             ACTION_KIND_STRIP_EXPR,
                             uri,
                             &params.range,
+                            vec![diag.clone()],
+                            false,
                             extra,
-                        )),
-                    }));
+                        ));
+                    }
 
                     // ── Fix 2: Change return type to match actual ───
                     // Extract the actual type from the message:
@@ -161,145 +158,137 @@ impl Backend {
                     // from a void function is not a type mismatch, it's
                     // just a habit.  The "Remove return statement" fix above
                     // handles it.
-                    if let Some(actual_type) = extract_actual_type(&diag.message)
+                    if let Some(actual_type) =
+                        extract_actual_type(crate::util::message_text(&diag.message))
                         && !actual_type.is_null()
                     {
                         // Verify the change-type fix is applicable (the
                         // function has a return type that can be replaced).
-                        if build_change_return_type_edits_to(content, diag_line, &actual_type)
+                        if build_change_return_type_edits_to(content, &target, &actual_type)
                             .is_some()
                         {
                             let actual_str = actual_type.to_string();
                             let extra = serde_json::json!({
-                                "diagnostic_line": diag_line,
                                 "identifier": RETURN_VOID_ID,
+                                "message": &diag.message,
                                 "actual_type": actual_str,
                             });
 
-                            out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                                title: format!("Change return type to {}", actual_str),
-                                kind: Some(CodeActionKind::QUICKFIX),
-                                diagnostics: Some(vec![diag.clone()]),
-                                edit: None,
-                                command: None,
-                                is_preferred: Some(true),
-                                disabled: None,
-                                data: Some(make_code_action_data(
-                                    ACTION_KIND_CHANGE_TYPE_TO_ACTUAL,
-                                    uri,
-                                    &params.range,
-                                    extra,
-                                )),
-                            }));
+                            out.push(deferred_quickfix(
+                                format!("Change return type to {}", actual_str),
+                                ACTION_KIND_CHANGE_TYPE_TO_ACTUAL,
+                                uri,
+                                &params.range,
+                                vec![diag.clone()],
+                                true,
+                                extra,
+                            ));
                         }
                     }
                 }
                 RETURN_EMPTY_ID => {
-                    if !diag.message.contains(RETURN_EMPTY_MSG_FRAGMENT) {
+                    if !crate::util::message_text(&diag.message).contains(RETURN_EMPTY_MSG_FRAGMENT)
+                    {
                         continue;
                     }
 
                     // Verify the fix is applicable.
-                    if build_change_return_type_edits_to(content, diag_line, &PhpType::void())
-                        .is_none()
-                    {
+                    let applies = target_function(
+                        content,
+                        diag_line,
+                        Anchor::Return,
+                        crate::util::message_text(&diag.message),
+                    )
+                    .is_some_and(|target| {
+                        build_change_return_type_edits_to(content, &target, &PhpType::void())
+                            .is_some()
+                    });
+                    if !applies {
                         continue;
                     }
 
                     let title = "Change return type to void".to_string();
 
                     let extra = serde_json::json!({
-                        "diagnostic_line": diag_line,
                         "identifier": RETURN_EMPTY_ID,
+                        "message": &diag.message,
                     });
 
-                    let data =
-                        make_code_action_data(ACTION_KIND_CHANGE_TYPE, uri, &params.range, extra);
-
-                    out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    out.push(deferred_quickfix(
                         title,
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![diag.clone()]),
-                        edit: None,
-                        command: None,
-                        is_preferred: Some(true),
-                        disabled: None,
-                        data: Some(data),
-                    }));
+                        ACTION_KIND_CHANGE_TYPE,
+                        uri,
+                        &params.range,
+                        vec![diag.clone()],
+                        true,
+                        extra,
+                    ));
                 }
                 RETURN_TYPE_ID => {
                     // "Method Foo::bar() should return {expected} but returns {actual}."
-                    // Just verify the message is parseable — defer all
-                    // computation to Phase 2.
-                    if extract_return_type_actual(&diag.message).is_none() {
+                    // Just verify the message is parseable and names a
+                    // function the fix can edit — defer the inference to
+                    // Phase 2.
+                    if extract_return_type_actual(crate::util::message_text(&diag.message))
+                        .is_none()
+                        || target_function(
+                            content,
+                            diag_line,
+                            Anchor::Return,
+                            crate::util::message_text(&diag.message),
+                        )
+                        .is_none()
+                    {
                         continue;
                     }
 
                     let extra = serde_json::json!({
-                        "diagnostic_line": diag_line,
                         "identifier": RETURN_TYPE_ID,
                         "message": &diag.message,
                     });
 
-                    out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                        title: "Update return type".to_string(),
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![diag.clone()]),
-                        edit: None,
-                        command: None,
-                        is_preferred: Some(false),
-                        disabled: None,
-                        data: Some(make_code_action_data(
-                            ACTION_KIND_UPDATE_RETURN_TYPE,
-                            uri,
-                            &params.range,
-                            extra,
-                        )),
-                    }));
+                    out.push(deferred_quickfix(
+                        "Update return type".to_string(),
+                        ACTION_KIND_UPDATE_RETURN_TYPE,
+                        uri,
+                        &params.range,
+                        vec![diag.clone()],
+                        false,
+                        extra,
+                    ));
                 }
                 MISSING_TYPE_RETURN_ID => {
                     // "Method Foo::bar() has no return type specified."
                     // Defer type inference to the resolve phase — it can
                     // be expensive and the collect phase runs on every
                     // cursor move.  Just validate that the function has
-                    // no return type yet.
-                    let lines: Vec<&str> = content.lines().collect();
-
-                    let brace_line = match find_open_brace_from_declaration(&lines, diag_line) {
-                        Some(l) => l,
-                        None => continue,
+                    // no return type yet, and a body to infer one from.
+                    let Some(target) = target_function(
+                        content,
+                        diag_line,
+                        Anchor::Declaration,
+                        crate::util::message_text(&diag.message),
+                    ) else {
+                        continue;
                     };
-                    let (paren_line, paren_col) =
-                        match find_close_paren_before_brace(&lines, brace_line) {
-                            Some(p) => p,
-                            None => continue,
-                        };
-
-                    // Check there is no existing return type.
-                    if has_return_type_between(&lines, paren_line, paren_col, brace_line) {
+                    if target.has_return_type() || target.body_end.is_none() {
                         continue;
                     }
 
                     let extra = serde_json::json!({
-                        "diagnostic_line": diag_line,
                         "identifier": MISSING_TYPE_RETURN_ID,
+                        "message": &diag.message,
                     });
 
-                    out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                        title: "Add return type".to_string(),
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![diag.clone()]),
-                        edit: None,
-                        command: None,
-                        is_preferred: Some(true),
-                        disabled: None,
-                        data: Some(make_code_action_data(
-                            ACTION_KIND_ADD_TYPE,
-                            uri,
-                            &params.range,
-                            extra,
-                        )),
-                    }));
+                    out.push(deferred_quickfix(
+                        "Add return type".to_string(),
+                        ACTION_KIND_ADD_TYPE,
+                        uri,
+                        &params.range,
+                        vec![diag.clone()],
+                        true,
+                        extra,
+                    ));
                 }
                 _ => continue,
             }
@@ -316,22 +305,30 @@ impl Backend {
     ) -> Option<WorkspaceEdit> {
         let extra = &data.extra;
         let diag_line = extra.get("diagnostic_line")?.as_u64()? as usize;
+        let diag_msg = extra.get("message")?.as_str()?;
+        // Every fix but the one that adds a missing return type is offered
+        // for a diagnostic on a `return`.
+        let anchor = if data.action_kind == ACTION_KIND_ADD_TYPE {
+            Anchor::Declaration
+        } else {
+            Anchor::Return
+        };
+        let target = target_function(content, diag_line, anchor, diag_msg)?;
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
 
         match data.action_kind.as_str() {
             ACTION_KIND_STRIP_EXPR => {
-                let edit = build_strip_return_expr_edit(content, diag_line)?;
+                let edit = build_strip_return_expr_edit(content, &target)?;
                 Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
             }
             ACTION_KIND_CHANGE_TYPE_TO_ACTUAL => {
                 let actual_type_str = extra.get("actual_type")?.as_str()?;
                 let actual_type = PhpType::parse(actual_type_str);
-                let edits = build_change_return_type_edits_to(content, diag_line, &actual_type)?;
+                let edits = build_change_return_type_edits_to(content, &target, &actual_type)?;
                 Some(crate::code_actions::single_file_edit(doc_uri, edits))
             }
             ACTION_KIND_UPDATE_RETURN_TYPE => {
-                let diag_msg = extra.get("message")?.as_str()?;
                 let tip_type = extract_return_type_actual(diag_msg)?;
 
                 // Run our own inference and compare to the current
@@ -340,68 +337,49 @@ impl Backend {
                 // native/effective split, e.g. native=`array`,
                 // effective=`list<int>`).  If they agree, we can't
                 // see the problem ourselves — trust the PHPStan tip.
-                //
-                // The diagnostic line is a return statement inside the
-                // body.  Walk backward to find the function declaration
-                // line so the inference engine can locate the full body.
-                let lines: Vec<&str> = content.lines().collect();
-                let brace_line = find_function_open_brace_line(&lines, diag_line)?;
-                let (paren_line, _) = find_close_paren_before_brace(&lines, brace_line)?;
-                let func_line = find_func_keyword_line(&lines, paren_line)?;
-
-                let our = self.infer_return_type_for_function(&data.uri, content, func_line, false);
-                let current = read_current_return_type(content, diag_line);
+                let our = self.infer_return_type_at(&data.uri, content, target.start, false);
+                let current = read_current_return_type(content, &target);
 
                 let edits = if should_use_own_inference(&our, &current) {
                     let inferred = our?;
                     build_update_return_type_edits_split(
                         content,
-                        diag_line,
+                        &target,
                         &inferred.native,
                         inferred.effective.as_ref(),
                     )?
                 } else {
                     // Trust the PHPStan tip.
-                    build_update_return_type_edits(content, diag_line, &tip_type)?
+                    build_update_return_type_edits(content, &target, &tip_type)?
                 };
 
                 Some(crate::code_actions::single_file_edit(doc_uri, edits))
             }
             ACTION_KIND_CHANGE_TYPE => {
                 let void = PhpType::void();
-                let edits = build_change_return_type_edits_to(content, diag_line, &void)?;
+                let edits = build_change_return_type_edits_to(content, &target, &void)?;
                 Some(crate::code_actions::single_file_edit(doc_uri, edits))
             }
             ACTION_KIND_ADD_TYPE => {
                 // Infer the type now (deferred from collect phase).
                 let inferred =
-                    self.infer_return_type_for_function(&data.uri, content, diag_line, false)?;
-
-                let native_str = inferred.native.to_string();
-
-                let lines: Vec<&str> = content.lines().collect();
-                let brace_line = find_open_brace_from_declaration(&lines, diag_line)?;
-                let (paren_line, paren_col) = find_close_paren_before_brace(&lines, brace_line)?;
-
-                let mut edits = Vec::new();
+                    self.infer_return_type_at(&data.uri, content, target.start, false)?;
 
                 // Insert `: native_type` after the closing paren.
-                edits.push(TextEdit {
-                    range: Range {
-                        start: Position::new(paren_line as u32, (paren_col + 1) as u32),
-                        end: Position::new(paren_line as u32, (paren_col + 1) as u32),
-                    },
-                    new_text: format!(": {}", native_str),
-                });
+                let mut edits =
+                    vec![target.add_return_type_edit(content, &inferred.native.to_string())];
 
                 // When the effective type is richer than the native hint,
                 // add a `@return` docblock tag.  An existing `@return` tag
                 // is left alone: the user wrote it on purpose.
                 if let Some(ref eff_type) = inferred.effective
-                    && let Some(docblock) = paren_function_docblock(content, paren_line, paren_col)
-                    && docblock.return_tag().is_none()
+                    && target.docblock.return_tag().is_none()
                 {
-                    edits.push(docblock.add_return_tag_edit(content, &eff_type.to_string()));
+                    edits.push(
+                        target
+                            .docblock
+                            .add_return_tag_edit(content, &eff_type.to_string()),
+                    );
                 }
 
                 Some(crate::code_actions::single_file_edit(doc_uri, edits))
@@ -413,77 +391,55 @@ impl Backend {
 
 // ── Stale detection ─────────────────────────────────────────────────────────
 
-/// Check whether a `return.void` or `return.empty` diagnostic is stale.
+/// Check whether a `return.void`, `return.empty` or `missingType.return`
+/// diagnostic with `message` is stale.
 ///
-/// For `return.void`: the diagnostic is stale when the diagnostic line
-/// contains `return;` (bare return, no expression) — meaning the
-/// expression has already been stripped.
+/// For `return.void`: the diagnostic is stale when the `return` on the
+/// diagnostic line no longer returns anything — meaning the expression has
+/// already been stripped.
 ///
-/// For `return.empty`: the diagnostic is stale when the enclosing
-/// function's return type declaration already says `void`.
+/// For `return.empty`: the diagnostic is stale when the function's return
+/// type declaration already says `void`.
+///
+/// For `missingType.return`: the diagnostic is stale once the function
+/// declares a return type.
 ///
 /// Called from `is_stale_phpstan_diagnostic` in `diagnostics/stale.rs`.
-pub(crate) fn is_fix_return_type_stale(content: &str, diag_line: usize, identifier: &str) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
-
-    if diag_line >= lines.len() {
+pub(crate) fn is_fix_return_type_stale(
+    content: &str,
+    diag_line: usize,
+    identifier: &str,
+    message: &str,
+) -> bool {
+    let Some(line) = content.lines().nth(diag_line) else {
         return true; // line doesn't exist any more → stale
-    }
+    };
 
     match identifier {
-        RETURN_VOID_ID => {
-            // Stale if the line no longer contains a return with an
-            // expression (user either stripped it or changed the type).
-            let trimmed = lines[diag_line].trim();
-            !trimmed.contains("return ") || trimmed == "return;"
-        }
+        RETURN_VOID_ID => match target_function(content, diag_line, Anchor::Return, message) {
+            // An arrow function returns its expression for as long as it
+            // has one, so only a type change makes its diagnostic stale.
+            Some(target) => target
+                .statement
+                .is_some_and(|statement| statement.value.is_none()),
+            // Stale if the line no longer holds a return with an
+            // expression (the user stripped it or removed the return).
+            None => {
+                let trimmed = line.trim();
+                !trimmed.contains("return ") || trimmed == "return;"
+            }
+        },
         RETURN_TYPE_ID => {
             // No content heuristic — the fix might be to change the
             // code rather than the type, so we can't tell from the
             // source alone.  Cleared eagerly by codeAction/resolve.
             false
         }
-        MISSING_TYPE_RETURN_ID => {
-            // The diagnostic is reported on the function declaration
-            // line itself.  Stale if `)` is followed by `:` (a return
-            // type has been added).  Simple text check on the line.
-            let line = lines[diag_line];
-            if let Some(paren_pos) = line.rfind(')') {
-                line[paren_pos + 1..].contains(':')
-            } else {
-                false
-            }
-        }
-        RETURN_EMPTY_ID => {
-            // Stale if the enclosing function's return type is already
-            // `void`.  The diagnostic is on a `return;` inside the
-            // body, so search backward for the opening brace.
-            let brace_line = match find_function_open_brace_line(&lines, diag_line) {
-                Some(l) => l,
-                None => return false,
-            };
-            let (paren_line, paren_col) = match find_close_paren_before_brace(&lines, brace_line) {
-                Some(p) => p,
-                None => return false,
-            };
-
-            // Gather text between `)` and `{` and check if the return
-            // type is already `void`.
-            let between = gather_between_paren_and_brace(&lines, paren_line, paren_col, brace_line);
-
-            // Look for `: void` in the between text.
-            if let Some(colon_pos) = between.find(':') {
-                let after_colon = between[colon_pos + 1..].trim();
-                // The type name after `:` ends at whitespace or `{`.
-                let type_word = after_colon
-                    .split(|c: char| c.is_whitespace() || c == '{')
-                    .next()
-                    .unwrap_or("");
-                PhpType::parse(type_word).is_void()
-            } else {
-                false
-            }
-        }
+        MISSING_TYPE_RETURN_ID => target_function(content, diag_line, Anchor::Declaration, message)
+            .is_some_and(|target| target.has_return_type()),
+        RETURN_EMPTY_ID => target_function(content, diag_line, Anchor::Return, message)
+            .and_then(|target| target.native_return_type(content))
+            .is_some_and(|return_type| return_type.is_void()),
         _ => false,
     }
 }

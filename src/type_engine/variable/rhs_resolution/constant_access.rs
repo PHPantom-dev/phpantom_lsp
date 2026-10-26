@@ -33,7 +33,7 @@ pub(super) fn resolve_rhs_constant_access(
     if let Some(ts) = global_constant_type(name, ca.name.span().start.offset, ctx) {
         return vec![ResolvedType::from_type_string(ts)];
     }
-    crate::hover::constants::unversioned_php_version_constant_type(name_clean)
+    crate::resolution::unversioned_php_version_constant_type(name_clean)
         .map(|ts| vec![ResolvedType::from_type_string(ts)])
         .unwrap_or_default()
 }
@@ -64,7 +64,7 @@ fn global_constant_type(name: &str, offset: u32, ctx: &VarResolutionCtx<'_>) -> 
                 .flatten()
                 .or_else(|| crate::Backend::resolve_arg_text_to_type(text, &rctx))
         };
-        crate::type_engine::types::const_fold::folded_constant_type(
+        crate::type_engine::type_ops::const_fold::folded_constant_type(
             strip_fqn_prefix(name),
             &value,
             &resolve,

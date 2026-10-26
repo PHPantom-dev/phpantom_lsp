@@ -7,7 +7,7 @@
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
+use tower_lsp_server::gen_lsp_types::{FoldingRange, FoldingRangeKind};
 
 use crate::Backend;
 
@@ -48,7 +48,7 @@ impl Backend {
                 .filter_map(|r| self.translate_folding_range(uri, r))
                 .collect();
             if let Some(raw) = self.get_file_content_arc(uri) {
-                collect_blade_native_folds(&raw, &self.blade_directives.read(), &mut ranges);
+                collect_blade_native_folds(&raw, &self.blade.directives.read(), &mut ranges);
             }
         }
 
@@ -68,14 +68,14 @@ impl Backend {
     fn translate_folding_range(&self, uri: &str, range: FoldingRange) -> Option<FoldingRange> {
         let start = self.try_translate_php_to_blade(
             uri,
-            tower_lsp::lsp_types::Position {
+            tower_lsp_server::gen_lsp_types::Position {
                 line: range.start_line,
                 character: range.start_character.unwrap_or(0),
             },
         )?;
         let end = self.try_translate_php_to_blade(
             uri,
-            tower_lsp::lsp_types::Position {
+            tower_lsp_server::gen_lsp_types::Position {
                 line: range.end_line,
                 character: range.end_character.unwrap_or(0),
             },

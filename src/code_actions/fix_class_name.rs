@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::diagnostics::class_name_mismatch::class_name_mismatch_diagnostic;
@@ -12,12 +12,12 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
-        let Ok(url) = Url::parse(uri) else {
+        let Some(url) = crate::util::parse_url(uri) else {
             return;
         };
-        let Ok(file_path) = url.to_file_path() else {
+        let Some(file_path) = crate::util::url_to_path(&url) else {
             return;
         };
         let file_stem = match file_path.file_stem().and_then(|s| s.to_str()) {
@@ -44,9 +44,9 @@ impl Backend {
 
         let title = format!("Fix class name to `{}`", file_stem);
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title,
-            kind: Some(CodeActionKind::QUICKFIX),
+            kind: Some(CodeActionKind::QuickFix),
             diagnostics: Some(vec![diag]),
             edit: Some(single_edit(url, range, file_stem)),
             is_preferred: Some(true),

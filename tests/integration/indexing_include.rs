@@ -1,8 +1,9 @@
+use crate::common::{goto_definition_at, hover_response, open_php, references_response};
 use std::fs;
 
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// A trimmed-down `.castor.stub.php`: braced namespace blocks holding
 /// the helpers the task files call. Hidden *and* gitignored.
@@ -67,41 +68,22 @@ async fn castor_workspace(include: &[&str]) -> (Backend, tempfile::TempDir) {
     let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
     backend.initialized(InitializedParams {}).await;
 
-    let uri = Url::from_file_path(root.join("castor.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri,
-                language_id: "php".into(),
-                version: 1,
-                text: CASTOR_TASKS.into(),
-            },
-        })
-        .await;
+    let uri = Uri::from_file_path(root.join("castor.php")).unwrap();
+    open_php(&backend, &uri, CASTOR_TASKS).await;
 
     (backend, dir)
 }
 
-fn tasks_uri(dir: &tempfile::TempDir) -> Url {
-    Url::from_file_path(dir.path().join("castor.php")).unwrap()
+fn tasks_uri(dir: &tempfile::TempDir) -> Uri {
+    Uri::from_file_path(dir.path().join("castor.php")).unwrap()
 }
 
-async fn goto(backend: &Backend, uri: &Url, line: u32, character: u32) -> Option<Location> {
-    let response = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+async fn goto(backend: &Backend, uri: &Uri, line: u32, character: u32) -> Option<Location> {
+    let response = goto_definition_at(backend, uri, line, character).await;
 
     match response {
-        Some(GotoDefinitionResponse::Scalar(location)) => Some(location),
-        Some(GotoDefinitionResponse::Array(mut locations)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => Some(location),
+        Some(DefinitionResponse::Definition(Definition::LocationList(mut locations))) => {
             (!locations.is_empty()).then(|| locations.remove(0))
         }
         _ => None,
@@ -144,7 +126,7 @@ async fn include_resolves_function_from_gitignored_stub() {
         .expect("`run` should resolve to the included stub");
     assert_eq!(
         location.uri,
-        Url::from_file_path(dir.path().join(".castor.stub.php")).unwrap()
+        Uri::from_file_path(dir.path().join(".castor.stub.php")).unwrap()
     );
     assert_eq!(location.range.start.line, 5, "Castor\\run is on line 5");
 }
@@ -159,7 +141,7 @@ async fn include_resolves_function_from_hidden_directory() {
         .expect("`up` should resolve inside the included hidden directory");
     assert_eq!(
         location.uri,
-        Url::from_file_path(dir.path().join(".castor/docker.php")).unwrap()
+        Uri::from_file_path(dir.path().join(".castor/docker.php")).unwrap()
     );
 }
 
@@ -182,23 +164,12 @@ async fn include_feeds_hover() {
     let uri = tasks_uri(&dir);
 
     // `io();` on line 8.
-    let hover = backend
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 8,
-                    character: 5,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
+    let hover = hover_response(&backend, &uri, 8, 5)
         .await
-        .unwrap()
         .expect("hover should resolve a function from the included stub");
 
     let text = match hover.contents {
-        HoverContents::Markup(markup) => markup.value,
+        Contents::MarkupContent(markup) => markup.value,
         other => panic!("expected markup hover, got: {other:?}"),
     };
     assert!(
@@ -233,26 +204,11 @@ async fn include_feeds_find_references_from_function_only_files() {
     .unwrap();
 
     let uri = tasks_uri(&dir);
-    let locations = backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 5,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-        })
+    let locations = references_response(&backend, &uri, Position::new(10, 5), false)
         .await
-        .unwrap()
         .unwrap_or_default();
 
-    let caller_uri = Url::from_file_path(&caller).unwrap();
+    let caller_uri = Uri::from_file_path(&caller).unwrap();
     assert!(
         locations.iter().any(|loc| loc.uri == caller_uri),
         "the call in the included task file should be found, got: {locations:?}"
@@ -318,7 +274,7 @@ async fn include_outside_the_workspace_is_library_code() {
         .expect("`up` should resolve into the included library");
     assert_eq!(
         location.uri,
-        Url::from_file_path(lib.path().join("docker.php")).unwrap()
+        Uri::from_file_path(lib.path().join("docker.php")).unwrap()
     );
 
     assert!(
@@ -335,7 +291,7 @@ async fn include_outside_the_workspace_is_library_code() {
 }
 
 /// Prepare a rename on the `up()` call in `castor.php`.
-async fn prepare_rename_up(backend: &Backend, uri: Url) -> Option<PrepareRenameResponse> {
+async fn prepare_rename_up(backend: &Backend, uri: Uri) -> Option<PrepareRenameResult> {
     backend
         .prepare_rename(TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },

@@ -9,8 +9,8 @@ use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
-use crate::type_engine::types::narrowing;
-use crate::type_engine::variable::foreach_resolution::{
+use crate::type_engine::type_ops::condition_facts;
+use crate::type_engine::variable::iterable_elements::{
     is_unsubstituted_template_param, resolve_iterable_element_via_class,
 };
 use crate::types::ResolvedType;
@@ -134,7 +134,7 @@ fn guarded_collection_type<'b>(
         return None;
     };
     let var_name = bytes_to_str(dv.name).to_string();
-    let collection_key = narrowing::expr_to_subject_key(foreach.expression)?;
+    let collection_key = condition_facts::expr_to_subject_key(foreach.expression)?;
 
     // Replay the leading guards against the entry binding alone: what
     // survives all of them is what every entry had to be to get here.
@@ -187,11 +187,11 @@ pub(crate) fn resolve_foreach_iterable_type_raw<'b>(
 /// derivation reads.
 pub(crate) fn iterable_ctx<'a>(
     ctx: &'a ForwardWalkCtx<'_>,
-) -> crate::type_engine::variable::foreach_resolution::IterableCtx<'a> {
-    crate::type_engine::variable::foreach_resolution::IterableCtx {
+) -> crate::type_engine::variable::iterable_elements::IterableCtx<'a> {
+    crate::type_engine::variable::iterable_elements::IterableCtx {
         current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        class_loader: ctx.class_loader,
+        all_classes: ctx.file.all_classes,
+        class_loader: ctx.file.class_loader,
         resolved_class_cache: ctx.resolved_class_cache,
     }
 }
@@ -306,7 +306,7 @@ impl<'b> ForeachBinding<'b> {
         let mut value_docblock_override: Option<Vec<ResolvedType>> = None;
         let mut key_docblock_override: Option<Vec<ResolvedType>> = None;
         let foreach_offset = foreach.foreach.span().start.offset as usize;
-        if let Some(doc_text) = docblock_above(ctx.content, foreach_offset) {
+        if let Some(doc_text) = docblock_above(ctx.file.content, foreach_offset) {
             for (doc_var, php_type) in &parse_var_docblock_pairs(doc_text) {
                 if value_var_name.as_ref() == Some(doc_var) {
                     value_docblock_override = Some(resolve_type_to_resolved_types(php_type, ctx));
@@ -375,7 +375,7 @@ pub(crate) fn process_foreach<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let depth_guard = LoopDepthGuard::enter();
+    let depth_guard = LoopDepthGuard::enter(ctx.flow);
     let loop_depth = depth_guard.depth();
 
     // Hard limit: skip the body entirely at excessive nesting depth.
@@ -441,8 +441,8 @@ pub(crate) fn process_foreach<'b>(
         ForeachBody::Statement(inner) => vec![*inner],
         ForeachBody::ColonDelimited(body) => body.statements.iter().collect(),
     };
-    let assignment_depth =
-        clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+    let assignments = loop_assignments(&body_stmts, std::iter::empty());
+    let assignment_depth = clamp_iterations_for_depth(assignments.depth, loop_depth);
 
     // A loop that walks an array's own keys and unconditionally writes the
     // entry at each key it visits (`foreach ($pairs as $cn => $_)` /
@@ -474,7 +474,7 @@ pub(crate) fn process_foreach<'b>(
         .is_some_and(|it| it.is_empty_array_shape())
     {
         binding.reset(scope, None);
-        let exit_frame = ExitFrameGuard::push();
+        let exit_frame = ExitFrameGuard::push(ctx.flow);
         walk_body_forward(body_stmts.iter().copied(), scope, &loop_ctxs.body_ctx);
         exit_frame.pop();
         // A cursor inside the body is answered by the walk that stopped at
@@ -485,11 +485,15 @@ pub(crate) fn process_foreach<'b>(
         return;
     }
 
-    let exit_frame = ExitFrameGuard::push();
+    let exit_frame = ExitFrameGuard::push(ctx.flow);
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
+        loop_ctxs.walk(
+            &pre_loop_scope,
+            assignment_depth,
+            &assignments.self_dependent,
+        ),
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;
@@ -648,62 +652,74 @@ fn carried_key_writes(foreach: &Foreach<'_>, body_stmts: &[&Statement<'_>]) -> V
 ///
 /// Each write lands on one of the keys the loop variable can hold, which
 /// only makes each of them a possible entry (`array{a?: true, b?: true}`).
-/// A loop over a shape whose entries are all there, with a literal key or
-/// value per entry, visits every one of those literals, though. So when the
-/// body writes through the loop variable on every path, never skips ahead
-/// with `continue`, and never reassigns the variable, every entry the
-/// literals name was written by the time the loop ends. The caller has
-/// already checked that the body runs and that nothing broke out of it.
+/// A loop over a shape visits every entry the shape requires, though, so
+/// when the body writes through the loop variable on every path, never
+/// skips ahead with `continue`, and never reassigns the variable, every
+/// entry a required key (or a required entry's literal value) names was
+/// written by the time the loop ends. An entry the iterated shape leaves
+/// optional stays optional.
+///
+/// When the loop visits no entry it can name (a `non-empty-array<K, V>`,
+/// or a shape whose values are not literals), the written array still
+/// gained at least one entry, so it becomes non-empty instead: an
+/// all-optional shape generalizes to `non-empty-array<K, V>`, the way
+/// PHPStan widens it, so reading a key neither adds `null` nor claims an
+/// entry that may be missing. The caller has already checked that the
+/// body runs and that nothing broke out of it.
 fn mark_visited_keys_written(
     foreach: &Foreach<'_>,
     body_stmts: &[&Statement<'_>],
     iter_type: Option<&PhpType>,
     scope: &mut ScopeState,
 ) {
-    let Some(TypeKind::ArrayShape(entries)) = iter_type.map(PhpType::kind) else {
+    let Some(iter_type) = iter_type else {
         return;
-    };
-    let Some(runtime_keys) = crate::php_type::runtime_shape_keys(entries) else {
-        return;
-    };
-    let keys_visited: Option<Vec<String>> = entries
-        .iter()
-        .zip(runtime_keys)
-        .map(|(entry, key)| (!entry.optional && !key.contains("::")).then_some(key))
-        .collect();
-    let values_visited: Option<Vec<String>> = entries
-        .iter()
-        .map(|entry| {
-            if entry.optional {
-                return None;
-            }
-            if let Some(class) = entry.value_type.as_class_name_literal() {
-                return Some(crate::php_type::class_name_shape_key(class));
-            }
-            let literal = entry.value_type.as_literal()?;
-            match literal {
-                LiteralValue::Int(raw) => Some(raw.to_string()),
-                LiteralValue::String(_) => {
-                    literal.string_content().map(std::borrow::Cow::into_owned)
-                }
-                LiteralValue::Float(_) => None,
-            }
-        })
-        .collect();
-    let candidates: Vec<(&Expression<'_>, Option<Vec<String>>)> = match &foreach.target {
-        ForeachTarget::KeyValue(kv) => vec![(kv.key, keys_visited), (kv.value, values_visited)],
-        ForeachTarget::Value(val) => vec![(val.value, values_visited)],
     };
     if body_stmts.iter().any(|stmt| statement_may_continue(stmt)) {
         return;
     }
+    let (keys_visited, values_visited) = match iter_type.kind() {
+        TypeKind::ArrayShape(entries) => {
+            let Some(runtime_keys) = crate::php_type::runtime_shape_keys(entries) else {
+                return;
+            };
+            let keys: Vec<String> = entries
+                .iter()
+                .zip(runtime_keys)
+                .filter(|(entry, key)| !entry.optional && !key.contains("::"))
+                .map(|(_, key)| key)
+                .collect();
+            let values: Vec<String> = entries
+                .iter()
+                .filter(|entry| !entry.optional)
+                .filter_map(|entry| {
+                    if let Some(class) = entry.value_type.as_class_name_literal() {
+                        return Some(crate::php_type::class_name_shape_key(class));
+                    }
+                    let literal = entry.value_type.as_literal()?;
+                    match literal {
+                        LiteralValue::Int(raw) => Some(raw.to_string()),
+                        LiteralValue::String(_) => {
+                            literal.string_content().map(std::borrow::Cow::into_owned)
+                        }
+                        LiteralValue::Float(_) => None,
+                    }
+                })
+                .collect();
+            (keys, values)
+        }
+        _ => (Vec::new(), Vec::new()),
+    };
+    let candidates: Vec<(&Expression<'_>, Vec<String>)> = match &foreach.target {
+        ForeachTarget::KeyValue(kv) => vec![(kv.key, keys_visited), (kv.value, values_visited)],
+        ForeachTarget::Value(val) => vec![(val.value, values_visited)],
+    };
     let mut assigned = HashMap::new();
     for stmt in body_stmts {
         collect_assignment_deps(stmt, &mut assigned);
     }
     for (loop_var, visited) in candidates {
-        let (Expression::Variable(Variable::Direct(dv)), Some(visited)) = (loop_var, visited)
-        else {
+        let Expression::Variable(Variable::Direct(dv)) = loop_var else {
             continue;
         };
         let loop_var = bytes_to_str(dv.name);
@@ -714,7 +730,8 @@ fn mark_visited_keys_written(
 }
 
 /// Make the entries under `visited` required in every array the body
-/// writes through `loop_var` on every path.
+/// writes through `loop_var` on every path, or, with nothing in `visited`,
+/// mark those arrays non-empty.
 fn mark_keys_written(
     body_stmts: &[&Statement<'_>],
     loop_var: &str,
@@ -726,8 +743,22 @@ fn mark_keys_written(
             continue;
         };
         let Some(written) = current.shape_entries() else {
+            if visited.is_empty() && scope.get(&array_var).len() == 1 {
+                let non_empty = current.non_empty_array_form();
+                if &non_empty != current {
+                    scope.set(&array_var, vec![ResolvedType::from_type_string(non_empty)]);
+                }
+            }
             continue;
         };
+        if visited.is_empty() {
+            if written.iter().all(|entry| entry.optional)
+                && let Some(general) = non_empty_generalized_shape(written)
+            {
+                scope.set(&array_var, vec![ResolvedType::from_type_string(general)]);
+            }
+            continue;
+        }
         let Some(written_keys) = crate::php_type::runtime_shape_keys(written) else {
             continue;
         };
@@ -749,6 +780,40 @@ fn mark_keys_written(
             ))],
         );
     }
+}
+
+/// `non-empty-array<K, V>` for a shape known to hold at least one of its
+/// entries, keeping the literal keys it names (`array{dk?: T, en?: T}` →
+/// `non-empty-array<'dk'|'en', T>`).
+///
+/// Returns `None` for an empty shape, or one keyed by a constant known only
+/// by its spelling.
+fn non_empty_generalized_shape(entries: &[crate::php_type::ShapeEntry]) -> Option<PhpType> {
+    let runtime_keys = crate::php_type::runtime_shape_keys(entries)?;
+    if runtime_keys.is_empty() {
+        return None;
+    }
+    let mut keys = Vec::with_capacity(runtime_keys.len());
+    for key in &runtime_keys {
+        if key.contains("::") {
+            return None;
+        }
+        keys.push(if crate::php_type::is_canonical_int_key(key) {
+            PhpType::literal_int(key.as_str())
+        } else {
+            PhpType::literal_string_value(key)
+        });
+    }
+    let mut values: Vec<PhpType> = Vec::new();
+    for entry in entries {
+        if !values.contains(&entry.value_type) {
+            values.push(entry.value_type.clone());
+        }
+    }
+    Some(PhpType::generic_atom(
+        atom("non-empty-array"),
+        vec![PhpType::union(keys), PhpType::union(values)],
+    ))
 }
 
 /// Whether a statement in a loop body may skip ahead to the next iteration,
@@ -806,8 +871,8 @@ fn record_key_value_pairing(
     }
     let key_var = bytes_to_str(key_dv.name);
     let value_var = extract_foreach_var_name(kv.value);
-    let element_key =
-        narrowing::expr_to_subject_key(foreach.expression).map(|base| format!("{base}[{key_var}]"));
+    let element_key = condition_facts::expr_to_subject_key(foreach.expression)
+        .map(|base| format!("{base}[{key_var}]"));
     let targets: Vec<crate::atom::Atom> = value_var
         .iter()
         .map(|v| atom(v))
@@ -853,7 +918,7 @@ fn record_existing_keys(foreach: &Foreach<'_>, scope: &mut ScopeState) {
             let Expression::Variable(Variable::Direct(key_dv)) = kv.key else {
                 return;
             };
-            let Some(subject) = narrowing::expr_to_subject_key(foreach.expression) else {
+            let Some(subject) = condition_facts::expr_to_subject_key(foreach.expression) else {
                 return;
             };
             let value_var = match kv.value {
@@ -909,7 +974,8 @@ fn foreach_own_keys<'b>(foreach: &'b Foreach<'b>) -> Option<(String, String)> {
     if args.next().is_some() {
         return None;
     }
-    let Expression::Variable(Variable::Direct(arr_var)) = narrowing::argument_value(arg) else {
+    let Expression::Variable(Variable::Direct(arr_var)) = condition_facts::argument_value(arg)
+    else {
         return None;
     };
     Some((
@@ -1150,11 +1216,11 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
 ) -> Option<PhpType> {
     let raw = resolve_foreach_iterable_type_raw(foreach, scope, ctx)?;
     Some(
-        crate::type_engine::types::aliases::resolve_type_alias_typed(
+        crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &raw,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         )
         .unwrap_or(raw),
     )
@@ -1191,9 +1257,9 @@ pub(crate) fn bind_foreach_value<'b>(
             // (or, for tuple-style shapes, the union of positional values),
             // read through the class's traversal binding when it has one.
             let value_php_type =
-                crate::type_engine::variable::foreach_resolution::generic_traversal_value_type(
+                crate::type_engine::variable::iterable_elements::generic_traversal_value_type(
                     it,
-                    ctx.class_loader,
+                    ctx.file.class_loader,
                 )
                 .or_else(|| it.iterable_element_type());
             if let Some(vt) = value_php_type {
@@ -1250,7 +1316,7 @@ pub(crate) fn bind_foreach_value<'b>(
         // destructured variable's type from that element type using shape
         // keys or positional indices.
         let element_type: Option<PhpType> = iter_type.as_ref().and_then(|it| {
-            crate::type_engine::variable::foreach_resolution::iteration_value_type(
+            crate::type_engine::variable::iterable_elements::iteration_value_type(
                 it,
                 &iterable_ctx(ctx),
             )
@@ -1370,7 +1436,7 @@ pub(crate) fn bind_foreach_key<'b>(
         // A bare `array` says nothing about its keys, and neither does an
         // untyped iterable: both leave the key `int|string`.
         let key_type = iter_type.as_ref().and_then(|it| {
-            crate::type_engine::variable::foreach_resolution::iteration_key_type(
+            crate::type_engine::variable::iterable_elements::iteration_key_type(
                 it,
                 &iterable_ctx(ctx),
             )

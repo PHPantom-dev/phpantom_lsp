@@ -192,14 +192,14 @@ pub(crate) fn detect_factory_pattern(body: &str) -> Option<String> {
         }
         // Short variable — prefer the class name.
         if let Some(ref name) = assigned_class {
-            let short = name.rsplit('\\').next().unwrap_or(name);
+            let short = crate::util::short_name(name);
             return Some(short.to_string());
         }
     }
 
     // `return new ClassName(…)` — use the class name.
     if let Some(name) = returned_class {
-        let short = name.rsplit('\\').next().unwrap_or(&name);
+        let short = crate::util::short_name(&name);
         return Some(short.to_string());
     }
 
@@ -212,7 +212,7 @@ pub(crate) fn detect_factory_pattern(body: &str) -> Option<String> {
         }
     }
     if let Some(name) = assigned_class {
-        let short = name.rsplit('\\').next().unwrap_or(&name);
+        let short = crate::util::short_name(&name);
         return Some(short.to_string());
     }
 
@@ -385,7 +385,7 @@ pub(crate) fn detect_single_call(body: &str) -> Option<String> {
         && line[name.len()..].starts_with('(')
     {
         // Use the short name (after last backslash).
-        let short = name.rsplit('\\').next().unwrap_or(&name);
+        let short = crate::util::short_name(&name);
         return Some(short.to_string());
     }
 
@@ -449,16 +449,3 @@ pub(crate) fn trim_selection(content: &str, start: usize, end: usize) -> Option<
 }
 
 // ─── Indentation helpers ────────────────────────────────────────────────────
-
-/// Find the end of the line containing `offset` (after the `\n`).
-pub(crate) fn find_line_end(content: &str, offset: usize) -> usize {
-    match content[offset..].find('\n') {
-        Some(pos) => offset + pos + 1,
-        None => content.len(),
-    }
-}
-
-/// Find the start of the line containing `offset`.
-pub(crate) fn find_line_start(content: &str, offset: usize) -> usize {
-    content[..offset].rfind('\n').map_or(0, |p| p + 1)
-}

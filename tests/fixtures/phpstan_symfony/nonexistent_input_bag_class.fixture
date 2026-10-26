@@ -1,0 +1,7 @@
+// test: A controller reading the query bag calls only methods that exist
+// feature: diagnostics
+// Ported from PHPStan's Symfony extension, NonexistentInputBagClassTest::testInputBag.
+// project: phpstan_symfony
+// file: rules/data/input_bag.php
+// codes: unknown_member
+---

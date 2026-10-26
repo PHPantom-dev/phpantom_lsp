@@ -1,12 +1,14 @@
-//! Range formatting on top of whole-document formatters.
+//! Narrowing a formatted document to the lines a range selects.
 //!
-//! None of the formatters PHPantom drives can format part of a file:
-//! mago-formatter, php-cs-fixer, Pint and phpcbf all take a whole file,
-//! and formatting the selected lines as an isolated snippet breaks on a
-//! selection that starts or ends mid-statement and loses the indentation
-//! the surrounding code gives it.  So the whole document is formatted,
-//! diffed line by line against the original, and only the changed hunks
-//! that touch the requested lines are returned.
+//! php-cs-fixer, Pint, phpcbf and the Blade formatters all take a whole
+//! file, and formatting the selected lines as an isolated snippet breaks
+//! on a selection that starts or ends mid-statement and loses the
+//! indentation the surrounding code gives it.  So the whole document is
+//! formatted, diffed line by line against the original, and only the
+//! changed hunks that touch the requested lines are returned.  The
+//! built-in mago-formatter can format just the statement or member
+//! enclosing a range, but that construct can be larger than the
+//! selection, so its output is narrowed the same way.
 //!
 //! A hunk that straddles the edge of the range is returned whole: the
 //! formatter's output is only known to be valid as a unit, so splitting a
@@ -21,7 +23,7 @@ use std::collections::HashMap;
 use std::ops::Range as Lines;
 
 use similar::{Algorithm, DiffOp, capture_diff_slices};
-use tower_lsp::lsp_types::{Position, Range, TextEdit};
+use tower_lsp_server::gen_lsp_types::{Position, Range, TextEdit};
 
 /// The `TextEdit`s that turn `original` into `formatted` within `range`.
 ///

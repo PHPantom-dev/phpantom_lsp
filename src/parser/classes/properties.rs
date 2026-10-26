@@ -62,7 +62,7 @@ pub(super) fn extract_property(
             .and_then(docblock::extract_deprecation_message_from_info);
         let see_refs = info
             .as_ref()
-            .map(docblock::extract_see_references_from_info)
+            .map(docblock::extract_see_refs_from_info)
             .unwrap_or_default();
         if !see_refs.is_empty() {
             for prop in &mut prop_infos {

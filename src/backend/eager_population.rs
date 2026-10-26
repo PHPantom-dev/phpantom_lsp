@@ -21,6 +21,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 
 /// How long the receiver warm-up may run before it stops where it is.
 ///
@@ -66,7 +67,7 @@ impl Backend {
             // `populate_from_sorted` fans the list out over its own
             // large-stack workers, so this needs no wrapper thread of
             // its own.
-            let class_loader = |name: &str| backend.find_or_load_class(name);
+            let class_loader = |name: Fqn<'_>| backend.find_or_load_class(&name);
             crate::virtual_members::populate_from_sorted(
                 &sorted_fqns,
                 &backend.resolved_class_cache,
@@ -168,7 +169,10 @@ mod tests {
             .write()
             .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
         backend.update_ast(uri, text);
-        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .workspace_index
+            .indexed
+            .store(true, Ordering::Release);
     }
 
     /// The pass reaches every user file, not just the ones a search has
@@ -195,10 +199,7 @@ mod tests {
         backend.warm_member_reference_layer_blocking();
 
         let symbol_map = backend
-            .symbol_maps
-            .read()
-            .get(CONSUMER_URI)
-            .cloned()
+            .symbol_map_for(CONSUMER_URI)
             .expect("the consumer was parsed");
         let entry = backend
             .resolved_member_file(CONSUMER_URI, &symbol_map)
@@ -206,10 +207,7 @@ mod tests {
         assert!(entry.covers([crate::atom::atom("save")]));
 
         let empty_map = backend
-            .symbol_maps
-            .read()
-            .get(EMPTY_URI)
-            .cloned()
+            .symbol_map_for(EMPTY_URI)
             .expect("the empty file was parsed");
         assert!(
             backend

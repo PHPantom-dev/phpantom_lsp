@@ -17,7 +17,7 @@
 //! `ClassReference` spans that fall on `use` statement lines are skipped
 //! because they are import declarations, not actual usages.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
@@ -43,9 +43,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
-            return;
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
         self.collect_unknown_class_diagnostics_with_context(&ctx, uri, content, out);
     }
 
@@ -250,7 +248,7 @@ impl Backend {
 
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 UNKNOWN_CLASS_CODE,
                 message,
             ));

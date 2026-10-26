@@ -13,7 +13,7 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -522,7 +522,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let Some((start_offset, end_offset)) =
             crate::code_actions::selected_byte_range(content, params.range)
@@ -655,7 +655,7 @@ impl Backend {
         };
         let replacement = format!("self::{}", const_name);
 
-        let doc_uri: Url = match data.uri.parse() {
+        let doc_uri: Uri = match data.uri.parse() {
             Ok(u) => u,
             Err(_) => return None,
         };

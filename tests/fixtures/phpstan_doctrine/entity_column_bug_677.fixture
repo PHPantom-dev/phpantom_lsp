@@ -1,0 +1,7 @@
+// test: An enum column read through DBAL's enum type
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testBug677.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/bug-677.php
+---

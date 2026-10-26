@@ -176,7 +176,9 @@ pub(super) fn export_span(
                 });
             }
         }
-        SymbolKind::MemberDeclaration { name, is_static } => {
+        SymbolKind::MemberDeclaration {
+            name, is_static, ..
+        } => {
             if let Some(class) = enclosing_class(&context.classes, span.start) {
                 let kind = declared_member_kind(class, name, *is_static);
                 output.occurrences.push(ExportOccurrence {

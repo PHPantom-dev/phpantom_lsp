@@ -26,6 +26,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, Visibility};
 
@@ -153,13 +154,13 @@ impl Backend {
     /// than one class renders the template, the first by name wins, so the
     /// answer does not depend on the order the files were parsed in.
     fn render_backing_class(&self, view_names: &[String]) -> Option<Arc<ClassInfo>> {
-        use crate::symbol_map::{LaravelStringKind, SymbolKind};
+        use crate::symbol_map::{StringKeyKind, SymbolKind};
 
         let keys: Vec<crate::reference_index::ReferenceIndexKey> = view_names
             .iter()
             .map(
-                |name| crate::reference_index::ReferenceIndexKey::LaravelString {
-                    kind: LaravelStringKind::View,
+                |name| crate::reference_index::ReferenceIndexKey::StringKey {
+                    kind: StringKeyKind::View,
                     key: name.clone(),
                 },
             )
@@ -170,8 +171,8 @@ impl Backend {
                 continue;
             }
             let mut offsets = map.spans.iter().filter_map(|span| match &span.kind {
-                SymbolKind::LaravelStringKey {
-                    kind: LaravelStringKind::View,
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::View,
                     key,
                     ..
                 } if view_names.contains(key) => Some(span.start),
@@ -211,7 +212,7 @@ impl Backend {
 
     /// Whether `class` extends the framework base `base`.
     fn is_component_of(&self, class: &ClassInfo, base: &str) -> bool {
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         crate::class_lookup::is_subclass_of(&class.fqn(), base, &loader)
     }
 
@@ -231,7 +232,8 @@ impl Backend {
         }
 
         let namespaces = self
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .read()
             .class_component_namespaces
             .clone();
@@ -296,7 +298,7 @@ impl Backend {
         if !class.fqn().eq_ignore_ascii_case(fqn) {
             return None;
         }
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         if !crate::class_lookup::is_subclass_of(fqn, base, &loader) {
             return None;
         }
@@ -335,9 +337,8 @@ impl Backend {
             return LIVEWIRE_DEFAULT_NAMESPACE.to_string();
         };
         let path = root.join("config").join("livewire.php");
-        let content = tower_lsp::lsp_types::Url::from_file_path(&path)
-            .ok()
-            .and_then(|uri| self.get_file_content(uri.as_str()));
+        let content =
+            crate::util::path_to_url(&path).and_then(|uri| self.get_file_content(uri.as_str()));
         let namespace = content
             .as_deref()
             .and_then(parse_config_tree)
@@ -371,7 +372,7 @@ impl Backend {
     /// supplied.
     pub(crate) fn component_render_scope_names(&self, class: &ClassInfo) -> Option<Vec<String>> {
         let fqn = class.fqn();
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let extends = |base: &str| crate::class_lookup::is_subclass_of(&fqn, base, &loader);
         // Livewire renders the view with the component bound, so `$this` is
         // the component inside the template.  `livewire_scope_vars` covers
@@ -423,7 +424,7 @@ impl Backend {
     /// The public members `class` exposes to its view, under the rules the
     /// framework it belongs to applies.
     fn class_member_vars(&self, class: &ClassInfo, exposure: Exposure) -> InjectedVars {
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             class,
             &loader,
@@ -475,7 +476,7 @@ impl Backend {
         let Some(base_class) = self.find_or_load_class(exposure.base()) else {
             return Vec::new();
         };
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             &base_class,
             &loader,
@@ -616,7 +617,8 @@ mod tests {
         let (mappings, _) = crate::composer::parse_composer_json(dir.path());
         let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
         backend
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .write()
             .class_component_namespaces
             .push((

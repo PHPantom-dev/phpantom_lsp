@@ -46,13 +46,17 @@ pub(crate) fn apply_substitution_to_method(
     // rewrites just the return type.
     let keys: Vec<String> = subs.keys().cloned().collect();
     let any_param_referenced = method.parameters.iter().any(|p| {
-        p.type_hint
-            .as_ref()
-            .is_some_and(|h| h.references_any_template_param(&keys))
+        [&p.type_hint, &p.param_out_type]
+            .into_iter()
+            .flatten()
+            .any(|h| h.references_any_template_param(&keys))
     });
     if any_param_referenced {
         for param in method.parameters.make_mut() {
-            if let Some(ref mut hint) = param.type_hint {
+            for hint in [&mut param.type_hint, &mut param.param_out_type]
+                .into_iter()
+                .flatten()
+            {
                 *hint = hint.substitute(subs);
             }
         }
@@ -235,7 +239,7 @@ pub(crate) fn apply_substitution_to_property(
 /// hundreds of parent methods, but only the handful that actually mention
 /// a template parameter need a distinct, substituted copy. The checked
 /// fields mirror [`apply_substitution_to_method`] exactly (return type,
-/// conditional return, type assertions, parameter hints, template
+/// conditional return, type assertions, parameter in and out types, template
 /// defaults).
 pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[String]) -> bool {
     if template_params.is_empty() {
@@ -254,9 +258,10 @@ pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[S
                 .references_any_template_param(template_params)
         })
         || method.parameters.iter().any(|p| {
-            p.type_hint
-                .as_ref()
-                .is_some_and(|h| h.references_any_template_param(template_params))
+            [&p.type_hint, &p.param_out_type]
+                .into_iter()
+                .flatten()
+                .any(|h| h.references_any_template_param(template_params))
         })
         || method
             .template_param_defaults()

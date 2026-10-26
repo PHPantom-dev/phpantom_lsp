@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_method};
 
@@ -828,7 +829,10 @@ fn relation_chain_details_keep_the_terminal_declaring_model() {
         Some("HasOne<$this, static>"),
     )));
     let classes = [Arc::new(team), Arc::new(stock), Arc::new(warehouse)];
-    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        classes.iter().find(|class| class.fqn() == name).cloned()
+    };
     let relation =
         resolve_relation_chain_details(&classes[0], " stocks . warehouse ", &loader, None).unwrap();
     assert_eq!(relation.models[0].fqn(), "Warehouse");
@@ -881,7 +885,10 @@ fn relation_chain_instantiates_generic_related_models() {
         Arc::new(holder),
         Arc::new(make_class("Item")),
     ];
-    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        classes.iter().find(|class| class.fqn() == name).cloned()
+    };
     let cache = crate::virtual_members::new_resolved_class_cache();
     let relation =
         resolve_relation_chain_details(&classes[0], "holder", &loader, Some(&cache)).unwrap();

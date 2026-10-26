@@ -6,24 +6,43 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
+use tower_lsp_server::jsonrpc::Result;
 
 use crate::Backend;
+use crate::backend::ClientCaps;
 use crate::composer;
 use crate::config::IndexingStrategy;
 use crate::server::{run_blocking_cancel_safe, type_hierarchy_registration};
 
 impl Backend {
     pub(crate) async fn on_initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // `rootUri` is deprecated in favour of `workspaceFolders`, but it is
+        // what every client still sends and what the workspace root has
+        // always been read from. A client that sends only the folders gets
+        // the first one, which is what the others set `rootUri` to.
+        let folders = match &params.workspace_folders_initialize_params.workspace_folders {
+            Some(WorkspaceFolders::WorkspaceFolderList(folders)) => folders.as_slice(),
+            Some(WorkspaceFolders::Null) | None => &[],
+        };
+        #[allow(deprecated)]
         let workspace_root = params
             .root_uri
             .as_ref()
-            .and_then(|uri| uri.to_file_path().ok());
+            .and_then(crate::util::url_to_path)
+            .or_else(|| {
+                folders
+                    .first()
+                    .and_then(|folder| crate::util::url_to_path(&folder.uri))
+            });
 
         if let Some(root) = workspace_root {
             *self.workspace.workspace_root.write() = Some(root);
         }
+
+        // The other folders are indexed beside the root once discovery
+        // runs in `initialized`.
+        self.set_workspace_folders(folders);
 
         // Store the client name for quirks-mode adjustments.
         if let Some(info) = &params.client_info {
@@ -42,156 +61,24 @@ impl Backend {
             self.set_client_indexing_options(options);
         }
 
-        let client_supports_pull = params
-            .capabilities
-            .text_document
+        // The stub directory an editor extension ships, scanned with the
+        // `[stubs]` paths once discovery runs.
+        if let Some(options) = params
+            .initialization_options
             .as_ref()
-            .and_then(|td| td.diagnostic.as_ref())
-            .is_some();
-        self.supports_pull_diagnostics
-            .store(client_supports_pull, Ordering::Release);
+            .and_then(crate::config::ClientStubOptions::from_client_settings)
+        {
+            self.set_client_stub_options(options);
+        }
 
-        // Detect which resource operations the client accepts in workspace
-        // edits: the rename handler includes a `RenameFile` operation when a
-        // class rename matches PSR-4 naming, and the code actions that
-        // create a file (extract interface, create a missing view) are only
-        // offered when `CreateFile` is accepted.
-        let resource_operations = params
-            .capabilities
-            .workspace
-            .as_ref()
-            .and_then(|ws| ws.workspace_edit.as_ref())
-            .and_then(|we| we.resource_operations.as_deref())
-            .unwrap_or_default();
-        self.supports_file_rename.store(
-            resource_operations.contains(&ResourceOperationKind::Rename),
-            Ordering::Release,
-        );
-        self.supports_file_create.store(
-            resource_operations.contains(&ResourceOperationKind::Create),
-            Ordering::Release,
-        );
-
-        // Deferred code actions carry `data` and no `edit`, which the spec
-        // only allows for a client that resolves `edit` lazily.
-        let code_action = params
-            .capabilities
-            .text_document
-            .as_ref()
-            .and_then(|td| td.code_action.as_ref());
-        let supports_resolve = code_action.is_some_and(|ca| {
-            ca.data_support == Some(true)
-                && ca
-                    .resolve_support
-                    .as_ref()
-                    .is_some_and(|rs| rs.properties.iter().any(|p| p == "edit"))
-        });
-        self.supports_code_action_resolve
-            .store(supports_resolve, Ordering::Release);
-
-        // Detect whether the client supports server-initiated work-done
-        // progress (window/workDoneProgress/create).  Per the LSP spec,
-        // we must not send that request unless the client opts in.
-        let client_supports_work_done_progress = params
-            .capabilities
-            .window
-            .as_ref()
-            .and_then(|w| w.work_done_progress)
-            .unwrap_or(false);
-        self.supports_work_done_progress
-            .store(client_supports_work_done_progress, Ordering::Release);
-
-        // Detect whether the client handles `window/showDocument`.  Code
-        // lens navigation routes through that request, so a client that
-        // does not opt in needs a lens command it can act on itself.
-        let client_supports_show_document = params
-            .capabilities
-            .window
-            .as_ref()
-            .and_then(|w| w.show_document.as_ref())
-            .is_some_and(|sd| sd.support);
-        self.supports_show_document
-            .store(client_supports_show_document, Ordering::Release);
-
-        // Detect whether the client supports server-initiated semantic
-        // token refreshes (`workspace/semanticTokens/refresh`).  Used to
-        // re-pull tokens after background didChange parses commit a new
-        // symbol map.
-        let client_supports_semantic_tokens_refresh = params
-            .capabilities
-            .workspace
-            .as_ref()
-            .and_then(|ws| ws.semantic_tokens.as_ref())
-            .and_then(|st| st.refresh_support)
-            .unwrap_or(false);
-        self.supports_semantic_tokens_refresh
-            .store(client_supports_semantic_tokens_refresh, Ordering::Release);
-
-        let client_supports_code_lens_refresh = params
-            .capabilities
-            .workspace
-            .as_ref()
-            .and_then(|ws| ws.code_lens.as_ref())
-            .and_then(|code_lens| code_lens.refresh_support)
-            .unwrap_or(false);
-        self.supports_code_lens_refresh
-            .store(client_supports_code_lens_refresh, Ordering::Release);
-
-        // Reference counts on declarations are computed off the request
-        // path, so the hints an editor holds are the ones from before the
-        // counts landed unless it can be asked to re-pull them.
-        let client_supports_inlay_hint_refresh = params
-            .capabilities
-            .workspace
-            .as_ref()
-            .and_then(|ws| ws.inlay_hint.as_ref())
-            .and_then(|ih| ih.refresh_support)
-            .unwrap_or(false);
-        self.supports_inlay_hint_refresh
-            .store(client_supports_inlay_hint_refresh, Ordering::Release);
-
-        let watched_files_capability = params
-            .capabilities
-            .workspace
-            .as_ref()
-            .and_then(|ws| ws.did_change_watched_files.as_ref());
-
-        // Asking a client to watch files is a `client/registerCapability`
-        // request, and the protocol has no other way to do it.  One that did
-        // not opt in may not understand the request, and may never answer
-        // it, so it is not sent one.
-        let client_supports_watched_files_dynamic_registration = watched_files_capability
-            .and_then(|w| w.dynamic_registration)
-            .unwrap_or(false);
-        self.supports_watched_files_dynamic_registration.store(
-            client_supports_watched_files_dynamic_registration,
-            Ordering::Release,
-        );
-
-        // A tree indexed through a symlink is not inside any workspace
-        // folder, so being told about a change in it takes a watcher that
-        // names the link.  Clients that predate LSP 3.17 get none, and a
-        // `git pull` into a linked framework needs a reload there.
-        let client_supports_relative_pattern_watchers = watched_files_capability
-            .and_then(|w| w.relative_pattern_support)
-            .unwrap_or(false);
-        self.supports_relative_pattern_watchers
-            .store(client_supports_relative_pattern_watchers, Ordering::Release);
-
-        let client_supports_type_hierarchy_dynamic_registration = params
-            .capabilities
-            .text_document
-            .as_ref()
-            .and_then(|td| td.type_hierarchy.as_ref())
-            .and_then(|th| th.dynamic_registration)
-            .unwrap_or(false);
-        self.supports_type_hierarchy_dynamic_registration.store(
-            client_supports_type_hierarchy_dynamic_registration,
-            Ordering::Release,
-        );
+        let caps = ClientCaps::from_capabilities(&params.capabilities);
+        // A client that can register type hierarchy dynamically gets it
+        // from `initialized` instead, so it is never registered twice.
+        let type_hierarchy_provider = (!caps.type_hierarchy_dynamic_registration)
+            .then_some(TypeHierarchyProvider::Bool(true));
+        *self.client_caps.write() = caps;
 
         Ok(InitializeResult {
-            offset_encoding: None,
             capabilities: ServerCapabilities {
                 signature_help_provider: Some(SignatureHelpOptions {
                     trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
@@ -220,55 +107,60 @@ impl Backend {
                     },
                     completion_item: None,
                 }),
-                inlay_hint_provider: Some(OneOf::Left(true)),
-                text_document_sync: Some(TextDocumentSyncCapability::Options(
-                    TextDocumentSyncOptions {
-                        open_close: Some(true),
-                        change: Some(TextDocumentSyncKind::INCREMENTAL),
-                        will_save: None,
-                        will_save_wait_until: None,
-                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
-                            include_text: Some(false),
-                        })),
-                    },
-                )),
-                hover_provider: Some(HoverProviderCapability::Simple(true)),
-                definition_provider: Some(OneOf::Left(true)),
-                type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
-                implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
-                references_provider: Some(OneOf::Left(true)),
-                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
-                document_highlight_provider: Some(OneOf::Left(true)),
-                code_action_provider: Some(CodeActionProviderCapability::Options(
+                inlay_hint_provider: Some(InlayHintProvider::Bool(true)),
+                text_document_sync: Some(TextDocumentSync::Options(TextDocumentSyncOptions {
+                    open_close: Some(true),
+                    change: Some(TextDocumentSyncKind::Incremental),
+                    will_save: None,
+                    will_save_wait_until: None,
+                    save: Some(Save::SaveOptions(SaveOptions {
+                        include_text: Some(false),
+                    })),
+                })),
+                hover_provider: Some(HoverProvider::Bool(true)),
+                definition_provider: Some(DefinitionProvider::Bool(true)),
+                type_definition_provider: Some(TypeDefinitionProvider::Bool(true)),
+                implementation_provider: Some(ImplementationProvider::Bool(true)),
+                references_provider: Some(ReferencesProvider::Bool(true)),
+                call_hierarchy_provider: Some(CallHierarchyProvider::Bool(true)),
+                type_hierarchy_provider,
+                document_highlight_provider: Some(DocumentHighlightProvider::Bool(true)),
+                code_action_provider: Some(CodeActionProvider::CodeActionOptions(
                     CodeActionOptions {
                         code_action_kinds: Some(vec![
-                            CodeActionKind::QUICKFIX,
-                            CodeActionKind::REFACTOR_EXTRACT,
-                            CodeActionKind::REFACTOR_INLINE,
-                            CodeActionKind::SOURCE_ORGANIZE_IMPORTS,
+                            CodeActionKind::QuickFix,
+                            CodeActionKind::RefactorExtract,
+                            CodeActionKind::RefactorInline,
+                            CodeActionKind::SourceOrganizeImports,
                             CodeActionKind::new("source.addMissingImports"),
                         ]),
                         work_done_progress_options: WorkDoneProgressOptions {
                             work_done_progress: None,
                         },
                         resolve_provider: Some(true),
+                        documentation: None,
                     },
                 )),
-                rename_provider: Some(OneOf::Right(RenameOptions {
+                rename_provider: Some(RenameProvider::RenameOptions(RenameOptions {
                     prepare_provider: Some(true),
                     work_done_progress_options: WorkDoneProgressOptions {
                         work_done_progress: None,
                     },
                 })),
-                document_symbol_provider: Some(OneOf::Left(true)),
-                workspace_symbol_provider: Some(OneOf::Left(true)),
-                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                document_symbol_provider: Some(DocumentSymbolProvider::Bool(true)),
+                workspace_symbol_provider: Some(WorkspaceSymbolProvider::Bool(true)),
+                folding_range_provider: Some(FoldingRangeProvider::Bool(true)),
                 code_lens_provider: Some(CodeLensOptions {
                     resolve_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: None,
+                    },
                 }),
-                selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
-                document_formatting_provider: Some(OneOf::Left(true)),
-                document_range_formatting_provider: Some(OneOf::Left(true)),
+                selection_range_provider: Some(SelectionRangeProvider::Bool(true)),
+                document_formatting_provider: Some(DocumentFormattingProvider::Bool(true)),
+                document_range_formatting_provider: Some(DocumentRangeFormattingProvider::Bool(
+                    true,
+                )),
                 document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
                     first_trigger_character: "\n".to_string(),
                     more_trigger_character: None,
@@ -279,20 +171,22 @@ impl Backend {
                         work_done_progress: None,
                     },
                 }),
-                semantic_tokens_provider: Some(
-                    SemanticTokensServerCapabilities::SemanticTokensOptions(
-                        SemanticTokensOptions {
-                            work_done_progress_options: WorkDoneProgressOptions {
-                                work_done_progress: None,
-                            },
-                            legend: crate::semantic_tokens::legend(),
-                            range: Some(false),
-                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                semantic_tokens_provider: Some(SemanticTokensProvider::SemanticTokensOptions(
+                    SemanticTokensOptions {
+                        work_done_progress_options: WorkDoneProgressOptions {
+                            work_done_progress: None,
                         },
-                    ),
-                ),
-                diagnostic_provider: if client_supports_pull {
-                    Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
+                        legend: crate::semantic_tokens::legend(),
+                        range: Some(SemanticTokensOptionsRange::Bool(false)),
+                        full: Some(Full::Bool(true)),
+                    },
+                )),
+                // Advertised to every client: one that cannot pull ignores
+                // it, and a push client that pulls anyway is answered from
+                // the set last published.  Delivery mode still follows the
+                // client's own `textDocument.diagnostic` declaration.
+                diagnostic_provider: Some(DiagnosticProvider::DiagnosticOptions(
+                    DiagnosticOptions {
                         identifier: Some("phpantom".to_string()),
                         inter_file_dependencies: true,
                         // The workspace/diagnostic handler reports both
@@ -303,13 +197,20 @@ impl Backend {
                         work_done_progress_options: WorkDoneProgressOptions {
                             work_done_progress: None,
                         },
-                    }))
-                } else {
-                    None
-                },
+                    },
+                )),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec!["phpantom.navigateToPrototype".to_string()],
                     ..ExecuteCommandOptions::default()
+                }),
+                // Without this a client sends the folder list at startup
+                // but never says when a folder is added or removed.
+                workspace: Some(WorkspaceOptions {
+                    workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                        supported: Some(true),
+                        change_notifications: Some(ChangeNotifications::Bool(true)),
+                    }),
+                    ..WorkspaceOptions::default()
                 }),
                 ..ServerCapabilities::default()
             },
@@ -321,6 +222,14 @@ impl Backend {
     }
 
     pub(crate) async fn on_initialized(&self) {
+        if !crate::stubs::has_embedded_stubs()
+            && let Some(client) = &self.client
+        {
+            client
+                .show_message(MessageType::Warning, crate::stubs::MISSING_STUBS_WARNING)
+                .await;
+        }
+
         let workspace_root = self.workspace.workspace_root.read().clone();
 
         if let Some(root) = workspace_root {
@@ -337,7 +246,7 @@ impl Backend {
                 }
                 Err(e) => {
                     self.log(
-                        MessageType::WARNING,
+                        MessageType::Warning,
                         format!("Failed to load .phpantom.toml: {}", e),
                     )
                     .await;
@@ -347,7 +256,17 @@ impl Backend {
             // Parse composer.json once up front.  The result is used for
             // PHP version detection and passed into init_single_project
             // so the file is never re-read during startup.
-            let composer_package = composer::read_composer_package(&root);
+            let composer_package = match composer::try_read_composer_package(&root) {
+                Ok(package) => package,
+                Err(e) => {
+                    self.log(
+                        MessageType::Warning,
+                        format!("{e}; PSR-4 mappings and the PHP version from it are ignored"),
+                    )
+                    .await;
+                    None
+                }
+            };
 
             // Detect the target PHP version.  The config file override
             // takes precedence; otherwise fall back to composer.json.
@@ -386,7 +305,7 @@ impl Backend {
             // set by the init pass above from composer.json, so it has to
             // run after it: a Symfony workspace must never pay for the
             // whole-tree migration walk, let alone hang in it.
-            if self.resolved_class_cache.read().is_laravel() {
+            if self.resolved_class_cache.read().laravel().is_enabled() {
                 // The macro index must be built before the schema index:
                 // `load_schema_index` takes the project's `Blueprint` macro
                 // closures so a migration calling a custom column helper
@@ -403,7 +322,7 @@ impl Backend {
 
                 let laravel_config = self.config().laravel;
                 if laravel_config.schema.enabled() || laravel_config.migrations.enabled() {
-                    let bp_macros = self.laravel_macros.read().blueprint_macro_closures();
+                    let bp_macros = self.laravel.macros.read().blueprint_macro_closures();
                     let schema_root = root.clone();
                     let schema_config = laravel_config.clone();
                     let loaded = run_blocking_cancel_safe("load_schema_index", move || {
@@ -418,12 +337,13 @@ impl Backend {
                         Some(Ok(index)) => {
                             self.resolved_class_cache
                                 .write()
+                                .laravel_mut()
                                 .set_schema_index(index.clone());
-                            *self.schema_index.write() = index;
+                            *self.laravel.schema_index.write() = index;
                         }
                         Some(Err(e)) => {
                             self.log(
-                                MessageType::WARNING,
+                                MessageType::Warning,
                                 format!("Failed to load Laravel schema dumps: {}", e),
                             )
                             .await;
@@ -455,7 +375,7 @@ impl Backend {
                     .await;
             }
         } else {
-            self.log(MessageType::INFO, "PHPantom initialized!".to_string())
+            self.log(MessageType::Info, "PHPantom initialized!".to_string())
                 .await;
         }
 
@@ -468,7 +388,7 @@ impl Backend {
         // (php_version, vendor_uri_prefixes, vendor_dir_paths) are
         // snapshotted — they are only written during init (above) and
         // never change afterwards.
-        let worker_backend = self.clone_for_diagnostic_worker();
+        let worker_backend = self.clone_for_blocking();
         tokio::spawn(async move {
             worker_backend.diagnostic_worker().await;
         });
@@ -478,7 +398,7 @@ impl Backend {
         // in its own task with its own debounce timer and pending-URI
         // slot.  At most one PHPStan process runs at a time.  Native
         // diagnostics (fast + slow phases) are never blocked.
-        let phpstan_backend = self.clone_for_diagnostic_worker();
+        let phpstan_backend = self.clone_for_blocking();
         tokio::spawn(async move {
             phpstan_backend.phpstan_worker().await;
         });
@@ -486,13 +406,13 @@ impl Backend {
         // Spawn the PHPCS worker as a separate background task.
         // Same pattern as the PHPStan worker: dedicated task, own
         // debounce timer, single pending-URI slot.
-        let phpcs_backend = self.clone_for_diagnostic_worker();
+        let phpcs_backend = self.clone_for_blocking();
         tokio::spawn(async move {
             phpcs_backend.phpcs_worker().await;
         });
 
         // Spawn the PHPMD worker.  Same pattern as PHPCS.
-        let phpmd_backend = self.clone_for_diagnostic_worker();
+        let phpmd_backend = self.clone_for_blocking();
         tokio::spawn(async move {
             phpmd_backend.phpmd_worker().await;
         });
@@ -500,7 +420,7 @@ impl Backend {
         // Spawn the Mago lint worker.  Same pattern as PHPCS: dedicated
         // task, own debounce timer, single pending-URI slot.  Mago lint
         // is fast (AST-level rules) so it uses the same debounce as PHPCS.
-        let mago_lint_backend = self.clone_for_diagnostic_worker();
+        let mago_lint_backend = self.clone_for_blocking();
         tokio::spawn(async move {
             mago_lint_backend.mago_lint_worker().await;
         });
@@ -508,7 +428,7 @@ impl Backend {
         // Spawn the Mago analyze worker.  Mago analyze is slower
         // (type-aware) so it follows the PHPStan pattern with a longer
         // debounce.
-        let mago_analyze_backend = self.clone_for_diagnostic_worker();
+        let mago_analyze_backend = self.clone_for_blocking();
         tokio::spawn(async move {
             mago_analyze_backend.mago_analyze_worker().await;
         });
@@ -518,22 +438,19 @@ impl Backend {
         // the global config lives outside the workspace and has to be
         // polled directly; see `global_config_watcher` for why.
         if let Some(root) = self.workspace.workspace_root.read().clone() {
-            let config_watcher_backend = self.clone_for_diagnostic_worker();
+            let config_watcher_backend = self.clone_for_blocking();
             tokio::spawn(async move {
                 config_watcher_backend.global_config_watcher(root).await;
             });
         }
 
         // ── Dynamic capability registration ─────────────────────────
-        // lsp-types 0.94 does not expose a `type_hierarchy_provider`
-        // field on `ServerCapabilities`, so we register the capability
-        // dynamically via `client/registerCapability` instead.
+        // Type hierarchy is registered here only for a client that
+        // supports it; any other client got the static
+        // `type_hierarchy_provider` capability from `initialize`.
         let mut registrations = Vec::new();
 
-        if self
-            .supports_type_hierarchy_dynamic_registration
-            .load(Ordering::Acquire)
-        {
+        if self.caps().type_hierarchy_dynamic_registration {
             registrations.push(type_hierarchy_registration());
         }
 
@@ -585,14 +502,12 @@ impl Backend {
         // the merged cache — resolves them correctly.  Clearing here lets
         // the now-complete index rebuild every merge correctly.
         self.clear_resolved_class_cache();
-        self.auth_user_type_cache.write().clear();
-        *self.storage_disk_type_cache.write() = None;
-        self.laravel_aliases.invalidate();
+        self.laravel.clear_config_facts();
 
         // Scan project source for the remaining Laravel indexes (macros
         // were already scanned above, before the schema index load, so
         // `Blueprint` macro columns are present from the first load).
-        if self.resolved_class_cache.read().is_laravel() {
+        if self.resolved_class_cache.read().laravel().is_enabled() {
             // Each of these parses the project's provider and Blade files, so
             // they run on the blocking pool: `initialized` is a notification
             // and tower-lsp cannot dispatch anything else while it runs.
@@ -633,7 +548,7 @@ impl Backend {
         // `init_complete` is false. Queue that catch-up work after
         // `initialized` returns so early completion requests are not
         // stuck behind diagnostics for the active file.
-        let diagnostics_backend = self.clone_for_diagnostic_worker();
+        let diagnostics_backend = self.clone_for_blocking();
         tokio::spawn(async move {
             let file_snapshots: Vec<(String, Arc<String>)> = diagnostics_backend
                 .open_files
@@ -667,7 +582,11 @@ impl Backend {
         if self.workspace.workspace_root.read().is_none() {
             return;
         }
-        if self.full_index_in_progress.swap(true, Ordering::AcqRel) {
+        if self
+            .workspace_index
+            .full_in_progress
+            .swap(true, Ordering::AcqRel)
+        {
             return;
         }
 
@@ -694,7 +613,12 @@ impl Backend {
                 let report_progress =
                     |percentage, message: String| worker_state.set_percentage(percentage, message);
                 parse_backend.ensure_workspace_indexed_with_progress(Some(&report_progress));
-                parse_backend.symbol_maps.read().len()
+                parse_backend
+                    .files
+                    .read()
+                    .values()
+                    .filter(|state| state.symbol_map.is_some())
+                    .count()
             })
             .await
             .unwrap_or(0);
@@ -704,7 +628,8 @@ impl Backend {
             }
 
             progress_backend
-                .full_index_in_progress
+                .workspace_index
+                .full_in_progress
                 .store(false, Ordering::Release);
 
             // The walk above covers the whole workspace root, so it is
@@ -760,10 +685,7 @@ impl Backend {
             if !progress_backend.config().diagnostics.workspace_enabled() {
                 return;
             }
-            if progress_backend
-                .supports_pull_diagnostics
-                .load(Ordering::Acquire)
-            {
+            if progress_backend.caps().pull_diagnostics {
                 progress_backend.wait_for_first_workspace_pull().await;
                 if progress_backend.shutdown_flag.load(Ordering::Acquire) {
                     return;

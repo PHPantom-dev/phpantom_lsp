@@ -37,6 +37,26 @@ pub(crate) fn assignment_map_depth_with_updates<'a>(
     statements: &[&Statement<'_>],
     updates: impl Iterator<Item = &'a Expression<'a>>,
 ) -> u32 {
+    loop_assignments(statements, updates).depth
+}
+
+/// What a loop's assignments say about how walks of its body settle.
+pub(crate) struct LoopAssignments {
+    /// How many walks it takes for a type to propagate along the longest
+    /// assignment chain; see [`assignment_map_depth`].
+    pub(crate) depth: u32,
+    /// The variables whose new value is computed from their own previous
+    /// one, directly (`$i = $i + 1`) or through others (`$a = $b + 1; $b =
+    /// $a;`).  Only these can keep changing from one pass to the next.
+    pub(crate) self_dependent: HashSet<String>,
+}
+
+/// The [`LoopAssignments`] of a loop body, plus a `for` loop's update
+/// clause (see [`assignment_map_depth_with_updates`]).
+pub(crate) fn loop_assignments<'a>(
+    statements: &[&Statement<'_>],
+    updates: impl Iterator<Item = &'a Expression<'a>>,
+) -> LoopAssignments {
     // Build dependency map: assigned_var → set of RHS variables
     let mut deps: HashMap<String, HashSet<String>> = HashMap::new();
 
@@ -47,6 +67,42 @@ pub(crate) fn assignment_map_depth_with_updates<'a>(
         collect_expr_assignment_deps(update, &mut deps);
     }
 
+    let self_dependent = deps
+        .keys()
+        .filter(|var| reaches_itself(var, &deps))
+        .cloned()
+        .collect();
+    LoopAssignments {
+        depth: dependency_depth(&deps),
+        self_dependent,
+    }
+}
+
+/// Whether `var`'s value depends, through the assignments in `deps`, on its
+/// own previous value.
+fn reaches_itself(var: &str, deps: &HashMap<String, HashSet<String>>) -> bool {
+    let mut seen = HashSet::new();
+    let mut stack: Vec<&str> = deps
+        .get(var)
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+        .collect();
+    while let Some(next) = stack.pop() {
+        if next == var {
+            return true;
+        }
+        if seen.insert(next)
+            && let Some(more) = deps.get(next)
+        {
+            stack.extend(more.iter().map(String::as_str));
+        }
+    }
+    false
+}
+
+/// The number of walks the longest chain in `deps` takes to settle.
+fn dependency_depth(deps: &HashMap<String, HashSet<String>>) -> u32 {
     if deps.is_empty() {
         return 1;
     }
@@ -54,9 +110,8 @@ pub(crate) fn assignment_map_depth_with_updates<'a>(
     // Compute longest dependency chain via DFS with cycle detection.
     let mut cache: HashMap<String, u32> = HashMap::new();
     let mut max_depth: u32 = 1;
-    let keys: Vec<String> = deps.keys().cloned().collect();
-    for key in &keys {
-        let d = chain_depth(key, &deps, &mut cache, &mut HashSet::new());
+    for key in deps.keys() {
+        let d = chain_depth(key, deps, &mut cache, &mut HashSet::new());
         max_depth = max_depth.max(d);
     }
 
@@ -139,6 +194,13 @@ pub(crate) fn collect_expr_assignment_deps(
 
     let mut rhs_vars = HashSet::new();
     collect_rhs_variables(assign.rhs, &mut rhs_vars);
+    // `$a += …` reads `$a` as well.
+    if !matches!(
+        assign.operator,
+        mago_syntax::cst::assignment::AssignmentOperator::Assign(_)
+    ) {
+        collect_rhs_variables(assign.lhs, &mut rhs_vars);
+    }
 
     // A write through an index or a property (`$a[$k] = …`, `$a->p = …`)
     // keeps everything the target already held, so the new type of the

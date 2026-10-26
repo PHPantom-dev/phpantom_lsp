@@ -29,13 +29,14 @@ use mago_allocator::LocalArena;
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::property::Property;
 use mago_syntax::cst::modifier::Modifier;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::class_lookup::Fqn;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::offset_to_position;
+use crate::text_position::{byte_range_to_lsp_range, offset_to_position};
 use crate::types::{ClassInfo, Visibility};
 
 /// The action kind used for the deferred resolve dispatch.
@@ -93,7 +94,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
@@ -147,7 +148,7 @@ impl Backend {
         // the "correct" targets so we can mark them as preferred.
         let phpstan_targets: Vec<String> = phpstan_diag
             .as_ref()
-            .and_then(|d| parse_phpstan_visibility_targets(&d.message))
+            .and_then(|d| parse_phpstan_visibility_targets(crate::util::message_text(&d.message)))
             .unwrap_or_default();
 
         for &(new_keyword, title) in &alternatives {
@@ -158,13 +159,13 @@ impl Backend {
             // remain refactoring actions.
             let (kind, is_preferred, diagnostics) = if is_phpstan_target {
                 (
-                    CodeActionKind::QUICKFIX,
+                    CodeActionKind::QuickFix,
                     // The most-restrictive valid target is preferred.
                     Some(phpstan_targets.first().is_some_and(|t| t == new_keyword)),
                     phpstan_diag.as_ref().map(|d| vec![d.clone()]),
                 )
             } else {
-                (CodeActionKind::new("refactor.rewrite"), None, None)
+                (CodeActionKind::RefactorRewrite, None, None)
             };
 
             let extra = serde_json::json!({
@@ -175,7 +176,7 @@ impl Backend {
 
             let data = make_code_action_data(ACTION_KIND, uri, &params.range, extra);
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: title.to_string(),
                 kind: Some(kind),
                 diagnostics,
@@ -184,6 +185,7 @@ impl Backend {
                 is_preferred,
                 disabled: None,
                 data: Some(data),
+                tags: None,
             }));
         }
     }
@@ -218,16 +220,10 @@ impl Backend {
             return None;
         }
 
-        let start_pos = offset_to_position(content, vis_start);
-        let end_pos = offset_to_position(content, vis_end);
-
-        let doc_uri: Url = uri.parse().ok()?;
+        let doc_uri: Uri = uri.parse().ok()?;
         Some(crate::code_actions::single_edit(
             doc_uri,
-            Range {
-                start: start_pos,
-                end: end_pos,
-            },
+            byte_range_to_lsp_range(content, vis_start, vis_end),
             target_vis.to_string(),
         ))
     }
@@ -250,7 +246,7 @@ impl Backend {
         // Find the enclosing ClassInfo from the uri_classes_index.
         let enclosing = self.class_at_offset(uri, cursor_offset)?;
 
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let mut best_level: Option<u8> = None;
         let mut interfaces = enclosing.interfaces.clone();
         for (_, parent) in crate::inheritance::ancestors(&enclosing, &class_loader) {
@@ -300,7 +296,7 @@ impl Backend {
                 let diag_line = d.range.start.line;
                 let in_range = diag_line >= start_line && diag_line <= end_line;
                 let is_vis_id = match &d.code {
-                    Some(NumberOrString::String(s)) => {
+                    Some(Code::String(s)) => {
                         s == METHOD_VISIBILITY_ID || s == PROPERTY_VISIBILITY_ID
                     }
                     _ => false,

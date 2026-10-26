@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 
 use parking_lot::Mutex;
 use tokio::sync::Notify;
-use tower_lsp::lsp_types::Diagnostic;
+use tower_lsp_server::gen_lsp_types::Diagnostic;
 
 use crate::diagnostics::workspace::WorkspaceDiagnostics;
 

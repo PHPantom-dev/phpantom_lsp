@@ -2,10 +2,9 @@
 //! conversion, parent-chain ancestry checks, accessor/mutator name
 //! mapping, and reading string literals off the AST.
 
-use std::sync::Arc;
-
 use mago_syntax::cst::*;
 
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 
 use super::ELOQUENT_MODEL_FQN;
@@ -21,7 +20,7 @@ use super::ELOQUENT_MODEL_FQN;
 /// FQN without a leading backslash.
 pub(in crate::virtual_members::laravel) fn walks_parent_chain(
     class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     predicate: fn(&str) -> bool,
 ) -> bool {
     if predicate(&class.name) {
@@ -42,7 +41,7 @@ pub(in crate::virtual_members::laravel) fn walks_parent_chain(
         if predicate(parent_name) {
             return true;
         }
-        match crate::class_lookup::load_resolved_name(parent_name, class_loader) {
+        match class_loader(Fqn::new(parent_name)) {
             Some(parent) => {
                 current_parent = parent.parent_class;
             }
@@ -62,10 +61,7 @@ pub(in crate::virtual_members::laravel) fn is_eloquent_model(class_name: &str) -
 /// `Illuminate\Database\Eloquent\Model`.
 ///
 /// Returns `true` if the class itself is `Model` or any ancestor is.
-pub fn extends_eloquent_model(
-    class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+pub fn extends_eloquent_model(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
     walks_parent_chain(class, class_loader, is_eloquent_model)
 }
 
@@ -76,10 +72,7 @@ pub(in crate::virtual_members::laravel) fn is_eloquent_builder(class_name: &str)
 
 /// Walk the parent chain of `class` looking for
 /// `Illuminate\Database\Eloquent\Builder`.
-pub fn extends_eloquent_builder(
-    class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+pub fn extends_eloquent_builder(class: &ClassInfo, class_loader: &ResolvedClassLoader<'_>) -> bool {
     walks_parent_chain(class, class_loader, is_eloquent_builder)
 }
 

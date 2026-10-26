@@ -5,35 +5,27 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::common::message_text;
     use crate::common::{
-        APP_PSR4_COMPOSER, create_psr4_workspace, open_document, with_code, workspace_path,
-        workspace_uri,
+        APP_PSR4_COMPOSER, completion_response, create_psr4_workspace, hover_response,
+        open_document, references_response, with_code, workspace_path, workspace_uri,
     };
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     const ITEM_CLASS: &str =
         "<?php\nnamespace App;\nclass Item { public string $name; public int $price; }\n";
 
     async fn hover_type(
         backend: &phpantom_lsp::Backend,
-        uri: &Url,
+        uri: &Uri,
         line: u32,
         character: u32,
     ) -> String {
-        let result = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
+        let result = hover_response(backend, uri, line, character).await;
         match result {
             Some(Hover {
-                contents: HoverContents::Markup(m),
+                contents: Contents::MarkupContent(m),
                 ..
             }) => m.value,
             other => panic!("expected markup hover, got {:?}", other),
@@ -76,30 +68,21 @@ mod tests {
         .await;
 
         // Completion after `$item->` must offer Item's members.
-        let result = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier {
-                        uri: blade_uri.clone(),
-                    },
-                    position: Position {
-                        line: 0,
-                        character: 10,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: Some(CompletionContext {
-                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-                    trigger_character: Some(">".to_string()),
-                }),
-            })
-            .await
-            .unwrap();
+        let result = completion_response(
+            &backend,
+            &blade_uri,
+            0,
+            10,
+            Some(CompletionContext {
+                trigger_kind: CompletionTriggerKind::TriggerCharacter,
+                trigger_character: Some(">".to_string()),
+            }),
+        )
+        .await;
 
         let items = match result {
-            Some(CompletionResponse::Array(items)) => items,
-            Some(CompletionResponse::List(list)) => list.items,
+            Some(CompletionResponse::CompletionItemList(items)) => items,
+            Some(CompletionResponse::CompletionList(list)) => list.items,
             None => panic!("no completions for injected $item->"),
         };
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
@@ -355,17 +338,20 @@ mod tests {
         );
         let undefined: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("Undefined variable"))
+            .filter(|d| message_text(&d.message).contains("Undefined variable"))
             .collect();
         assert!(
-            !undefined.iter().any(|d| d.message.contains("$item")),
+            !undefined
+                .iter()
+                .any(|d| message_text(&d.message).contains("$item")),
             "injected $item must not be flagged undefined: {:?}",
             undefined
         );
         assert!(
             undefined
                 .iter()
-                .any(|d| d.message.contains("$undefined_thing") && d.range.start.line == 1),
+                .any(|d| message_text(&d.message).contains("$undefined_thing")
+                    && d.range.start.line == 1),
             "$undefined_thing must be flagged on Blade line 1: {:?}",
             undefined
         );
@@ -709,7 +695,7 @@ mod tests {
         );
         let undefined: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("Undefined variable"))
+            .filter(|d| message_text(&d.message).contains("Undefined variable"))
             .collect();
         assert!(
             undefined.is_empty(),
@@ -837,7 +823,7 @@ mod tests {
     /// `view()` call but never names the class itself, so `App\Item` appears
     /// in the template's virtual PHP only through the injected prologue.
     async fn workspace_naming_item_only_in_the_prologue()
-    -> (phpantom_lsp::Backend, tempfile::TempDir, Url, Url) {
+    -> (phpantom_lsp::Backend, tempfile::TempDir, Uri, Uri) {
         let (backend, dir) = create_psr4_workspace(
             APP_PSR4_COMPOSER,
             &[
@@ -877,7 +863,7 @@ mod tests {
 
     /// Every text edit a workspace edit applies to `uri`, from either the
     /// `changes` map or the `document_changes` operation list.
-    fn edits_for(edit: &WorkspaceEdit, uri: &Url) -> Vec<Range> {
+    fn edits_for(edit: &WorkspaceEdit, uri: &Uri) -> Vec<Range> {
         let mut ranges = Vec::new();
 
         if let Some(changes) = &edit.changes
@@ -887,23 +873,23 @@ mod tests {
         }
 
         let doc_edits: Vec<&TextDocumentEdit> = match &edit.document_changes {
-            Some(DocumentChanges::Edits(edits)) => edits.iter().collect(),
-            Some(DocumentChanges::Operations(ops)) => ops
+            Some(ops) => ops
                 .iter()
                 .filter_map(|op| match op {
-                    DocumentChangeOperation::Edit(e) => Some(e),
-                    DocumentChangeOperation::Op(_) => None,
+                    DocumentChange::TextDocumentEdit(e) => Some(e),
+                    _ => None,
                 })
                 .collect(),
             None => Vec::new(),
         };
         for doc_edit in doc_edits {
-            if doc_edit.text_document.uri != *uri {
+            if doc_edit.text_document.text_document_identifier.uri != *uri {
                 continue;
             }
             ranges.extend(doc_edit.edits.iter().map(|e| match e {
-                OneOf::Left(e) => e.range,
-                OneOf::Right(e) => e.text_edit.range,
+                Edit::TextEdit(e) => e.range,
+                Edit::AnnotatedTextEdit(e) => e.text_edit.range,
+                Edit::SnippetTextEdit(e) => e.range,
             }));
         }
 
@@ -918,25 +904,8 @@ mod tests {
         let (backend, _dir, item_uri, blade_uri) =
             workspace_naming_item_only_in_the_prologue().await;
 
-        let locations = backend
-            .references(ReferenceParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier {
-                        uri: item_uri.clone(),
-                    },
-                    position: Position {
-                        line: 2,
-                        character: 7,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: ReferenceContext {
-                    include_declaration: true,
-                },
-            })
+        let locations = references_response(&backend, &item_uri, Position::new(2, 7), true)
             .await
-            .unwrap()
             .unwrap_or_default();
 
         let in_template: Vec<_> = locations.iter().filter(|l| l.uri == blade_uri).collect();
@@ -957,7 +926,7 @@ mod tests {
 
         let edit = backend
             .rename(RenameParams {
-                text_document_position: TextDocumentPositionParams {
+                text_document_position_params: TextDocumentPositionParams {
                     text_document: TextDocumentIdentifier {
                         uri: item_uri.clone(),
                     },
@@ -1376,25 +1345,8 @@ mod tests {
         )
         .await;
 
-        let locations = backend
-            .references(ReferenceParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier {
-                        uri: blade_uri.clone(),
-                    },
-                    position: Position {
-                        line: 1,
-                        character: 9,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: ReferenceContext {
-                    include_declaration: false,
-                },
-            })
+        let locations = references_response(&backend, &blade_uri, Position::new(1, 9), false)
             .await
-            .unwrap()
             .unwrap_or_default();
 
         let in_template: Vec<Range> = locations

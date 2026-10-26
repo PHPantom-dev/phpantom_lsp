@@ -139,7 +139,7 @@ impl Backend {
                 .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
             && !is_self_or_static(trimmed)
             && !trimmed.eq_ignore_ascii_case("parent")
-            && let Some(backend) = ctx.backend
+            && let Some(backend) = ctx.file.backend
             && let Some(ty) = match backend.lookup_global_constant(trimmed) {
                 None => None,
                 Some(Some(value)) => {
@@ -148,9 +148,7 @@ impl Backend {
                     )
                     .or_else(|| super::folded_global_constant_type(trimmed, &value, ctx))
                 }
-                Some(None) => {
-                    crate::hover::constants::unversioned_php_version_constant_type(trimmed)
-                }
+                Some(None) => crate::resolution::unversioned_php_version_constant_type(trimmed),
             }
         {
             return Some(ty);
@@ -176,6 +174,16 @@ impl Backend {
             && let Some(class_name) =
                 crate::completion::source::helpers::extract_new_expression_class(trimmed)
         {
+            // `new $class(…)` builds whatever class the variable names.
+            if class_name.starts_with('$') {
+                let built = crate::type_engine::resolver::resolve_target_classes_expr(
+                    &crate::type_engine::subject_expr::SubjectExpr::NewExpr { class_name },
+                    crate::AccessKind::Arrow,
+                    ctx,
+                );
+                return (!built.is_empty())
+                    .then(|| crate::types::ResolvedType::types_joined(&built));
+            }
             let resolved_name = ctx.written_names().resolve_class(&class_name);
             return Some(PhpType::named(atom(
                 resolved_name.strip_prefix('\\').unwrap_or(&resolved_name),

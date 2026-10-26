@@ -9,9 +9,10 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, ClassInfo, FileContext};
 
@@ -191,7 +192,11 @@ impl Backend {
 
         let class_info = if ac_ctx.is_static {
             // `Class::class` — resolve the class name to FQN and load.
-            load(&resolve_class_name_to_fqn(self, &ac_ctx.subject, ctx))?
+            load(Fqn::new(&resolve_class_name_to_fqn(
+                self,
+                &ac_ctx.subject,
+                ctx,
+            )))?
         } else if ac_ctx.subject == "$this" {
             Arc::clone(crate::class_lookup::find_shared_class_at_offset(
                 &ctx.classes,
@@ -203,7 +208,7 @@ impl Backend {
                 .resolution_ctx_at(content, cursor_offset)
                 .resolve_variable_at_cursor(&ac_ctx.subject)
                 .iter()
-                .find_map(|rt| load(rt.type_string.base_name()?))?
+                .find_map(|rt| load(Fqn::new(rt.type_string.base_name()?)))?
         };
 
         self.string_method_name_completions(uri, ctx, cursor_offset, class_info, &ac_ctx.prefix)
@@ -244,7 +249,7 @@ impl Backend {
         );
 
         // Only methods: a callable names nothing else.
-        items.retain(|item| item.kind == Some(CompletionItemKind::METHOD));
+        items.retain(|item| item.kind == Some(CompletionItemKind::Method));
         if !prefix.is_empty() {
             let prefix_lower = prefix.to_lowercase();
             items.retain(|item| {
@@ -262,7 +267,7 @@ impl Backend {
             item.insert_text_format = None;
         }
 
-        (!items.is_empty()).then_some(CompletionResponse::Array(items))
+        (!items.is_empty()).then_some(CompletionResponse::CompletionItemList(items))
     }
 }
 
@@ -288,7 +293,7 @@ pub(super) fn resolve_class_name_to_fqn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::lsp_types::Position;
+    use tower_lsp_server::gen_lsp_types::Position;
 
     #[test]
     fn detects_class_const_callable() {

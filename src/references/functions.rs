@@ -7,7 +7,7 @@
 
 use super::*;
 
-use tower_lsp::lsp_types::Location;
+use tower_lsp_server::gen_lsp_types::Location;
 
 use crate::symbol_map::SymbolKind;
 
@@ -99,7 +99,9 @@ impl Backend {
                 // An import names the constant qualified and a use of it
                 // names it plainly, so the span text alone cannot decide
                 // whether this file matches -- the resolved name can.
-                let resolved_names = self.resolved_names.read().get(file.uri()).cloned();
+                let resolved_names = self
+                    .file_state(file.uri())
+                    .and_then(|state| state.resolved_names.clone());
                 let constant_matches = |name: &str, offset: u32| -> bool {
                     let resolved = resolved_names
                         .as_ref()

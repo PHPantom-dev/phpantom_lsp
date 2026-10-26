@@ -10,7 +10,7 @@
 
 use std::ops::Range;
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, DiagnosticSeverity};
 
 /// One report from a block-structure scan (directive or component tag).
 pub(super) trait BlockImbalance {
@@ -41,7 +41,7 @@ pub(super) fn report_block_imbalances<T: BlockImbalance>(
         let (code, message) = imbalance.code_and_message(|span| range_of(span).start.line + 1);
         out.push(super::helpers::make_diagnostic(
             range_of(imbalance.span()),
-            DiagnosticSeverity::ERROR,
+            DiagnosticSeverity::Error,
             code,
             message,
         ));

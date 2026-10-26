@@ -12,7 +12,7 @@ use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_on_line,
     inject_phpstan_diag, resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const UNREACHABLE_MSG: &str = "Unreachable statement - code above always terminates.";
 const UNREACHABLE_ID: &str = "deadCode.unreachable";
@@ -42,7 +42,7 @@ class Foo {
     let action =
         find_action(&actions, "Remove unreachable code").expect("should offer removal action");
 
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
 
     let resolved = resolve_action(&backend, uri, content, action);

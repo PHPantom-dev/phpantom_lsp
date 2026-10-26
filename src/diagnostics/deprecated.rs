@@ -20,14 +20,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
-use crate::class_lookup::find_class_at_offset;
+use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
-use crate::types::{ClassInfo, ClassLikeKind};
+use crate::types::{ClassInfo, ClassLikeKind, SeeRef};
 use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
 use super::helpers::{FileDiagnosticContext, find_enclosing_method_name, make_tagged_diagnostic};
@@ -44,9 +44,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let Some(ctx) = FileDiagnosticContext::gather(self, uri) else {
-            return;
-        };
+        let ctx = FileDiagnosticContext::gather(self, uri);
         self.collect_deprecated_diagnostics_with_context(&ctx, uri, content, out);
     }
 
@@ -101,7 +99,7 @@ impl Backend {
                       symbol: &str,
                       class: Option<&str>,
                       msg: &str,
-                      see_refs: &[String]| {
+                      see_refs: &[SeeRef]| {
             if is_within_deprecated_scope(
                 self,
                 local_classes,
@@ -330,7 +328,7 @@ fn deprecated_diagnostic(
     symbol_name: &str,
     class_name: Option<&str>,
     deprecation_message: &str,
-    see_refs: &[String],
+    see_refs: &[SeeRef],
 ) -> Diagnostic {
     let display = if let Some(cls) = class_name {
         format!("{}::{}", cls, symbol_name)
@@ -343,7 +341,11 @@ fn deprecated_diagnostic(
     let full_message = if see_refs.is_empty() {
         deprecation_message.to_string()
     } else {
-        let see_list = see_refs.join(", ");
+        let see_list = see_refs
+            .iter()
+            .map(|see| see.text.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
         if deprecation_message.is_empty() {
             format!("See: {}", see_list)
         } else {
@@ -359,10 +361,10 @@ fn deprecated_diagnostic(
 
     make_tagged_diagnostic(
         range,
-        DiagnosticSeverity::HINT,
+        DiagnosticSeverity::Hint,
         "deprecated_usage",
         message,
-        Some(DiagnosticTag::DEPRECATED),
+        Some(DiagnosticTag::Deprecated),
     )
 }
 
@@ -384,7 +386,7 @@ fn deprecated_diagnostic(
 fn is_within_deprecated_scope(
     backend: &Backend,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: &ResolvedClassCache,
     content: &str,
     offset: u32,
@@ -474,7 +476,7 @@ fn resolve_variable_subject(
     rctx: &ResolutionCtx<'_>,
 ) -> Option<Arc<ClassInfo>> {
     match resolve_subject_outcome(subject_text.trim(), access_kind, rctx) {
-        SubjectOutcome::Resolved(classes) => classes.into_iter().next(),
+        SubjectOutcome::Resolved { classes, .. } => classes.into_iter().next(),
         _ => None,
     }
 }

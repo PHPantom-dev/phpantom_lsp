@@ -35,11 +35,11 @@
 //! recomputes the workspace edit on demand when the user picks the
 //! action.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 use crate::text_position::byte_offset_to_utf16_col;
 
 use super::split_phpstan_tip;
@@ -74,7 +74,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -87,7 +87,7 @@ impl Backend {
                 continue;
             }
 
-            let info = match parse_prefixed_diagnostic(&diag.message) {
+            let info = match parse_prefixed_diagnostic(crate::util::message_text(&diag.message)) {
                 Some(i) => i,
                 None => continue,
             };
@@ -116,25 +116,19 @@ impl Backend {
             let title = format!("Replace {} with {}", actual_prefixed, info.corrected);
 
             let extra = serde_json::json!({
-                "diagnostic_message": diag.message,
-                "diagnostic_line": diag_line,
-                "diagnostic_code": CLASS_PREFIXED_ID,
                 "prefixed_name": actual_prefixed,
                 "corrected_name": info.corrected,
             });
 
-            let data = make_code_action_data(ACTION_KIND, uri, &params.range, extra);
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(deferred_quickfix(
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(data),
-            }));
+                ACTION_KIND,
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                extra,
+            ));
         }
     }
 
@@ -152,7 +146,7 @@ impl Backend {
 
         let edit = build_fix_prefixed_edit(content, diag_line, prefixed, corrected)?;
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 }

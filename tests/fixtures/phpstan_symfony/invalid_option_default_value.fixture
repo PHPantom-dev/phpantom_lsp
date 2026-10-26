@@ -1,0 +1,7 @@
+// test: An option's default value that does not fit its mode
+// feature: diagnostics
+// Ported from PHPStan's Symfony extension, InvalidOptionDefaultValueRuleTest::testGetArgument.
+// project: phpstan_symfony
+// file: rules/Symfony/ExampleCommand.php
+// expect_diagnostic: 29: Parameter #5 $default of method Symfony\Component\Console\Command\Command::addOption() expects array<string>|null, array<int, int> given. // SKIP: console arguments and options are not read from configure()
+---

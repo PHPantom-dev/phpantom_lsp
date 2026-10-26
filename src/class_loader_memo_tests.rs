@@ -98,3 +98,29 @@ fn every_slot_is_reachable() {
         assert!(probe(owner, 1, ty).is_some());
     }
 }
+
+#[test]
+fn stored_refinement_is_returned() {
+    let (owner, linked, refined) = (owner(), class("Guard"), class("Guard"));
+    store_refined(owner, 3, &linked, &refined);
+
+    let hit = probe_refined(owner, 3, &linked).expect("memoised");
+    assert!(Arc::ptr_eq(&hit, &refined));
+}
+
+#[test]
+fn a_later_refinement_generation_retires_the_refinement() {
+    let (owner, linked) = (owner(), class("Guard"));
+    store_refined(owner, 3, &linked, &class("Guard"));
+
+    assert!(probe_refined(owner, 4, &linked).is_none());
+}
+
+#[test]
+fn an_equal_but_distinct_class_misses_the_refinement() {
+    let (owner, linked) = (owner(), class("Guard"));
+    store_refined(owner, 1, &linked, &class("Guard"));
+
+    // A re-indexed class is a new `Arc`, whatever it holds.
+    assert!(probe_refined(owner, 1, &class("Guard")).is_none());
+}

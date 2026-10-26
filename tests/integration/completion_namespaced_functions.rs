@@ -12,13 +12,12 @@
 
 use crate::common::{
     complete_at, create_psr4_workspace, create_test_backend,
-    create_test_backend_with_function_stubs, labels,
+    create_test_backend_with_function_stubs, labels, open_php,
 };
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
 use phpantom_lsp::types::FunctionInfo;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Register a namespaced helper function in the global_functions map.
 fn register_namespaced_function(
@@ -79,13 +78,13 @@ async fn test_use_function_namespaced_insert_text_is_fqn() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nuse function enum_val\n";
 
     let items = complete_at(&backend, &uri, text, 1, 21).await;
 
     let item = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION)
+        i.kind == Some(CompletionItemKind::Function)
             && i.insert_text.as_deref() == Some("Illuminate\\Support\\enum_value;")
     });
     assert!(
@@ -93,7 +92,7 @@ async fn test_use_function_namespaced_insert_text_is_fqn() {
         "use function should insert the FQN. Got insert_texts: {:?}",
         items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+            .filter(|i| i.kind == Some(CompletionItemKind::Function))
             .map(|i| i.insert_text.as_deref())
             .collect::<Vec<_>>()
     );
@@ -113,13 +112,13 @@ async fn test_use_function_namespaced_label_is_fqn() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nuse function enum_val\n";
 
     let items = complete_at(&backend, &uri, text, 1, 21).await;
 
     let item = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION)
+        i.kind == Some(CompletionItemKind::Function)
             && i.label.contains("Illuminate\\Support\\enum_value")
     });
     assert!(
@@ -137,13 +136,13 @@ async fn test_use_function_global_insert_text_is_short_name() {
 
     register_global_function(&backend, "my_global_func", "file:///helpers.php");
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nuse function my_global\n";
 
     let items = complete_at(&backend, &uri, text, 1, 22).await;
 
     let item = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION)
+        i.kind == Some(CompletionItemKind::Function)
             && i.insert_text
                 .as_deref()
                 .is_some_and(|t| t.contains("my_global_func"))
@@ -153,7 +152,7 @@ async fn test_use_function_global_insert_text_is_short_name() {
         "use function for global func should insert the short name. Got: {:?}",
         items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+            .filter(|i| i.kind == Some(CompletionItemKind::Function))
             .map(|i| (&i.label, &i.insert_text))
             .collect::<Vec<_>>()
     );
@@ -173,13 +172,13 @@ async fn test_use_function_filter_text_is_fqn() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nuse function Illuminate\\Support\\enum\n";
 
     let items = complete_at(&backend, &uri, text, 1, 40).await;
 
     let item = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION)
+        i.kind == Some(CompletionItemKind::Function)
             && i.filter_text
                 .as_deref()
                 .is_some_and(|ft| ft.contains("Illuminate\\Support\\enum_value"))
@@ -189,7 +188,7 @@ async fn test_use_function_filter_text_is_fqn() {
         "filter_text should contain the FQN. Got: {:?}",
         items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+            .filter(|i| i.kind == Some(CompletionItemKind::Function))
             .map(|i| (&i.label, &i.filter_text))
             .collect::<Vec<_>>()
     );
@@ -211,14 +210,14 @@ async fn test_inline_namespaced_function_gets_auto_import() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nenum_val\n";
 
     let items = complete_at(&backend, &uri, text, 1, 8).await;
 
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("enum_value"));
+        .find(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("enum_value"));
     assert!(
         item.is_some(),
         "Should find enum_value in inline completions. Labels: {:?}",
@@ -256,14 +255,14 @@ async fn test_inline_namespaced_function_insert_text_is_short_name() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nenum_val\n";
 
     let items = complete_at(&backend, &uri, text, 1, 8).await;
 
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("enum_value"));
+        .find(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("enum_value"));
     assert!(item.is_some(), "Should find enum_value");
 
     let insert = item.unwrap().insert_text.as_deref().unwrap();
@@ -286,13 +285,13 @@ async fn test_inline_global_function_no_auto_import() {
 
     register_global_function(&backend, "my_global_func", "file:///helpers.php");
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nmy_global\n";
 
     let items = complete_at(&backend, &uri, text, 1, 9).await;
 
     let item = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("my_global_func")
+        i.kind == Some(CompletionItemKind::Function) && i.label.contains("my_global_func")
     });
     assert!(item.is_some(), "Should find my_global_func");
 
@@ -316,7 +315,7 @@ async fn test_inline_same_namespace_function_no_auto_import() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     // File declares the same namespace as the function.
     let text = "<?php\nnamespace App\\Helpers;\n\nmy_help\n";
 
@@ -324,7 +323,7 @@ async fn test_inline_same_namespace_function_no_auto_import() {
 
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("my_helper"));
+        .find(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("my_helper"));
     assert!(
         item.is_some(),
         "Should find my_helper. Labels: {:?}",
@@ -352,14 +351,14 @@ async fn test_inline_namespaced_function_detail_shows_namespace() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nenum_val\n";
 
     let items = complete_at(&backend, &uri, text, 1, 8).await;
 
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("enum_value"));
+        .find(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("enum_value"));
     assert!(item.is_some(), "Should find enum_value");
 
     let item = item.unwrap();
@@ -380,13 +379,13 @@ async fn test_inline_global_function_detail_is_plain() {
 
     register_global_function(&backend, "my_global_func", "file:///helpers.php");
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nmy_global\n";
 
     let items = complete_at(&backend, &uri, text, 1, 9).await;
 
     let item = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("my_global_func")
+        i.kind == Some(CompletionItemKind::Function) && i.label.contains("my_global_func")
     });
     assert!(item.is_some(), "Should find my_global_func");
 
@@ -424,14 +423,14 @@ async fn test_different_namespaces_same_short_name_both_appear() {
         "file:///symfony.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nenum_val\n";
 
     let items = complete_at(&backend, &uri, text, 1, 8).await;
 
     let matching: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("enum_value"))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("enum_value"))
         .collect();
 
     assert!(
@@ -466,14 +465,14 @@ async fn test_use_function_different_namespaces_both_appear_with_fqn() {
         "file:///symfony.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nuse function enum_val\n";
 
     let items = complete_at(&backend, &uri, text, 1, 21).await;
 
     let matching: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("enum_value"))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("enum_value"))
         .collect();
 
     assert!(
@@ -505,7 +504,7 @@ async fn test_no_short_name_fallback_in_global_functions() {
     let backend = create_test_backend();
 
     // Open a file that defines a namespaced function.
-    let uri = Url::parse("file:///helpers.php").unwrap();
+    let uri = Uri::parse("file:///helpers.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Illuminate\\Support;\n",
@@ -514,16 +513,7 @@ async fn test_no_short_name_fallback_in_global_functions() {
         "    return $value;\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     let fmap = backend.global_functions().read();
 
@@ -547,7 +537,7 @@ async fn test_no_short_name_fallback_in_global_functions() {
 async fn test_use_function_filters_current_file_namespaced() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///current.php").unwrap();
+    let uri = Uri::parse("file:///current.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Helpers;\n",
@@ -560,7 +550,7 @@ async fn test_use_function_filters_current_file_namespaced() {
     let items = complete_at(&backend, &uri, text, 5, 24).await;
 
     let has_current = items.iter().any(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("my_current_helper")
+        i.kind == Some(CompletionItemKind::Function) && i.label.contains("my_current_helper")
     });
     assert!(
         !has_current,
@@ -592,28 +582,19 @@ async fn test_psr4_namespaced_function_completion() {
 
     // Open the helper file so it gets parsed.
     let helpers_path = _dir.path().join("src/Helpers/helpers.php");
-    let helpers_uri = Url::from_file_path(&helpers_path).unwrap();
+    let helpers_uri = Uri::from_file_path(&helpers_path).unwrap();
     let helpers_text = std::fs::read_to_string(&helpers_path).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: helpers_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: helpers_text,
-            },
-        })
-        .await;
+    open_php(&backend, &helpers_uri, &helpers_text).await;
 
     // Complete in a different file.
-    let test_uri = Url::parse("file:///test.php").unwrap();
+    let test_uri = Uri::parse("file:///test.php").unwrap();
     let test_text = "<?php\nformat_pri\n";
 
     let items = complete_at(&backend, &test_uri, test_text, 1, 10).await;
 
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("format_price"));
+        .find(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("format_price"));
     assert!(
         item.is_some(),
         "Should find format_price from PSR-4 helper file. Labels: {:?}",
@@ -660,13 +641,13 @@ async fn test_use_function_matches_by_namespace_prefix() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nuse function Illuminate\\\n";
 
     let items = complete_at(&backend, &uri, text, 1, 28).await;
 
     let item = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION)
+        i.kind == Some(CompletionItemKind::Function)
             && i.insert_text
                 .as_deref()
                 .is_some_and(|t| t.contains("Illuminate\\Support\\enum_value"))
@@ -676,7 +657,7 @@ async fn test_use_function_matches_by_namespace_prefix() {
         "Typing namespace prefix should match namespaced functions. Got: {:?}",
         items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+            .filter(|i| i.kind == Some(CompletionItemKind::Function))
             .map(|i| (&i.label, &i.insert_text))
             .collect::<Vec<_>>()
     );
@@ -691,13 +672,13 @@ async fn test_use_function_matches_by_namespace_prefix() {
 async fn test_stub_global_function_no_auto_import() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\narray_ma\n";
 
     let items = complete_at(&backend, &uri, text, 1, 8).await;
 
     let item = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION)
+        i.kind == Some(CompletionItemKind::Function)
             && i.filter_text.as_deref() == Some("array_map")
     });
     assert!(item.is_some(), "Should find array_map from stubs");
@@ -724,7 +705,7 @@ async fn test_auto_import_alphabetical_placement() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Models\\User;\n",
@@ -737,7 +718,7 @@ async fn test_auto_import_alphabetical_placement() {
 
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("enum_value"));
+        .find(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("enum_value"));
     assert!(item.is_some(), "Should find enum_value");
 
     let edits = item
@@ -800,14 +781,14 @@ async fn test_use_function_namespaced_detail_shows_signature() {
         );
     }
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nuse function enum_val\n";
 
     let items = complete_at(&backend, &uri, text, 1, 21).await;
 
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("Illuminate"));
+        .find(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("Illuminate"));
     assert!(item.is_some(), "Should find the function");
 
     let item = item.unwrap();
@@ -831,7 +812,7 @@ async fn test_user_function_shadows_stub_same_fqn() {
     // Register a user-defined `array_map` that shadows the stub.
     register_global_function(&backend, "array_map", "file:///custom.php");
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\narray_ma\n";
 
     let items = complete_at(&backend, &uri, text, 1, 8).await;
@@ -839,7 +820,7 @@ async fn test_user_function_shadows_stub_same_fqn() {
     let matching: Vec<_> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::FUNCTION)
+            i.kind == Some(CompletionItemKind::Function)
                 && i.filter_text.as_deref() == Some("array_map")
         })
         .collect();
@@ -885,18 +866,18 @@ async fn test_deprecated_namespaced_function() {
         );
     }
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nold_hel\n";
 
     let items = complete_at(&backend, &uri, text, 1, 7).await;
 
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("old_helper"));
+        .find(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("old_helper"));
     assert!(item.is_some(), "Should find old_helper");
     let tags = item.unwrap().tags.as_deref().unwrap_or(&[]);
     assert!(
-        tags.contains(&CompletionItemTag::DEPRECATED),
+        tags.contains(&CompletionItemTag::Deprecated),
         "Tags should contain DEPRECATED"
     );
 }
@@ -917,14 +898,14 @@ async fn test_inline_different_namespace_gets_auto_import() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\nnamespace App\\Services;\n\nenum_val\n";
 
     let items = complete_at(&backend, &uri, text, 3, 8).await;
 
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("enum_value"));
+        .find(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("enum_value"));
     assert!(item.is_some(), "Should find enum_value");
 
     let edits = item
@@ -950,7 +931,7 @@ async fn test_inline_different_namespace_gets_auto_import() {
 #[tokio::test]
 async fn test_call_resolves_function_in_later_namespace_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multi_ns.php").unwrap();
+    let uri = Uri::parse("file:///multi_ns.php").unwrap();
 
     // `makeWidget()` is declared in `namespace Second` and called from the
     // same block.  The file-level namespace is `First`, so a `First\makeWidget`
@@ -1000,7 +981,7 @@ async fn test_auto_import_lands_in_the_cursor_namespace_block() {
         "file:///helpers.php",
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace A {\n",
@@ -1015,7 +996,7 @@ async fn test_auto_import_lands_in_the_cursor_namespace_block() {
 
     let edits = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::FUNCTION) && i.label.contains("enum_value"))
+        .find(|i| i.kind == Some(CompletionItemKind::Function) && i.label.contains("enum_value"))
         .and_then(|i| i.additional_text_edits.as_ref())
         .expect("Should have auto-import");
 

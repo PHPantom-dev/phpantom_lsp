@@ -1,8 +1,9 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{
+    completion_response, create_psr4_workspace, create_test_backend, open_php, position_of,
+};
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 static SPL_GENERIC_STUB: &str = r#"<?php
 /**
@@ -79,7 +80,7 @@ fn create_spl_generic_backend() -> Backend {
 async fn test_generic_extends_resolves_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_basic.php").unwrap();
+    let uri = Uri::parse("file:///generics_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -109,37 +110,16 @@ async fn test_generic_extends_resolves_return_type() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 24,
-                character: 19,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 24, 19, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -154,7 +134,7 @@ async fn test_generic_extends_resolves_return_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -163,7 +143,7 @@ async fn test_generic_extends_resolves_return_type() {
 async fn test_generic_extends_two_params_resolves() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_two_params.php").unwrap();
+    let uri = Uri::parse("file:///generics_two_params.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -194,37 +174,16 @@ async fn test_generic_extends_two_params_resolves() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 25,
-                character: 21,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 25, 21, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -234,7 +193,7 @@ async fn test_generic_extends_two_params_resolves() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -246,7 +205,7 @@ async fn test_generic_extends_two_params_resolves() {
 async fn test_generic_extends_short_args_right_align() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_right_align.php").unwrap();
+    let uri = Uri::parse("file:///generics_right_align.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -275,37 +234,16 @@ async fn test_generic_extends_short_args_right_align() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 23,
-                character: 19,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 23, 19, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -315,7 +253,7 @@ async fn test_generic_extends_short_args_right_align() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -324,7 +262,7 @@ async fn test_generic_extends_short_args_right_align() {
 async fn test_generic_template_covariant() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_covariant.php").unwrap();
+    let uri = Uri::parse("file:///generics_covariant.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -353,37 +291,16 @@ async fn test_generic_template_covariant() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 23,
-                character: 21,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 23, 21, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -398,7 +315,7 @@ async fn test_generic_template_covariant() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -408,7 +325,7 @@ async fn test_generic_template_covariant() {
 async fn test_generic_child_own_methods_preserved() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_own_methods.php").unwrap();
+    let uri = Uri::parse("file:///generics_own_methods.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -434,37 +351,16 @@ async fn test_generic_child_own_methods_preserved() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 19,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 19, 15, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -482,7 +378,7 @@ async fn test_generic_child_own_methods_preserved() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -491,7 +387,7 @@ async fn test_generic_child_own_methods_preserved() {
 async fn test_generic_method_return_type_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_chain.php").unwrap();
+    let uri = Uri::parse("file:///generics_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -521,37 +417,16 @@ async fn test_generic_method_return_type_chain() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 23,
-                character: 42,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 23, 42, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -566,7 +441,7 @@ async fn test_generic_method_return_type_chain() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -575,7 +450,7 @@ async fn test_generic_method_return_type_chain() {
 async fn test_generic_nullable_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_nullable.php").unwrap();
+    let uri = Uri::parse("file:///generics_nullable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -602,37 +477,16 @@ async fn test_generic_nullable_return_type() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 21,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 21, 22, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -642,7 +496,7 @@ async fn test_generic_nullable_return_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -653,7 +507,7 @@ async fn test_generic_nullable_return_type() {
 async fn test_generic_property_type_substitution() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_property.php").unwrap();
+    let uri = Uri::parse("file:///generics_property.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -678,37 +532,16 @@ async fn test_generic_property_type_substitution() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 23,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 23, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -718,7 +551,7 @@ async fn test_generic_property_type_substitution() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -797,38 +630,17 @@ async fn test_generic_extends_cross_file_psr4() {
         "}\n",
     );
 
-    let uri = Url::parse("file:///test_usage.php").unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: usage_text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    let uri = Uri::parse("file:///test_usage.php").unwrap();
+    open_php(&backend, &uri, usage_text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 7,
-                character: 23,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 7, 23, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -843,7 +655,7 @@ async fn test_generic_extends_cross_file_psr4() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -853,7 +665,7 @@ async fn test_generic_extends_cross_file_psr4() {
 async fn test_generic_non_template_return_types_unchanged() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_non_template.php").unwrap();
+    let uri = Uri::parse("file:///generics_non_template.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -884,37 +696,16 @@ async fn test_generic_non_template_return_types_unchanged() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 25,
-                character: 11,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 25, 11, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -934,7 +725,7 @@ async fn test_generic_non_template_return_types_unchanged() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -944,7 +735,7 @@ async fn test_generic_non_template_return_types_unchanged() {
 async fn test_generic_chained_inheritance() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_chained.php").unwrap();
+    let uri = Uri::parse("file:///generics_chained.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -981,38 +772,17 @@ async fn test_generic_chained_inheritance() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Test that Parent_::findItem() resolves T → Car
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 31,
-                character: 27,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 31, 27, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1022,7 +792,7 @@ async fn test_generic_chained_inheritance() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1032,7 +802,7 @@ async fn test_generic_chained_inheritance() {
 async fn test_generic_grandparent_method_resolves() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_grandparent.php").unwrap();
+    let uri = Uri::parse("file:///generics_grandparent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1067,37 +837,16 @@ async fn test_generic_grandparent_method_resolves() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 29,
-                character: 20,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 29, 20, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1107,7 +856,7 @@ async fn test_generic_grandparent_method_resolves() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1116,7 +865,7 @@ async fn test_generic_grandparent_method_resolves() {
 async fn test_generic_phpstan_extends_variant() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_phpstan.php").unwrap();
+    let uri = Uri::parse("file:///generics_phpstan.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1143,37 +892,16 @@ async fn test_generic_phpstan_extends_variant() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 21,
-                character: 20,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 21, 20, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1183,7 +911,7 @@ async fn test_generic_phpstan_extends_variant() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1193,7 +921,7 @@ async fn test_generic_phpstan_extends_variant() {
 async fn test_generic_without_extends_annotation_no_crash() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_no_extends.php").unwrap();
+    let uri = Uri::parse("file:///generics_no_extends.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1213,37 +941,16 @@ async fn test_generic_without_extends_annotation_no_crash() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 15, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1259,7 +966,7 @@ async fn test_generic_without_extends_annotation_no_crash() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1657,7 +1364,7 @@ fn test_synthesize_template_conditional_class_string_null_union() {
 async fn test_method_template_assignment_resolves_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_template_assign.php").unwrap();
+    let uri = Uri::parse("file:///method_template_assign.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class User {\n",                                       // 1
@@ -1681,37 +1388,16 @@ async fn test_method_template_assignment_resolves_type() {
         "}\n",                                                  // 19
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 11,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 11, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1726,7 +1412,7 @@ async fn test_method_template_assignment_resolves_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1736,7 +1422,7 @@ async fn test_method_template_assignment_resolves_type() {
 async fn test_method_template_inline_chain_resolves() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_template_chain.php").unwrap();
+    let uri = Uri::parse("file:///method_template_chain.php").unwrap();
     let text = concat!(
         "<?php\n",                                                    // 0
         "class Product {\n",                                          // 1
@@ -1758,37 +1444,16 @@ async fn test_method_template_inline_chain_resolves() {
         "}\n",                                                        // 17
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 16,
-                character: 35,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 16, 35, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1803,7 +1468,7 @@ async fn test_method_template_inline_chain_resolves() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1813,7 +1478,7 @@ async fn test_method_template_inline_chain_resolves() {
 async fn test_method_template_static_method_resolves() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_template_static.php").unwrap();
+    let uri = Uri::parse("file:///method_template_static.php").unwrap();
     let text = concat!(
         "<?php\n",                                                     // 0
         "class Order {\n",                                             // 1
@@ -1835,37 +1500,16 @@ async fn test_method_template_static_method_resolves() {
         "}\n",                                                         // 17
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 16,
-                character: 39,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 16, 39, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1880,7 +1524,7 @@ async fn test_method_template_static_method_resolves() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1890,7 +1534,7 @@ async fn test_method_template_static_method_resolves() {
 async fn test_function_template_resolves_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///function_template.php").unwrap();
+    let uri = Uri::parse("file:///function_template.php").unwrap();
     let text = concat!(
         "<?php\n",                                                     // 0
         "class Config {\n",                                            // 1
@@ -1910,37 +1554,16 @@ async fn test_function_template_resolves_type() {
         "}\n",                                                         // 15
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 14,
-                character: 33,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 14, 33, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1955,7 +1578,7 @@ async fn test_function_template_resolves_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1965,7 +1588,7 @@ async fn test_function_template_resolves_type() {
 async fn test_function_template_assignment_resolves() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///function_template_assign.php").unwrap();
+    let uri = Uri::parse("file:///function_template_assign.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "class Logger {\n",                                  // 1
@@ -1986,37 +1609,16 @@ async fn test_function_template_assignment_resolves() {
         "}\n",                                               // 16
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 13,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 13, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2031,7 +1633,7 @@ async fn test_function_template_assignment_resolves() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2041,7 +1643,7 @@ async fn test_function_template_assignment_resolves() {
 async fn test_method_template_this_context_resolves() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_template_this.php").unwrap();
+    let uri = Uri::parse("file:///method_template_this.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Address {\n",                                // 1
@@ -2063,37 +1665,16 @@ async fn test_method_template_this_context_resolves() {
         "}\n",                                              // 17
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 40,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 40, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2108,7 +1689,7 @@ async fn test_method_template_this_context_resolves() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2118,7 +1699,7 @@ async fn test_method_template_this_context_resolves() {
 async fn test_method_template_does_not_override_existing_conditional() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_template_existing.php").unwrap();
+    let uri = Uri::parse("file:///method_template_existing.php").unwrap();
     let text = concat!(
         "<?php\n",                                                             // 0
         "class Session {\n",                                                   // 1
@@ -2139,37 +1720,16 @@ async fn test_method_template_does_not_override_existing_conditional() {
         "}\n",                                                                 // 16
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 35,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 35, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2180,7 +1740,7 @@ async fn test_method_template_does_not_override_existing_conditional() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2189,7 +1749,7 @@ async fn test_method_template_does_not_override_existing_conditional() {
 async fn test_method_phpstan_template_resolves() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_phpstan_template.php").unwrap();
+    let uri = Uri::parse("file:///method_phpstan_template.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class Invoice {\n",                                      // 1
@@ -2210,37 +1770,16 @@ async fn test_method_phpstan_template_resolves() {
         "}\n",                                                    // 16
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 35,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 35, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2250,7 +1789,7 @@ async fn test_method_phpstan_template_resolves() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2266,7 +1805,7 @@ async fn test_method_template_cross_file_resolves() {
         )],
     );
 
-    let uri = Url::parse("file:///method_template_cross.php").unwrap();
+    let uri = Uri::parse("file:///method_template_cross.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Payment;\n",
@@ -2285,37 +1824,16 @@ async fn test_method_template_cross_file_resolves() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 13,
-                character: 33,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 13, 33, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2330,7 +1848,7 @@ async fn test_method_template_cross_file_resolves() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2351,7 +1869,7 @@ async fn test_method_template_string_literal_unescapes_namespace() {
         )],
     );
 
-    let uri = Url::parse("file:///method_template_string_literal.php").unwrap();
+    let uri = Uri::parse("file:///method_template_string_literal.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "\n",                                               // 1
@@ -2369,37 +1887,16 @@ async fn test_method_template_string_literal_unescapes_namespace() {
         "}\n",                                              // 13
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 30,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 30, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2414,7 +1911,7 @@ async fn test_method_template_string_literal_unescapes_namespace() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2424,7 +1921,7 @@ async fn test_method_template_string_literal_unescapes_namespace() {
 async fn test_method_template_different_param_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_template_param_name.php").unwrap();
+    let uri = Uri::parse("file:///method_template_param_name.php").unwrap();
     let text = concat!(
         "<?php\n",                                                    // 0
         "class Customer {\n",                                         // 1
@@ -2445,37 +1942,16 @@ async fn test_method_template_different_param_name() {
         "}\n",                                                        // 16
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 35,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 35, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2485,7 +1961,7 @@ async fn test_method_template_different_param_name() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2502,7 +1978,7 @@ async fn test_method_template_different_param_name() {
 async fn test_generic_property_type_preserves_context() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generic_property_context.php").unwrap();
+    let uri = Uri::parse("file:///generic_property_context.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -2531,37 +2007,16 @@ async fn test_generic_property_type_preserves_context() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 37,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 37, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2576,7 +2031,7 @@ async fn test_generic_property_type_preserves_context() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2586,7 +2041,7 @@ async fn test_generic_property_type_preserves_context() {
 async fn test_generic_return_type_preserves_context() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generic_return_context.php").unwrap();
+    let uri = Uri::parse("file:///generic_return_context.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -2613,37 +2068,16 @@ async fn test_generic_return_type_preserves_context() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 20,
-                character: 45,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 20, 45, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2658,7 +2092,7 @@ async fn test_generic_return_type_preserves_context() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2668,7 +2102,7 @@ async fn test_generic_return_type_preserves_context() {
 async fn test_generic_context_through_variable_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generic_var_assign.php").unwrap();
+    let uri = Uri::parse("file:///generic_var_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -2694,37 +2128,16 @@ async fn test_generic_context_through_variable_assignment() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 19,
-                character: 28,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 19, 28, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2734,7 +2147,7 @@ async fn test_generic_context_through_variable_assignment() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2744,7 +2157,7 @@ async fn test_generic_context_through_variable_assignment() {
 async fn test_generic_property_single_template_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generic_prop_single.php").unwrap();
+    let uri = Uri::parse("file:///generic_prop_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -2770,37 +2183,16 @@ async fn test_generic_property_single_template_param() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 19,
-                character: 34,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 19, 34, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2815,7 +2207,7 @@ async fn test_generic_property_single_template_param() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2879,38 +2271,17 @@ async fn test_generic_property_context_cross_file_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///src/UserService.php").unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: service_php.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    let uri = Uri::parse("file:///src/UserService.php").unwrap();
+    open_php(&backend, &uri, service_php).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 37,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 37, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2925,7 +2296,7 @@ async fn test_generic_property_context_cross_file_psr4() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2935,7 +2306,7 @@ async fn test_generic_property_context_cross_file_psr4() {
 async fn test_generic_nullable_union_preserves_context() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generic_nullable_union.php").unwrap();
+    let uri = Uri::parse("file:///generic_nullable_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -2960,37 +2331,16 @@ async fn test_generic_nullable_union_preserves_context() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 35,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 35, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3000,7 +2350,7 @@ async fn test_generic_nullable_union_preserves_context() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3010,7 +2360,7 @@ async fn test_generic_nullable_union_preserves_context() {
 async fn test_non_generic_return_type_still_works() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///non_generic_still_works.php").unwrap();
+    let uri = Uri::parse("file:///non_generic_still_works.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -3028,37 +2378,16 @@ async fn test_non_generic_return_type_still_works() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 32,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 32, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3073,7 +2402,7 @@ async fn test_non_generic_return_type_still_works() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3083,7 +2412,7 @@ async fn test_non_generic_return_type_still_works() {
 async fn test_generic_extends_and_inline_var_coexist() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generic_extends_and_var.php").unwrap();
+    let uri = Uri::parse("file:///generic_extends_and_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -3128,41 +2457,20 @@ async fn test_generic_extends_and_inline_var_coexist() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Test 1: @extends substitution still works (find() → Order)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 34,
-                character: 29,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 34, 29, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for find()"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3172,34 +2480,21 @@ async fn test_generic_extends_and_inline_var_coexist() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 
     // Test 2: inline @var generic also works (lineItems->first() → Item)
-    let completion_params2 = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 38,
-                character: 42,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result2 = backend.completion(completion_params2).await.unwrap();
+    let result2 = completion_response(&backend, &uri, 38, 42, None).await;
     assert!(
         result2.is_some(),
         "Completion should return results for lineItems->first()"
     );
 
     match result2.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3209,7 +2504,7 @@ async fn test_generic_extends_and_inline_var_coexist() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3219,7 +2514,7 @@ async fn test_generic_extends_and_inline_var_coexist() {
 async fn test_generic_property_own_methods_still_visible() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generic_prop_own_methods.php").unwrap();
+    let uri = Uri::parse("file:///generic_prop_own_methods.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -3247,37 +2542,16 @@ async fn test_generic_property_own_methods_still_visible() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 21,
-                character: 21,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 21, 21, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3297,7 +2571,7 @@ async fn test_generic_property_own_methods_still_visible() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3308,7 +2582,7 @@ async fn test_generic_property_own_methods_still_visible() {
 async fn test_generic_property_assignment_to_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generic_prop_assign.php").unwrap();
+    let uri = Uri::parse("file:///generic_prop_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -3335,37 +2609,16 @@ async fn test_generic_property_assignment_to_variable() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 20,
-                character: 28,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 20, 28, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3380,7 +2633,7 @@ async fn test_generic_property_assignment_to_variable() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3397,7 +2650,7 @@ async fn test_generic_property_assignment_to_variable() {
 async fn test_trait_use_generic_resolves_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_use_generic_basic.php").unwrap();
+    let uri = Uri::parse("file:///trait_use_generic_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -3425,37 +2678,16 @@ async fn test_trait_use_generic_resolves_return_type() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 22, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3470,7 +2702,7 @@ async fn test_trait_use_generic_resolves_return_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3479,7 +2711,7 @@ async fn test_trait_use_generic_resolves_return_type() {
 async fn test_trait_use_generic_two_params() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_use_generic_two_params.php").unwrap();
+    let uri = Uri::parse("file:///trait_use_generic_two_params.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -3510,37 +2742,16 @@ async fn test_trait_use_generic_two_params() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 25,
-                character: 19,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 25, 19, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3550,7 +2761,7 @@ async fn test_trait_use_generic_two_params() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3559,7 +2770,7 @@ async fn test_trait_use_generic_two_params() {
 async fn test_trait_use_generic_property_substitution() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_use_generic_property.php").unwrap();
+    let uri = Uri::parse("file:///trait_use_generic_property.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -3588,37 +2799,16 @@ async fn test_trait_use_generic_property_substitution() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 23,
-                character: 21,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 23, 21, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3633,7 +2823,7 @@ async fn test_trait_use_generic_property_substitution() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3642,7 +2832,7 @@ async fn test_trait_use_generic_property_substitution() {
 async fn test_trait_phpstan_use_variant() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_phpstan_use.php").unwrap();
+    let uri = Uri::parse("file:///trait_phpstan_use.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -3670,37 +2860,16 @@ async fn test_trait_phpstan_use_variant() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 20,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 20, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3710,7 +2879,7 @@ async fn test_trait_phpstan_use_variant() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3719,7 +2888,7 @@ async fn test_trait_phpstan_use_variant() {
 async fn test_trait_use_generic_class_own_wins() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_use_generic_precedence.php").unwrap();
+    let uri = Uri::parse("file:///trait_use_generic_precedence.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -3755,37 +2924,16 @@ async fn test_trait_use_generic_class_own_wins() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 30,
-                character: 19,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 30, 19, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3801,7 +2949,7 @@ async fn test_trait_use_generic_class_own_wins() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3861,7 +3009,7 @@ async fn test_trait_use_generic_cross_file_psr4() {
     );
 
     // Open a file that uses User::factory()
-    let uri = Url::parse("file:///test_trait_cross_file.php").unwrap();
+    let uri = Uri::parse("file:///test_trait_cross_file.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Models\\User;\n",
@@ -3871,37 +3019,16 @@ async fn test_trait_use_generic_cross_file_psr4() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 4, 22, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3916,7 +3043,7 @@ async fn test_trait_use_generic_cross_file_psr4() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3926,7 +3053,7 @@ async fn test_trait_use_generic_cross_file_psr4() {
 async fn test_trait_use_without_generics_no_crash() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_no_use_generics.php").unwrap();
+    let uri = Uri::parse("file:///trait_no_use_generics.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -3948,37 +3075,16 @@ async fn test_trait_use_without_generics_no_crash() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 16,
-                character: 10,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 16, 10, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3994,7 +3100,7 @@ async fn test_trait_use_without_generics_no_crash() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4003,7 +3109,7 @@ async fn test_trait_use_without_generics_no_crash() {
 async fn test_trait_use_generic_this_context() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_use_generic_this.php").unwrap();
+    let uri = Uri::parse("file:///trait_use_generic_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -4030,37 +3136,16 @@ async fn test_trait_use_generic_this_context() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 20,
-                character: 33,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 20, 33, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -4070,7 +3155,7 @@ async fn test_trait_use_generic_this_context() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4284,7 +3369,7 @@ fn test_extract_template_param_bindings_multi_param_generic() {
 async fn test_function_template_collect_inline_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///function_template_collect.php").unwrap();
+    let uri = Uri::parse("file:///function_template_collect.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class User {\n",                                       // 1
@@ -4316,42 +3401,21 @@ async fn test_function_template_collect_inline_chain() {
         "}\n",                                                  // 27
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // cursor right after `->` on line 26
     // "    collect($users)->" = 4+7+1+6+1+2 = 21 characters
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 26,
-                character: 21,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 26, 21, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for collect($users)->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -4366,7 +3430,7 @@ async fn test_function_template_collect_inline_chain() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4377,7 +3441,7 @@ async fn test_function_template_collect_inline_chain() {
 async fn test_function_template_collect_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///function_template_collect_assign.php").unwrap();
+    let uri = Uri::parse("file:///function_template_collect_assign.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class User {\n",                                       // 1
@@ -4410,42 +3474,21 @@ async fn test_function_template_collect_assignment() {
         "}\n",                                                  // 28
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // cursor right after `->` on line 27
     // "    $collection->" = 4+11+2 = 17 characters
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 27,
-                character: 17,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 27, 17, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $collection-> after collect($users)"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -4460,7 +3503,7 @@ async fn test_function_template_collect_assignment() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4470,7 +3513,7 @@ async fn test_function_template_collect_assignment() {
 async fn test_function_template_collect_deep_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///function_template_collect_deep.php").unwrap();
+    let uri = Uri::parse("file:///function_template_collect_deep.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class User {\n",                                       // 1
@@ -4503,42 +3546,21 @@ async fn test_function_template_collect_deep_chain() {
         "}\n",                                                  // 28
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // cursor right after `->` on line 27
     // "    collect($users)->first()->" = 4+7+1+6+1+2+5+2+2 = 30 characters
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 27,
-                character: 30,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 27, 30, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for collect($users)->first()->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -4553,7 +3575,7 @@ async fn test_function_template_collect_deep_chain() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4566,7 +3588,7 @@ async fn test_function_template_collect_deep_chain() {
 async fn test_function_template_collect_laravel_union_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///function_template_collect_laravel.php").unwrap();
+    let uri = Uri::parse("file:///function_template_collect_laravel.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                  // 0
         "class User {\n",                                                           // 1
@@ -4599,42 +3621,21 @@ async fn test_function_template_collect_laravel_union_param() {
         "}\n",                                                                      // 28
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // cursor right after `->` on line 27
     // "    collect($users)->first()->" = 30 characters
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 27,
-                character: 30,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 27, 30, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for collect($users)->first()-> with Laravel union @param"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -4649,7 +3650,7 @@ async fn test_function_template_collect_laravel_union_param() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4661,7 +3662,7 @@ async fn test_function_template_collect_laravel_union_param() {
 async fn test_method_template_general_inline_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_inline.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_inline.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -4689,37 +3690,16 @@ async fn test_method_template_general_inline_chain() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 35,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 35, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -4734,7 +3714,7 @@ async fn test_method_template_general_inline_chain() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4743,7 +3723,7 @@ async fn test_method_template_general_inline_chain() {
 async fn test_method_template_general_this_context() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_this.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -4771,37 +3751,16 @@ async fn test_method_template_general_this_context() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 21,
-                character: 46,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 21, 46, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -4816,7 +3775,7 @@ async fn test_method_template_general_this_context() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4826,7 +3785,7 @@ async fn test_method_template_general_this_context() {
 async fn test_method_template_general_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_assign.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -4854,37 +3813,16 @@ async fn test_method_template_general_assignment() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 26,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 26, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -4894,7 +3832,7 @@ async fn test_method_template_general_assignment() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4903,7 +3841,7 @@ async fn test_method_template_general_assignment() {
 async fn test_method_template_general_static_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_static.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -4930,37 +3868,16 @@ async fn test_method_template_general_static_method() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 21,
-                character: 39,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 21, 39, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -4970,7 +3887,7 @@ async fn test_method_template_general_static_method() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4980,7 +3897,7 @@ async fn test_method_template_general_static_method() {
 async fn test_method_template_general_direct_return() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_direct.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_direct.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -5001,37 +3918,16 @@ async fn test_method_template_general_direct_return() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 29,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 29, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5041,7 +3937,7 @@ async fn test_method_template_general_direct_return() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5051,7 +3947,7 @@ async fn test_method_template_general_direct_return() {
 async fn test_method_template_general_multiple_params() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_multi.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Category {\n",
@@ -5084,37 +3980,16 @@ async fn test_method_template_general_multiple_params() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 27,
-                character: 38,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 27, 38, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5130,7 +4005,7 @@ async fn test_method_template_general_multiple_params() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5141,7 +4016,7 @@ async fn test_method_template_general_multiple_params() {
 async fn test_method_template_general_does_not_break_class_string() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_regression.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_regression.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -5162,37 +4037,16 @@ async fn test_method_template_general_does_not_break_class_string() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 30,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 30, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5202,7 +4056,7 @@ async fn test_method_template_general_does_not_break_class_string() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5212,7 +4066,7 @@ async fn test_method_template_general_does_not_break_class_string() {
 async fn test_method_template_self_class_resolves_to_enclosing_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///self_class_tpl.php").unwrap();
+    let uri = Uri::parse("file:///self_class_tpl.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class OrmService {\n",
@@ -5235,15 +4089,7 @@ async fn test_method_template_self_class_resolves_to_enclosing_class() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let line = text.lines().position(|l| l.contains("$child->")).unwrap() as u32;
     let col = text
@@ -5253,26 +4099,14 @@ async fn test_method_template_self_class_resolves_to_enclosing_class() {
         .find("$child->")
         .unwrap() as u32
         + 8;
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line,
-                character: col,
-            },
-        },
-        work_done_progress_params: Default::default(),
-        partial_result_params: Default::default(),
-        context: None,
-    };
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, line, col, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5282,7 +4116,7 @@ async fn test_method_template_self_class_resolves_to_enclosing_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5292,7 +4126,7 @@ async fn test_method_template_self_class_resolves_to_enclosing_class() {
 async fn test_method_template_general_this_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_this_assign.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_this_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -5320,37 +4154,16 @@ async fn test_method_template_general_this_assignment() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 21,
-                character: 26,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 21, 26, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5360,7 +4173,7 @@ async fn test_method_template_general_this_assignment() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5439,38 +4252,17 @@ async fn test_method_template_general_cross_file_psr4() {
         "}\n",                                                          // 10
     );
 
-    let uri = Url::parse("file:///test_cross_tpl.php").unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: test_text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    let uri = Uri::parse("file:///test_cross_tpl.php").unwrap();
+    open_php(&backend, &uri, test_text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 29,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 29, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5485,7 +4277,7 @@ async fn test_method_template_general_cross_file_psr4() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5495,7 +4287,7 @@ async fn test_method_template_general_cross_file_psr4() {
 async fn test_method_template_general_new_expression_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_new_arg.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_new_arg.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -5516,37 +4308,16 @@ async fn test_method_template_general_new_expression_arg() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 34,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 34, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5556,7 +4327,7 @@ async fn test_method_template_general_new_expression_arg() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5565,7 +4336,7 @@ async fn test_method_template_general_new_expression_arg() {
 async fn test_method_template_general_phpstan_prefix() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_phpstan.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_phpstan.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -5586,37 +4357,16 @@ async fn test_method_template_general_phpstan_prefix() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 29,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 29, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5626,7 +4376,7 @@ async fn test_method_template_general_phpstan_prefix() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5635,7 +4385,7 @@ async fn test_method_template_general_phpstan_prefix() {
 async fn test_method_template_general_non_template_unaffected() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_no_tpl.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_no_tpl.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -5651,37 +4401,16 @@ async fn test_method_template_general_non_template_unaffected() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 10,
-                character: 21,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 10, 21, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5691,7 +4420,7 @@ async fn test_method_template_general_non_template_unaffected() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5700,7 +4429,7 @@ async fn test_method_template_general_non_template_unaffected() {
 async fn test_method_template_general_this_property_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_general_prop_arg.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_general_prop_arg.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -5725,37 +4454,16 @@ async fn test_method_template_general_this_property_arg() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 39,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 39, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5765,7 +4473,7 @@ async fn test_method_template_general_this_property_arg() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5775,7 +4483,7 @@ async fn test_method_template_general_this_property_arg() {
 async fn test_method_template_general_deep_chain_new_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_deep_chain.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_deep_chain.php").unwrap();
     let text = concat!(
         "<?php\n",                                                      // 0
         "class Product {\n",                                            // 1
@@ -5803,37 +4511,16 @@ async fn test_method_template_general_deep_chain_new_arg() {
         "}\n",                                                          // 23
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 47,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 47, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5843,7 +4530,7 @@ async fn test_method_template_general_deep_chain_new_arg() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5854,7 +4541,7 @@ async fn test_method_template_general_deep_chain_new_arg() {
 async fn test_method_template_general_deep_chain_namespaced() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_deep_chain_ns.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_deep_chain_ns.php").unwrap();
     let text = concat!(
         "<?php\n",                                                      // 0
         "namespace App;\n",                                             // 1
@@ -5884,37 +4571,16 @@ async fn test_method_template_general_deep_chain_namespaced() {
         "}\n",                                                          // 25
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 24,
-                character: 47,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 24, 47, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -5924,7 +4590,7 @@ async fn test_method_template_general_deep_chain_namespaced() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5936,7 +4602,7 @@ async fn test_method_template_general_deep_chain_namespaced() {
 async fn test_match_class_string_forwarded_to_method_conditional_return() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_class_string_method.php").unwrap();
+    let uri = Uri::parse("file:///match_class_string_method.php").unwrap();
     let text = concat!(
         "<?php\n",                                                      // 0
         "class GetCreditnotesRequest {\n",                              // 1
@@ -5969,40 +4635,19 @@ async fn test_match_class_string_forwarded_to_method_conditional_return() {
         "}\n",                                                          // 28
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 26,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 26, 22, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $requestBody->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6017,7 +4662,7 @@ async fn test_match_class_string_forwarded_to_method_conditional_return() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6028,7 +4673,7 @@ async fn test_match_class_string_forwarded_to_method_conditional_return() {
 async fn test_match_class_string_forwarded_to_function_conditional_return() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_class_string_func.php").unwrap();
+    let uri = Uri::parse("file:///match_class_string_func.php").unwrap();
     let text = concat!(
         "<?php\n",                                         // 0
         "class Alpha {\n",                                 // 1
@@ -6058,40 +4703,19 @@ async fn test_match_class_string_forwarded_to_function_conditional_return() {
         "}\n",                                             // 25
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 23,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 23, 14, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $obj->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6106,7 +4730,7 @@ async fn test_match_class_string_forwarded_to_function_conditional_return() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6116,7 +4740,7 @@ async fn test_match_class_string_forwarded_to_function_conditional_return() {
 async fn test_simple_class_string_variable_forwarded_to_conditional_return() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///simple_class_string_var.php").unwrap();
+    let uri = Uri::parse("file:///simple_class_string_var.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class User {\n",                                       // 1
@@ -6142,40 +4766,19 @@ async fn test_simple_class_string_variable_forwarded_to_conditional_return() {
         "}\n",                                                  // 21
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 19,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 19, 15, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $user->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6185,7 +4788,7 @@ async fn test_simple_class_string_variable_forwarded_to_conditional_return() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6195,7 +4798,7 @@ async fn test_simple_class_string_variable_forwarded_to_conditional_return() {
 async fn test_ternary_class_string_forwarded_to_conditional_return() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_class_string.php").unwrap();
+    let uri = Uri::parse("file:///ternary_class_string.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "class Admin {\n",                                          // 1
@@ -6225,40 +4828,19 @@ async fn test_ternary_class_string_forwarded_to_conditional_return() {
         "}\n",                                                      // 25
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 23,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 23, 15, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $user->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6273,7 +4855,7 @@ async fn test_ternary_class_string_forwarded_to_conditional_return() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6283,7 +4865,7 @@ async fn test_ternary_class_string_forwarded_to_conditional_return() {
 async fn test_match_class_string_inline_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_class_string_inline.php").unwrap();
+    let uri = Uri::parse("file:///match_class_string_inline.php").unwrap();
     let text = concat!(
         "<?php\n",                                                 // 0
         "class Foo {\n",                                           // 1
@@ -6315,40 +4897,19 @@ async fn test_match_class_string_inline_chain() {
         "}\n",                                                     // 27
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 25,
-                character: 38,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 25, 38, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for inline chain $container->make($cls)->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6363,7 +4924,7 @@ async fn test_match_class_string_inline_chain() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6373,7 +4934,7 @@ async fn test_match_class_string_inline_chain() {
 async fn test_match_class_string_forwarded_to_static_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_class_string_static.php").unwrap();
+    let uri = Uri::parse("file:///match_class_string_static.php").unwrap();
     let text = concat!(
         "<?php\n",                                                       // 0
         "class Widget {\n",                                              // 1
@@ -6400,40 +4961,19 @@ async fn test_match_class_string_forwarded_to_static_method() {
         "}\n",                                                           // 22
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 20,
-                character: 19,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 20, 19, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $instance->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6443,7 +4983,7 @@ async fn test_match_class_string_forwarded_to_static_method() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6455,7 +4995,7 @@ async fn test_match_class_string_forwarded_to_static_method() {
 async fn test_generic_array_shape_substitution() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_shape.php").unwrap();
+    let uri = Uri::parse("file:///generics_shape.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -6481,37 +5021,16 @@ async fn test_generic_array_shape_substitution() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 19,
-                character: 28,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 19, 28, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6521,7 +5040,7 @@ async fn test_generic_array_shape_substitution() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6530,7 +5049,7 @@ async fn test_generic_array_shape_substitution() {
 async fn test_generic_object_shape_substitution() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_object_shape.php").unwrap();
+    let uri = Uri::parse("file:///generics_object_shape.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -6556,37 +5075,16 @@ async fn test_generic_object_shape_substitution() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 19,
-                character: 23,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 19, 23, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6596,7 +5094,7 @@ async fn test_generic_object_shape_substitution() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6607,7 +5105,7 @@ async fn test_generic_object_shape_substitution() {
 async fn test_generic_shape_string_key_variable_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_shape_assign.php").unwrap();
+    let uri = Uri::parse("file:///generics_shape_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -6634,37 +5132,16 @@ async fn test_generic_shape_string_key_variable_assignment() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 20,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 20, 16, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6674,7 +5151,7 @@ async fn test_generic_shape_string_key_variable_assignment() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6685,7 +5162,7 @@ async fn test_generic_shape_string_key_variable_assignment() {
 async fn test_generic_shape_chained_bracket_variable_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///generics_shape_chain_assign.php").unwrap();
+    let uri = Uri::parse("file:///generics_shape_chain_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -6712,37 +5189,16 @@ async fn test_generic_shape_chained_bracket_variable_assignment() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 20,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 20, 16, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6752,7 +5208,7 @@ async fn test_generic_shape_chained_bracket_variable_assignment() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6762,7 +5218,7 @@ async fn test_generic_shape_chained_bracket_variable_assignment() {
 async fn test_shape_string_key_from_var_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///shape_var_annotation.php").unwrap();
+    let uri = Uri::parse("file:///shape_var_annotation.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -6779,37 +5235,16 @@ async fn test_shape_string_key_from_var_annotation() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 10,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 10, 16, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6819,7 +5254,7 @@ async fn test_shape_string_key_from_var_annotation() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6830,7 +5265,7 @@ async fn test_shape_string_key_from_var_annotation() {
 async fn test_foreach_extends_generic_collection_single_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_single_level.php").unwrap();
+    let uri = Uri::parse("file:///foreach_single_level.php").unwrap();
     // SimpleCollection @extends AbstractReflectionCollection<Item>
     // AbstractReflectionCollection @implements IteratorAggregate<T>
     // → foreach element should be Item
@@ -6861,38 +5296,17 @@ async fn test_foreach_extends_generic_collection_single_level() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Line 20: `            $item->`
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 20,
-                character: 19,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 20, 19, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6902,7 +5316,7 @@ async fn test_foreach_extends_generic_collection_single_level() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6913,7 +5327,7 @@ async fn test_foreach_extends_generic_collection_single_level() {
 async fn test_multi_level_generic_collection_foreach() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multi_level_foreach.php").unwrap();
+    let uri = Uri::parse("file:///multi_level_foreach.php").unwrap();
     // Top-level code (matching the fixture pattern) — the foreach
     // resolution at the top level walks `program.statements` directly
     // via `walk_statements_for_assignments`.
@@ -6952,38 +5366,17 @@ async fn test_multi_level_generic_collection_foreach() {
         "}\n",                                                                              // 31
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Line 30: `    $item->`  (4 spaces + `$item->` = char 11 is after `->`)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 30,
-                character: 11,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 30, 11, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -6993,7 +5386,7 @@ async fn test_multi_level_generic_collection_foreach() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7011,7 +5404,7 @@ async fn test_multi_level_generic_collection_foreach() {
 async fn test_chain_level_generic_substitution_first() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_generic.php").unwrap();
+    let uri = Uri::parse("file:///chain_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -7040,37 +5433,16 @@ async fn test_chain_level_generic_substitution_first() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 42,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 42, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -7085,7 +5457,7 @@ async fn test_chain_level_generic_substitution_first() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7095,7 +5467,7 @@ async fn test_chain_level_generic_substitution_first() {
 async fn test_chain_level_generic_substitution_variable_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_generic_var.php").unwrap();
+    let uri = Uri::parse("file:///chain_generic_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -7124,37 +5496,16 @@ async fn test_chain_level_generic_substitution_variable_assignment() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 16, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -7169,7 +5520,7 @@ async fn test_chain_level_generic_substitution_variable_assignment() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7180,7 +5531,7 @@ async fn test_chain_level_generic_substitution_variable_assignment() {
 async fn test_mixin_generic_substitution() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///mixin_generic.php").unwrap();
+    let uri = Uri::parse("file:///mixin_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -7220,37 +5571,16 @@ async fn test_mixin_generic_substitution() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 33,
-                character: 45,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 33, 45, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -7265,7 +5595,7 @@ async fn test_mixin_generic_substitution() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7279,7 +5609,7 @@ async fn test_mixin_generic_substitution() {
 async fn test_inherited_array_property_template_substitution() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///t19_array_prop.php").unwrap();
+    let uri = Uri::parse("file:///t19_array_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Message {\n",
@@ -7309,46 +5639,25 @@ async fn test_inherited_array_property_template_substitution() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$item->` on the foreach body line
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 19,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 19, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $item-> inside foreach over $this->items"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -7363,7 +5672,7 @@ async fn test_inherited_array_property_template_substitution() {
                 prop_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7373,7 +5682,7 @@ async fn test_inherited_array_property_template_substitution() {
 async fn test_inherited_property_bracket_access_template_substitution() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///t19_bracket.php").unwrap();
+    let uri = Uri::parse("file:///t19_bracket.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Task {\n",
@@ -7398,40 +5707,19 @@ async fn test_inherited_property_bracket_access_template_substitution() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 17,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 17, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $first-> after $this->data[0]"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -7441,7 +5729,7 @@ async fn test_inherited_property_bracket_access_template_substitution() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7453,7 +5741,7 @@ async fn test_inherited_property_bracket_access_template_substitution() {
 async fn test_method_template_param_resolves_to_bound_inside_body() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_body_bound.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_body_bound.php").unwrap();
     let text = concat!(
         "<?php\n",                                                              // 0
         "class Builder {\n",                                                    // 1
@@ -7475,37 +5763,16 @@ async fn test_method_template_param_resolves_to_bound_inside_body() {
         "}\n",                // 17
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 16, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -7520,7 +5787,7 @@ async fn test_method_template_param_resolves_to_bound_inside_body() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7530,7 +5797,7 @@ async fn test_method_template_param_resolves_to_bound_inside_body() {
 async fn test_method_template_union_bound_resolves_inside_body() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tpl_union_body.php").unwrap();
+    let uri = Uri::parse("file:///method_tpl_union_body.php").unwrap();
     let text = concat!(
         "<?php\n",                                                              // 0
         "class Builder {\n",                                                    // 1
@@ -7556,37 +5823,16 @@ async fn test_method_template_union_bound_resolves_inside_body() {
         "}\n",                // 21
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 19,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 19, 16, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -7601,7 +5847,7 @@ async fn test_method_template_union_bound_resolves_inside_body() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7612,7 +5858,7 @@ async fn test_method_template_union_bound_resolves_inside_body() {
 async fn test_trait_method_template_param_resolves_inside_body() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_tpl_body.php").unwrap();
+    let uri = Uri::parse("file:///trait_tpl_body.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                     // 0
         "class QueryBuilder {\n",                                                      // 1
@@ -7635,37 +5881,16 @@ async fn test_trait_method_template_param_resolves_inside_body() {
         "}\n",                                                                         // 18
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 16,
-                character: 20,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 16, 20, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -7675,7 +5900,7 @@ async fn test_trait_method_template_param_resolves_inside_body() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7685,7 +5910,7 @@ async fn test_trait_method_template_param_resolves_inside_body() {
 async fn test_function_template_param_resolves_to_bound_inside_body() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///func_tpl_body_bound.php").unwrap();
+    let uri = Uri::parse("file:///func_tpl_body_bound.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // 0
         "class Model {\n",                            // 1
@@ -7703,37 +5928,16 @@ async fn test_function_template_param_resolves_to_bound_inside_body() {
         "}\n",                                        // 13
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 14, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -7748,7 +5952,7 @@ async fn test_function_template_param_resolves_to_bound_inside_body() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7765,7 +5969,7 @@ async fn test_function_template_param_resolves_to_bound_inside_body() {
 async fn test_mixin_template_param_resolved_via_property_generic_type() {
     let backend = create_test_backend();
 
-    let wrapper_uri = Url::parse("file:///Subclient.php").unwrap();
+    let wrapper_uri = Uri::parse("file:///Subclient.php").unwrap();
     let wrapper_text = r#"<?php
 /**
  * @template TWraps of object
@@ -7776,7 +5980,7 @@ class Subclient {
 }
 "#;
 
-    let api_uri = Url::parse("file:///EventsApi.php").unwrap();
+    let api_uri = Uri::parse("file:///EventsApi.php").unwrap();
     let api_text = r#"<?php
 class EventsApi {
     public function createEvent(array $body): array {}
@@ -7785,7 +5989,7 @@ class EventsApi {
 }
 "#;
 
-    let consumer_uri = Url::parse("file:///KlaviyoClient.php").unwrap();
+    let consumer_uri = Uri::parse("file:///KlaviyoClient.php").unwrap();
     let consumer_text = r#"<?php
 class KlaviyoClient {
     /** @var Subclient<EventsApi> */
@@ -7803,41 +6007,17 @@ class KlaviyoClient {
         (&api_uri, api_text),
         (&consumer_uri, consumer_text),
     ] {
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, uri, text).await;
     }
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier {
-                uri: consumer_uri.clone(),
-            },
-            position: Position {
-                line: 6,
-                character: 24,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &consumer_uri, 6, 24, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -7863,7 +6043,7 @@ class KlaviyoClient {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7872,7 +6052,7 @@ class KlaviyoClient {
 async fn test_mixin_union_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///mixin_union.php").unwrap();
+    let uri = Uri::parse("file:///mixin_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Webpage {\n",
@@ -7890,32 +6070,15 @@ async fn test_mixin_union_type() {
         "$page = new PendingAwaitablePage();\n",
         "$page->\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let line = text.lines().count() as u32 - 1;
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position { line, character: 7 },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
 
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, line, 7, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
@@ -7936,7 +6099,7 @@ async fn test_mixin_union_type() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7947,7 +6110,7 @@ async fn test_mixin_union_type() {
 async fn test_template_inferred_from_closure_param_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///closure_param_template.php").unwrap();
+    let uri = Uri::parse("file:///closure_param_template.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "class User {\n",                                                 // 1
@@ -7971,37 +6134,16 @@ async fn test_template_inferred_from_closure_param_type() {
         "}\n",                                                            // 19
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 13,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 13, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8016,7 +6158,7 @@ async fn test_template_inferred_from_closure_param_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8027,7 +6169,7 @@ async fn test_template_inferred_from_closure_param_type() {
 async fn test_template_inferred_from_closure_return_type_reduce_pattern() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///closure_reduce_template.php").unwrap();
+    let uri = Uri::parse("file:///closure_reduce_template.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                     // 0
         "class Decimal {\n",                                                           // 1
@@ -8052,37 +6194,16 @@ async fn test_template_inferred_from_closure_return_type_reduce_pattern() {
         "}\n",            // 20
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 19,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 19, 12, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8097,7 +6218,7 @@ async fn test_template_inferred_from_closure_return_type_reduce_pattern() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8108,7 +6229,7 @@ async fn test_template_inferred_from_closure_return_type_reduce_pattern() {
 async fn test_template_inferred_from_closure_second_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///closure_second_param_template.php").unwrap();
+    let uri = Uri::parse("file:///closure_second_param_template.php").unwrap();
     let text = concat!(
         "<?php\n",                                                           // 0
         "class Order {\n",                                                   // 1
@@ -8132,37 +6253,16 @@ async fn test_template_inferred_from_closure_second_param() {
         "}\n",                                                               // 19
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 11,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 11, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8177,7 +6277,7 @@ async fn test_template_inferred_from_closure_second_param() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8187,7 +6287,7 @@ async fn test_template_inferred_from_closure_second_param() {
 async fn test_function_template_inferred_from_closure_param_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///func_closure_param_template.php").unwrap();
+    let uri = Uri::parse("file:///func_closure_param_template.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class Product {\n",                                    // 1
@@ -8206,37 +6306,16 @@ async fn test_function_template_inferred_from_closure_param_type() {
         "$result->\n",                                          // 14
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 14,
-                character: 9,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 14, 9, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8251,7 +6330,7 @@ async fn test_function_template_inferred_from_closure_param_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8261,7 +6340,7 @@ async fn test_function_template_inferred_from_closure_param_type() {
 async fn test_template_inferred_from_full_closure_param_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///full_closure_param_template.php").unwrap();
+    let uri = Uri::parse("file:///full_closure_param_template.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                    // 0
         "class Invoice {\n",                                                          // 1
@@ -8285,37 +6364,16 @@ async fn test_template_inferred_from_full_closure_param_type() {
         "}\n",                                                                        // 19
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 10,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 10, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8330,7 +6388,7 @@ async fn test_template_inferred_from_full_closure_param_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8345,7 +6403,7 @@ async fn test_template_inferred_from_full_closure_param_type() {
 async fn test_reduce_two_template_params_union_callable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///reduce_two_tpl.php").unwrap();
+    let uri = Uri::parse("file:///reduce_two_tpl.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Decimal {\n",                                     // 1
@@ -8380,40 +6438,19 @@ async fn test_reduce_two_template_params_union_callable() {
         "}\n",            // 30
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 29,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 29, 12, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $total->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8428,7 +6465,7 @@ async fn test_reduce_two_template_params_union_callable() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8451,7 +6488,7 @@ async fn test_reduce_two_template_params_union_callable() {
 async fn test_array_iterator_current_resolves_generic_value_type() {
     let backend = create_spl_generic_backend();
 
-    let uri = Url::parse("file:///array_iterator_generics.php").unwrap();
+    let uri = Uri::parse("file:///array_iterator_generics.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Rule {\n",
@@ -8469,38 +6506,17 @@ async fn test_array_iterator_current_resolves_generic_value_type() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor is after `->` on the chain line (line 12, end of `->`)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 42,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 42, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8515,7 +6531,7 @@ async fn test_array_iterator_current_resolves_generic_value_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8524,7 +6540,7 @@ async fn test_array_iterator_current_resolves_generic_value_type() {
 async fn test_array_iterator_current_via_variable_assignment() {
     let backend = create_spl_generic_backend();
 
-    let uri = Url::parse("file:///array_iterator_var.php").unwrap();
+    let uri = Uri::parse("file:///array_iterator_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Priority {\n",
@@ -8542,41 +6558,20 @@ async fn test_array_iterator_current_via_variable_assignment() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor is after `$item->` (line 12, character 11)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 12,
-                character: 11,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 12, 11, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for $item->"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8586,7 +6581,7 @@ async fn test_array_iterator_current_via_variable_assignment() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8594,7 +6589,7 @@ async fn test_array_iterator_current_via_variable_assignment() {
 async fn test_completion_new_variable_with_class_string_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///new_class_string.php").unwrap();
+    let uri = Uri::parse("file:///new_class_string.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -8618,39 +6613,16 @@ async fn test_completion_new_variable_with_class_string_param() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 16,
-                    character: 21,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 16, 21, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -8667,7 +6639,7 @@ async fn test_completion_new_variable_with_class_string_param() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8675,7 +6647,7 @@ async fn test_completion_new_variable_with_class_string_param() {
 async fn test_implements_generic_interface_completion() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///implements_generic_interface.php").unwrap();
+    let uri = Uri::parse("file:///implements_generic_interface.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -8704,37 +6676,16 @@ async fn test_implements_generic_interface_completion() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 30,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 30, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8749,7 +6700,7 @@ async fn test_implements_generic_interface_completion() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8761,7 +6712,7 @@ async fn test_implements_generic_interface_completion() {
 async fn test_class_template_params_preserved_through_chained_calls() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b8_chain_generic.php").unwrap();
+    let uri = Uri::parse("file:///b8_chain_generic.php").unwrap();
     let text = concat!(
         "<?php\n",                                         // 0
         "class Product {\n",                               // 1
@@ -8791,38 +6742,17 @@ async fn test_class_template_params_preserved_through_chained_calls() {
         "}\n",                                             // 25
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Line 23: "        $this->products()->filter()->"
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 23,
-                character: 99,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 23, 99, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8839,7 +6769,7 @@ async fn test_class_template_params_preserved_through_chained_calls() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8851,7 +6781,7 @@ async fn test_class_template_params_preserved_through_chained_calls() {
 async fn test_class_template_params_preserved_through_self_return_then_first() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b8_chain_first.php").unwrap();
+    let uri = Uri::parse("file:///b8_chain_first.php").unwrap();
     let text = concat!(
         "<?php\n",                                            // 0
         "class Product {\n",                                  // 1
@@ -8880,38 +6810,17 @@ async fn test_class_template_params_preserved_through_self_return_then_first() {
         "}\n",                                                // 24
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Line 22: "        $filtered->first()->"
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 99,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 99, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8926,7 +6835,7 @@ async fn test_class_template_params_preserved_through_self_return_then_first() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8934,7 +6843,7 @@ async fn test_class_template_params_preserved_through_self_return_then_first() {
 async fn test_static_return_preserves_generic_parameters() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_static_return_generics.php").unwrap();
+    let uri = Uri::parse("file:///test_static_return_generics.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                  // 0
         "/** @template T */\n",                                                     // 1
@@ -8953,39 +6862,16 @@ async fn test_static_return_preserves_generic_parameters() {
         "$item->\n",                                                                // 14
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position {
-                    line: 14,
-                    character: 7,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 14, 7, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -8995,7 +6881,7 @@ async fn test_static_return_preserves_generic_parameters() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9006,7 +6892,7 @@ async fn test_static_return_preserves_generic_parameters() {
 async fn test_chained_new_expression_propagates_constructor_generics() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chained_new_generic.php").unwrap();
+    let uri = Uri::parse("file:///chained_new_generic.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "/**\n",                                                          // 1
@@ -9031,37 +6917,16 @@ async fn test_chained_new_expression_propagates_constructor_generics() {
         "}\n",                                                            // 20
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 19,
-                character: 39,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 19, 39, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -9076,14 +6941,14 @@ async fn test_chained_new_expression_propagates_constructor_generics() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
 #[tokio::test]
 async fn test_named_constructor_argument_skips_an_omitted_template_binding() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///named_constructor_generic.php").unwrap();
+    let uri = Uri::parse("file:///named_constructor_generic.php").unwrap();
     let marked = r#"<?php
 /**
  * @template TIgnored
@@ -9108,45 +6973,20 @@ function demo() {
     (new NamedBox(value: new NamedProduct()))->get()->§
 }
 "#;
-    let cursor = marked.find('§').expect("test source needs a cursor");
-    let before = &marked[..cursor];
-    let position = Position {
-        line: before.matches('\n').count() as u32,
-        character: before.rsplit('\n').next().unwrap_or("").chars().count() as u32,
-    };
+    let position = position_of(marked, "§");
     let text = marked.replace('§', "");
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text,
-            },
-        })
-        .await;
+    open_php(&backend, &uri, &text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, position.line, position.character, None).await;
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|item| item.kind == Some(CompletionItemKind::METHOD))
+        .filter(|item| item.kind == Some(CompletionItemKind::Method))
         .map(|item| item.filter_text.as_deref().unwrap_or(&item.label))
         .collect();
 
@@ -9162,7 +7002,7 @@ function demo() {
 async fn test_chained_new_expression_string_literal_generic() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chained_new_string.php").unwrap();
+    let uri = Uri::parse("file:///chained_new_string.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "/**\n",                                                          // 1
@@ -9186,37 +7026,16 @@ async fn test_chained_new_expression_string_literal_generic() {
         "}\n",                                                            // 19
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 51,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 51, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -9226,7 +7045,7 @@ async fn test_chained_new_expression_string_literal_generic() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9236,7 +7055,7 @@ async fn test_chained_new_expression_string_literal_generic() {
 async fn test_bare_new_expression_chain_propagates_constructor_generics() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///bare_new_chain.php").unwrap();
+    let uri = Uri::parse("file:///bare_new_chain.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "/**\n",                                                          // 1
@@ -9260,37 +7079,16 @@ async fn test_bare_new_expression_chain_propagates_constructor_generics() {
         "}\n",                                                            // 19
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 43,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 43, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -9300,7 +7098,7 @@ async fn test_bare_new_expression_chain_propagates_constructor_generics() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9310,7 +7108,7 @@ async fn test_bare_new_expression_chain_propagates_constructor_generics() {
 async fn test_constructor_array_key_value_template_inference() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_kv_ctor.php").unwrap();
+    let uri = Uri::parse("file:///array_kv_ctor.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -9338,37 +7136,16 @@ async fn test_constructor_array_key_value_template_inference() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 20,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 20, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -9378,7 +7155,7 @@ async fn test_constructor_array_key_value_template_inference() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9389,7 +7166,7 @@ async fn test_constructor_array_key_value_template_inference() {
 async fn test_arrayobject_getiterator_template_substitution() {
     let backend = create_spl_generic_backend();
 
-    let uri = Url::parse("file:///arrayobj_iter.php").unwrap();
+    let uri = Uri::parse("file:///arrayobj_iter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -9417,38 +7194,17 @@ async fn test_arrayobject_getiterator_template_substitution() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Completion after $iter->current()->
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 24,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 24, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -9458,7 +7214,7 @@ async fn test_arrayobject_getiterator_template_substitution() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9468,7 +7224,7 @@ async fn test_arrayobject_getiterator_template_substitution() {
 async fn test_key_of_and_value_of_type_operators() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///key_of_test.php").unwrap();
+    let uri = Uri::parse("file:///key_of_test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -9496,38 +7252,17 @@ async fn test_key_of_and_value_of_type_operators() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Line 22: `    $bag->firstValue()->`
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 22,
-                character: 26,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 22, 26, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -9537,7 +7272,7 @@ async fn test_key_of_and_value_of_type_operators() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9547,7 +7282,7 @@ async fn test_key_of_and_value_of_type_operators() {
 async fn test_method_tag_template_resolves_at_call_site() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tag_template.php").unwrap();
+    let uri = Uri::parse("file:///method_tag_template.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -9570,38 +7305,17 @@ async fn test_method_tag_template_resolves_at_call_site() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$result->` on line 17
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 17,
-                character: 13,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 17, 13, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -9616,7 +7330,7 @@ async fn test_method_tag_template_resolves_at_call_site() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9630,7 +7344,7 @@ async fn test_method_tag_template_resolves_at_call_site() {
 async fn test_template_array_bound_identity_generic_resolves_inside_body() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///template_array_bound_identity.php").unwrap();
+    let uri = Uri::parse("file:///template_array_bound_identity.php").unwrap();
     let text = concat!(
         "<?php\n",                                                              // 0
         "class Token {\n",                                                      // 1
@@ -9651,35 +7365,14 @@ async fn test_template_array_bound_identity_generic_resolves_inside_body() {
         "}\n",                                                                  // 16
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `end($tokens)->` on line 13.
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 13,
-                character: 22,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 13, 22, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
@@ -9696,7 +7389,7 @@ async fn test_template_array_bound_identity_generic_resolves_inside_body() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9709,7 +7402,7 @@ async fn test_template_array_bound_identity_generic_resolves_inside_body() {
 async fn test_short_implements_arg_right_aligns_to_value_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///short_implements_arg.php").unwrap();
+    let uri = Uri::parse("file:///short_implements_arg.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class User {\n",                                         // 1
@@ -9734,37 +7427,16 @@ async fn test_short_implements_arg_right_aligns_to_value_param() {
         "}\n",                                                    // 20
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 18,
-                character: 23,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 18, 23, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -9774,7 +7446,7 @@ async fn test_short_implements_arg_right_aligns_to_value_param() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9787,7 +7459,7 @@ async fn test_short_implements_arg_right_aligns_to_value_param() {
 async fn test_short_extends_arg_right_aligns_when_collecting_implements() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///short_extends_implements.php").unwrap();
+    let uri = Uri::parse("file:///short_extends_implements.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class User {\n",                                         // 1
@@ -9818,37 +7490,16 @@ async fn test_short_extends_arg_right_aligns_when_collecting_implements() {
         "}\n",                                                    // 26
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 24,
-                character: 23,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 24, 23, None).await;
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -9858,7 +7509,7 @@ async fn test_short_extends_arg_right_aligns_when_collecting_implements() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9870,7 +7521,7 @@ async fn test_short_extends_arg_right_aligns_when_collecting_implements() {
 async fn test_inline_new_binds_templates_through_another_templates_bound() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///bound_args_inline_new.php").unwrap();
+    let uri = Uri::parse("file:///bound_args_inline_new.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Engine {\n",                                      // 1
@@ -9903,7 +7554,7 @@ async fn test_inline_new_binds_templates_through_another_templates_bound() {
 #[tokio::test]
 async fn generic_union_keeps_each_instantiation_through_members() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///generic-union-members.php").unwrap();
+    let uri = Uri::parse("file:///generic-union-members.php").unwrap();
     let source = r#"<?php
 class LeftValue { public function leftOnly(): void {} public function label(): string { return ''; } }
 class RightValue { public function rightOnly(): void {} public function label(): string { return ''; } }
@@ -9948,7 +7599,7 @@ function demonstrate(ValueBox $box): void { BODY }
 #[tokio::test]
 async fn test_wrapper_template_not_bound_through_call_chained_off_new() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///new_chain_wrapper_arg.php").unwrap();
+    let uri = Uri::parse("file:///new_chain_wrapper_arg.php").unwrap();
     let text = concat!(
         "<?php\n",                                                            // 0
         "/**\n",                                                              // 1

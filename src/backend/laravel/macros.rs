@@ -4,8 +4,7 @@
 use std::collections::HashMap;
 
 use crate::Backend;
-use crate::type_engine::resolver::CtxLoaders;
-use crate::types::FileContext;
+use crate::type_engine::resolver::{CtxLoaders, FileCtx};
 
 impl Backend {
     /// Build the Laravel macro index by scanning the project's own source
@@ -150,12 +149,10 @@ impl Backend {
         let has_macros = !index.is_empty();
         let new_targets = index.target_fqns();
         let target_count = new_targets.len();
-        let old_targets = self.laravel_macros.read().target_fqns();
-        *self.laravel_macros.write() = index;
-        self.laravel_has_macros
-            .store(has_macros, std::sync::atomic::Ordering::Relaxed);
-        *self.laravel_macro_seeds.write() = seeds;
-        *self.laravel_macro_mixin_uris.write() = mixin_uris;
+        let old_targets = self.laravel.macros.read().target_fqns();
+        self.laravel.macros.replace(index, has_macros);
+        *self.laravel.macro_seeds.write() = seeds;
+        *self.laravel.macro_mixin_uris.write() = mixin_uris;
 
         // Evict every class that had macros before or has them now, so a
         // rebuild triggered by a provider edit replaces stale cached merges
@@ -226,7 +223,7 @@ impl Backend {
         content: &str,
         providers: &super::ProvidersOnce<'_>,
     ) {
-        if !self.resolved_class_cache.read().is_laravel() {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
             return;
         }
         // Re-run the full date-factory scan when the edited file is one that
@@ -236,7 +233,7 @@ impl Backend {
         // `Date::use()` / `DateFactory::use()` call is reflected, and an edit
         // to an unrelated file can neither override the configured class nor
         // leave a stale one behind.
-        if self.laravel_date_seed_uris.read().contains(uri) {
+        if self.laravel.date_seed_uris.read().contains(uri) {
             self.build_laravel_date_class(providers.get());
         }
         // A `Macroable::mixin()` registration pulls its macros from another
@@ -248,7 +245,7 @@ impl Backend {
         // whole index (which also refreshes the dependency set).  Mixin
         // registrations are rare, so the occasional full rebuild is cheap.
         if memchr::memmem::find(content.as_bytes(), b"mixin(").is_some()
-            || self.laravel_macro_mixin_uris.read().contains(uri)
+            || self.laravel.macro_mixin_uris.read().contains(uri)
         {
             self.build_laravel_macro_index(providers.get());
             return;
@@ -258,7 +255,7 @@ impl Backend {
         // files feed the index, so the index is rebuilt.  When the references
         // are unchanged the edit can only affect the seed's own
         // registrations, which the single-file path below picks up.
-        let prev_refs = self.laravel_macro_seeds.read().get(uri).cloned();
+        let prev_refs = self.laravel.macro_seeds.read().get(uri).cloned();
         if let Some(prev_refs) = prev_refs {
             let refs = if self.is_laravel_provider_list_uri(uri) {
                 crate::virtual_members::laravel::parse_provider_class_list(content)
@@ -270,7 +267,7 @@ impl Backend {
                 return;
             }
         }
-        let had = self.laravel_macros.read().files.has_uri(uri);
+        let had = self.laravel.macros.read().files.has_uri(uri);
         let has_token = memchr::memmem::find(content.as_bytes(), b"macro(").is_some();
         if !had && !has_token {
             return;
@@ -285,14 +282,13 @@ impl Backend {
         self.expand_facade_macros(&mut regs);
 
         let targets = {
-            let mut index = self.laravel_macros.write();
+            let mut index = self.laravel.macros.write();
             // Capture the pre-edit targets too, so a class whose last macro
             // this edit removed is also evicted below.
             let mut targets = index.target_fqns();
             index.files.set_file(uri.to_string(), regs);
             index.rebuild();
-            self.laravel_has_macros
-                .store(!index.is_empty(), std::sync::atomic::Ordering::Relaxed);
+            self.laravel.macros.set_has_any(!index.is_empty());
             targets.extend(index.target_fqns());
             targets
         };
@@ -336,8 +332,7 @@ impl Backend {
             }
             self.infer_macro_return_type(
                 reg,
-                content,
-                &file_ctx,
+                loaders.file_ctx_at(content, reg.name_offset),
                 loaders.ctx_loaders_at(reg.name_offset),
             );
         }
@@ -362,23 +357,21 @@ impl Backend {
         let loaders = self.file_loaders(&file_ctx);
         self.infer_macro_return_type(
             reg,
-            &content,
-            &file_ctx,
+            loaders.file_ctx_at(&content, reg.name_offset),
             loaders.ctx_loaders_at(reg.name_offset),
         );
     }
 
     /// Type `reg`'s macro from the closure it registers, read as the body of
-    /// a method on the target class.  `content` is the file the closure is
-    /// written in, and `file_ctx` and `loaders` describe that same file.
+    /// a method on the target class.  `file` is the file the closure is
+    /// written in, and `loaders` belong to that same file.
     ///
     /// A no-op when the registration has no closure or the target class
     /// cannot be resolved.
     fn infer_macro_return_type(
         &self,
         reg: &mut crate::virtual_members::laravel::MacroRegistration,
-        content: &str,
-        file_ctx: &FileContext,
+        file: FileCtx<'_>,
         loaders: CtxLoaders<'_>,
     ) {
         let Some(closure_text) = reg.closure_text.as_deref() else {
@@ -389,13 +382,7 @@ impl Backend {
         };
         let rctx = crate::type_engine::resolver::ResolutionCtx {
             preserve_static: true,
-            ..self.resolution_ctx_at(
-                Some(target_class.as_ref()),
-                &file_ctx.classes,
-                content,
-                reg.name_offset,
-                loaders,
-            )
+            ..self.resolution_ctx_at(file, Some(target_class.as_ref()), reg.name_offset, loaders)
         };
         if let Some(ty) = Self::infer_closure_return_type(closure_text, &rctx) {
             reg.method.return_type = Some(ty);
@@ -404,16 +391,16 @@ impl Backend {
     }
 
     fn is_macro_helper_uri_allowed(&self, provider_uri: &str, helper_uri: &str) -> bool {
-        let Ok(provider_url) = tower_lsp::lsp_types::Url::parse(provider_uri) else {
+        let Some(provider_url) = crate::util::parse_url(provider_uri) else {
             return false;
         };
-        let Ok(helper_url) = tower_lsp::lsp_types::Url::parse(helper_uri) else {
+        let Some(helper_url) = crate::util::parse_url(helper_uri) else {
             return false;
         };
-        let Ok(provider_path) = provider_url.to_file_path() else {
+        let Some(provider_path) = crate::util::url_to_path(&provider_url) else {
             return false;
         };
-        let Ok(helper_path) = helper_url.to_file_path() else {
+        let Some(helper_path) = crate::util::url_to_path(&helper_url) else {
             return false;
         };
 

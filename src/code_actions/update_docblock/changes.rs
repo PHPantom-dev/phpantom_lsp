@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, SourceClassLoader};
 use crate::code_actions::phpstan::fix_return_type::enrichment_return_type;
 use crate::completion::phpdoc::generation::{enrichment_plain, enrichment_plain_typed};
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
@@ -22,10 +23,10 @@ fn resolve_type_name_to_fqn(
     name: &str,
     use_map: &HashMap<String, String>,
     file_namespace: &Option<String>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> String {
     let resolved = crate::names::resolve_to_fqn(name, use_map, file_namespace);
-    crate::class_lookup::load_resolved_name(&resolved, class_loader)
+    class_loader(Fqn::new(&resolved))
         .map(|cls| cls.fqn().to_string())
         .unwrap_or(resolved)
 }
@@ -37,7 +38,8 @@ pub(super) fn analyse_body(
     info: &FunctionWithDocblock,
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
+    resolved_class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&Backend>,
     function_loader: FunctionLoader<'_>,
     use_map: &HashMap<String, String>,
@@ -52,12 +54,15 @@ pub(super) fn analyse_body(
                     .is_some_and(|dr| dr.type_parsed.has_type_structure()) =>
         {
             enrichment_return_type(
-                content,
-                info.docblock_position,
-                local_classes,
-                class_loader,
-                Some(use_map),
-                backend,
+                crate::type_engine::resolver::FileCtx::new(
+                    content,
+                    local_classes,
+                    resolved_class_loader,
+                    class_loader,
+                )
+                .with_imports(Some(use_map))
+                .with_backend(backend),
+                info.decl_offset,
                 function_loader,
             )
             .filter(|enriched| {
@@ -78,6 +83,7 @@ pub(super) fn analyse_body(
         info.docblock_position,
         Some(&ThrowsContext {
             class_loader,
+            resolved_class_loader,
             function_loader,
             use_map,
             local_classes,
@@ -87,7 +93,10 @@ pub(super) fn analyse_body(
     let existing_fqns: Vec<String> = info
         .doc_throws
         .iter()
-        .map(|t| resolve_type_name_to_fqn(t, use_map, file_namespace, class_loader).to_lowercase())
+        .map(|t| {
+            resolve_type_name_to_fqn(t, use_map, file_namespace, resolved_class_loader)
+                .to_lowercase()
+        })
         .collect();
     let missing_throws = uncaught
         .iter()

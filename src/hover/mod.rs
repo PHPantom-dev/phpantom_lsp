@@ -16,7 +16,7 @@
 //! holds the shared Markdown builders.
 
 mod class;
-pub(crate) mod constants;
+mod constants;
 mod formatting;
 mod function;
 mod laravel;
@@ -26,7 +26,7 @@ mod see_refs;
 mod templates;
 mod variable;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
@@ -104,7 +104,10 @@ impl Backend {
     /// resolved to a meaningful description, or `None` when resolution
     /// fails or the cursor is not on a navigable symbol.
     pub fn handle_hover(&self, uri: &str, content: &str, position: Position) -> Option<Hover> {
-        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+        // Inside a request this re-enters the scope `with_file_content`
+        // opened; a caller holding its own content (the type-assertion
+        // runner, in-process tests) gets the same caches a request does.
+        let _scope = self.enter_request_scope_borrowed(content);
         let offset = crate::text_position::position_to_offset(content, position);
 
         if let Some(symbol) = self.lookup_symbol_map(uri, offset)
@@ -168,8 +171,7 @@ impl Backend {
         offset: u32,
     ) -> Option<Hover> {
         let last_span_end = {
-            let maps = self.symbol_maps.read();
-            let map = maps.get(uri)?;
+            let map = self.symbol_map_for(uri)?;
             if !map.spans.iter().all(|s| s.end <= offset) {
                 return None;
             }
@@ -268,8 +270,8 @@ impl Backend {
             SymbolKind::ConstantReference { name, .. } => {
                 self.hover_constant_reference(&site, symbol.start, name)
             }
-            SymbolKind::LaravelStringKey { kind, key, .. } => {
-                if !self.resolved_class_cache.read().is_laravel() {
+            SymbolKind::StringKey { kind, key, .. } => {
+                if !self.string_key_kind_enabled(*kind) {
                     return None;
                 }
                 self.hover_laravel_string_key(kind, key, uri)

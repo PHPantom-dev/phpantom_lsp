@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{
+use tower_lsp_server::gen_lsp_types::{
     CompletionContext, CompletionItem, CompletionList, CompletionResponse, Position,
 };
 
@@ -82,9 +82,10 @@ impl Backend {
                 let patched_offset = position_to_offset(&patched, position);
                 let patched_current = find_class_at_offset(&patched_classes, patched_offset);
                 let patched_rctx = self.resolution_ctx_at(
+                    loaders
+                        .file_ctx_at(&patched, cursor_offset)
+                        .with_source(&patched, &patched_classes),
                     patched_current,
-                    &patched_classes,
-                    &patched,
                     patched_offset,
                     loaders.ctx_loaders_at(cursor_offset),
                 );
@@ -192,12 +193,14 @@ impl Backend {
                 }
 
                 if is_filtered {
-                    Some(CompletionResponse::List(CompletionList {
+                    Some(CompletionResponse::CompletionList(CompletionList {
                         is_incomplete: false,
                         items,
+                        apply_kind: None,
+                        item_defaults: None,
                     }))
                 } else {
-                    Some(CompletionResponse::Array(items))
+                    Some(CompletionResponse::CompletionItemList(items))
                 }
             }
             _ => None,
@@ -386,8 +389,7 @@ impl Backend {
         // innermost function-like scope around it opens *before* the class
         // body does — i.e. the body is not nested in the function.
         {
-            let maps = self.symbol_maps.read();
-            let map = maps.get(uri)?;
+            let map = self.symbol_map_for(uri)?;
             if map.find_enclosing_scope(cursor_offset) >= class.start_offset {
                 return None;
             }
@@ -412,13 +414,12 @@ impl Backend {
             Vec::new()
         } else {
             let keyword_ctx = {
-                let maps = self.symbol_maps.read();
-                let map = maps.get(uri);
+                let map = self.symbol_map_for(uri);
                 crate::completion::keyword_completion::build_keyword_context(
                     content,
                     position,
                     cursor_offset,
-                    map.map(|m| m.as_ref()),
+                    map.as_deref(),
                     &ctx.classes,
                 )
             };
@@ -497,8 +498,7 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<CompletionTarget> {
-        let maps = self.symbol_maps.read();
-        let map = maps.get(uri)?;
+        let map = self.symbol_map_for(uri)?;
         // The map's offsets describe the text it was extracted from; a
         // buffer edited since then is a different file as far as they are
         // concerned, and the caller's text-based extraction is the right

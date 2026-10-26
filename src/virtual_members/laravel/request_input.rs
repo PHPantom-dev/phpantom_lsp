@@ -23,10 +23,9 @@
 //! and a key nothing describes is read as the single upload it almost
 //! always is.
 
-use std::sync::Arc;
-
 use crate::Backend;
 use crate::atom::atom;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::ClassInfo;
 
@@ -97,7 +96,7 @@ pub(crate) fn resolve_accessor_type(
     args: &AccessorArgs<'_>,
     content: &str,
     offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&Backend>,
 ) -> Option<PhpType> {
     if !is_request_like(receiver, class_loader) {
@@ -176,7 +175,7 @@ fn file_key_type(
     key: &str,
     content: &str,
     offset: u32,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     backend: Option<&Backend>,
 ) -> PhpType {
     let upload = PhpType::named(atom(UPLOADED_FILE_FQN));

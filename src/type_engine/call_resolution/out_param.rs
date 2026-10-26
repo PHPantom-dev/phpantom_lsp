@@ -32,13 +32,14 @@ use mago_syntax::cst::statement::Statement;
 
 use crate::Backend;
 use crate::atom::{Atom, atom};
+use crate::class_lookup::Fqn;
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::conditional_resolution::{
     ConditionalClassContext, TemplateContext, VarClassStringResolver,
     resolve_conditional_with_text_args_and_defaults,
 };
-use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::resolver::{FileCtx, Loaders, ResolutionCtx};
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FunctionInfo, ParameterInfo};
 
@@ -123,13 +124,13 @@ impl OutParamCallee {
                     .get(fqn.as_str())
                     .map(|(uri, _)| uri.clone())?;
                 // An embedded stub has a synthetic URI and no body to read.
-                if uri.starts_with("phpantom-stub-fn://") {
+                if uri.starts_with(crate::stubs::STUB_FUNCTION_URI_PREFIX) {
                     return None;
                 }
                 (fi.name_offset != 0).then_some((uri, fi.name_offset))
             }
             Self::Method(cls, name) => {
-                let loader = |n: &str| backend.find_or_load_class(n);
+                let loader = |n: Fqn<'_>| backend.find_or_load_class(&n);
                 let declaring = crate::hover::find_declaring_class(
                     cls,
                     name,
@@ -264,7 +265,7 @@ pub(crate) fn resolve_out_type_for_call(
             declaring: declaring_fqn.as_deref(),
             written_class: Some(&|name: &str| resolution_ctx.written_names().resolve_class(name)),
         },
-        resolution_ctx.class_loader,
+        resolution_ctx.file.class_loader,
         &tpl,
     )
     .unwrap_or(hint)
@@ -362,7 +363,7 @@ fn read_out_type(
 
         let mut returns = Vec::new();
         crate::return_collection::collect_returns(body.statements.iter(), &mut returns);
-        let exit_ctx = crate::type_engine::types::narrowing::ExitCtx {
+        let exit_ctx = crate::type_engine::type_ops::condition_facts::ExitCtx {
             current_class,
             all_classes: &file_ctx.classes,
             class_loader: &resolved_class_loader,
@@ -377,10 +378,11 @@ fn read_out_type(
         // The walker reads a position no path reaches as the state before
         // the statement that left, so a body whose every path returns
         // would add a stale reading from its closing brace.
-        let falls_through = !crate::type_engine::types::narrowing::statements_unconditionally_exit(
-            body.statements.iter(),
-            &exit_ctx,
-        );
+        let falls_through =
+            !crate::type_engine::type_ops::condition_facts::statements_unconditionally_exit(
+                body.statements.iter(),
+                &exit_ctx,
+            );
         let exits = returns
             .iter()
             .map(|&(_, _, _, return_keyword)| return_keyword as u32)
@@ -391,16 +393,20 @@ fn read_out_type(
                 crate::type_engine::variable::resolution::resolve_variable_types_in_program(
                     program,
                     VarQuery {
-                        var_name: param_name,
-                        cursor_offset: exit,
-                        content,
-                        current_class: Some(current_class),
-                        all_classes: &file_ctx.classes,
-                        class_loader: &resolved_class_loader,
-                        source_class_loader: &class_loader,
-                        source_imports: Some(use_map),
-                        backend: Some(backend),
                         loaders,
+                        ..VarQuery::new(
+                            param_name,
+                            FileCtx::new(
+                                content,
+                                &file_ctx.classes,
+                                &resolved_class_loader,
+                                &class_loader,
+                            )
+                            .with_imports(Some(use_map))
+                            .with_backend(Some(backend)),
+                            Some(current_class),
+                            exit,
+                        )
                     },
                 )
             })

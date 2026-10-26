@@ -8,7 +8,7 @@ use crate::common::{
     LARAVEL_APP_COMPOSER, complete_at_opened, create_psr4_workspace, markup_hover_at,
     open_initialized_php, position_of,
 };
-use tower_lsp::lsp_types::Url;
+use tower_lsp_server::gen_lsp_types::Uri;
 
 const DATABASE_CONFIG_PHP: &str = "\
 <?php
@@ -63,7 +63,7 @@ return new class extends Migration
 async fn workspace(
     migrations: &[(&str, String)],
     consumer: &str,
-) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
     let paths: Vec<String> = migrations
         .iter()
         .map(|(name, _)| format!("database/migrations/{name}"))
@@ -87,7 +87,7 @@ async fn workspace(
 /// `consumer` (e.g. `"$user->email;"`).
 async fn hover_member(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     consumer: &str,
     access: &str,
 ) -> String {
@@ -100,7 +100,7 @@ async fn hover_member(
 /// `consumer` that ends in `->` (e.g. `"$user->\n"`).
 async fn properties_after(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     consumer: &str,
     line: &str,
 ) -> Vec<String> {

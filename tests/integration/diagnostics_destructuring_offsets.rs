@@ -1,6 +1,7 @@
 use crate::common::collect_diagnostics_with;
+use crate::common::message_text;
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 fn collect(php: &str) -> Vec<Diagnostic> {
     collect_diagnostics_with(
@@ -11,7 +12,10 @@ fn collect(php: &str) -> Vec<Diagnostic> {
 }
 
 fn messages(php: &str) -> Vec<String> {
-    collect(php).into_iter().map(|d| d.message).collect()
+    collect(php)
+        .into_iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
 }
 
 #[test]
@@ -27,17 +31,17 @@ function demo(): void {
     let diags = collect(php);
     assert_eq!(diags.len(), 2, "{diags:?}");
     assert_eq!(
-        diags[0].message,
+        message_text(&diags[0].message),
         "Offset 0 does not exist on array<string, int>"
     );
     assert_eq!(
-        diags[1].message,
+        message_text(&diags[1].message),
         "Offset 1 does not exist on array<string, int>"
     );
-    assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+    assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
     assert_eq!(
         diags[0].code,
-        Some(NumberOrString::String("unknown_offset".to_string()))
+        Some(Code::String("unknown_offset".to_string()))
     );
     assert_eq!(diags[0].range.start, Position::new(5, 5));
     assert_eq!(diags[0].range.end, Position::new(5, 7));

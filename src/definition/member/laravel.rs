@@ -2,11 +2,11 @@
 //! attributes and their array entries, scopes, timestamp constants,
 //! Builder and facade forwarding, and macro registration sites.
 
-use std::sync::Arc;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::{MemberKind, MemberLookup};
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::definition::point_location;
 use crate::types::*;
 use crate::virtual_members::ResolvedClassCache;
@@ -55,7 +55,7 @@ impl Backend {
         let class_bounds = (class.start_offset as usize, class.end_offset as usize);
         let entry_position =
             Self::find_eloquent_array_entry(&class_content, entry_name, Some(class_bounds))?;
-        let parsed_uri = Url::parse(&class_uri).ok()?;
+        let parsed_uri = crate::util::parse_url(&class_uri)?;
         Some(point_location(parsed_uri, entry_position))
     }
 
@@ -65,7 +65,7 @@ impl Backend {
     pub(super) fn find_facade_forwarded_method(
         class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
         cache: Option<&ResolvedClassCache>,
     ) -> Option<(ClassInfo, String)> {
         let concrete = facade_concrete_class(class, class_loader, cache)?;
@@ -90,20 +90,17 @@ impl Backend {
     /// instead (typically in a service provider).  Returns `None` when the
     /// project has no macros or the member is not a recognized macro.
     pub(super) fn macro_definition_location(&self, fqn: &str, name: &str) -> Option<Location> {
-        if !self
-            .laravel_has_macros
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if !self.laravel.macros.has_any() {
             return None;
         }
         let (uri, offset) = {
-            let index = self.laravel_macros.read();
+            let index = self.laravel.macros.read();
             let (uri, offset) = index.definition(fqn, name)?;
             (uri.to_string(), offset)
         };
         let content = self.get_file_content(&uri)?;
         let position = crate::text_position::offset_to_position(&content, offset as usize + 1);
-        let parsed_uri = Url::parse(&uri).ok()?;
+        let parsed_uri = crate::util::parse_url(&uri)?;
         Some(point_location(parsed_uri, position))
     }
 
@@ -140,7 +137,7 @@ impl Backend {
     pub(super) fn find_builder_forwarded_method(
         class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<(ClassInfo, String)> {
         if !extends_eloquent_model(class, class_loader) {
             return None;
@@ -149,7 +146,7 @@ impl Backend {
         let builder_fqn = custom_builder_fqn(class, class_loader)
             .unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
 
-        let builder = class_loader(&builder_fqn)?;
+        let builder = class_loader(Fqn::new(&builder_fqn))?;
         let (declaring_class, fqn) =
             Self::find_declaring_class(&builder, member_name, class_loader)?;
 
@@ -181,7 +178,7 @@ impl Backend {
         resolved_candidate: &ClassInfo,
         raw_class: &ClassInfo,
         member_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<(ClassInfo, String, String)> {
         // Only applies to the Eloquent Builder class.
         let raw_fqn = raw_class.fqn();
@@ -239,7 +236,7 @@ impl Backend {
             })?;
 
         // Load the model and verify it extends Eloquent Model.
-        let model = class_loader(&model_name)?;
+        let model = class_loader(Fqn::new(&model_name))?;
         if !extends_eloquent_model(&model, class_loader) {
             return None;
         }

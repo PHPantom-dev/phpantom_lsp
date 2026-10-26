@@ -1,10 +1,11 @@
 //! Completion inside a string argument: array shape keys, the Laravel
 //! string keys (routes, config, views, translations, morph aliases, paths,
-//! route and command parameters, request input), Eloquent relation and
+//! route and command parameters, request input), Symfony service IDs and
+//! container parameters, Eloquent relation and
 //! column names, the strings a parameter's declared type asks for, and
 //! method names in route-controller groups and array callables.
 
-use tower_lsp::lsp_types::CompletionResponse;
+use tower_lsp_server::gen_lsp_types::CompletionResponse;
 
 use crate::Backend;
 use crate::completion::comment_position::StringContext;
@@ -59,7 +60,7 @@ impl Backend {
         // on `resolved_class_cache` is dropped before calling
         // `try_laravel_string_key_completion`, which may trigger
         // `ensure_workspace_indexed` → `update_ast` → write lock.
-        let is_laravel = self.resolved_class_cache.read().is_laravel();
+        let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         if is_laravel
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
@@ -80,6 +81,19 @@ impl Backend {
             )
             && let Some(response) =
                 self.try_laravel_string_key_completion_in_file(content, position, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── Symfony names ───────────────────────────────────────
+        // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`,
+        // `$translator->trans('|')`, and in any project that uses Twig,
+        // `$twig->render('|')`.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && (self.is_symfony_project() || self.is_twig_project())
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_symfony_string_key_completion(uri, content, position, code, ctx)
         {
             return Some(response);
         }

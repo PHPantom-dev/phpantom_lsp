@@ -25,7 +25,7 @@
 //! so a client that applies this after "Remove all unused imports" (as
 //! organize-on-save does) sorts the text the removal left behind.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::{CodeActionData, make_code_action_data, range_touches_use_import};
 use crate::Backend;
@@ -45,7 +45,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         if !range_touches_use_import(content, &params.range)
             || compute_sort_use_edits(content).is_empty()
@@ -53,9 +53,9 @@ impl Backend {
             return;
         }
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title: "Sort use statements".to_string(),
-            kind: Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS),
+            kind: Some(CodeActionKind::SourceOrganizeImports),
             diagnostics: None,
             edit: None,
             command: None,
@@ -67,6 +67,7 @@ impl Backend {
                 &params.range,
                 serde_json::json!({}),
             )),
+            tags: None,
         }));
     }
 
@@ -77,7 +78,7 @@ impl Backend {
         data: &CodeActionData,
         content: &str,
     ) -> Option<WorkspaceEdit> {
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         let edits = compute_sort_use_edits(content);
         if edits.is_empty() {
             return None;

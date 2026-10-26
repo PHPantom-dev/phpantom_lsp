@@ -4,8 +4,9 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, DiagnosticSeverity};
 
+use crate::type_engine::resolver::{SubjectOutcome, UnionBranch, UnionBranches};
 use crate::types::ClassInfo;
 use crate::virtual_members::resolve_class_fully_cached;
 
@@ -16,7 +17,7 @@ use super::super::member_lookup::{
 };
 use super::super::member_visibility::{INVALID_MEMBER_ACCESS_CODE, inaccessible_member_message};
 use super::access::MemberAccessSite;
-use super::{MemberCheckResult, UNKNOWN_MEMBER_CODE, UnknownMemberPass};
+use super::{MemberCheckResult, PARTIAL_UNION_MEMBER_CODE, UNKNOWN_MEMBER_CODE, UnknownMemberPass};
 
 impl UnknownMemberPass<'_> {
     /// Check the member on the classes the subject resolved to, and push
@@ -25,9 +26,14 @@ impl UnknownMemberPass<'_> {
         &self,
         access: &MemberAccessSite,
         base_classes: &[Arc<ClassInfo>],
+        branches: &UnionBranches,
         out: &mut Vec<Diagnostic>,
     ) -> MemberCheckResult {
         let (result, coarse_diags) = self.check_member_on_resolved_classes(access, base_classes);
+        if result == MemberCheckResult::Ok && coarse_diags.is_empty() {
+            self.report_partial_union(access, base_classes, branches, out);
+            return result;
+        }
 
         // ── Narrowing re-resolution fallback ────────────
         // When the member was not found on the coarsely-cached
@@ -41,9 +47,10 @@ impl UnknownMemberPass<'_> {
         let (result, diags) = if result != MemberCheckResult::Ok && access.is_narrowable_subject() {
             match self.resolve_subject(access) {
                 // Use the fresh diagnostics instead of the coarse ones.
-                crate::type_engine::resolver::SubjectOutcome::Resolved(fresh_classes) => {
-                    self.check_member_on_resolved_classes(access, &fresh_classes)
-                }
+                SubjectOutcome::Resolved {
+                    classes: fresh_classes,
+                    ..
+                } => self.check_member_on_resolved_classes(access, &fresh_classes),
                 // Re-resolution changed the outcome category (e.g.
                 // became Untyped).  Keep the original diagnostic from
                 // the coarse check.
@@ -54,6 +61,118 @@ impl UnknownMemberPass<'_> {
         };
         out.extend(diags);
         result
+    }
+
+    /// Report the alternatives of a union that lack a member another
+    /// alternative declares (the opt-in `partial-union-members`
+    /// diagnostic).
+    fn report_partial_union(
+        &self,
+        access: &MemberAccessSite,
+        classes: &[Arc<ClassInfo>],
+        branches: &UnionBranches,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        if !self.report_partial_union || classes.len() < 2 || access.is_docblock_ref {
+            return;
+        }
+        let mut message = self.partial_union_message(access, classes, branches);
+        // The cached outcome ignores expression-level narrowing (a
+        // ternary `instanceof`, an `&&` chain), which may have ruled the
+        // lacking alternatives out at this exact position.
+        if message.is_some() && access.is_narrowable_subject() {
+            let SubjectOutcome::Resolved { classes, branches } = self.resolve_subject(access)
+            else {
+                return;
+            };
+            message = self.partial_union_message(access, &classes, &branches);
+        }
+        let (Some(message), Some(range)) = (message, self.range(access)) else {
+            return;
+        };
+        out.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::Warning,
+            PARTIAL_UNION_MEMBER_CODE,
+            message,
+        ));
+    }
+
+    /// What to report when some alternatives of the subject's type
+    /// answer for the member and others do not, or `None` when they all
+    /// answer or none does.
+    ///
+    /// An alternative answers when one of its classes declares the member
+    /// or has a magic method that takes it.  An intersection one of whose
+    /// parts could not be loaded is taken to answer, since that part may
+    /// be the one declaring it.
+    fn partial_union_message(
+        &self,
+        access: &MemberAccessSite,
+        classes: &[Arc<ClassInfo>],
+        branches: &UnionBranches,
+    ) -> Option<String> {
+        let answers = |c: &ClassInfo| {
+            member_exists(
+                c,
+                access.member_name,
+                access.is_static,
+                access.is_method_call,
+            ) || has_magic_method_for_access(
+                c,
+                access.is_static,
+                access.is_method_call,
+                self.report_magic,
+            ) || (!access.is_method_call && c.name == "stdClass")
+        };
+        let class_answers = |c: &Arc<ClassInfo>| {
+            if answers(c) {
+                return true;
+            }
+            // Synthetic shapes carry all their members already and share
+            // one name, so they must not go through the cache.
+            c.name != "__object_shape"
+                && answers(&resolve_class_fully_cached(
+                    c,
+                    self.class_loader(),
+                    &self.backend.resolved_class_cache,
+                ))
+        };
+        let (declaring, lacking): (Vec<_>, Vec<_>) = branches
+            .split(classes)
+            .into_iter()
+            .filter(|b| !b.classes.is_empty())
+            .partition(|b| !b.complete || b.classes.iter().any(|c| class_answers(c)));
+        if declaring.is_empty() || lacking.is_empty() {
+            return None;
+        }
+        let names = |branches: &[UnionBranch<'_>]| {
+            branches
+                .iter()
+                .map(|b| {
+                    b.classes
+                        .iter()
+                        .map(|c| display_class_name(c))
+                        .collect::<Vec<_>>()
+                        .join("&")
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let kind_label = if access.is_method_call {
+            "Method"
+        } else if access.is_static {
+            "Member"
+        } else {
+            "Property"
+        };
+        Some(format!(
+            "{} '{}' exists on {} but not on {}",
+            kind_label,
+            access.member_name,
+            names(&declaring),
+            names(&lacking),
+        ))
     }
 
     /// Emit an access diagnostic when the member exists but the calling
@@ -91,7 +210,7 @@ impl UnknownMemberPass<'_> {
         };
         diagnostics.push(make_diagnostic(
             range,
-            DiagnosticSeverity::ERROR,
+            DiagnosticSeverity::Error,
             INVALID_MEMBER_ACCESS_CODE,
             message,
         ));
@@ -270,7 +389,7 @@ impl UnknownMemberPass<'_> {
 
         diagnostics.push(make_diagnostic(
             range,
-            DiagnosticSeverity::WARNING,
+            DiagnosticSeverity::Warning,
             UNKNOWN_MEMBER_CODE,
             message,
         ));

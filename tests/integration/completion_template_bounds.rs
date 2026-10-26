@@ -1,5 +1,5 @@
 use crate::common::{complete_labels_at, create_psr4_workspace, create_test_backend};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Template parameter bounds completion tests ─────────────────────────────
 //
@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::*;
 #[tokio::test]
 async fn test_template_bound_on_constructor_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///tpl_bound_basic.php").unwrap();
+    let uri = Uri::parse("file:///tpl_bound_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class PDependNode {\n",
@@ -57,7 +57,7 @@ async fn test_template_bound_on_constructor_param() {
 #[tokio::test]
 async fn test_template_bound_on_var_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///tpl_bound_var.php").unwrap();
+    let uri = Uri::parse("file:///tpl_bound_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -89,7 +89,7 @@ async fn test_template_bound_on_var_property() {
 #[tokio::test]
 async fn test_phpstan_template_bound() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///tpl_bound_phpstan.php").unwrap();
+    let uri = Uri::parse("file:///tpl_bound_phpstan.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Renderer {\n",
@@ -121,7 +121,7 @@ async fn test_phpstan_template_bound() {
 #[tokio::test]
 async fn test_template_covariant_bound() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///tpl_bound_covariant.php").unwrap();
+    let uri = Uri::parse("file:///tpl_bound_covariant.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Shape {\n",
@@ -154,7 +154,7 @@ async fn test_template_covariant_bound() {
 #[tokio::test]
 async fn test_template_without_bound_no_crash() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///tpl_no_bound.php").unwrap();
+    let uri = Uri::parse("file:///tpl_no_bound.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -182,7 +182,7 @@ async fn test_template_without_bound_no_crash() {
 #[tokio::test]
 async fn test_multiple_templates_one_with_bound() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///tpl_bound_multi.php").unwrap();
+    let uri = Uri::parse("file:///tpl_bound_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Entity {\n",
@@ -235,7 +235,7 @@ async fn test_template_bound_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///test_tpl_cross.php").unwrap();
+    let uri = Uri::parse("file:///test_tpl_cross.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\BaseModel;\n",
@@ -269,7 +269,7 @@ async fn test_template_bound_cross_file() {
 #[tokio::test]
 async fn test_template_bound_fqn() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///tpl_bound_fqn.php").unwrap();
+    let uri = Uri::parse("file:///tpl_bound_fqn.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -380,7 +380,7 @@ fn test_extract_bounds_contravariant_with_bound() {
 #[tokio::test]
 async fn test_trait_template_bound_fallback_without_use_annotation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///trait_tpl_bound.php").unwrap();
+    let uri = Uri::parse("file:///trait_tpl_bound.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class BaseObj {\n",
@@ -414,7 +414,7 @@ async fn test_trait_template_bound_fallback_without_use_annotation() {
 #[tokio::test]
 async fn test_trait_template_with_use_annotation_overrides_bound() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///trait_tpl_explicit.php").unwrap();
+    let uri = Uri::parse("file:///trait_tpl_explicit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class BaseObj {\n",
@@ -452,7 +452,7 @@ async fn test_trait_template_with_use_annotation_overrides_bound() {
 #[tokio::test]
 async fn test_trait_template_no_bound_no_crash() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///trait_tpl_no_bound.php").unwrap();
+    let uri = Uri::parse("file:///trait_tpl_no_bound.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -484,7 +484,7 @@ async fn test_trait_template_no_bound_no_crash() {
 #[tokio::test]
 async fn test_bounded_method_template_members_through_iteration_and_var() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///tpl_bound_method_travel.php").unwrap();
+    let uri = Uri::parse("file:///tpl_bound_method_travel.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Positioned { public function getPosition(): int; }\n",

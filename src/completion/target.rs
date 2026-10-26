@@ -10,8 +10,9 @@
 //! reused by the definition resolver and future features (hover,
 //! references).
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
+use crate::text_position::utf16_col_to_char_index;
 use crate::text_scan::collapse_continuation_lines;
 use crate::type_engine::subject_extraction::detect_access_operator;
 use crate::types::*;
@@ -28,8 +29,9 @@ pub fn extract_completion_target(content: &str, position: Position) -> Option<Co
 
     // Collapse multi-line method chains so that continuation lines
     // (starting with `->` or `?->`) are joined with preceding lines.
-    let (line, col) =
-        collapse_continuation_lines(&lines, position.line as usize, position.character as usize);
+    let line_idx = position.line as usize;
+    let cursor_col = utf16_col_to_char_index(lines[line_idx], position.character);
+    let (line, col) = collapse_continuation_lines(&lines, line_idx, cursor_col);
     let chars: Vec<char> = line.chars().collect();
 
     let (subject, access_kind) = detect_access_operator(&chars, col)?;

@@ -8,13 +8,15 @@
 
 use std::collections::HashSet;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::blade::use_directive::{
     UseDirective, first_string_literal, group_members, use_directives,
 };
 use crate::diagnostics::use_statements::scan_use_statements;
-use crate::text_position::{line_start_byte_offset, offset_to_position, position_to_byte_offset};
+use crate::text_position::{
+    byte_range_to_lsp_range, line_start_byte_offset, offset_to_position, position_to_byte_offset,
+};
 
 /// Check whether `range` touches a namespace-level `use` import.
 ///
@@ -24,24 +26,15 @@ use crate::text_position::{line_start_byte_offset, offset_to_position, position_
 /// offered the import actions while a cursor elsewhere in the file is
 /// not.  A trait `use` inside a class/trait body never counts.
 pub(crate) fn range_touches_use_import(content: &str, range: &Range) -> bool {
+    let start = line_start_byte_offset(content, range.start.line as usize);
     // A range starting past the end of the file rests on nothing.
-    let Some(start) = line_start_offset(content, range.start.line) else {
+    if start == content.len() && range.start.line as usize > content.matches('\n').count() {
         return false;
-    };
+    }
     let end = position_to_byte_offset(content, range.end).max(start);
     scan_use_statements(content).iter().any(|statement| {
         statement.top_level && statement.line_start <= end && start <= statement.end
     })
-}
-
-/// The byte offset line `line` starts at, or `None` past the end of the
-/// file.
-fn line_start_offset(content: &str, line: u32) -> Option<usize> {
-    let mut offset = 0usize;
-    for _ in 0..line {
-        offset += content[offset..].find('\n')? + 1;
-    }
-    Some(offset)
 }
 
 /// Build a `TextEdit` that deletes the full line(s) covered by `range`,
@@ -128,7 +121,10 @@ pub(crate) fn build_use_directive_deletion_edit(
                 Some(index) => group_member_removal(&members, &removed, index),
                 None => at..position_to_byte_offset(template, range.end),
             };
-            return Some(byte_deletion_edit(template, deleted));
+            return Some(TextEdit {
+                range: byte_range_to_lsp_range(template, deleted.start, deleted.end),
+                new_text: String::new(),
+            });
         }
     }
 
@@ -161,7 +157,10 @@ pub(crate) fn build_use_directive_deletion_edit(
     } else {
         span.start..span.end + (after.len() - after.trim_start_matches([' ', '\t']).len())
     };
-    Some(byte_deletion_edit(template, deleted))
+    Some(TextEdit {
+        range: byte_range_to_lsp_range(template, deleted.start, deleted.end),
+        new_text: String::new(),
+    })
 }
 
 /// The byte range of each member a group `@use` directive lists, or `None`
@@ -201,17 +200,6 @@ fn group_member_removal(
     }
 }
 
-/// An edit deleting the byte range `deleted` of `content`.
-fn byte_deletion_edit(content: &str, deleted: std::ops::Range<usize>) -> TextEdit {
-    TextEdit {
-        range: Range {
-            start: offset_to_position(content, deleted.start),
-            end: offset_to_position(content, deleted.end),
-        },
-        new_text: String::new(),
-    }
-}
-
 /// Delete lines `start_line..=end_line` (inclusive), including the
 /// trailing newline, optionally consuming an adjoining blank line so no
 /// gap is left behind.
@@ -242,14 +230,8 @@ fn delete_line_span(
         };
     let end_offset = line_start_byte_offset(content, last_consumed_line + 1).min(content.len());
 
-    let start_pos = offset_to_position(content, edit_start_offset);
-    let end_pos = offset_to_position(content, end_offset);
-
     TextEdit {
-        range: Range {
-            start: start_pos,
-            end: end_pos,
-        },
+        range: byte_range_to_lsp_range(content, edit_start_offset, end_offset),
         new_text: String::new(),
     }
 }

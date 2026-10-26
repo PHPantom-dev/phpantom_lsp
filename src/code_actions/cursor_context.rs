@@ -77,13 +77,86 @@ pub(crate) enum FunctionKinds {
     All,
 }
 
-/// A function-like declaration [`find_enclosing_function`] found.
+/// A function-like declaration: a function, a method, a closure or an
+/// arrow function.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct EnclosingFunction {
+pub(crate) enum FunctionLike<'ast, 'arena> {
+    Function(&'ast Function<'arena>),
+    Method(&'ast Method<'arena>),
+    Closure(&'ast Closure<'arena>),
+    ArrowFunction(&'ast ArrowFunction<'arena>),
+}
+
+impl<'ast, 'arena> FunctionLike<'ast, 'arena> {
+    /// The declaration `node` is, if it is one.
+    pub(crate) fn of(node: Node<'ast, 'arena>) -> Option<Self> {
+        match node {
+            Node::Function(function) => Some(Self::Function(function)),
+            Node::Method(method) => Some(Self::Method(method)),
+            Node::Closure(closure) => Some(Self::Closure(closure)),
+            Node::ArrowFunction(arrow) => Some(Self::ArrowFunction(arrow)),
+            _ => None,
+        }
+    }
+
     /// From its first attribute, modifier or keyword to its end.
-    pub(crate) span: mago_span::Span,
+    pub(crate) fn span(self) -> mago_span::Span {
+        match self {
+            Self::Function(function) => function.span(),
+            Self::Method(method) => method.span(),
+            Self::Closure(closure) => closure.span(),
+            Self::ArrowFunction(arrow) => arrow.span(),
+        }
+    }
+
+    /// Whether it is a closure or an arrow function.
+    pub(crate) fn is_anonymous(self) -> bool {
+        matches!(self, Self::Closure(_) | Self::ArrowFunction(_))
+    }
+
+    /// The parentheses and the parameters between them.
+    pub(crate) fn parameter_list(self) -> &'ast FunctionLikeParameterList<'arena> {
+        match self {
+            Self::Function(function) => &function.parameter_list,
+            Self::Method(method) => &method.parameter_list,
+            Self::Closure(closure) => &closure.parameter_list,
+            Self::ArrowFunction(arrow) => &arrow.parameter_list,
+        }
+    }
+
+    /// The `:` and the native return type after it, when it declares one.
+    pub(crate) fn return_type_hint(self) -> Option<&'ast FunctionLikeReturnTypeHint<'arena>> {
+        match self {
+            Self::Function(function) => function.return_type_hint.as_ref(),
+            Self::Method(method) => method.return_type_hint.as_ref(),
+            Self::Closure(closure) => closure.return_type_hint.as_ref(),
+            Self::ArrowFunction(arrow) => arrow.return_type_hint.as_ref(),
+        }
+    }
+
+    /// The block of its body.  An abstract method has none, and neither
+    /// does an arrow function, whose body is the expression it returns.
+    pub(crate) fn body(self) -> Option<&'ast Block<'arena>> {
+        match self {
+            Self::Function(function) => Some(&function.body),
+            Self::Method(method) => match &method.body {
+                MethodBody::Concrete(block) => Some(block),
+                MethodBody::Abstract(_) => None,
+            },
+            Self::Closure(closure) => Some(&closure.body),
+            Self::ArrowFunction(_) => None,
+        }
+    }
+
     /// The offsets of the braces around its body, when it has one.
-    pub(crate) body_braces: Option<(u32, u32)>,
+    pub(crate) fn body_braces(self) -> Option<(u32, u32)> {
+        self.body().map(|block| {
+            (
+                block.left_brace.start.offset,
+                block.right_brace.start.offset,
+            )
+        })
+    }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -108,19 +181,15 @@ pub(crate) fn find_cursor_context<'a>(
 /// The innermost function-like declaration of `kinds` whose span contains
 /// `offset`, wherever it is declared: at the top level, in a namespace, in
 /// a class-like or anonymous class, or nested in another body.
-pub(crate) fn find_enclosing_function<'a>(
-    statements: &'a Sequence<'a, Statement<'a>>,
+pub(crate) fn find_enclosing_function<'ast, 'arena>(
+    program: &'ast Program<'arena>,
     offset: u32,
     kinds: FunctionKinds,
-) -> Option<EnclosingFunction> {
-    use mago_syntax::walker::Walker;
-
-    let walker = InnermostFunction { offset, kinds };
-    let mut found = None;
-    for statement in statements.iter() {
-        walker.walk_statement(statement, &mut found);
-    }
-    found
+) -> Option<FunctionLike<'ast, 'arena>> {
+    innermost_at(program, offset, |node| {
+        FunctionLike::of(node)
+            .filter(|function| kinds == FunctionKinds::All || !function.is_anonymous())
+    })
 }
 
 /// What `pick` makes of the innermost node holding `offset` that it
@@ -278,65 +347,6 @@ fn find_member_at_cursor<'a>(
         };
     }
     MemberContext::None
-}
-
-/// Records each declaration holding the offset as the walk reaches it, so
-/// what is left once the walk ends is the innermost one.
-struct InnermostFunction {
-    offset: u32,
-    kinds: FunctionKinds,
-}
-
-impl InnermostFunction {
-    fn consider(
-        &self,
-        span: mago_span::Span,
-        body: Option<&Block<'_>>,
-        found: &mut Option<EnclosingFunction>,
-    ) {
-        if span.start.offset <= self.offset && self.offset <= span.end.offset {
-            *found = Some(EnclosingFunction {
-                span,
-                body_braces: body.map(|b| (b.left_brace.start.offset, b.right_brace.start.offset)),
-            });
-        }
-    }
-}
-
-impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Option<EnclosingFunction>>
-    for InnermostFunction
-{
-    fn walk_in_function(
-        &self,
-        node: &'ast Function<'arena>,
-        found: &mut Option<EnclosingFunction>,
-    ) {
-        self.consider(node.span(), Some(&node.body), found);
-    }
-
-    fn walk_in_method(&self, node: &'ast Method<'arena>, found: &mut Option<EnclosingFunction>) {
-        let body = match &node.body {
-            MethodBody::Concrete(block) => Some(block),
-            MethodBody::Abstract(_) => None,
-        };
-        self.consider(node.span(), body, found);
-    }
-
-    fn walk_in_closure(&self, node: &'ast Closure<'arena>, found: &mut Option<EnclosingFunction>) {
-        if self.kinds == FunctionKinds::All {
-            self.consider(node.span(), Some(&node.body), found);
-        }
-    }
-
-    fn walk_in_arrow_function(
-        &self,
-        node: &'ast ArrowFunction<'arena>,
-        found: &mut Option<EnclosingFunction>,
-    ) {
-        if self.kinds == FunctionKinds::All {
-            self.consider(node.span(), None, found);
-        }
-    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────

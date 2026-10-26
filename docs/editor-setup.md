@@ -41,7 +41,7 @@ Zed forwards `lsp.phpantom.initialization_options` to the server as-is, so you c
 
 These are the [editor-supplied file filters](configuration.md#editor-supplied-file-filters): `exclude` uses gitignore syntax relative to the workspace root, and they merge with (rather than replace) anything the project's `.phpantom.toml` already sets.
 
-Zed's own `file_scan_exclusions` and `file_types` are not picked up automatically. Its extension API serves extensions only the `language`, `lsp`, and `context_servers` settings categories, so the PHP extension cannot read those two settings to forward them. Until Zed exposes them, list the paths and extensions you care about in the block above, or in `.phpantom.toml` if you would rather your whole team got them.
+Zed's own `file_scan_exclusions` and `file_types` are not picked up automatically. Its extension API serves extensions only the `language`, `lsp`, and `context_servers` settings categories, so the PHP extension cannot read those two settings to forward them ([zed-industries/zed#66129](https://github.com/zed-industries/zed/discussions/66129) proposes changing that). Until Zed exposes them, list the paths and extensions you care about in the block above, or in `.phpantom.toml` if you would rather your whole team got them.
 
 ### VS Code / Cursor
 

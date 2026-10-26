@@ -2,6 +2,7 @@
 //! occurrence export.
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::inheritance::ancestry::find_declaring_ancestor;
 use crate::symbol_map::SymbolMap;
 use crate::types::{ClassInfo, FileContext};
@@ -161,7 +162,7 @@ impl MemberTargetResolver<'_> {
         }
 
         let loader = self.backend.resolved_class_loader(self.context);
-        let class = loader(&owner)?;
+        let class = loader(Fqn::new(&owner))?;
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             &class,
             &loader,
@@ -223,7 +224,7 @@ fn resolve_declaring_member_owner(
     kind: OccurrenceKind,
 ) -> Option<String> {
     let class_loader = backend.resolved_class_loader(context);
-    let class = class_loader(owner)?;
+    let class = class_loader(Fqn::new(owner))?;
     let declares = |candidate: &ClassInfo| member_exists(candidate, member_name, kind);
     if declares(&class) {
         return Some(class.fqn().to_string());

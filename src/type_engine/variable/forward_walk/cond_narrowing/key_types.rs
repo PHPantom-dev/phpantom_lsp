@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 
 /// What a member path's declaration promises, ignoring anything the walk
 /// has recorded about the path itself: the type a property goes back to
@@ -81,8 +82,8 @@ fn resolve_static_property_key_type(
     let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &PhpType::named(crate::atom::atom(&class_name)),
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     for owner in &owners {
         let resolved = static_property_hint_of(owner, prop_name, ctx);
@@ -100,7 +101,7 @@ fn static_property_hint_of(
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
     let Some(hint) =
-        crate::inheritance::resolve_property_type_hint(owner, prop_name, ctx.class_loader)
+        crate::inheritance::resolve_property_type_hint(owner, prop_name, ctx.file.class_loader)
     else {
         return Vec::new();
     };
@@ -116,12 +117,12 @@ fn resolve_array_key_type(
 ) -> Vec<ResolvedType> {
     // Split off the *last* bracket segment so a nested access resolves its
     // base (`$a["x"]` of `$a["x"]["y"]`) through the same dispatcher.
-    let Some((base_var, segment)) = narrowing::split_trailing_bracket(key) else {
+    let Some((base_var, segment)) = condition_facts::split_trailing_bracket(key) else {
         return Vec::new();
     };
     // A variable index names no shape entry, so only the container's
     // element type describes it.
-    let key_name = narrowing::bracket_segment_literal(segment);
+    let key_name = condition_facts::bracket_segment_literal(segment);
 
     // Only the leading variable of a path is ever assigned in the scope, so
     // a compound base has to be resolved the same way this key is.  Each
@@ -190,7 +191,7 @@ fn resolve_member_key_type(
     // number of segments in the key.
     let resolved_prefix;
     let obj_types: &[ResolvedType] = match scope.get(obj_var) {
-        [] if narrowing::is_member_path_key(obj_var) => {
+        [] if condition_facts::is_member_path_key(obj_var) => {
             resolved_prefix = resolve_synthetic_key_type(obj_var, scope, ctx);
             &resolved_prefix
         }
@@ -207,9 +208,9 @@ fn resolve_member_key_type(
             continue;
         };
         let type_hint = if is_call {
-            crate::inheritance::resolve_method_return_type(cls, member_name, ctx.class_loader)
+            crate::inheritance::resolve_method_return_type(cls, member_name, ctx.file.class_loader)
         } else {
-            crate::inheritance::resolve_property_type_hint(cls, member_name, ctx.class_loader)
+            crate::inheritance::resolve_property_type_hint(cls, member_name, ctx.file.class_loader)
         };
         let Some(hint) = type_hint else {
             continue;
@@ -227,11 +228,11 @@ fn resolve_member_key_type(
         let resolved_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &hint,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         if resolved_classes.is_empty() {
-            if is_call && !hint_says_what_it_says(&hint, ctx.class_loader) {
+            if is_call && !hint_says_what_it_says(&hint, ctx.file.class_loader) {
                 continue;
             }
             ResolvedType::extend_unique(
@@ -268,19 +269,15 @@ fn resolve_member_key_type(
 /// `array<string, Foo>` passes, `T[]` does not.  An unevaluated type
 /// operator (`key-of<X>`, `X[K]`) is excluded whatever it names, since its
 /// meaning is still waiting on the operand.
-fn hint_says_what_it_says(
-    hint: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<crate::types::ClassInfo>>,
-) -> bool {
+fn hint_says_what_it_says(hint: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> bool {
     !hint.contains_unevaluated_operator() && every_name_is_known(hint, class_loader)
 }
 
 /// Whether every class-like name in `hint` is a keyword or loads.
-fn every_name_is_known(
-    hint: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<crate::types::ClassInfo>>,
-) -> bool {
-    let known = |name: &str| crate::php_type::is_keyword_type(name) || class_loader(name).is_some();
+fn every_name_is_known(hint: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> bool {
+    let known = |name: &str| {
+        crate::php_type::is_keyword_type(name) || class_loader(Fqn::new(name)).is_some()
+    };
     match hint.kind() {
         TypeKind::Named(name) | TypeKind::StaticType(name) | TypeKind::ThisType(name) => {
             known(name)

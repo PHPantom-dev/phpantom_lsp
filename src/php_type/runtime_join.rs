@@ -96,10 +96,11 @@ impl PhpType {
 ///
 /// Only scalar value domains take part; see [`is_runtime_scalar_value_domain`].
 pub(crate) fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -> bool {
-    // `kind()` reads an unsealed shape as the array it widens to, and an
-    // exact class name as the `class-string<T>` it is one of, so either
-    // would take in the wider type it is read as and drop it from a join.
-    if supertype.as_unsealed_shape().is_some() || supertype.as_class_name_literal().is_some() {
+    // `kind()` reads an unsealed shape as the array it widens to, an exact
+    // class name as the `class-string<T>` it is one of, and an enum case as
+    // its enum, so any of them would take in the wider type it is read as
+    // and drop it from a join.
+    if supertype.as_unsealed_shape().is_some() || supertype.is_exact_value_marker() {
         return subtype == supertype;
     }
     // `array{}` is the empty array, and every array type that does not
@@ -175,13 +176,13 @@ fn generic_array_parts(ty: &PhpType) -> Option<GenericArrayParts> {
         },
         _ => return None,
     };
-    let (list, non_empty) = match keyword_lowercase(name).as_str() {
-        "array" => (false, false),
-        "non-empty-array" => (false, true),
-        "list" => (true, false),
-        "non-empty-list" => (true, true),
-        _ => return None,
-    };
+    let (list, non_empty) = with_keyword_lowercase(name, |lower| match lower {
+        "array" => Some((false, false)),
+        "non-empty-array" => Some((false, true)),
+        "list" => Some((true, false)),
+        "non-empty-list" => Some((true, true)),
+        _ => None,
+    })?;
     Some(GenericArrayParts {
         list,
         non_empty,
@@ -268,9 +269,11 @@ pub(super) fn shape_values_contained_in(
     }
 
     let parts = match supertype.kind() {
-        TypeKind::Named(name) if matches!(keyword_lowercase(name).as_str(), "array" | "list") => {
+        TypeKind::Named(name)
+            if with_keyword_lowercase(name, |lower| matches!(lower, "array" | "list")) =>
+        {
             GenericArrayParts {
-                list: keyword_lowercase(name) == "list",
+                list: with_keyword_lowercase(name, |lower| lower == "list"),
                 non_empty: false,
                 key: None,
                 value: PhpType::mixed(),
@@ -299,9 +302,9 @@ pub(super) fn shape_values_contained_in(
         Some(key_type) if key_type.is_mixed() || key_type.is_array_key() => true,
         Some(key_type) => key_type.union_members().iter().any(|member| {
             if is_decimal_int_array_key(key) {
-                matches!(member.kind(), TypeKind::Named(n) if matches!(keyword_lowercase(n).as_str(), "int" | "integer"))
+                matches!(member.kind(), TypeKind::Named(n) if with_keyword_lowercase(n, |lower| matches!(lower, "int" | "integer")))
             } else {
-                matches!(member.kind(), TypeKind::Named(n) if keyword_lowercase(n) == "string")
+                matches!(member.kind(), TypeKind::Named(n) if with_keyword_lowercase(n, |lower| lower == "string"))
             }
         }),
     }
@@ -329,25 +332,27 @@ fn is_runtime_scalar_value_domain(ty: &PhpType) -> bool {
             if name == "number" {
                 return true;
             }
-            matches!(
-                keyword_lowercase(name).as_str(),
-                "int"
-                    | "integer"
-                    | int_refinement!()
-                    | "float"
-                    | "double"
-                    | "real"
-                    | "string"
-                    | string_refinement!()
-                    | "bool"
-                    | "boolean"
-                    | "true"
-                    | "false"
-                    | "null"
-                    | "numeric"
-                    | "scalar"
-                    | "array-key"
-            )
+            with_keyword_lowercase(name, |lower| {
+                matches!(
+                    lower,
+                    "int"
+                        | "integer"
+                        | int_refinement!()
+                        | "float"
+                        | "double"
+                        | "real"
+                        | "string"
+                        | string_refinement!()
+                        | "bool"
+                        | "boolean"
+                        | "true"
+                        | "false"
+                        | "null"
+                        | "numeric"
+                        | "scalar"
+                        | "array-key"
+                )
+            })
         }
         _ => false,
     }

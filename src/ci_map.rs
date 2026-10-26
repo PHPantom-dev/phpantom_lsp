@@ -15,6 +15,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 
 /// ASCII-lowercase a key, borrowing when it is already lowercase.
 ///
@@ -103,6 +104,23 @@ impl<V> CiMap<V> {
         let key = key.into();
         let folded = fold(&key).into_owned();
         &mut self.inner.entry(folded).or_insert_with(|| (key, f())).1
+    }
+
+    /// Insert `make()` under `key` unless an entry already exists for it
+    /// (compared case-insensitively), in which case `key` is handed back
+    /// with the value already there.
+    pub fn try_insert_with(
+        &mut self,
+        key: String,
+        make: impl FnOnce() -> V,
+    ) -> Result<(), (String, &V)> {
+        match self.inner.entry(fold(&key).into_owned()) {
+            Entry::Occupied(entry) => Err((key, &entry.into_mut().1)),
+            Entry::Vacant(entry) => {
+                entry.insert((key, make()));
+                Ok(())
+            }
+        }
     }
 
     pub fn remove(&mut self, key: &str) -> Option<V> {
@@ -290,6 +308,17 @@ mod tests {
         assert_eq!(map.get("strlen"), Some(&1));
         map.or_insert_with("str_contains", || 3);
         assert_eq!(map.get("STR_CONTAINS"), Some(&3));
+    }
+
+    #[test]
+    fn map_try_insert_with_hands_back_the_key_when_taken() {
+        let mut map = CiMap::new();
+        assert_eq!(map.try_insert_with("Foo".to_string(), || 1), Ok(()));
+        assert_eq!(
+            map.try_insert_with("FOO".to_string(), || 2),
+            Err(("FOO".to_string(), &1))
+        );
+        assert_eq!(map.keys().collect::<Vec<_>>(), vec!["Foo"]);
     }
 
     #[test]

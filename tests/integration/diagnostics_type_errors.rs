@@ -1,9 +1,10 @@
+use crate::common::message_text;
 use crate::common::{
     collect_diagnostics_with, create_test_backend, create_test_backend_with_full_stubs,
     create_test_backend_with_function_stubs, messages_with_code,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -55,9 +56,9 @@ fn collect_slow_with_full_stubs(php: &str) -> Vec<Diagnostic> {
 
 fn has_type_error(diags: &[Diagnostic]) -> bool {
     diags.iter().any(|d| {
-        d.code.as_ref().is_some_and(
-            |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-        )
+        d.code
+            .as_ref()
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
     })
 }
 
@@ -439,7 +440,9 @@ function test(): void {
 "#;
     let diags = collect(php);
     assert!(
-        diags.iter().any(|d| d.message.contains("got Customer")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("got Customer")),
         "($factory)() should return what $factory() does, got: {diags:?}"
     );
 }
@@ -466,7 +469,8 @@ function test(bool $flag): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("Apple") && d.message.contains("Pear")),
+            .any(|d| message_text(&d.message).contains("Apple")
+                && message_text(&d.message).contains("Pear")),
         "Pear::make() goes through __callStatic, so the call returns Apple|Pear, got: {diags:?}"
     );
 }
@@ -802,9 +806,9 @@ function test(): void {
     let type_diags: Vec<_> = diags
         .iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
         })
         .collect();
     assert!(
@@ -813,7 +817,7 @@ function test(): void {
     );
     assert_eq!(
         type_diags[0].severity,
-        Some(DiagnosticSeverity::ERROR),
+        Some(DiagnosticSeverity::Error),
         "Type error should be ERROR severity"
     );
     assert_eq!(
@@ -1740,9 +1744,9 @@ namespace B {
     let lines: Vec<u32> = diags
         .iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
         })
         .map(|d| d.range.start.line)
         .collect();
@@ -1874,6 +1878,92 @@ function probe(string $v): void {
 }
 
 #[test]
+fn array_map_callback_param_is_narrowed_by_the_array() {
+    let php = r#"<?php
+/** @param non-empty-string $s */
+function nes(string $s): void {}
+
+/** @param list<non-empty-string> $classes */
+function narrowed(array $classes): void {
+    array_map(static fn (string $c) => nes($c), $classes);
+}
+"#;
+    let diags = collect_with_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "A callback parameter should take the array's element type, got: {diags:?}"
+    );
+
+    let php = r#"<?php
+/** @param non-empty-string $s */
+function nes(string $s): void {}
+
+/** @param list<string> $classes */
+function wide(array $classes): void {
+    array_map(static fn (string $c) => nes($c), $classes);
+}
+"#;
+    let diags = collect_with_stubs(php);
+    assert!(
+        has_type_error(&diags),
+        "A plain string element should still be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn concatenating_a_non_empty_operand_is_non_empty() {
+    let php = r#"<?php
+/** @param non-empty-string $s */
+function nes(string $s): void {}
+
+/** @param non-falsy-string $s */
+function nfs(string $s): void {}
+
+/** @param non-empty-string $ne */
+function probe(string $u, string $ne, int $id): void {
+    nes('x' . $u);
+    nes($u . '/');
+    nfs('https://' . $u . '/product/' . $id);
+    nfs($ne . $ne);
+    nes($id . $u);
+    nfs($ne . '0');
+    $path = '/';
+    $path .= $u;
+    nes($path);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Concatenations with a non-empty operand should be non-empty, got: {diags:?}"
+    );
+}
+
+#[test]
+fn concatenating_possibly_empty_operands_is_not_non_empty() {
+    let php = r#"<?php
+/** @param non-empty-string $s */
+function nes(string $s): void {}
+
+/** @param non-falsy-string $s */
+function nfs(string $s): void {}
+
+/** @param non-empty-string $ne */
+function probe(string $u, ?string $v, string $ne): void {
+    nes($u . $v);
+    nfs($ne . $u);
+    nfs('0' . $u);
+}
+"#;
+    let diags = collect(php);
+    let type_errors = diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(c)) if c == "type_mismatch_argument"))
+        .count();
+    assert_eq!(type_errors, 3, "got: {diags:?}");
+}
+
+#[test]
 fn no_diagnostic_for_truthy_string_to_non_empty_string() {
     let php = r#"<?php
 /** @param non-empty-string $value */
@@ -1950,45 +2040,108 @@ function probe(string $v): void {{
     }
 }
 
-/// A bare `string` might satisfy any of the value-shape string refinements
-/// at runtime, so passing one where such a refinement is declared is a
-/// MAYBE and stays silent. Every member of the family has to be listed for
-/// that: one left out turns into a false positive on the first call site
-/// that uses it. `class-string` and `interface-string` are the deliberate
-/// exception, and are reported the way PHPStan reports them.
+/// A refinement of a scalar is a subtype of the scalar, so the base type
+/// handed to it is reported: a plain `string` may be `''`, an `int` may be
+/// `0`, a `bool` may be the other boolean. PHPStan reports each of these as
+/// `argument.type`, and Psalm as `ArgumentTypeCoercion`.
 #[test]
-fn no_diagnostic_for_bare_string_passed_to_any_string_refinement() {
-    for refinement in [
-        "non-empty-string",
-        "numeric-string",
-        "literal-string",
-        "non-empty-literal-string",
-        "lowercase-string",
-        "non-empty-lowercase-string",
-        "uppercase-string",
-        "non-empty-uppercase-string",
-        "truthy-string",
-        "non-falsy-string",
-        "callable-string",
-        "trait-string",
-        "enum-string",
+fn base_scalar_passed_to_a_refinement_of_it_is_reported() {
+    for (base, refinement) in [
+        ("string", "non-empty-string"),
+        ("string", "numeric-string"),
+        ("string", "literal-string"),
+        ("string", "non-empty-literal-string"),
+        ("string", "lowercase-string"),
+        ("string", "non-empty-lowercase-string"),
+        ("string", "uppercase-string"),
+        ("string", "non-empty-uppercase-string"),
+        ("string", "truthy-string"),
+        ("string", "non-falsy-string"),
+        ("string", "callable-string"),
+        ("string", "trait-string"),
+        ("string", "enum-string"),
+        ("int", "positive-int"),
+        ("int", "non-negative-int"),
+        ("int", "int<1, 100>"),
+        ("bool", "true"),
+        ("bool", "false"),
     ] {
         let php = format!(
             r#"<?php
 /** @param {refinement} $value */
-function takes(string $value): void {{}}
+function takes({base} $value): void {{}}
 
-function probe(string $v): void {{
+function probe({base} $v): void {{
     takes($v);
 }}
 "#
         );
         let diags = collect(&php);
         assert!(
-            !has_type_error(&diags),
-            "a bare string might be a {refinement} at runtime, got: {diags:?}"
+            has_type_error(&diags),
+            "a bare {base} is not known to be a {refinement}, got: {diags:?}"
         );
     }
+}
+
+#[test]
+fn bcmath_results_are_numeric_strings() {
+    let php = r#"<?php
+/** @param numeric-string $value */
+function takes(string $value): void {}
+
+function probe(\BcMath\Number $number, string $plain): void {
+    takes(bcadd('1', '2', 0));
+    takes(bcmul('1', '2'));
+    takes((string) $number);
+    takes($plain);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
+    assert_eq!(
+        messages,
+        ["Argument 1 ($value) expects numeric-string, got string"],
+        "only the plain string should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn phpunit_assert_not_empty_refines_a_string() {
+    let php = r#"<?php
+namespace PHPUnit\Framework {
+    abstract class Assert {
+        final public static function assertNotEmpty(mixed $actual, string $message = ''): void {}
+        final public static function assertEmpty(mixed $actual, string $message = ''): void {}
+    }
+    abstract class TestCase extends Assert {}
+}
+
+namespace App {
+    /** @param non-empty-string $value */
+    function takes(string $value): void {}
+
+    final class PrefixTest extends \PHPUnit\Framework\TestCase {
+        public function testPrefix(string $prefix, ?string $other): void {
+            self::assertNotEmpty($prefix);
+            takes($prefix);
+            $this->assertNotEmpty($other);
+            takes($other);
+        }
+
+        public function testUnchecked(string $prefix): void {
+            takes($prefix);
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    let lines: Vec<u32> = diags.iter().map(|d| d.range.start.line).collect();
+    assert_eq!(
+        lines,
+        [22],
+        "only the unchecked string should be flagged, got: {diags:?}"
+    );
 }
 
 #[test]
@@ -2562,6 +2715,39 @@ function test(Named $named): void {
 }
 
 #[test]
+fn key_write_keeps_open_key_domain_of_value_only_array() {
+    // `string[]` names no key type, so a string-keyed write leaves the keys
+    // as open as they were rather than pinning them to `int|string`.
+    let php = r#"<?php
+/** @param array<string, string|int> $arguments */
+function exec_map(array $arguments): void {}
+
+/** @param array<int, string> $arguments */
+function exec_ints(array $arguments): void {}
+
+/**
+ * @param string[] $open
+ * @param array<int, string> $ints
+ */
+function test(array $open, array $ints): void {
+    $open['--admin'] = 1;
+    exec_map($open);
+    $ints['x'] = 'y';
+    exec_ints($ints);
+}
+"#;
+    let diags = collect(php);
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
+    assert_eq!(
+        messages,
+        [
+            "Argument 1 ($arguments) expects array<int, string>, got non-empty-array<int|string, string>"
+        ],
+        "only the write that widens a declared key domain should be reported"
+    );
+}
+
+#[test]
 fn type_error_for_class_without_to_string_to_stringable_param() {
     let php = r#"<?php
 class Plain {}
@@ -2576,6 +2762,37 @@ function test(): void {
     assert!(
         has_type_error(&diags),
         "Expected type error for a class without __toString() passed to Stringable, got: {diags:?}"
+    );
+}
+
+/// `array_reduce()`'s `TCarry` is bound by the initial value and by what
+/// the callback returns, so a `true` seed does not make the callback's own
+/// `bool` return too wide for the callable it is checked against.
+#[test]
+fn no_type_error_for_callback_returning_the_base_of_a_literal_seed() {
+    let php = r#"<?php
+function test(array $items): void {
+    array_reduce($items, fn ($carry, $item) => $carry && $item > 0, true);
+    array_reduce($items, function ($carry, $item) { return $carry || $item; }, false);
+    array_reduce($items, fn ($carry, $item) => $carry . $item, '');
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "the callback's return joins the seed's binding, got: {diags:?}"
+    );
+
+    // The callback still has to accept the seed it is handed first.
+    let php = r#"<?php
+function test(array $items): void {
+    array_reduce([1, 2, 3], function (string $foo, int $current): string { return $foo . $current; }, null);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        has_type_error(&diags),
+        "an `int` seed does not fit a `string` carry, got: {diags:?}"
     );
 }
 
@@ -4507,7 +4724,7 @@ function test(mixed $password): void {
         .unwrap();
     assert_eq!(
         type_error.severity,
-        Some(DiagnosticSeverity::ERROR),
+        Some(DiagnosticSeverity::Error),
         "default severity must stay ERROR so existing projects see no change"
     );
 }
@@ -4539,7 +4756,7 @@ function test(mixed $password): void {
         .filter(|d| has_type_error(std::slice::from_ref(d)))
         .collect();
     assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::WARNING));
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Warning));
 }
 
 #[test]
@@ -4571,10 +4788,10 @@ function test(?string $a, string|null $b, ?array $c): void {
     assert_eq!(
         severities,
         vec![
-            Some(DiagnosticSeverity::WARNING),
-            Some(DiagnosticSeverity::WARNING),
+            Some(DiagnosticSeverity::Warning),
+            Some(DiagnosticSeverity::Warning),
             // `?array` fails on more than its nullability.
-            Some(DiagnosticSeverity::ERROR),
+            Some(DiagnosticSeverity::Error),
         ],
         "got {diags:?}"
     );
@@ -4595,7 +4812,7 @@ function test(?string $a): void {
         .filter(|d| has_type_error(std::slice::from_ref(d)))
         .collect();
     assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::ERROR));
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Error));
 }
 
 #[test]
@@ -4622,7 +4839,7 @@ function test(array|string $val): void {
         .filter(|d| has_type_error(std::slice::from_ref(d)))
         .collect();
     assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::ERROR));
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Error));
 }
 
 #[test]
@@ -5053,7 +5270,7 @@ function test(): void {
         .iter()
         .filter(|d| {
             d.code
-                == Some(tower_lsp::lsp_types::NumberOrString::String(
+                == Some(tower_lsp_server::gen_lsp_types::Code::String(
                     "type_mismatch_argument".to_string(),
                 ))
         })
@@ -5140,6 +5357,53 @@ function test(): void {
 }
 
 #[test]
+fn conditionable_value_is_not_checked_against_its_own_truthy_half() {
+    let php = r#"<?php
+trait Conditionable {
+    /**
+     * @template TWhenParameter
+     * @template TWhenReturnType
+     * @param (\Closure($this): TWhenParameter)|TWhenParameter|null $value
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $callback
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $default
+     * @return $this|TWhenReturnType
+     */
+    public function when($value = null, ?callable $callback = null, ?callable $default = null) {
+        return $this;
+    }
+
+    /**
+     * @template TUnlessParameter
+     * @template TUnlessReturnType
+     * @param (\Closure($this): TUnlessParameter)|TUnlessParameter|null $value
+     * @param (callable($this, TUnlessParameter): TUnlessReturnType)|null $callback
+     * @param (callable($this, TUnlessParameter): TUnlessReturnType)|null $default
+     * @return $this|TUnlessReturnType
+     */
+    public function unless($value = null, ?callable $callback = null, ?callable $default = null) {
+        return $this;
+    }
+}
+
+class Builder {
+    use Conditionable;
+}
+
+function test(Builder $query, bool $onlyLuxury, ?string $name): void {
+    $query->when($onlyLuxury, function (Builder $q): void {});
+    $query->when($name, fn (Builder $q, string $name) => $q);
+    $query->unless($onlyLuxury, function (Builder $q): void {});
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "when()/unless() must check $value against the binding it made, not a half of it: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument")
+    );
+}
+
+#[test]
 fn conditionable_callbacks_only_see_the_value_half_that_runs_them() {
     let php = r#"<?php
 trait Conditionable {
@@ -5222,6 +5486,40 @@ function test(Builder $query, ?string $name): void {
     assert!(
         has_type_error(&diags),
         "A callback typed for a value when() never passes must still be flagged: {diags:?}"
+    );
+}
+
+#[test]
+fn conditionable_default_callback_rejects_the_wrong_value_type() {
+    let php = r#"<?php
+trait Conditionable {
+    /**
+     * @template TWhenParameter
+     * @template TWhenReturnType
+     * @param (\Closure($this): TWhenParameter)|TWhenParameter|null $value
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $callback
+     * @param (callable($this, TWhenParameter): TWhenReturnType)|null $default
+     * @return $this|TWhenReturnType
+     */
+    public function when($value = null, ?callable $callback = null, ?callable $default = null) {
+        return $this;
+    }
+}
+
+class Builder {
+    use Conditionable;
+}
+
+class Job {}
+
+function test(Builder $query, ?Job $job): void {
+    $query->when($job, fn (Builder $query) => $query, fn (Builder $query, Job $job) => $query);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "A default callback typed for the value's truthy half must be flagged: {diags:?}"
     );
 }
 
@@ -9109,7 +9407,7 @@ fn builtin_enum_case_prefers_stub_over_polyfill_classmap_entry() {
         let mut idx = backend.fqn_uri_index().write();
         idx.insert(
             "RoundingMode".to_string(),
-            Url::from_file_path(&polyfill).unwrap().to_string(),
+            Uri::from_file_path(&polyfill).unwrap().to_string(),
         );
     }
 
@@ -10373,6 +10671,133 @@ acceptsClassString(returnsInterfaceString());
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+// ── enum-string / trait-string ──────────────────────────────────────
+
+#[test]
+fn only_an_enum_name_is_an_enum_string() {
+    let php = r#"<?php
+namespace App;
+
+interface SomeInterface {}
+enum SomeEnum { case A; }
+final class SomeClass {}
+trait SomeTrait {}
+
+/** @return enum-string */
+function returnsEnumString(): string { return SomeEnum::class; }
+
+/** @return enum-string<SomeEnum> */
+function returnsBoundEnumString(): string { return SomeEnum::class; }
+
+/** @param enum-string $value */
+function acceptsEnumString($value): void {}
+
+enum OtherEnum { case B; }
+
+/** @param enum-string<SomeEnum> $value */
+function acceptsBoundEnumString(string $value): void {}
+
+/** @param class-string $name */
+function acceptsClassString(string $name): void {}
+
+acceptsEnumString(SomeEnum::class);
+acceptsEnumString('App\SomeEnum');
+acceptsEnumString('App\Unindexed');
+acceptsEnumString(SomeInterface::class);
+acceptsEnumString(SomeClass::class);
+acceptsEnumString(SomeTrait::class);
+acceptsEnumString('App\SomeClass');
+acceptsClassString(returnsEnumString());
+acceptsClassString(returnsBoundEnumString());
+acceptsBoundEnumString(SomeEnum::class);
+acceptsBoundEnumString(OtherEnum::class);
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got {diags:?}"
+    );
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(messages.len(), 5, "got {messages:?}");
+    assert!(
+        messages.iter().all(|m| m.contains("enum-string")),
+        "each message should name the expected type, got {messages:?}"
+    );
+}
+
+#[test]
+fn only_a_trait_name_is_a_trait_string() {
+    let php = r#"<?php
+namespace App;
+
+interface SomeInterface {}
+trait SomeTrait {}
+final class SomeClass {}
+enum SomeEnum { case A; }
+
+/** @return trait-string */
+function returnsTraitString(): string { return SomeTrait::class; }
+
+/** @param trait-string $value */
+function acceptsTraitString($value): void {}
+
+/** @param class-string $name */
+function acceptsClassString(string $name): void {}
+
+acceptsTraitString(SomeTrait::class);
+acceptsTraitString('App\SomeTrait');
+acceptsTraitString('App\Unindexed');
+acceptsTraitString(SomeInterface::class);
+acceptsTraitString(SomeClass::class);
+acceptsTraitString(SomeEnum::class);
+acceptsTraitString('App\SomeClass');
+acceptsClassString(returnsTraitString());
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got {diags:?}"
+    );
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(messages.len(), 5, "got {messages:?}");
+    assert!(
+        messages[..4].iter().all(|m| m.contains("trait-string")),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn enum_and_trait_strings_satisfy_class_string_and_string_parameters() {
+    let php = r#"<?php
+namespace App;
+
+/** @return enum-string */
+function returnsEnumString(): string { return \UnitEnum::class; }
+
+/** @return trait-string */
+function returnsTraitString(): string { return 'App\T'; }
+
+function acceptsString(string $value): void {}
+
+/** @param class-string $name */
+function acceptsClassString(string $name): void {}
+
+/** @param enum-string $name */
+function acceptsEnumString(string $name): void {}
+
+/** @param trait-string $name */
+function acceptsTraitString(string $name): void {}
+
+acceptsString(returnsEnumString());
+acceptsString(returnsTraitString());
+acceptsClassString(returnsEnumString());
+acceptsEnumString(returnsEnumString());
+acceptsTraitString(returnsTraitString());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 /// A closure whose declared return type contradicts the one the parameter's
 /// `callable(...)` spelling promises is a mismatch the callee will hit on the
 /// first call, not a signature we merely failed to verify.
@@ -10816,7 +11241,6 @@ function takesOptional(array $config): void {}
 
 takesConfig(['host' => 'localhost', 'port' => 3306]);
 takesConfig(['port' => 3306, 'host' => 'localhost']);
-takesConfig(['host' => 'localhost', 'port' => 3306, 'debug' => true]);
 takesOptional(['host' => 'localhost']);
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
@@ -12008,7 +12432,10 @@ function test(DOMDocument $dom): void {
     let mut out = Vec::new();
     backend.collect_argument_type_diagnostics(uri, php, &mut out);
     backend.collect_property_type_diagnostics(uri, php, &mut out);
-    let messages: Vec<String> = out.iter().map(|d| d.message.clone()).collect();
+    let messages: Vec<String> = out
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect();
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -13761,6 +14188,85 @@ function g() {
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
+/// A first-class callable or partial application takes the parameters of
+/// the call it wraps that its placeholders leave open, so it is checked
+/// against a declared closure signature like a closure literal is.
+#[test]
+fn a_partial_application_is_checked_against_a_closure_signature() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class User {}
+final class Repo {
+    public function find(int $id, int $tenant): User { return new User(); }
+    public function make(int $id, string $class): object { return new User(); }
+    public static function named(string $name): User { return new User(); }
+    /**
+     * @template T
+     * @param T $value
+     * @return T
+     */
+    public function echo(mixed $value): mixed { return $value; }
+}
+function build(string $class): User { return new User(); }
+
+/** @param Closure(string): object $factory */
+function useFactory(Closure $factory): void {}
+
+function f(Repo $r): void {
+    $make = $r->make(1, ?);
+    useFactory($make);
+    useFactory($r->make(class: ?, id: 1));
+    useFactory(Repo::named(...));
+    useFactory(build(...));
+    useFactory($r->echo(...));
+    useFactory($r->find(...));
+    useFactory($r->find(1, ?));
+    useFactory($r->make(?, 'x'));
+}
+"#;
+    let diags = collect(php);
+    let flagged: Vec<u32> = diags
+        .iter()
+        .filter(|d| {
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
+        })
+        .map(|d| d.range.start.line)
+        .collect();
+    assert_eq!(flagged, [27, 28, 29], "got {diags:?}");
+}
+
+/// The arguments a partial application binds decide what its closure
+/// returns, the way they would for the call it wraps.
+#[test]
+fn a_partial_application_returns_what_its_bound_arguments_decide() {
+    let php = r#"<?php
+class User {}
+final class Admin extends User {}
+final class Repo {
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function make(string $class, int $id): object { return new $class(); }
+}
+
+/** @param Closure(int): Admin $factory */
+function useAdminFactory(Closure $factory): void {}
+
+function f(Repo $r): void {
+    useAdminFactory($r->make(Admin::class, ?));
+    useAdminFactory($r->make(User::class, ?));
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("User"), "got {messages:?}");
+}
+
 // ── Array shapes against typed arrays and other shapes ──────────────
 
 #[test]
@@ -13828,12 +14334,53 @@ h(['k' => 'x']);
 }
 
 #[test]
-fn a_shape_with_extra_keys_still_satisfies_a_narrower_shape() {
+fn a_shape_with_an_undeclared_key_does_not_satisfy_a_sealed_shape() {
     let php = r#"<?php
 declare(strict_types=1);
 /** @param array{foo: int} $a */
 function f(array $a): void {}
 f(['foo' => 1, 'buz' => 'x']);
+/** @param array{foo: int, buz: float} $wider */
+function g(array $wider): void {
+    f($wider);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("(undeclared key 'buz')")),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn a_shape_with_extra_keys_satisfies_an_unsealed_shape() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{foo: int, ...} $a */
+function f(array $a): void {}
+f(['foo' => 1, 'buz' => 'x']);
+/** @param array{foo: int, buz: float} $wider */
+function g(array $wider): void {
+    f($wider);
+}
+"#;
+    assert!(!has_type_error(&collect(php)));
+}
+
+#[test]
+fn a_class_constant_key_matches_the_key_it_evaluates_to_in_a_sealed_shape() {
+    let php = r#"<?php
+declare(strict_types=1);
+final class Slots { public const NAME = 'name'; }
+/** @param array{name: string} $a */
+function f(array $a): void {}
+/** @param array{Slots::NAME: string} $b */
+function g(array $b): void {
+    f($b);
+}
 "#;
     assert!(!has_type_error(&collect(php)));
 }
@@ -14407,7 +14954,9 @@ final class Holder
 "#;
     let diags = collect_slow_with_full_stubs(php);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'bar' not found")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'bar' not found")),
         "property_exists() should prove $this->obj->bar exists: {diags:?}"
     );
 }
@@ -14511,7 +15060,8 @@ function run(P $p): void {{
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("got Resp|Prom") || d.message.contains("got Prom|Resp")),
+            .any(|d| message_text(&d.message).contains("got Resp|Prom")
+                || message_text(&d.message).contains("got Prom|Resp")),
         "`bool is false` may go either way: {diags:?}"
     );
 }
@@ -14593,7 +15143,9 @@ function test(string $s): void
 "#;
     let diags = collect_slow(php);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'children'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'children'")),
         "`'array'` binds `T` to the literal, so `root()` is an `ArrNode`: {diags:?}"
     );
     let messages = messages_with_code(&diags, "type_mismatch_argument");
@@ -15052,11 +15604,304 @@ namespace App {
 "#;
     let diags = collect(php);
     assert!(
-        diags.iter().any(|d| d.message.contains("got 5")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("got 5")),
         "`id(self::NUM)` must bind `T` to the constant's value, got: {diags:?}",
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("Clash")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("Clash")),
         "`self` is `App\\Clash`, not the class itself as a value, got: {diags:?}",
     );
+}
+
+// ─── Literal key writes into a literal key domain ──────────────────────────
+
+#[test]
+fn a_write_under_a_literal_key_keeps_a_literal_key_domain() {
+    let php = r#"<?php
+enum Country: string { case DK = 'dk'; case EN = 'en'; }
+
+/** @param array<value-of<Country>, string> $texts */
+function save(array $texts): void {}
+
+/** @param array<value-of<Country>, string> $texts */
+function f(array $texts): void {
+    $texts[Country::EN->value] = 'x';
+    save($texts);
+}
+
+/** @param array<'a'|'b', string> $texts */
+function strings(array $texts): void {}
+
+/** @param array<'a'|'b', string> $t */
+function g(array $t): void {
+    $t['a'] = 'x';
+    strings($t);
+}
+
+/** @param array<1|2, string> $texts */
+function ints(array $texts): void {}
+
+/** @param array<1|2, string> $t */
+function h(array $t): void {
+    $t[2] = 'x';
+    ints($t);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A write under a key the domain already has should keep the domain, got: {diags:?}"
+    );
+}
+
+#[test]
+fn a_write_under_a_new_literal_key_adds_just_that_key() {
+    let php = r#"<?php
+/** @param array<'a'|'b', string> $texts */
+function strings(array $texts): void {}
+
+/** @param array<'a'|'b'|'c', string> $texts */
+function wider(array $texts): void {}
+
+/** @param array<'a'|'b', string> $t */
+function g(array $t): void {
+    $t['c'] = 'x';
+    wider($t);
+    strings($t);
+}
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Only the call that does not allow 'c' should be flagged, got: {msgs:?}"
+    );
+    assert!(
+        msgs[0].contains("non-empty-array<'a'|'b'|'c', string>"),
+        "The written key should join the literal domain, got: {msgs:?}"
+    );
+}
+
+/// A `(string)` cast keeps what is known about its operand: a number casts
+/// to a `numeric-string`, and an object to whatever its `__toString()`
+/// declares, inherited or not. A cast of a plain `string` stays one.
+#[test]
+fn string_cast_keeps_what_the_operand_spells() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace App;
+
+/** @param non-empty-string $s */ function nes(string $s): void {}
+/** @param numeric-string $s */   function num(string $s): void {}
+
+class Name {
+    /** @return non-empty-string */
+    public function __toString(): string { return 'x'; }
+}
+
+final class FullName extends Name {}
+
+final class Plain {
+    public function __toString(): string { return ''; }
+}
+
+function f(int $i, float $x, Name $n, FullName $full, ?int $maybe, Plain $plain, string $text): void {
+    num((string) $i);
+    num((string) $x);
+    nes((string) $n);
+    nes((string) $full);
+    $cast = (string) $i;
+    num($cast);
+    nes((string) $maybe);
+    nes((string) $plain);
+    num((string) $text);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(messages[0].contains("''|numeric-string"), "{messages:?}");
+    assert!(messages[1].ends_with("got string"), "{messages:?}");
+    assert!(messages[2].ends_with("got string"), "{messages:?}");
+}
+
+/// An `int<a, b>` operand keeps its bounds through `+`, and a loop counter
+/// computed from the value a `strpos()` found covers every pass, so neither
+/// widens to `int` in front of an `int<0, max>` parameter. Subtracting does
+/// move the bound below zero, which is still reported.
+#[test]
+fn int_range_survives_arithmetic_and_loops() {
+    let php = r#"<?php
+/** @param int<0, max> $n */
+function nonNeg(int $n): void {}
+
+function f(string $u): void {
+    $p = strpos($u, 'x');
+    if ($p !== false) {
+        nonNeg($p);
+        nonNeg($p + 1);
+        nonNeg($p - 1);
+    }
+    $offset = 0;
+    while (($pos = strpos($u, 'x', $offset)) !== false) {
+        nonNeg($offset);
+        $offset = $pos + 1;
+    }
+    $count = 0;
+    foreach (str_split($u) as $_) {
+        nonNeg($count);
+        $count = $count + 1;
+    }
+    nonNeg($count);
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].ends_with("got int<-1, max>"), "{messages:?}");
+}
+
+// ─── Operators overloaded by GMP and BcMath\Number ──────────────────────────
+
+/// `GMP` and `BcMath\Number` overload the arithmetic operators, so an
+/// operation on one of them produces another, whichever side it is on and
+/// whatever the other operand is.
+#[test]
+fn overloaded_number_arithmetic_produces_the_class() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+use BcMath\Number;
+
+function takesNumber(Number $v): void {}
+function takesGmp(\GMP $v): void {}
+
+function f(Number $price, int $qty, string $rate): void {
+    takesNumber($price * $qty);
+    takesNumber($qty - $price);
+    takesNumber($price / $rate);
+    takesNumber($price % 3);
+    takesNumber($price ** 2);
+    takesNumber(-$price);
+    $price += 1;
+    takesNumber($price);
+}
+
+function g(\GMP $l, \GMP $r, ?\GMP $maybe): void {
+    takesGmp($l + $r);
+    takesGmp(2 * $l);
+    takesGmp($l % $r);
+    takesGmp($l | $r);
+    takesGmp($l << 2);
+    takesGmp(~$l);
+    takesGmp(-$l);
+    takesGmp($maybe + 1);
+    $l &= $r;
+    takesGmp($l);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "Operators on GMP and BcMath\\Number should produce the class, got: {diags:?}"
+    );
+}
+
+/// The overloaded result is the class itself, not something that also
+/// satisfies a number parameter.
+#[test]
+fn overloaded_number_arithmetic_is_not_an_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function takes_int(int $x): void {}
+
+function g(\GMP $l): void {
+    takes_int($l + 1);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        has_type_error(&diags),
+        "GMP + int passed to an int parameter should be flagged, got: {diags:?}"
+    );
+}
+
+/// `BcMath\Number` does not overload the bitwise operators: `&` on one
+/// keeps the ordinary `int` result rather than becoming a `Number`.
+#[test]
+fn bcmath_number_bitwise_is_not_overloaded() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+use BcMath\Number;
+
+function takesNumber(Number $v): void {}
+
+function f(Number $n): void {
+    takesNumber($n & 1);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    assert!(
+        has_type_error(&diags),
+        "Number & int should not be typed as a Number, got: {diags:?}"
+    );
+}
+
+/// A scope called on a query is grafted onto the builder, but `self` and
+/// `static` in its signature still name the model that declares it, not
+/// the builder the call goes through.
+#[test]
+fn scope_self_param_names_the_model_when_called_on_a_query() {
+    let php = r#"<?php
+namespace Illuminate\Database\Eloquent\Attributes {
+    #[\Attribute]
+    class Scope {}
+}
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {
+        /** @return \Illuminate\Database\Eloquent\Builder<static> */
+        public static function query() {}
+        /** @return \Illuminate\Database\Eloquent\Builder<static> */
+        public function newQuery() {}
+    }
+    /** @template TModel of \Illuminate\Database\Eloquent\Model */
+    class Builder {}
+}
+namespace App\Models {
+    use Illuminate\Database\Eloquent\Attributes\Scope;
+    use Illuminate\Database\Eloquent\Builder;
+    use Illuminate\Database\Eloquent\Model;
+
+    class Post extends Model {
+        #[Scope]
+        protected function relatedTo(Builder $query, self $post): void {}
+        #[Scope]
+        protected function maybeRelatedTo(Builder $query, ?self $post): void {}
+        #[Scope]
+        protected function explicitlyRelatedTo(Builder $query, Post $post): void {}
+        public function scopeLegacyRelatedTo(Builder $query, self $post): void {}
+    }
+    class Comment extends Model {}
+
+    function usage(Post $post, Comment $comment): void {
+        Post::query()->relatedTo($post);
+        Post::query()->maybeRelatedTo($post);
+        Post::query()->maybeRelatedTo(null);
+        Post::query()->explicitlyRelatedTo($post);
+        Post::query()->legacyRelatedTo($post);
+        $post->newQuery()->relatedTo($post);
+        Post::relatedTo($post);
+        Post::query()->relatedTo($comment);
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("Comment"), "{messages:?}");
 }

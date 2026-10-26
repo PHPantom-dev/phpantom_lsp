@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{CompletionItem, Position};
+use tower_lsp_server::gen_lsp_types::{CompletionItem, Position};
 
 use crate::Backend;
 use crate::completion::named_args::{
@@ -83,7 +83,7 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<NamedArgContext> {
-        let symbol_map = self.symbol_maps.read().get(uri).cloned()?;
+        let symbol_map = self.symbol_map_for(uri)?;
 
         let cursor_byte_offset = position_to_offset(content, position);
         let cs = symbol_map.find_enclosing_call_site(cursor_byte_offset)?;

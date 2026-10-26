@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
@@ -51,10 +51,7 @@ impl Backend {
             .get_file_content(&definition_uri)
             .ok_or_else(|| format!("Could not read the definition of `{old_fqn}`."))?;
         let symbol_map = self
-            .symbol_maps
-            .read()
-            .get(&definition_uri)
-            .cloned()
+            .symbol_map_for(&definition_uri)
             .ok_or_else(|| format!("Could not index the definition of `{old_fqn}`."))?;
         let span = class_declaration_span(
             &symbol_map,
@@ -120,7 +117,7 @@ impl Backend {
             definition_uri: self.symbols.fqn_uri_index.read().get(old_fqn).cloned(),
         };
 
-        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
         for (file_uri_str, file_locations) in &group_locations_by_file(locations) {
             match self.class_move_file_edits(&mv, file_uri_str, file_locations)? {
                 FileMoveEdits::Unreadable => {}
@@ -131,6 +128,8 @@ impl Backend {
                 FileMoveEdits::Edits(..) => {}
             }
         }
+
+        self.collect_framework_class_edits(old_fqn, new_fqn, &mut changes);
 
         if changes.is_empty() {
             return Ok(None);
@@ -285,7 +284,7 @@ impl Backend {
         blocks: &[FileRewrite],
         file_uri_str: &str,
     ) -> Result<Option<Vec<TextEdit>>, String> {
-        let Some(sm) = self.symbol_maps.read().get(file_uri_str).cloned() else {
+        let Some(sm) = self.symbol_map_for(file_uri_str) else {
             return Ok(Some(Vec::new()));
         };
 
@@ -413,5 +412,5 @@ enum FileMoveEdits {
     /// abandoned rather than planned against stale offsets.
     Stale,
     /// The edits, filed under the URI the editor applies them to.
-    Edits(Url, Vec<TextEdit>),
+    Edits(Uri, Vec<TextEdit>),
 }

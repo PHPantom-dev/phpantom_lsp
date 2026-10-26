@@ -1,8 +1,11 @@
-//! The many-to-many relationship sources behind the reverse pivot index.
+//! The reverse pivot index: the many-to-many relationship sources behind
+//! it, and keeping it current as they change.
 
-use tower_lsp::lsp_types::Url;
+use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
+use crate::types::ClassInfo;
 use crate::virtual_members::laravel::source_may_declare_pivot_relationship;
 
 impl Backend {
@@ -37,7 +40,7 @@ impl Backend {
 
         let mut loaded = 0usize;
         for uri in &candidates {
-            let Some(path) = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()) else {
+            let Some(path) = crate::util::uri_to_path(uri) else {
                 continue;
             };
             let Ok(content) = std::fs::read(&path) else {
@@ -52,8 +55,7 @@ impl Backend {
         }
 
         if loaded > 0 {
-            self.laravel_pivots_dirty
-                .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.laravel.pivots.mark_dirty();
             // A pivot accessor lands on the target model, whose cached
             // resolutions record no dependency on the relation's file.
             self.clear_resolved_member_files();
@@ -64,5 +66,45 @@ impl Backend {
             candidates.len(),
             loaded,
         );
+    }
+
+    /// Mark the reverse pivot index stale when `content` (at `uri`) affects
+    /// many-to-many relationships — either it now looks like it declares
+    /// one, or it previously contributed one (an edit may have
+    /// removed the last such relation). A no-op for unrelated edits.
+    pub(crate) fn refresh_laravel_pivots(&self, uri: &str, content: &str) {
+        if self.laravel.pivots.is_dirty() {
+            return;
+        }
+        let has_m2m = source_may_declare_pivot_relationship(content.as_bytes());
+        if has_m2m || self.laravel.pivots.read().contributes(uri) {
+            self.laravel.pivots.mark_dirty();
+            // A pivot accessor is attached to the *target* model, which the
+            // file declaring the relation never has to be looked up for, so a
+            // cached receiver resolution records no dependency on this index.
+            self.clear_resolved_member_files();
+        }
+    }
+
+    /// Rebuild the reverse pivot index from every parsed class.
+    ///
+    /// Collects an `(uri, class)` snapshot, releases the index lock, then
+    /// resolves related/pivot class names via the normal loader. A no-op-shaped
+    /// empty index is stored for non-Laravel projects so the gate stays off.
+    pub(crate) fn rebuild_laravel_pivot_index(&self) {
+        let index = if self.resolved_class_cache.read().laravel().is_enabled() {
+            let classes: Vec<(String, Arc<ClassInfo>)> = {
+                let idx = self.symbols.uri_classes_index.read();
+                idx.iter()
+                    .flat_map(|(uri, list)| list.iter().map(move |c| (uri.clone(), Arc::clone(c))))
+                    .collect()
+            };
+            let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
+            crate::virtual_members::laravel::build_pivot_index(&classes, &loader)
+        } else {
+            crate::virtual_members::laravel::LaravelPivotIndex::default()
+        };
+        let non_empty = !index.is_empty();
+        self.laravel.pivots.replace(index, non_empty);
     }
 }

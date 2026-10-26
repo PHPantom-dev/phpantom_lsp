@@ -36,8 +36,8 @@
 //! try the next strategy."
 use std::ops::ControlFlow;
 
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
+use tower_lsp_server::jsonrpc::Result;
 
 use crate::Backend;
 use crate::completion::class_completion::{ClassCompletionParams, ClassNameContext};
@@ -68,13 +68,13 @@ fn merge_named_args_into_response(
         return response;
     }
     match response {
-        CompletionResponse::Array(mut items) => {
+        CompletionResponse::CompletionItemList(mut items) => {
             items.extend(named_arg_items);
-            CompletionResponse::Array(items)
+            CompletionResponse::CompletionItemList(items)
         }
-        CompletionResponse::List(mut list) => {
+        CompletionResponse::CompletionList(mut list) => {
             list.items.extend(named_arg_items);
-            CompletionResponse::List(list)
+            CompletionResponse::CompletionList(list)
         }
     }
 }
@@ -96,6 +96,36 @@ fn paren_follows_cursor(content: &str, position: Position) -> bool {
     after_ident.starts_with('(')
 }
 
+/// Give the text every item inserts the file's line terminator `eol`.
+fn match_completion_line_endings(response: &mut CompletionResponse, eol: &str) {
+    use crate::text_position::match_line_ending;
+
+    if eol == "\n" {
+        return;
+    }
+    let items = match response {
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => &mut list.items,
+    };
+    for item in items {
+        if let Some(text) = &mut item.insert_text {
+            match_line_ending(text, eol);
+        }
+        match &mut item.text_edit {
+            Some(CompletionItemTextEdit::TextEdit(edit)) => {
+                match_line_ending(&mut edit.new_text, eol)
+            }
+            Some(CompletionItemTextEdit::InsertReplaceEdit(edit)) => {
+                match_line_ending(&mut edit.new_text, eol);
+            }
+            None => {}
+        }
+        for edit in item.additional_text_edits.iter_mut().flatten() {
+            match_line_ending(&mut edit.new_text, eol);
+        }
+    }
+}
+
 /// Downgrade callable snippet items to plain-name insertions.
 ///
 /// When `(` already follows the cursor, snippets that insert their own
@@ -108,12 +138,12 @@ fn strip_snippet_parens(items: Vec<CompletionItem>) -> Vec<CompletionItem> {
     items
         .into_iter()
         .map(|mut item| {
-            if item.insert_text_format == Some(InsertTextFormat::SNIPPET)
+            if item.insert_text_format == Some(InsertTextFormat::Snippet)
                 && matches!(
                     item.kind,
-                    Some(CompletionItemKind::METHOD)
-                        | Some(CompletionItemKind::FUNCTION)
-                        | Some(CompletionItemKind::CLASS)
+                    Some(CompletionItemKind::Method)
+                        | Some(CompletionItemKind::Function)
+                        | Some(CompletionItemKind::Class)
                 )
             {
                 // Replace the snippet with just the name
@@ -122,7 +152,7 @@ fn strip_snippet_parens(items: Vec<CompletionItem>) -> Vec<CompletionItem> {
                     item.insert_text = Some(name.clone());
                 }
                 // Also clear any text_edit that carries the snippet text.
-                if let Some(CompletionTextEdit::Edit(ref mut te)) = item.text_edit
+                if let Some(CompletionItemTextEdit::TextEdit(ref mut te)) = item.text_edit
                     && let Some(ref name) = item.filter_text
                 {
                     te.new_text = name.clone();
@@ -162,43 +192,62 @@ impl Backend {
         &self,
         params: CompletionParams,
     ) -> Result<Option<CompletionResponse>> {
-        let uri = params.text_document_position.text_document.uri.to_string();
-        let position = params.text_document_position.position;
-
-        if self.is_blade_file(&uri)
-            && let Some(response) = self.blade_source_completion(&uri, position)
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let mut response = self.completion_response(&uri, params);
+        if let Some(response) = &mut response
+            && let Some(content) = self.get_file_content_arc(&uri)
         {
-            return Ok(Some(response));
+            match_completion_line_endings(response, crate::text_position::line_ending(&content));
+        }
+        Ok(response)
+    }
+
+    /// The completion items at the request's position, before their edit
+    /// text is given the file's line terminator.
+    fn completion_response(
+        &self,
+        uri: &str,
+        params: CompletionParams,
+    ) -> Option<CompletionResponse> {
+        let position = params.text_document_position_params.position;
+
+        if self.is_blade_file(uri)
+            && let Some(response) = self.blade_source_completion(uri, position)
+        {
+            return Some(response);
+        }
+
+        let is_template = self.is_twig_template_uri(uri);
+        if (is_template || self.is_resource_uri(uri))
+            && let Some(content) = self.get_file_content_arc(uri)
+            && let Some(response) = self.try_symfony_resource_completion(uri, &content, position)
+        {
+            return Some(response);
+        }
+        // A template is not PHP, so nothing below applies to it.
+        if is_template {
+            return None;
         }
 
         // A template is analysed as the virtual PHP it lowers to, with the
         // cursor moved into it, so variable resolution walks the
         // preprocessed AST.
-        let Some((content, position)) = self.analysable_content_at(&uri, position) else {
-            return Ok(None);
-        };
+        let (content, position) = self.analysable_content_at(uri, position)?;
 
         let response = {
-            // Activate the chain resolution cache so that shared chain
-            // prefixes are resolved once and reused within this completion
-            // request.  The guard is re-entrant safe.
-            let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
-            let _resolver_guard =
-                crate::type_engine::call_resolution::activate_type_engine_caches();
-            let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
-                &self.resolved_class_cache,
-            );
-            // Parse the document at most once per request, as every request
-            // that goes through `with_file_content` does.
-            let _parse_guard = crate::parser::with_parse_cache_arc(std::sync::Arc::clone(&content));
+            let _scope = self.enter_request_scope(std::sync::Arc::clone(&content));
 
             let cursor_offset = crate::text_position::position_to_offset(&content, position);
             let site = CompletionSite {
-                uri: &uri,
+                uri,
                 content: &content,
                 position,
                 cursor_offset,
-                ctx: self.file_context_at(&uri, cursor_offset),
+                ctx: self.file_context_at(uri, cursor_offset),
             };
             match self.completion_stages(&site, params.context.as_ref()) {
                 ControlFlow::Break(response) => response,
@@ -212,12 +261,12 @@ impl Backend {
         // has — translate it back, dropping items whose range falls in
         // the injected prologue rather than clamping them to the
         // template's start.
-        Ok(match response {
-            Some(response) if self.is_blade_file(&uri) => {
-                Some(self.translate_completion_response(&uri, response))
+        match response {
+            Some(response) if self.is_blade_file(uri) => {
+                Some(self.translate_completion_response(uri, response))
             }
             other => other,
-        })
+        }
     }
 
     /// Completion that reads a Blade template's own source at the
@@ -322,7 +371,7 @@ impl Backend {
         // still fall through to it.
         if let Some(items) = self.try_class_root_member_completion(uri, content, position, ctx) {
             return ControlFlow::Break(
-                (!items.is_empty()).then_some(CompletionResponse::Array(items)),
+                (!items.is_empty()).then_some(CompletionResponse::CompletionItemList(items)),
             );
         }
 
@@ -333,7 +382,7 @@ impl Backend {
             let items = self
                 .try_method_override_completion(content, position, ctx)
                 .filter(|items| !items.is_empty());
-            return ControlFlow::Break(items.map(CompletionResponse::Array));
+            return ControlFlow::Break(items.map(CompletionResponse::CompletionItemList));
         }
 
         ControlFlow::Continue(())
@@ -368,14 +417,14 @@ impl Backend {
             // syntax errors.  Filter to properties only.
             if matches!(string_ctx, StringContext::SimpleInterpolation) {
                 let items = match response {
-                    CompletionResponse::Array(items) => items,
-                    CompletionResponse::List(list) => list.items,
+                    CompletionResponse::CompletionItemList(items) => items,
+                    CompletionResponse::CompletionList(list) => list.items,
                 };
                 let filtered = items
                     .into_iter()
-                    .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                    .filter(|i| i.kind == Some(CompletionItemKind::Property))
                     .collect();
-                return Some(CompletionResponse::Array(filtered));
+                return Some(CompletionResponse::CompletionItemList(filtered));
             }
             return Some(response);
         }
@@ -418,7 +467,8 @@ impl Backend {
         }
 
         // No strategy matched, but we may still have named arg items.
-        (!named_arg_items.is_empty()).then_some(CompletionResponse::Array(named_arg_items))
+        (!named_arg_items.is_empty())
+            .then_some(CompletionResponse::CompletionItemList(named_arg_items))
     }
 
     // ─── Strategy: array shape key completion ────────────────────────────
@@ -439,7 +489,7 @@ impl Backend {
         if items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::Array(items))
+            Some(CompletionResponse::CompletionItemList(items))
         }
     }
 
@@ -459,17 +509,18 @@ impl Backend {
         uri: &str,
     ) -> Option<CompletionResponse> {
         let partial = Self::extract_partial_variable_name(content, position)?;
-        let symbol_maps = self.symbol_maps.read();
-        let symbol_map = symbol_maps.get(uri).map(|arc| arc.as_ref());
+        let symbol_map = self.symbol_map_for(uri);
         let (var_items, var_incomplete) =
-            Self::build_variable_completions(content, &partial, position, symbol_map);
+            Self::build_variable_completions(content, &partial, position, symbol_map.as_deref());
 
         if var_items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::List(CompletionList {
+            Some(CompletionResponse::CompletionList(CompletionList {
                 is_incomplete: var_incomplete,
                 items: var_items,
+                apply_kind: None,
+                item_defaults: None,
             }))
         }
     }
@@ -501,7 +552,7 @@ impl Backend {
         );
         if catch_ctx.has_specific_types && !items.is_empty() {
             // These items don't carry snippets, but guard for consistency.
-            return Some(CompletionResponse::Array(items));
+            return Some(CompletionResponse::CompletionItemList(items));
         }
 
         // No specific throws discovered — fall back to
@@ -546,9 +597,11 @@ impl Backend {
             } else {
                 all_items
             };
-            Some(CompletionResponse::List(CompletionList {
+            Some(CompletionResponse::CompletionList(CompletionList {
                 is_incomplete: class_incomplete,
                 items,
+                apply_kind: None,
+                item_defaults: None,
             }))
         }
     }

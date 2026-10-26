@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, atom};
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::variable::rhs_resolution::{
@@ -471,7 +472,11 @@ fn bind_generic_wrapper(
     // single argument where the ancestor takes several (`Iterator<T>` for an
     // `Iterator<int, Foo>`) names the value, the last one.
     if let Some(args) = resolved.as_ref().and_then(|ty| {
-        crate::inheritance::extract_generic_args_from_ancestor(ty, wrapper_name, ctx.class_loader)
+        crate::inheritance::extract_generic_args_from_ancestor(
+            ty,
+            wrapper_name,
+            ctx.file.class_loader,
+        )
     }) {
         let arg = if arity == 1 && args.len() > 1 {
             args.last()
@@ -514,7 +519,7 @@ fn bare_wrapper_default(
     if !crate::util::short_name(name).eq_ignore_ascii_case(crate::util::short_name(wrapper_name)) {
         return None;
     }
-    let cls = (ctx.class_loader)(name)?;
+    let cls = (ctx.file.class_loader)(Fqn::new(name))?;
     let offset = crate::inheritance::generic_arg_offset(&cls, arity.max(1));
     let param = cls.template_params.get(offset + tpl_position)?;
     cls.template_param_defaults.get(param).cloned()
@@ -532,8 +537,9 @@ fn wrapper_constructor_template(
     if !rest.starts_with(char::is_whitespace) {
         return None;
     }
-    let wrapper_cls = (ctx.class_loader)(wrapper_name).or_else(|| {
-        ctx.all_classes
+    let wrapper_cls = (ctx.file.class_loader)(Fqn::new(wrapper_name)).or_else(|| {
+        ctx.file
+            .all_classes
             .iter()
             .find(|c| crate::util::short_name(&c.name) == crate::util::short_name(wrapper_name))
             .cloned()
@@ -577,7 +583,7 @@ pub(crate) fn instantiate_class(
     }
     let mut substituted = crate::virtual_members::resolve_class_fully_with_type_args(
         cls,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
         &type_args,
     );
@@ -594,7 +600,7 @@ pub(crate) fn instantiate_class(
         let mixin_members = crate::virtual_members::phpdoc::resolve_template_param_mixins(
             cls,
             &generic_subs,
-            ctx.class_loader,
+            ctx.file.class_loader,
         );
         if !mixin_members.is_empty() {
             crate::virtual_members::merge_virtual_members(
@@ -619,7 +625,7 @@ fn constructor_class_subs(
     let (ctor_owner, inherited) = if cls.get_method("__construct").is_some() {
         (None, false)
     } else {
-        match crate::inheritance::ancestors(cls, ctx.class_loader)
+        match crate::inheritance::ancestors(cls, ctx.file.class_loader)
             .find(|(_, parent)| parent.get_method("__construct").is_some())
         {
             Some((_, ancestor)) => (Some(ancestor), true),
@@ -639,7 +645,7 @@ fn constructor_class_subs(
         crate::type_engine::variable::rhs_resolution::remap_inherited_ctor_subs(
             cls,
             &subs,
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
     } else {
         subs

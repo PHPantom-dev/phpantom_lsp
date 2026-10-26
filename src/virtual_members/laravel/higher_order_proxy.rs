@@ -40,7 +40,7 @@
 use std::sync::{Arc, LazyLock};
 
 use crate::atom::{Atom, AtomMap, atom};
-use crate::class_lookup::{is_subtype_of, is_subtype_of_named};
+use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of, is_subtype_of_named};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     ClassInfo, ELOQUENT_COLLECTION_FQN, MethodExtras, MethodInfo, PropertyInfo, Visibility,
@@ -191,7 +191,7 @@ struct ProxyContext<'a> {
     /// mapped value that is not a model.  Resolved once: the check walks a
     /// parent chain and the answer is the same for every member.
     collection_is_eloquent: bool,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
 }
 
 /// Whether a resolved class is a proxy carrying the tag that
@@ -218,7 +218,7 @@ pub(crate) fn is_tagged_higher_order_proxy(fqn: &str, generic_args: &[PhpType]) 
 pub(crate) fn inject_higher_order_proxy_members(
     result: &mut ClassInfo,
     generic_args: &[PhpType],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) {
     if generic_args.len() < TAGGED_ARG_COUNT {
@@ -312,10 +312,10 @@ fn named_atom(ty: &PhpType) -> Option<Atom> {
 /// Fully resolve the collection's value type so its members can be read.
 fn load_value_class(
     value: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
 ) -> Option<Arc<ClassInfo>> {
-    let raw = class_loader(value.base_name()?)?;
+    let raw = class_loader(Fqn::new(value.base_name()?))?;
     let type_args: &[PhpType] = match value.kind() {
         TypeKind::Generic(generic) => &generic.args,
         _ => &[],
@@ -358,7 +358,7 @@ impl<'a> ProxyContext<'a> {
         value: &PhpType,
         method: &str,
         collection: Atom,
-        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &'a ResolvedClassLoader<'a>,
     ) -> Self {
         let result = plan_result(method, key, value, collection);
         // Only the two shapes that build a collection around the member can
@@ -366,7 +366,7 @@ impl<'a> ProxyContext<'a> {
         // parent-chain walk is worth paying for only then.
         let collection_is_eloquent =
             matches!(result, ProxiedResult::Mapped | ProxiedResult::Flattened)
-                && class_loader(collection.as_str())
+                && class_loader(Fqn::new(collection.as_str()))
                     .is_some_and(|cls| is_subtype_of(&cls, ELOQUENT_COLLECTION_FQN, class_loader));
 
         Self {
@@ -497,10 +497,7 @@ fn numeric() -> PhpType {
     PhpType::union(vec![PhpType::int(), PhpType::float()])
 }
 
-fn is_eloquent_model_type(
-    ty: &PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> bool {
+fn is_eloquent_model_type(ty: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> bool {
     is_subtype_of_named(ty, super::ELOQUENT_MODEL_FQN, class_loader)
 }
 

@@ -37,15 +37,15 @@ impl Backend {
         store: impl Fn(&mut crate::backend::laravel::LaravelStringKeyCache, T),
         build: impl FnOnce() -> T,
     ) -> T {
-        if let Some(cached) = read(&self.laravel_string_key_cache.read()) {
+        if let Some(cached) = read(&self.laravel.string_key_cache.read()) {
             return cached;
         }
         let _build_guard = build_lock.lock();
-        if let Some(cached) = read(&self.laravel_string_key_cache.read()) {
+        if let Some(cached) = read(&self.laravel.string_key_cache.read()) {
             return cached;
         }
         let value = build();
-        store(&mut self.laravel_string_key_cache.write(), value.clone());
+        store(&mut self.laravel.string_key_cache.write(), value.clone());
         value
     }
 
@@ -55,7 +55,7 @@ impl Backend {
         &self,
     ) -> std::sync::Arc<crate::virtual_members::laravel::RouteDiscovery> {
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.routes,
+            &self.laravel.string_key_build_locks.routes,
             |cache| cache.routes.clone(),
             |cache, routes| cache.routes = Some(routes),
             || std::sync::Arc::new(crate::virtual_members::laravel::enumerate_all_routes(self)),
@@ -70,7 +70,7 @@ impl Backend {
     /// Every config key `config/` declares, sorted.
     pub(crate) fn cached_config_keys(&self) -> std::sync::Arc<[String]> {
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.config_keys,
+            &self.laravel.string_key_build_locks.config_keys,
             |cache| cache.config_keys.clone(),
             |cache, keys| cache.config_keys = Some(keys),
             || self.enumerate_all_config_keys().into(),
@@ -80,7 +80,7 @@ impl Backend {
     /// Every Blade view name the project ships, sorted.
     pub(crate) fn cached_view_names(&self) -> std::sync::Arc<[String]> {
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.view_names,
+            &self.laravel.string_key_build_locks.view_names,
             |cache| cache.view_names.clone(),
             |cache, names| cache.view_names = Some(names),
             || self.blade_view_names().into(),
@@ -91,7 +91,7 @@ impl Backend {
     /// registrations and policy class methods, sorted.
     pub(crate) fn cached_gate_abilities(&self) -> std::sync::Arc<[String]> {
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.gate_abilities,
+            &self.laravel.string_key_build_locks.gate_abilities,
             |cache| cache.gate_abilities.clone(),
             |cache, names| cache.gate_abilities = Some(names),
             || crate::virtual_members::laravel::enumerate_gate_abilities(self).into(),

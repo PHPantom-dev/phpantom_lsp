@@ -1,0 +1,15 @@
+// test: a loop variable assigned a literal keeps the exact values
+// feature: hover
+// Only a value computed from its own last one keeps changing between
+// passes, so this one is not widened to a range.
+// expect: 0|5
+---
+<?php
+
+function test(): void {
+    $m = 0;
+    while (rand()) {
+        $m = 5;
+    }
+    echo $<>m;
+}

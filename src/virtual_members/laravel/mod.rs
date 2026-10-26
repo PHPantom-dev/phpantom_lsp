@@ -107,6 +107,7 @@ pub(crate) mod array_file;
 mod auth;
 mod builder;
 mod builder_injection;
+mod cache_state;
 mod cast_literals;
 mod casts;
 mod collections;
@@ -129,6 +130,7 @@ mod higher_order_proxy;
 mod inflector;
 mod macros;
 mod magic_uses;
+mod method_refinement;
 mod model_extraction;
 mod model_provider;
 mod model_type;
@@ -159,7 +161,10 @@ mod view_names;
 pub(crate) mod where_property;
 
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
-pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
+pub(crate) use auth::{
+    AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type,
+};
+pub(crate) use cache_state::LaravelCacheState;
 pub(crate) use collections::{
     mentions_eloquent_collection, replace_eloquent_collections_in_param_type,
     replace_eloquent_collections_in_type, try_swap_custom_collection,
@@ -320,6 +325,27 @@ pub(crate) fn view_helper_returns_view(func_name: &str, text_args: &str) -> bool
     }
     let first = text_args.trim();
     !first.is_empty() && !first.eq_ignore_ascii_case("null")
+}
+
+/// The fully-qualified name of the response class the `response()` helper
+/// builds when it is given content.
+pub const RESPONSE_FQN: &str = "Illuminate\\Http\\Response";
+
+/// Whether a call to the `response()` helper builds a response rather than
+/// returning the response factory.
+///
+/// The helper's declared return type is
+/// `($content is null ? ResponseFactory : Response)`, but its body branches
+/// on `func_num_args()`: any call with an argument returns
+/// `$factory->make($content ?? '', …)`, even when that argument is `null`.
+/// Following the docblock would type every `response($maybeNull)` as the
+/// union of both.
+pub(crate) fn response_helper_returns_response(func_name: &str, text_args: &str) -> bool {
+    if func_name.trim_start_matches('\\') != "response" {
+        return false;
+    }
+    let args = text_args.trim();
+    !args.is_empty() && args != "..."
 }
 
 /// Build a substitution map that replaces `static`, `$this`, and `self`

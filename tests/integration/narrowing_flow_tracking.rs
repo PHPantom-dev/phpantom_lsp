@@ -8,9 +8,10 @@
 //! enum case, and a loop condition that narrows its own operands. Losing
 //! any of them surfaces as a `?T` where the source proved `T`, so the
 //! null-argument and return-type diagnostics are what these assert on.
+use crate::common::message_text;
 
 use crate::common::create_test_backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Run the slow diagnostic pipeline (which activates the forward
 /// walker's scope cache, as a real analysis does) and keep only the
@@ -24,11 +25,11 @@ fn type_diagnostics(php: &str) -> Vec<String> {
     out.iter()
         .filter(|d| {
             d.code.as_ref().is_some_and(|c| {
-                matches!(c, NumberOrString::String(s)
+                matches!(c, Code::String(s)
                     if s == "type_mismatch_argument" || s == "type_mismatch_return")
             })
         })
-        .map(|d| d.message.clone())
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 
@@ -2488,11 +2489,11 @@ fn member_access_diagnostics(php: &str) -> Vec<String> {
     backend.collect_slow_diagnostics(uri, php, &mut out);
     out.iter()
         .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "scalar_member_access"),
-            )
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "scalar_member_access"))
         })
-        .map(|d| d.message.clone())
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 

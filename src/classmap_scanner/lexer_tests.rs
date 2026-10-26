@@ -477,3 +477,48 @@ function realFunc(): void {}
     assert!(result.classes.is_empty());
     assert!(result.constants.is_empty());
 }
+
+#[test]
+fn symbols_function_behind_a_function_exists_guard() {
+    let content = br"<?php
+if (! function_exists('public_path')) {
+    function public_path($path = ''): string
+    {
+        return app()->publicPath($path);
+    }
+} else {
+    function fallback() {}
+}
+";
+    let result = find_symbols(content);
+    assert_eq!(result.functions, vec!["public_path", "fallback"]);
+}
+
+#[test]
+fn symbols_function_in_a_braced_namespace_block() {
+    let content = br"<?php
+namespace App {
+    if (PHP_VERSION_ID < 80000) {
+        function polyfill() {}
+    }
+}
+";
+    let result = find_symbols(content);
+    assert_eq!(result.functions, vec!["App\\polyfill"]);
+}
+
+#[test]
+fn symbols_methods_and_nested_functions_are_not_functions() {
+    let content = br"<?php
+if (true) {
+    class Foo { public function method() { if (true) { function nested() {} } } }
+    $a = new class(1) { public function anon() {} };
+    $b = new class{ public function anon2() {} };
+    $c = function () { function inClosure() {} };
+}
+function outer() { function inner() {} }
+function after() {}
+";
+    let result = find_symbols(content);
+    assert_eq!(result.functions, vec!["outer", "after"]);
+}

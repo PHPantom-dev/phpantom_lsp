@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::atom::Atom;
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::ClassInfo;
@@ -62,7 +63,7 @@ pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Opt
             let class = load_operand_class(class_part, ctx)?;
             let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                 &class,
-                ctx.class_loader,
+                ctx.file.class_loader,
                 ctx.resolved_class_cache,
             );
             merged.get_constant(const_name)?.value.clone()?
@@ -89,7 +90,7 @@ pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Opt
 /// every autoload file: an operand is as often a template parameter as a
 /// constant, and a miss must not charge the whole autoload set.
 fn resolve_operand_constant_value(name: &str, ctx: &ResolutionCtx<'_>) -> Option<String> {
-    let backend = ctx.backend?;
+    let backend = ctx.file.backend?;
     // An absolute name names exactly one constant, with no namespace or
     // import in play.
     if let Some(absolute) = name.strip_prefix('\\') {
@@ -127,14 +128,14 @@ fn resolve_operand_constant_value(name: &str, ctx: &ResolutionCtx<'_>) -> Option
         _ => name,
     };
     let imported = match backend
-        .parse_symbol_imports(ctx.content)
+        .parse_symbol_imports(ctx.file.content)
         .constants
         .remove(alias)
     {
         Some(fqn) => fqn,
         None => {
             let (first, rest) = name.split_once('\\')?;
-            let use_map = backend.parse_use_statements(ctx.content);
+            let use_map = backend.parse_use_statements(ctx.file.content);
             let prefix = crate::names::lookup_import(&use_map, first)?;
             format!("{prefix}\\{rest}")
         }
@@ -233,14 +234,29 @@ fn evaluate_enum_value_of(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpType {
 /// The backing value of the enum case `operand` names (`Suit::Hearts`), or
 /// the union of every case's for a backed enum named by itself.
 fn enum_backing_values(operand: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
-    let name: &str = match operand.kind() {
-        TypeKind::Named(name) => name,
-        TypeKind::Raw(raw) => raw,
-        _ => return None,
-    };
-    let (class_part, case) = match name.rsplit_once("::") {
-        Some((class_part, case)) => (class_part, Some(case)),
-        None => (name, None),
+    // A template bound to a union of cases reads each one's value.
+    if let TypeKind::Union(members) = operand.kind()
+        && members.iter().all(|member| member.as_enum_case().is_some())
+    {
+        let values = members
+            .iter()
+            .map(|member| enum_backing_values(member, ctx))
+            .collect::<Option<Vec<_>>>()?;
+        return Some(PhpType::union(values));
+    }
+    let (class_part, case) = match operand.as_enum_case() {
+        Some((enum_name, case)) => (enum_name, Some(case)),
+        None => {
+            let name: &str = match operand.kind() {
+                TypeKind::Named(name) => name,
+                TypeKind::Raw(raw) => raw,
+                _ => return None,
+            };
+            match name.rsplit_once("::") {
+                Some((class_part, case)) => (class_part, Some(case)),
+                None => (name, None),
+            }
+        }
     };
     let class = load_operand_class(class_part, ctx)?;
     if class.kind != crate::types::ClassLikeKind::Enum {
@@ -276,7 +292,7 @@ fn load_operand_class(class_part: &str, ctx: &ResolutionCtx<'_>) -> Option<Arc<C
     let class_name = class_name
         .as_deref()
         .unwrap_or_else(|| class_part.strip_prefix('\\').unwrap_or(class_part));
-    crate::class_lookup::find_class_by_fqn(ctx.all_classes, class_name)
+    crate::class_lookup::find_class_by_fqn(ctx.file.all_classes, class_name)
         .cloned()
-        .or_else(|| (ctx.class_loader)(class_name))
+        .or_else(|| (ctx.file.class_loader)(Fqn::new(class_name)))
 }

@@ -57,7 +57,7 @@ pub use shared_vec::*;
 /// and `@return DateTimeImmutable` inside `namespace App` names an
 /// `App\DateTimeImmutable` that may not exist at all.  The parser has no
 /// class loader, so it records the type here, and loading the declaration
-/// decides (see `type_engine::types::docblock_narrowing`).
+/// decides (see `type_engine::type_ops::docblock_narrowing`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnverifiedDocType {
     /// The method or property the type belongs to, or the function itself.
@@ -68,6 +68,51 @@ pub struct UnverifiedDocType {
     /// native hint: the hint with its class names qualified, and with `null`
     /// for a parameter that defaults to it.
     pub native: PhpType,
+}
+
+/// A `@see` reference from a declaration's docblock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeeRef {
+    /// The tag's text as written: a symbol reference (`"Foo"`,
+    /// `"Foo::bar()"`, `"Foo::$prop"`, `"Foo::CONST"`) or a URL, optionally
+    /// followed by a description.
+    pub text: String,
+    /// The class the reference names (the whole symbol, or the part before
+    /// `::`), qualified against the declaring file's imports and namespace
+    /// so a consumer in another file can load it.  `None` for a URL, and
+    /// until the parser's name-resolution pass fills it in.
+    pub class: Option<Atom>,
+}
+
+impl SeeRef {
+    /// The symbol or URL the reference points at, without its description.
+    pub fn target(&self) -> &str {
+        self.text
+            .split_once(char::is_whitespace)
+            .map_or(self.text.as_str(), |(target, _)| target)
+    }
+
+    /// The class name as written in the target, or `None` for a URL or a
+    /// target that is not a class name.
+    pub fn written_class(&self) -> Option<&str> {
+        let target = self.target();
+        let name = target.split_once("::").map_or(target, |(class, _)| class);
+        let is_name = !name.is_empty()
+            && name.trim_start_matches('\\').split('\\').all(|segment| {
+                segment
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphabetic() || c == '_')
+                    && segment.chars().all(|c| c.is_alphanumeric() || c == '_')
+            });
+        is_name.then_some(name)
+    }
+}
+
+impl From<String> for SeeRef {
+    fn from(text: String) -> Self {
+        SeeRef { text, class: None }
+    }
 }
 
 /// Where in a declaration an [`UnverifiedDocType`] was settled.

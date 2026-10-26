@@ -9,9 +9,11 @@ use mago_syntax::cst::binary::{Binary, BinaryOperator};
 use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::cst::{Expression, Literal, Variable};
 
-use crate::php_type::{PhpType, TypeKind, keyword_lowercase};
+use crate::atom::atom;
+use crate::php_type::{PhpType, TypeKind, with_keyword_lowercase};
 use crate::type_engine::resolver::VarResolutionCtx;
-use crate::type_engine::types::const_fold::{self, BitwiseOp};
+use crate::type_engine::type_ops::const_fold::{self, BitwiseOp};
+use crate::type_engine::type_ops::int_interval::IntInterval;
 use crate::types::ResolvedType;
 
 use super::resolve_rhs_expression;
@@ -110,6 +112,9 @@ pub(super) fn resolve_binary_result_type<'b>(
     if let Some(op) = bitwise_op(&binary.operator) {
         let lhs_types = resolve_rhs_expression(binary.lhs, ctx);
         let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
+        if let Some(result) = overloaded_number_result(&lhs_types, &rhs_types, true) {
+            return Some(vec![ResolvedType::from_type_string(result)]);
+        }
         // `&`, `|` and `^` are the ones PHP overloads for strings; a shift
         // always produces an int.
         if matches!(op, BitwiseOp::And | BitwiseOp::Or | BitwiseOp::Xor) {
@@ -150,6 +155,93 @@ pub(super) fn resolve_binary_result_type<'b>(
     }
 
     None
+}
+
+/// A built-in class whose instances overload PHP's arithmetic operators.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverloadedNumber {
+    Gmp,
+    BcMathNumber,
+}
+
+impl OverloadedNumber {
+    fn of_type(ty: &PhpType) -> Option<Self> {
+        let name = ty.class_name()?;
+        let name = name.strip_prefix('\\').unwrap_or(name);
+        if name.eq_ignore_ascii_case("GMP") {
+            Some(Self::Gmp)
+        } else if name.eq_ignore_ascii_case("BcMath\\Number") {
+            Some(Self::BcMathNumber)
+        } else {
+            None
+        }
+    }
+
+    /// The class an operand is an instance of, when every branch of it
+    /// (bar `null`) is that one class.
+    pub(crate) fn of_operand(types: &[ResolvedType]) -> Option<Self> {
+        let mut found = None;
+        for rt in types {
+            Self::collect(&rt.type_string, &mut found)?;
+        }
+        found
+    }
+
+    fn collect(ty: &PhpType, found: &mut Option<Self>) -> Option<()> {
+        match ty.kind() {
+            TypeKind::Union(members) => {
+                for member in members {
+                    Self::collect(member, found)?;
+                }
+                Some(())
+            }
+            TypeKind::Nullable(inner) => Self::collect(inner, found),
+            _ if ty.is_null() => Some(()),
+            _ => {
+                let class = Self::of_type(ty)?;
+                if found.is_some_and(|seen| seen != class) {
+                    return None;
+                }
+                *found = Some(class);
+                Some(())
+            }
+        }
+    }
+
+    /// Whether the class also overloads the bitwise operators (`&`, `|`,
+    /// `^`, `<<`, `>>`, `~`). Only `GMP` does.
+    fn overloads_bitwise(self) -> bool {
+        self == Self::Gmp
+    }
+
+    pub(crate) fn to_type(self) -> PhpType {
+        PhpType::named(atom(match self {
+            Self::Gmp => "GMP",
+            Self::BcMathNumber => "BcMath\\Number",
+        }))
+    }
+}
+
+/// The result of an operator one of whose operands is a `GMP` or a
+/// `BcMath\Number`: an instance of that class. Both classes take the other
+/// operand as an instance of the class, an `int`, or a numeric string, and
+/// throw for anything else, so whenever the operation produces a value it
+/// is the class. `None` when neither operand is one, or the two are
+/// instances of different such classes (which throws).
+pub(crate) fn overloaded_number_result(
+    lhs_types: &[ResolvedType],
+    rhs_types: &[ResolvedType],
+    bitwise: bool,
+) -> Option<PhpType> {
+    let class = match (
+        OverloadedNumber::of_operand(lhs_types),
+        OverloadedNumber::of_operand(rhs_types),
+    ) {
+        (Some(lhs), Some(rhs)) if lhs != rhs => return None,
+        (Some(class), _) | (None, Some(class)) => class,
+        (None, None) => return None,
+    };
+    (!bitwise || class.overloads_bitwise()).then(|| class.to_type())
 }
 
 /// Classify a resolved operand as `int`, `float`, or unknown for arithmetic
@@ -204,19 +296,21 @@ fn classify_php_type(ty: &PhpType, saw_float: &mut bool, saw_int: &mut bool) -> 
     }
     match ty.kind() {
         TypeKind::Named(n) => {
-            let lower = keyword_lowercase(n);
-            if lower == "bool" || lower == "boolean" || lower == "true" || lower == "false" {
-                *saw_int = true;
-            } else if lower == "numeric" || n == "number" {
-                *saw_int = true;
-                *saw_float = true;
-            } else if lower == "null" {
+            with_keyword_lowercase(n, |lower| match lower {
+                "bool" | "boolean" | "true" | "false" => {
+                    *saw_int = true;
+                    Some(())
+                }
+                "numeric" | "number" => {
+                    *saw_int = true;
+                    *saw_float = true;
+                    Some(())
+                }
                 // null coerces to 0 (int) in arithmetic; ignore it so that
                 // `int|null` classifies as int-like.
-            } else {
-                return None; // mixed, string, object, etc.
-            }
-            Some(())
+                "null" => Some(()),
+                _ => None, // mixed, string, object, etc.
+            })
         }
         TypeKind::Union(members) => {
             for member in members {
@@ -277,12 +371,17 @@ impl ArithmeticOpKind {
 /// - `float op float` → `float`
 /// - `int / int` or `int ** int` → benevolent `int|float` (either can
 ///   produce a float depending on the operand values)
+/// - an operand that is a `GMP` or `BcMath\Number` → that class
 /// - Anything else → `int|float`
 pub(crate) fn infer_arithmetic_result_type(
     lhs_types: &[ResolvedType],
     rhs_types: &[ResolvedType],
     op_kind: ArithmeticOpKind,
 ) -> PhpType {
+    if let Some(result) = overloaded_number_result(lhs_types, rhs_types, false) {
+        return result;
+    }
+
     // Two operands that are each pinned to one literal value fold to the
     // exact value PHP would compute, the same way a mask built from two
     // literal ints already folds through `apply_bitwise` above. Division by
@@ -322,7 +421,7 @@ pub(crate) fn infer_arithmetic_result_type(
                 // operator invented, and it stays strict.
                 PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::float()]))
             } else {
-                PhpType::int()
+                int_arithmetic_result(lhs_types, rhs_types, op_kind).unwrap_or_else(PhpType::int)
             }
         }
         // At least one float, the other is known: result is float.
@@ -349,6 +448,64 @@ pub(crate) fn infer_arithmetic_result_type(
             }
         }
     }
+}
+
+/// How many pairs of alternatives two integer operands may make before
+/// `+`, `-` and `*` answer with the range covering every operand value
+/// instead of working each pair out. PHPStan's `CALCULATE_SCALARS_LIMIT`.
+const INT_COMBINATION_LIMIT: usize = 128;
+
+/// The result of `+`, `-` or `*` on two integer operands, worked out for
+/// each pair of their alternatives the way PHPStan's `integerRangeMath()`
+/// does: `(1|2) + 1` is `2|3` and `int<0, max> + 1` is `int<1, max>`.
+/// `None` for any other operator, or an operand that is not made of
+/// integers.
+fn int_arithmetic_result(
+    lhs_types: &[ResolvedType],
+    rhs_types: &[ResolvedType],
+    op_kind: ArithmeticOpKind,
+) -> Option<PhpType> {
+    let apply = match op_kind {
+        ArithmeticOpKind::Addition => IntInterval::add,
+        ArithmeticOpKind::Subtraction => IntInterval::sub,
+        ArithmeticOpKind::Multiplication => IntInterval::mul,
+        ArithmeticOpKind::Division | ArithmeticOpKind::Exponentiation => return None,
+    };
+    let mut lhs = operand_intervals(lhs_types)?;
+    let mut rhs = operand_intervals(rhs_types)?;
+    if lhs.len() * rhs.len() > INT_COMBINATION_LIMIT {
+        lhs = vec![IntInterval::hull_of(&lhs)];
+        rhs = vec![IntInterval::hull_of(&rhs)];
+    }
+
+    let mut results: Vec<IntInterval> = lhs
+        .iter()
+        .flat_map(|&a| rhs.iter().map(move |&b| apply(a, b)))
+        .collect();
+    if results.contains(&IntInterval::UNBOUNDED) {
+        return Some(PhpType::int());
+    }
+    results.sort_by_key(|interval| (interval.min.is_some(), interval.min, interval.max));
+    results.dedup();
+    Some(PhpType::union(
+        results.into_iter().map(IntInterval::into_type).collect(),
+    ))
+}
+
+/// The interval of each alternative of an arithmetic operand, or `None`
+/// when one of them is not an integer (nor a `null` or `bool`, which
+/// arithmetic reads as one).
+fn operand_intervals(types: &[ResolvedType]) -> Option<Vec<IntInterval>> {
+    let mut intervals = Vec::new();
+    for rt in types {
+        for member in rt.type_string.union_members() {
+            let interval = IntInterval::of_operand(member)?;
+            if !intervals.contains(&interval) {
+                intervals.push(interval);
+            }
+        }
+    }
+    (!intervals.is_empty()).then_some(intervals)
 }
 
 /// Infer the result type of `+` / `+=`, which PHP overloads for the array
@@ -395,12 +552,15 @@ pub(crate) fn infer_addition_result_type(
     infer_arithmetic_result_type(lhs_types, rhs_types, ArithmeticOpKind::Addition)
 }
 
-/// Infer the result type of `%` / `%=`: always an `int`, and the exact one
-/// when both operands are known integers.
+/// Infer the result type of `%` / `%=`: an `int`, and the exact one when
+/// both operands are known integers, unless an operand overloads it.
 pub(crate) fn infer_modulo_result_type(
     lhs_types: &[ResolvedType],
     rhs_types: &[ResolvedType],
 ) -> PhpType {
+    if let Some(result) = overloaded_number_result(lhs_types, rhs_types, false) {
+        return result;
+    }
     match (
         single_arithmetic_number(lhs_types),
         single_arithmetic_number(rhs_types),

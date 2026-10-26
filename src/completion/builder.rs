@@ -17,9 +17,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::resolve::CompletionItemData;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::hover::{MemberKindForOrigin, find_declaring_class, shorten_php_type};
 use crate::types::Visibility;
 use crate::types::*;
@@ -45,7 +46,7 @@ fn display_class_name(name: &str) -> &str {
 /// parameters are omitted — they can be filled in via signature help.
 ///
 /// The returned string uses LSP snippet syntax and **must** be paired
-/// with `InsertTextFormat::SNIPPET` on the `CompletionItem`.
+/// with `InsertTextFormat::Snippet` on the `CompletionItem`.
 ///
 /// # Examples
 ///
@@ -229,7 +230,7 @@ fn is_magic_method(name: &str) -> bool {
 /// etc. to the very top of the method list. This tier sorts them after the
 /// regular methods instead, keeping the common members at the top.
 fn magic_sort_tier(item: &CompletionItem) -> u8 {
-    let is_magic = item.kind == Some(CompletionItemKind::METHOD)
+    let is_magic = item.kind == Some(CompletionItemKind::Method)
         && item.filter_text.as_deref().is_some_and(is_magic_method);
     if is_magic { 1 } else { 0 }
 }
@@ -407,10 +408,10 @@ pub(crate) fn build_completion_items(
                 detail: None,
                 description: class_description,
             }),
-            kind: Some(CompletionItemKind::METHOD),
+            kind: Some(CompletionItemKind::Method),
             detail: return_type,
             insert_text: Some(build_callable_snippet(&method.name, &method.parameters)),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            insert_text_format: Some(InsertTextFormat::Snippet),
             filter_text: Some(method.name.to_string()),
             tags: deprecation_tag(method.deprecation_message().is_some()),
             data,
@@ -464,7 +465,7 @@ pub(crate) fn build_completion_items(
                 detail: None,
                 description: class_description,
             }),
-            kind: Some(CompletionItemKind::PROPERTY),
+            kind: Some(CompletionItemKind::Property),
             detail,
             insert_text: Some(display_name.clone()),
             filter_text: Some(display_name),
@@ -507,7 +508,7 @@ pub(crate) fn build_completion_items(
                     detail: None,
                     description: class_description,
                 }),
-                kind: Some(CompletionItemKind::CONSTANT),
+                kind: Some(CompletionItemKind::Constant),
                 detail,
                 insert_text: Some(constant.name.to_string()),
                 filter_text: Some(constant.name.to_string()),
@@ -523,7 +524,7 @@ pub(crate) fn build_completion_items(
     if access_kind == AccessKind::DoubleColon || access_kind == AccessKind::ParentDoubleColon {
         items.push(CompletionItem {
             label: "class".to_string(),
-            kind: Some(CompletionItemKind::KEYWORD),
+            kind: Some(CompletionItemKind::Keyword),
             detail: Some("class-string".to_string()),
             insert_text: Some("class".to_string()),
             filter_text: Some("class".to_string()),
@@ -565,9 +566,9 @@ pub(crate) fn build_completion_items(
 /// 2 — methods
 fn kind_sort_tier(kind: Option<CompletionItemKind>) -> u8 {
     match kind {
-        Some(CompletionItemKind::CONSTANT) | Some(CompletionItemKind::KEYWORD) => 0,
-        Some(CompletionItemKind::PROPERTY) => 1,
-        Some(CompletionItemKind::METHOD) => 2,
+        Some(CompletionItemKind::Constant) | Some(CompletionItemKind::Keyword) => 0,
+        Some(CompletionItemKind::Property) => 1,
+        Some(CompletionItemKind::Method) => 2,
         _ => 3,
     }
 }
@@ -575,7 +576,7 @@ fn kind_sort_tier(kind: Option<CompletionItemKind>) -> u8 {
 /// Build a `tags` vec with the `DEPRECATED` tag when the member is deprecated.
 pub(crate) fn deprecation_tag(is_deprecated: bool) -> Option<Vec<CompletionItemTag>> {
     if is_deprecated {
-        Some(vec![CompletionItemTag::DEPRECATED])
+        Some(vec![CompletionItemTag::Deprecated])
     } else {
         None
     }
@@ -595,7 +596,7 @@ pub(crate) fn deprecation_tag(is_deprecated: bool) -> Option<Vec<CompletionItemT
 pub(crate) fn is_ancestor_of(
     current_class: Option<&ClassInfo>,
     target_class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> bool {
     let Some(cc) = current_class else {
         return false;
@@ -620,7 +621,7 @@ pub(crate) fn is_ancestor_of(
         {
             return true;
         }
-        ancestor_name = class_loader(name).and_then(|ci| ci.parent_class);
+        ancestor_name = class_loader(Fqn::new(name)).and_then(|ci| ci.parent_class);
     }
     false
 }
@@ -641,7 +642,7 @@ pub(crate) fn build_union_completion_items(
     candidates: &[Arc<ClassInfo>],
     effective_access: AccessKind,
     current_class: Option<&ClassInfo>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     cache: &crate::virtual_members::ResolvedClassCache,
     uri: &str,
 ) -> Vec<CompletionItem> {
@@ -730,7 +731,7 @@ pub(crate) fn build_union_completion_items(
 fn apply_declaring_class_label(
     item: &mut CompletionItem,
     owner: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     let Some(data_value) = item.data.as_ref() else {
         return;
@@ -1048,7 +1049,7 @@ mod tests {
             name: atom("Foo"),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         assert!(is_ancestor_of(Some(&cls), &cls, &loader));
     }
 
@@ -1058,7 +1059,7 @@ mod tests {
             name: atom("Foo"),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         assert!(!is_ancestor_of(None, &target, &loader));
     }
 
@@ -1073,7 +1074,7 @@ mod tests {
             parent_class: Some(atom("Parent")),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         assert!(is_ancestor_of(Some(&child), &parent, &loader));
     }
 
@@ -1088,7 +1089,8 @@ mod tests {
             parent_class: Some(atom("Parent")),
             ..ClassInfo::default()
         };
-        let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+            let name = name.as_str();
             if name == "Parent" {
                 Some(Arc::new(ClassInfo {
                     name: atom("Parent"),
@@ -1113,7 +1115,7 @@ mod tests {
             name: atom("Baz"),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         assert!(!is_ancestor_of(Some(&current), &target, &loader));
     }
 
@@ -1129,7 +1131,7 @@ mod tests {
             parent_class: Some(atom("App\\BaseService")),
             ..ClassInfo::default()
         };
-        let loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let loader = |_: Fqn<'_>| -> Option<Arc<ClassInfo>> { None };
         assert!(is_ancestor_of(Some(&child), &parent_target, &loader));
     }
 
@@ -1137,10 +1139,10 @@ mod tests {
 
     #[test]
     fn kind_sort_tier_constants_before_properties_before_methods() {
-        let constant = kind_sort_tier(Some(CompletionItemKind::CONSTANT));
-        let keyword = kind_sort_tier(Some(CompletionItemKind::KEYWORD));
-        let property = kind_sort_tier(Some(CompletionItemKind::PROPERTY));
-        let method = kind_sort_tier(Some(CompletionItemKind::METHOD));
+        let constant = kind_sort_tier(Some(CompletionItemKind::Constant));
+        let keyword = kind_sort_tier(Some(CompletionItemKind::Keyword));
+        let property = kind_sort_tier(Some(CompletionItemKind::Property));
+        let method = kind_sort_tier(Some(CompletionItemKind::Method));
 
         assert_eq!(
             constant, keyword,
@@ -1155,7 +1157,7 @@ mod tests {
 
     #[test]
     fn kind_sort_tier_none_sorts_last() {
-        let method = kind_sort_tier(Some(CompletionItemKind::METHOD));
+        let method = kind_sort_tier(Some(CompletionItemKind::Method));
         let none = kind_sort_tier(None);
         assert!(method < none, "None kind should sort after methods");
     }
@@ -1183,9 +1185,9 @@ mod tests {
     #[test]
     fn merge_sorts_by_kind_then_alphabetically() {
         let items = vec![
-            item_with_kind("alpha", "A", CompletionItemKind::METHOD),
-            item_with_kind("NAME", "A", CompletionItemKind::CONSTANT),
-            item_with_kind("color", "A", CompletionItemKind::PROPERTY),
+            item_with_kind("alpha", "A", CompletionItemKind::Method),
+            item_with_kind("NAME", "A", CompletionItemKind::Constant),
+            item_with_kind("color", "A", CompletionItemKind::Property),
         ];
         let mut counts = std::collections::HashMap::new();
         counts.insert("alpha".to_string(), 2);
@@ -1203,10 +1205,10 @@ mod tests {
     #[test]
     fn merge_branch_only_sorted_by_kind_then_alphabetically() {
         let items = vec![
-            item_with_kind("zebra", "A", CompletionItemKind::METHOD),
-            item_with_kind("STATUS", "A", CompletionItemKind::CONSTANT),
-            item_with_kind("active", "A", CompletionItemKind::PROPERTY),
-            item_with_kind("beta", "A", CompletionItemKind::METHOD),
+            item_with_kind("zebra", "A", CompletionItemKind::Method),
+            item_with_kind("STATUS", "A", CompletionItemKind::Constant),
+            item_with_kind("active", "A", CompletionItemKind::Property),
+            item_with_kind("beta", "A", CompletionItemKind::Method),
         ];
         let mut counts = std::collections::HashMap::new();
         counts.insert("zebra".to_string(), 1);
@@ -1227,8 +1229,8 @@ mod tests {
     fn intersection_kind_sorts_before_branch_only_same_kind() {
         // An intersection method should sort before a branch-only constant.
         let items = vec![
-            item_with_kind("shared", "A", CompletionItemKind::METHOD),
-            item_with_kind("ONLY_A", "A", CompletionItemKind::CONSTANT),
+            item_with_kind("shared", "A", CompletionItemKind::Method),
+            item_with_kind("ONLY_A", "A", CompletionItemKind::Constant),
         ];
         let mut counts = std::collections::HashMap::new();
         counts.insert("shared".to_string(), 2);
@@ -1249,7 +1251,7 @@ mod tests {
     fn deprecation_tag_returns_tag_when_deprecated() {
         let tags = deprecation_tag(true);
         assert!(tags.is_some());
-        assert!(tags.unwrap().contains(&CompletionItemTag::DEPRECATED));
+        assert!(tags.unwrap().contains(&CompletionItemTag::Deprecated));
     }
 
     #[test]

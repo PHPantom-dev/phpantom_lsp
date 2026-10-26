@@ -1,5 +1,5 @@
 use crate::common::create_test_backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 fn get_folding_ranges(php: &str) -> Vec<FoldingRange> {
     let backend = create_test_backend();

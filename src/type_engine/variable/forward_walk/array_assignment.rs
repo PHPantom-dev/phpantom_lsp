@@ -7,7 +7,7 @@ use mago_span::HasSpan;
 use crate::atom::bytes_to_str;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
-use crate::type_engine::types::narrowing;
+use crate::type_engine::type_ops::condition_facts;
 use crate::types::ResolvedType;
 
 /// Process array destructuring assignments.
@@ -53,18 +53,18 @@ pub(crate) fn destructuring_rhs_type(
         Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name)),
         _ => None,
     };
-    let raw_type = preceding_var_type_of_value(var_ctx.content, stmt_offset, rhs_var)
+    let raw_type = preceding_var_type_of_value(var_ctx.file.content, stmt_offset, rhs_var)
         .map(|vt| var_ctx.written_names().resolve_type(&vt))
         .or_else(|| {
-            super::super::foreach_resolution::resolve_expression_type(assignment.rhs, var_ctx)
+            super::super::iterable_elements::resolve_expression_type(assignment.rhs, var_ctx)
         })?;
 
     Some(
-        crate::type_engine::types::aliases::resolve_type_alias_typed(
+        crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &raw_type,
             &var_ctx.current_class.fqn(),
-            var_ctx.all_classes,
-            var_ctx.class_loader,
+            var_ctx.file.all_classes,
+            var_ctx.file.class_loader,
         )
         .unwrap_or(raw_type),
     )
@@ -515,7 +515,7 @@ fn apply_array_write<'b>(
     // starting point.  One with no type to start from (undeclared, or
     // reached through `__get`) is left to its declaration rather than
     // pinned to what one write put into it.
-    if narrowing::is_member_path_key(base_name) {
+    if condition_facts::is_member_path_key(base_name) {
         seed_synthetic_key_if_needed(base_name, scope, ctx);
         if scope.get(base_name).is_empty() {
             return;
@@ -751,7 +751,7 @@ fn overwrite_written_offset(
 }
 
 /// Render the synthetic scope key a keyed write targets, matching the key
-/// text [`narrowing::expr_to_subject_key`] builds for a read of the same
+/// text [`condition_facts::expr_to_subject_key`] builds for a read of the same
 /// subject (`$tmp[$key]`, `$a["x"][$i]`), so a write can find and
 /// overwrite whatever narrowing recorded under that key.
 pub(super) fn array_write_synthetic_key(
@@ -760,10 +760,10 @@ pub(super) fn array_write_synthetic_key(
 ) -> Option<String> {
     let mut key = base_name.to_string();
     for index in key_chain {
-        if let Some(literal) = narrowing::array_index_literal_key(index) {
+        if let Some(literal) = condition_facts::array_index_literal_key(index) {
             key.push_str(&format!("[\"{literal}\"]"));
         } else {
-            let index_key = narrowing::array_index_key(index)?;
+            let index_key = condition_facts::array_index_key(index)?;
             // `expr_to_subject_key`'s `array_access_subject_key` only
             // renders a non-literal index that reads a variable
             // (`contains('$')`); an index that writes, concatenates, or

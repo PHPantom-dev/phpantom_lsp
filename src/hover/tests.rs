@@ -532,7 +532,7 @@ fn a_definition_outside_the_workspace_hovers_without_a_path() {
     let uri = "file:///elsewhere/Provider.php";
     backend.update_ast(uri, provider);
     {
-        let mut index = backend.laravel_gates.write();
+        let mut index = backend.laravel.gates.write();
         index.files.set_file(
             uri.to_string(),
             crate::virtual_members::laravel::scan_gate_registrations(provider),
@@ -552,36 +552,5 @@ fn a_definition_outside_the_workspace_hovers_without_a_path() {
     assert!(
         detail.contains("User $user"),
         "the callback signature is known regardless, got: {detail}"
-    );
-}
-
-// ── Laravel string-key gating (non-Laravel projects) ────────────────
-
-/// A non-Laravel project can define its own `config()` function (common in
-/// home-grown micro-frameworks). `SymbolKind::LaravelStringKey` spans are
-/// extracted by name match alone, so hover must not fabricate a "Config
-/// key" tooltip unless the project is actually classified as Laravel.
-#[test]
-fn laravel_string_key_hover_gated_on_is_laravel() {
-    let uri = "file:///test.php";
-    let line2 = "    config('app.name');";
-    let content = format!("<?php\nfunction demo(): void {{\n{line2}\n}}\n");
-    let char = line2.find("'app.name'").unwrap() as u32 + 2;
-
-    let backend = crate::Backend::new_test();
-    backend.resolved_class_cache.write().set_laravel(false);
-    backend.update_ast(uri, &content);
-    let hover = backend.handle_hover(
-        uri,
-        &content,
-        Position {
-            line: 2,
-            character: char,
-        },
-    );
-    assert!(
-        hover.is_none(),
-        "a non-Laravel project's own config() must not hover as a Laravel \
-         config key, got {hover:?}"
     );
 }

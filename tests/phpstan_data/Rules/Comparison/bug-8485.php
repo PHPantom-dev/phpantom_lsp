@@ -59,14 +59,14 @@ function dooFoo(FooEnum $s):void {
 	if ($s === FooEnum::A) {
 	} elseif ($s === FooEnum::B) {
 	} else {
-		assertType('Bug8485\FooEnum::C', $s); // SKIP: there is no type for a single enum case
+		assertType('Bug8485\FooEnum::C', $s);
 	}
 
 	if ($s === FooEnum::A) {
 	} elseif ($s === FooEnum::B) {
 	} elseif ($s === FooEnum::C) {
 	} else {
-		assertType('*NEVER*', $s); // SKIP: there is no type for a single enum case
+		assertType('*NEVER*', $s);
 	}
 
 	if ($s === FooEnum::A) {

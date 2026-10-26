@@ -1,6 +1,7 @@
+use crate::common::message_text;
 use crate::common::{collect_diagnostics_with, create_psr4_workspace, create_test_backend};
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -16,13 +17,16 @@ fn retain_visibility(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
     diagnostics.retain(|d| {
         d.code
             .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "invalid_member_access"))
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "invalid_member_access"))
     });
     diagnostics
 }
 
 fn messages(php: &str) -> Vec<String> {
-    collect(php).into_iter().map(|d| d.message).collect()
+    collect(php)
+        .into_iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
 }
 
 /// Every diagnostic the file produces, whatever its code — used to prove
@@ -36,7 +40,7 @@ fn all_codes(php: &str) -> Vec<String> {
     backend.collect_slow_diagnostics(uri, php, &mut out);
     out.into_iter()
         .filter_map(|d| match d.code {
-            Some(NumberOrString::String(s)) => Some(s),
+            Some(Code::String(s)) => Some(s),
             _ => None,
         })
         .collect()
@@ -1046,7 +1050,7 @@ class Teller {
     backend.collect_slow_diagnostics(uri, php, &mut out);
     let msgs: Vec<String> = retain_visibility(out)
         .into_iter()
-        .map(|d| d.message)
+        .map(|d| message_text(&d.message).to_string())
         .collect();
 
     assert_eq!(msgs.len(), 1, "expected one diagnostic, got {msgs:?}");
@@ -1073,12 +1077,12 @@ echo $account->pin;
     assert_eq!(diags.len(), 1, "expected one diagnostic");
     assert_eq!(
         diags[0].severity,
-        Some(DiagnosticSeverity::ERROR),
+        Some(DiagnosticSeverity::Error),
         "an inaccessible member is a fatal error at runtime"
     );
     assert_eq!(diags[0].source.as_deref(), Some("phpantom"));
     assert!(matches!(
         diags[0].code,
-        Some(NumberOrString::String(ref s)) if s == "invalid_member_access"
+        Some(Code::String(ref s)) if s == "invalid_member_access"
     ));
 }

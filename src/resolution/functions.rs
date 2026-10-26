@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, FunctionInfo};
 use crate::util::short_name;
@@ -32,7 +33,7 @@ impl Backend {
 
     /// Keep each docblock type `function` settled in place of a native hint
     /// naming another class only where it narrows the hint (see
-    /// [`docblock_narrowing`](crate::type_engine::types::docblock_narrowing)).
+    /// [`docblock_narrowing`](crate::type_engine::type_ops::docblock_narrowing)).
     ///
     /// Every lookup clones the function out of the index, so the check runs
     /// on that copy rather than being cached.
@@ -40,10 +41,8 @@ impl Backend {
         if function.unverified_doc_types.is_empty() {
             return;
         }
-        let loader = |name: &str| {
-            self.find_indexed_class(&PhpType::parse(name.strip_prefix('\\').unwrap_or(name)))
-        };
-        crate::type_engine::types::docblock_narrowing::verify_function(function, &loader);
+        let loader = |name: Fqn<'_>| self.find_indexed_class(&PhpType::parse(&name));
+        crate::type_engine::type_ops::docblock_narrowing::verify_function(function, &loader);
     }
 
     /// [`find_or_load_function`](Self::find_or_load_function) with the
@@ -55,6 +54,11 @@ impl Backend {
         crate::resolution_deps::record_all(candidates);
 
         let index_generation = self.symbols.function_index_generation();
+
+        // ── Stub paths: a declaration there wins over every other ──
+        if let Some(function) = self.load_external_stub_function(candidates) {
+            return Some(function);
+        }
 
         // ── Phase 1: Check global_functions (user code + already-cached stubs) ──
         {
@@ -97,7 +101,7 @@ impl Backend {
                     let path = path.clone();
                     drop(idx); // release read lock before parsing
 
-                    if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Some(content) = crate::util::read_php_source(&path) {
                         let uri = crate::util::path_to_uri(&path);
                         self.update_ast(&uri, &content);
 
@@ -132,7 +136,7 @@ impl Backend {
                     continue;
                 }
 
-                if let Ok(content) = std::fs::read_to_string(path) {
+                if let Some(content) = crate::util::read_php_source(path) {
                     self.update_ast(&uri, &content);
 
                     let fmap = self.symbols.global_functions.read();
@@ -148,81 +152,15 @@ impl Backend {
         // ── Phase 2: Try embedded PHP stubs ──
         // The stub_function_index maps function names (including namespaced
         // ones like "Brotli\\compress") to the raw PHP source of the file
-        // that defines them.  We parse the entire file, cache all discovered
-        // functions in global_functions, and return the one we need.
+        // that defines them.
         for &name in candidates {
             // Copy the `&'static str` out: the guard must not be held across
-            // the `global_functions` write below.
+            // the `global_functions` write the load makes.
             let stub_content = self.stub_function_index.read().get(name).copied();
-            if let Some(stub_content) = stub_content {
-                // The functions, the namespace and the classes below are
-                // all read from this one parse.
-                let _parse_guard = crate::parser::with_parse_cache(stub_content);
-                let ver = Some(self.php_version());
-                let mut functions = self.parse_functions_versioned(stub_content, ver);
-
-                if functions.is_empty() {
-                    continue;
-                }
-
-                // Apply stub patches for phpstorm-stubs deficiencies
-                // (e.g. array_reduce returning `mixed` instead of a
-                // template-based type).  See `stub_patches`.
-                for func in &mut functions {
-                    crate::stub_patches::apply_function_stub_patches(func);
-                }
-
-                let stub_uri = format!("phpantom-stub-fn://{}", name);
-                let mut result: Option<FunctionInfo> = None;
-
-                {
-                    let mut fmap = self.symbols.global_functions.write();
-                    for func in &functions {
-                        let fqn = if let Some(ref ns) = func.namespace {
-                            format!("{}\\{}", ns, func.name)
-                        } else {
-                            func.name.to_string()
-                        };
-
-                        if result.is_none()
-                            && (fqn.eq_ignore_ascii_case(name)
-                                || func.name.eq_ignore_ascii_case(name))
-                        {
-                            result = Some(func.clone());
-                        }
-
-                        // Cache the FQN so future lookups hit Phase 1.
-                        // No short-name fallback: `resolve_function_name`
-                        // already builds namespace-qualified candidates.
-                        fmap.or_insert_with(fqn, || (stub_uri.clone(), func.clone()));
-                    }
-                }
-
-                // Also cache any classes defined in the same stub file so
-                // that class lookups for types referenced by the function
-                // (e.g. return types) can find them later.
-                let mut classes = Self::parse_php_versioned(stub_content, ver);
-                if !classes.is_empty() {
-                    let empty_use_map = HashMap::new();
-                    let stub_namespace = self.parse_namespace(stub_content);
-                    Self::resolve_parent_class_names(
-                        &mut classes,
-                        &empty_use_map,
-                        &empty_use_map,
-                        &stub_namespace,
-                    );
-                    let class_uri = format!("phpantom-stub-fn://{}", name);
-                    let arc_classes: Vec<Arc<ClassInfo>> =
-                        classes.into_iter().map(Arc::new).collect();
-                    self.symbols
-                        .uri_classes_index
-                        .write()
-                        .insert(class_uri, arc_classes);
-                }
-
-                if result.is_some() {
-                    return result;
-                }
+            if let Some(stub_content) = stub_content
+                && let Some(function) = self.load_stub_function(name, stub_content)
+            {
+                return Some(function);
             }
         }
 
@@ -249,6 +187,76 @@ impl Backend {
             }
         }
         None
+    }
+
+    /// Parse the embedded stub file that declares the function `name`,
+    /// cache everything it declares, and return that function.
+    ///
+    /// Every function in the file goes into `global_functions` under the
+    /// file's stub URI, corrected by [`crate::stub_patches`], so a later
+    /// lookup of any of them is answered by Phase 1.  The classes the file
+    /// declares are cached in `uri_classes_index` under the same URI, so a
+    /// type one of its functions names (a return type, say) resolves too.
+    ///
+    /// `None` when the file declares no function spelled `name`.
+    fn load_stub_function(&self, name: &str, stub_content: &str) -> Option<FunctionInfo> {
+        // The functions, the namespace and the classes below are all read
+        // from this one parse.
+        let _parse_guard = crate::parser::with_parse_cache(stub_content);
+        let ver = Some(self.php_version());
+        let mut functions = self.parse_functions_versioned(stub_content, ver);
+        if functions.is_empty() {
+            return None;
+        }
+
+        // Apply stub patches for phpstorm-stubs deficiencies (e.g.
+        // array_reduce returning `mixed` instead of a template-based type).
+        for func in &mut functions {
+            crate::stub_patches::apply_function_stub_patches(func);
+        }
+
+        let stub_uri = format!("{}{}", crate::stubs::STUB_FUNCTION_URI_PREFIX, name);
+        let mut result: Option<FunctionInfo> = None;
+        {
+            let mut fmap = self.symbols.global_functions.write();
+            for func in &functions {
+                let fqn = if let Some(ref ns) = func.namespace {
+                    format!("{}\\{}", ns, func.name)
+                } else {
+                    func.name.to_string()
+                };
+
+                if result.is_none()
+                    && (fqn.eq_ignore_ascii_case(name) || func.name.eq_ignore_ascii_case(name))
+                {
+                    result = Some(func.clone());
+                }
+
+                // Cache the FQN so future lookups hit Phase 1.  No short-name
+                // fallback: `resolve_function_name` already builds
+                // namespace-qualified candidates.
+                fmap.or_insert_with(fqn, || (stub_uri.clone(), func.clone()));
+            }
+        }
+
+        let mut classes = Self::parse_php_versioned(stub_content, ver);
+        if !classes.is_empty() {
+            let empty_use_map = HashMap::new();
+            let stub_namespace = self.parse_namespace(stub_content);
+            Self::resolve_parent_class_names(
+                &mut classes,
+                &empty_use_map,
+                &empty_use_map,
+                &stub_namespace,
+            );
+            let arc_classes: Vec<Arc<ClassInfo>> = crate::types::into_arcs(classes);
+            self.symbols
+                .uri_classes_index
+                .write()
+                .insert(stub_uri, arc_classes);
+        }
+
+        result
     }
 
     // ─── Shared Name Resolution ─────────────────────────────────────────────

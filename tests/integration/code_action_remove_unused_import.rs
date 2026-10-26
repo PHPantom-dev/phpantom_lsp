@@ -3,13 +3,14 @@
 //! These exercise the full pipeline: parse a file, request code actions on
 //! an import line, and verify which removal actions are offered and what
 //! the bulk action's edit does to the file once resolved.
+use crate::common::message_text;
 
 use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_at,
     get_code_actions_in_range, resolve_action,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const URI: &str = "file:///test.php";
 const SINGLE: &str = "Remove unused import";
@@ -21,7 +22,7 @@ fn actions_at(
     content: &str,
     line: u32,
     character: u32,
-) -> Vec<CodeActionOrCommand> {
+) -> Vec<CodeActionResponse> {
     backend.update_ast(URI, content);
     get_code_actions_at(backend, URI, content, line, character)
 }
@@ -225,6 +226,81 @@ fn an_import_used_only_in_another_namespace_block_is_unused() {
     assert_eq!(lines, [2], "only block A's import is unused: {diags:?}");
 }
 
+/// A call whose `)` has not been typed yet still uses the imports it names,
+/// and so does the rest of the class it is in.
+#[test]
+fn an_import_used_by_a_call_missing_its_closing_paren_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use Lib\Gadget;
+use Lib\Unused;
+use Lib\Widget;
+
+class Shop {
+    public function make() {
+        $w = new Widget(
+    }
+
+    public function gadget(): Gadget {}
+}
+"#;
+    assert_eq!(unused_imports(content), ["Unused import 'Lib\\Unused'"]);
+}
+
+/// A statement the end of the file cuts off, still missing its `)` and
+/// `;`, uses the imports it names.
+#[test]
+fn an_import_used_by_a_call_at_the_end_of_the_file_missing_its_closing_paren_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use App\Http\Controllers\HomeController;
+use App\Http\Controllers\Unused;
+
+Route::get('/', [HomeController::class, 'index']
+"#;
+    assert_eq!(
+        unused_imports(content),
+        ["Unused import 'App\\Http\\Controllers\\Unused'"]
+    );
+}
+
+/// A call cut off right after its `(`, with or without a newline after
+/// it, uses the imports it names.
+#[test]
+fn an_import_used_by_an_empty_call_at_the_end_of_the_file_is_used() {
+    let head =
+        "<?php\nnamespace App;\n\nuse App\\Services\\Mailer;\nuse App\\Services\\Unused;\n\n";
+    for last in ["$mailer = new Mailer(\n", "$mailer = new Mailer("] {
+        assert_eq!(
+            unused_imports(&format!("{head}{last}")),
+            ["Unused import 'App\\Services\\Unused'"],
+            "{last:?}"
+        );
+    }
+}
+
+/// A `::` access cut off before its member, on its own or inside a call,
+/// uses the import it names.
+#[test]
+fn an_import_used_by_a_static_access_at_the_end_of_the_file_is_used() {
+    let head =
+        "<?php\nnamespace App;\n\nuse App\\Services\\Mailer;\nuse App\\Services\\Unused;\n\n";
+    for last in [
+        "$mailer = Mailer::\n",
+        "$mailer = Mailer::",
+        "foo(Mailer::\n",
+        "foo(Mailer::",
+    ] {
+        assert_eq!(
+            unused_imports(&format!("{head}{last}")),
+            ["Unused import 'App\\Services\\Unused'"],
+            "{last:?}"
+        );
+    }
+}
+
 /// The `Unused import '…'` messages for `content`.
 fn unused_imports(content: &str) -> Vec<String> {
     let backend = create_test_backend();
@@ -234,7 +310,7 @@ fn unused_imports(content: &str) -> Vec<String> {
         Backend::collect_unused_import_diagnostics,
     )
     .into_iter()
-    .map(|d| d.message)
+    .map(|d| message_text(&d.message).to_string())
     .collect();
     messages.sort();
     messages

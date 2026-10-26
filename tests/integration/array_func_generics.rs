@@ -210,16 +210,16 @@ function probe(array $maybe, array $users, array $plain, callable $cb): void {
     $kept = array_filter($maybe);
     $present = array_filter($users);
     $chosen = array_filter($maybe, $cb);
-    $unchanged = array_filter($plain);
+    $truthy = array_filter($plain);
 }
 "#;
     assert_assigned_types(
         content,
         &[
-            ("$kept", "array<string, string>"),
+            ("$kept", "array<string, non-falsy-string>"),
             ("$present", "array<int, User>"),
             ("$chosen", "array<string, string|null>"),
-            ("$unchanged", "array<int, string>"),
+            ("$truthy", "array<int, non-falsy-string>"),
         ],
     );
 }
@@ -279,7 +279,7 @@ function probe(?int $w, ?bool $a, ?string $s, ?DateTime $d): void {
         content,
         &[(
             "$filtered",
-            "array{w?: int, a?: true, s?: string, d?: DateTime}",
+            "array{w?: int, a?: true, s?: non-falsy-string, d?: DateTime}",
         )],
     );
 }

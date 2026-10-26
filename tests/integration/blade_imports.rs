@@ -8,9 +8,13 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{APP_PSR4_COMPOSER, create_psr4_workspace, open_document, workspace_uri};
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use crate::common::message_text;
+    use crate::common::{
+        APP_PSR4_COMPOSER, create_psr4_workspace, hover_response, open_document, position_of,
+        workspace_uri,
+    };
+
+    use tower_lsp_server::gen_lsp_types::*;
 
     const HELPER: &str = "<?php\nnamespace App\\Helpers;\n\
 class CurrencyHelper {\n\
@@ -38,7 +42,7 @@ class CurrencyHelper {\n\
         backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
         diags
             .into_iter()
-            .map(|d| d.message)
+            .map(|d| message_text(&d.message).to_string())
             .filter(|m| !m.contains("Function 'e' not found"))
             .collect()
     }
@@ -115,22 +119,10 @@ class CurrencyHelper {\n\
         let uri = workspace_uri(&backend, "resources/views/page.blade.php");
         open_document(&backend, &uri, "blade", view).await;
 
-        let hover = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri },
-                    // `formatPrice` on the third Blade line.
-                    position: Position {
-                        line: 2,
-                        character: 25,
-                    },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
+        // `formatPrice` on the third Blade line.
+        let hover = hover_response(&backend, &uri, 2, 25).await;
         let text = match hover.map(|h| h.contents) {
-            Some(HoverContents::Markup(m)) => m.value,
+            Some(Contents::MarkupContent(m)) => m.value,
             _ => String::new(),
         };
         assert!(
@@ -190,12 +182,10 @@ class CurrencyHelper {\n\
     /// The template's range of the first occurrence of `text` in `view`,
     /// which sits on a single line.
     fn range_of(view: &str, text: &str) -> Range {
-        let at = view.find(text).expect("the text is in the view");
-        let line = view[..at].matches('\n').count() as u32;
-        let character = (at - view[..at].rfind('\n').map_or(0, |newline| newline + 1)) as u32;
+        let start = position_of(view, text);
         Range::new(
-            Position::new(line, character),
-            Position::new(line, character + text.len() as u32),
+            start,
+            Position::new(start.line, start.character + text.len() as u32),
         )
     }
 
@@ -208,7 +198,7 @@ class CurrencyHelper {\n\
         let diags = unused_imports(view).await;
         assert_eq!(diags.len(), 1, "{:?}", diags);
         assert_eq!(
-            diags[0].message,
+            message_text(&diags[0].message),
             "Unused import 'App\\Helpers\\CurrencyHelper'"
         );
         assert_eq!(
@@ -225,7 +215,10 @@ class CurrencyHelper {\n\
                     {{ CurrencyHelper::formatPrice(1) }}\n";
         let diags = unused_imports(view).await;
         assert_eq!(diags.len(), 1, "{:?}", diags);
-        assert_eq!(diags[0].message, "Unused import 'App\\Helpers\\DateHelper'");
+        assert_eq!(
+            message_text(&diags[0].message),
+            "Unused import 'App\\Helpers\\DateHelper'"
+        );
         assert_eq!(diags[0].range, range_of(view, "DateHelper as Dates"));
     }
 
@@ -246,7 +239,7 @@ class CurrencyHelper {\n\
         let mut diags = Vec::new();
         backend.collect_unused_import_diagnostics(uri.as_str(), &virtual_php, &mut diags);
         assert_eq!(diags.len(), 1, "{:?}", diags);
-        assert!(diags[0].message.contains("CurrencyHelper"));
+        assert!(message_text(&diags[0].message).contains("CurrencyHelper"));
         assert_eq!(diags[0].range.start.line, 1, "reported on the Blade line");
     }
 }

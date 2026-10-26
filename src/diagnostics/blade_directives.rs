@@ -10,7 +10,7 @@
 //! stack of open blocks; this turns what it finds into reports anchored on
 //! the offending directive in the Blade source.
 
-use tower_lsp::lsp_types::Diagnostic;
+use tower_lsp_server::gen_lsp_types::Diagnostic;
 
 use crate::Backend;
 use crate::blade::balance::{self, Imbalance};
@@ -81,7 +81,7 @@ impl Backend {
             return;
         };
 
-        let imbalances = balance::check(&source, &self.blade_directives.read());
+        let imbalances = balance::check(&source, &self.blade.directives.read());
         report_block_imbalances(&source, imbalances, out);
     }
 }

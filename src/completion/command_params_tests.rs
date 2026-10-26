@@ -156,8 +156,12 @@ class SyncCommand extends Command
 
 fn collect_labels(response: Option<CompletionResponse>) -> Vec<String> {
     match response {
-        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-        Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
+        Some(CompletionResponse::CompletionItemList(items)) => {
+            items.into_iter().map(|i| i.label).collect()
+        }
+        Some(CompletionResponse::CompletionList(list)) => {
+            list.items.into_iter().map(|i| i.label).collect()
+        }
         None => Vec::new(),
     }
 }

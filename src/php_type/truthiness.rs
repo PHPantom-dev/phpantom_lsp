@@ -130,6 +130,24 @@ impl PhpType {
             // truthy test has at least one entry.  Carrying that in the
             // type is what lets a later `foreach` know its body runs.
             _ if self.is_array_like() => Some(self.non_empty_array_form()),
+            // `''` and `'0'` are the falsy strings, so a string that
+            // survives is neither.
+            TypeKind::Named(name) => Some(match name.as_str() {
+                "string" | "non-empty-string" => PhpType::non_falsy_string(),
+                "lowercase-string" | "non-empty-lowercase-string" => PhpType::intersection(vec![
+                    PhpType::lowercase_string(),
+                    PhpType::non_falsy_string(),
+                ]),
+                "uppercase-string" | "non-empty-uppercase-string" => PhpType::intersection(vec![
+                    PhpType::uppercase_string(),
+                    PhpType::non_falsy_string(),
+                ]),
+                "literal-string" | "non-empty-literal-string" => PhpType::intersection(vec![
+                    PhpType::literal_string(),
+                    PhpType::non_falsy_string(),
+                ]),
+                _ => self.clone(),
+            }),
             _ => Some(self.clone()),
         }
     }
@@ -193,7 +211,7 @@ impl PhpType {
                     out.push(PhpType::literal_int("0"));
                 }
             }
-            TypeKind::Named(name) => match keyword_lowercase(name).as_str() {
+            TypeKind::Named(name) => with_keyword_lowercase(name, |lower| match lower {
                 "int" | "integer" | "non-negative-int" | "non-positive-int" => {
                     out.push(PhpType::literal_int("0"));
                 }
@@ -224,7 +242,7 @@ impl PhpType {
                 ]),
                 _ if self.is_array_like() => out.push(PhpType::array_shape(Vec::new())),
                 _ => out.push(self.clone()),
-            },
+            }),
             // `[]` is the only falsy array, whatever the array was declared
             // to hold.
             _ if self.is_array_like() => out.push(PhpType::array_shape(Vec::new())),

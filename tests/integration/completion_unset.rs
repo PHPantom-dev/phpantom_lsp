@@ -1,6 +1,7 @@
-use crate::common::{complete_at, create_psr4_workspace, create_test_backend};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{
+    complete_at, completion_response, create_psr4_workspace, create_test_backend, open_php,
+};
+use tower_lsp_server::gen_lsp_types::*;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Type resolution: $var-> after unset($var) should not resolve
@@ -12,7 +13,7 @@ use tower_lsp::lsp_types::*;
 async fn test_unset_clears_variable_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_basic.php").unwrap();
+    let uri = Uri::parse("file:///unset_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -28,34 +29,13 @@ async fn test_unset_clears_variable_type() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 9
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 9,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 9, 12, None).await;
     // After unset, the variable should have no resolved type, so either
     // no results or only generic fallback (no Foo methods).
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -71,7 +51,7 @@ async fn test_unset_clears_variable_type() {
 async fn test_unset_then_reassign_resolves_new_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_reassign.php").unwrap();
+    let uri = Uri::parse("file:///unset_reassign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -91,35 +71,14 @@ async fn test_unset_then_reassign_resolves_new_type() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 13
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 13,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 13, 12, None).await;
     assert!(result.is_some(), "Should return results after reassignment");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("barMethod")),
@@ -132,7 +91,7 @@ async fn test_unset_then_reassign_resolves_new_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -141,7 +100,7 @@ async fn test_unset_then_reassign_resolves_new_type() {
 async fn test_unset_multiple_variables() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_multi.php").unwrap();
+    let uri = Uri::parse("file:///unset_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -161,32 +120,11 @@ async fn test_unset_multiple_variables() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 13
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 13,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
-    if let Some(CompletionResponse::Array(items)) = result {
+    let result = completion_response(&backend, &uri, 13, 12, None).await;
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -201,7 +139,7 @@ async fn test_unset_multiple_variables() {
 async fn test_unset_different_variable_no_effect() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_different.php").unwrap();
+    let uri = Uri::parse("file:///unset_different.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -221,38 +159,17 @@ async fn test_unset_different_variable_no_effect() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 13
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 13,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 13, 12, None).await;
     assert!(
         result.is_some(),
         "Should still return results for $x after unset($y)"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -260,7 +177,7 @@ async fn test_unset_different_variable_no_effect() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -270,7 +187,7 @@ async fn test_unset_different_variable_no_effect() {
 async fn test_unset_inside_conditional_does_not_clear() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_conditional.php").unwrap();
+    let uri = Uri::parse("file:///unset_conditional.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -288,38 +205,17 @@ async fn test_unset_inside_conditional_does_not_clear() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 11
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 12, None).await;
     assert!(
         result.is_some(),
         "Should still return results after conditional unset"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -327,7 +223,7 @@ async fn test_unset_inside_conditional_does_not_clear() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -336,7 +232,7 @@ async fn test_unset_inside_conditional_does_not_clear() {
 async fn test_unset_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///unset_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -348,32 +244,11 @@ async fn test_unset_top_level() {
         "$x->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 7
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 7,
-                character: 4,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
-    if let Some(CompletionResponse::Array(items)) = result {
+    let result = completion_response(&backend, &uri, 7, 4, None).await;
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -411,33 +286,12 @@ async fn test_unset_cross_file() {
         &[("src/Foo.php", foo_php), ("src/Main.php", main_php)],
     );
 
-    let uri = Url::from_file_path(_dir.path().join("src/Main.php")).unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: main_php.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    let uri = Uri::from_file_path(_dir.path().join("src/Main.php")).unwrap();
+    open_php(&backend, &uri, main_php).await;
 
     // Cursor after `$x->` on line 6
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 6,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
-    if let Some(CompletionResponse::Array(items)) = result {
+    let result = completion_response(&backend, &uri, 6, 12, None).await;
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -452,7 +306,7 @@ async fn test_unset_cross_file() {
 async fn test_unset_does_not_affect_this() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_this.php").unwrap();
+    let uri = Uri::parse("file:///unset_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -465,38 +319,17 @@ async fn test_unset_does_not_affect_this() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$this->` on line 6
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 6,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 6, 15, None).await;
     assert!(
         result.is_some(),
         "$this-> should still resolve after unset($x)"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -504,7 +337,7 @@ async fn test_unset_does_not_affect_this() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -517,7 +350,7 @@ async fn test_unset_does_not_affect_this() {
 async fn test_unset_removes_variable_from_name_suggestions() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_varname.php").unwrap();
+    let uri = Uri::parse("file:///unset_varname.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -550,7 +383,7 @@ async fn test_unset_removes_variable_from_name_suggestions() {
 async fn test_unset_removes_multiple_variables_from_name_suggestions() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_varname_multi.php").unwrap();
+    let uri = Uri::parse("file:///unset_varname_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -589,7 +422,7 @@ async fn test_unset_removes_multiple_variables_from_name_suggestions() {
 async fn test_unset_then_reassign_variable_reappears() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_varname_reassign.php").unwrap();
+    let uri = Uri::parse("file:///unset_varname_reassign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -617,7 +450,7 @@ async fn test_unset_then_reassign_variable_reappears() {
 async fn test_unset_removes_variable_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_varname_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///unset_varname_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$user = 'test';\n",
@@ -648,7 +481,7 @@ async fn test_unset_removes_variable_top_level() {
 async fn test_unset_array_element_does_not_remove_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_array_elem.php").unwrap();
+    let uri = Uri::parse("file:///unset_array_elem.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -675,7 +508,7 @@ async fn test_unset_array_element_does_not_remove_variable() {
 async fn test_unset_inside_function() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_function.php").unwrap();
+    let uri = Uri::parse("file:///unset_function.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -689,32 +522,11 @@ async fn test_unset_inside_function() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 8
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 8,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
-    if let Some(CompletionResponse::Array(items)) = result {
+    let result = completion_response(&backend, &uri, 8, 8, None).await;
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -729,7 +541,7 @@ async fn test_unset_inside_function() {
 async fn test_completion_before_unset_still_works() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///before_unset.php").unwrap();
+    let uri = Uri::parse("file:///before_unset.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -745,38 +557,17 @@ async fn test_completion_before_unset_still_works() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 8 (before the unset on line 9)
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 12, None).await;
     assert!(
         result.is_some(),
         "Should return results for $x-> before unset"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -784,7 +575,7 @@ async fn test_completion_before_unset_still_works() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -794,7 +585,7 @@ async fn test_completion_before_unset_still_works() {
 async fn test_unset_non_variable_expression_no_crash() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_non_var.php").unwrap();
+    let uri = Uri::parse("file:///unset_non_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -811,38 +602,17 @@ async fn test_unset_non_variable_expression_no_crash() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 10
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 10,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
+    let result = completion_response(&backend, &uri, 10, 12, None).await;
     assert!(
         result.is_some(),
         "Should return results (unset of static prop should not affect $x)"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -850,7 +620,7 @@ async fn test_unset_non_variable_expression_no_crash() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -862,7 +632,7 @@ async fn test_unset_non_variable_expression_no_crash() {
 async fn test_unset_does_not_leak_to_top_level_same_name_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_toplevel_leak.php").unwrap();
+    let uri = Uri::parse("file:///unset_toplevel_leak.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -884,32 +654,11 @@ async fn test_unset_does_not_leak_to_top_level_same_name_variable() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor after `$x->` on line 15
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(params).await.unwrap();
-    if let Some(CompletionResponse::Array(items)) = result {
+    let result = completion_response(&backend, &uri, 15, 12, None).await;
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),

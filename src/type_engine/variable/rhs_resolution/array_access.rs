@@ -9,6 +9,7 @@ use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::ResolvedType;
 
@@ -108,11 +109,11 @@ pub(super) fn resolve_rhs_array_access<'b>(
 
     // Expand type aliases so that shape/generic extraction can see the
     // underlying type (e.g. a `@phpstan-type` alias).
-    if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
+    if let Some(expanded) = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
         &current,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     ) {
         current = expanded;
     }
@@ -133,11 +134,11 @@ pub(super) fn resolve_rhs_array_access<'b>(
 
         // After each segment, the resulting type might itself be an
         // alias (e.g. a shape value defined as another alias).
-        if let Some(expanded) = crate::type_engine::types::aliases::resolve_type_alias_typed(
+        if let Some(expanded) = crate::type_engine::type_ops::aliases::resolve_type_alias_typed(
             &current,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         ) {
             current = expanded;
         }
@@ -146,8 +147,8 @@ pub(super) fn resolve_rhs_array_access<'b>(
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &current,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     if classes.is_empty() {
         // No class matched (e.g. `list<Rule>`, `int`, `string`).
@@ -256,6 +257,28 @@ fn index_segment(
                 PhpType::null(),
             ]));
         }
+        // A value of `A&B` is both, so a read yields what every member
+        // promises at once: `array<string, mixed>&array{at: Carbon}` reads
+        // `at` as `Carbon`, since `mixed` adds nothing to it.
+        TypeKind::Intersection(members) => {
+            let mut answers: Vec<PhpType> = Vec::with_capacity(members.len());
+            let mut any_mixed = false;
+            for member in members.iter() {
+                match index_segment(member, seg, ctx) {
+                    Some(value) if value.is_mixed() => any_mixed = true,
+                    Some(value) if !answers.contains(&value) => answers.push(value),
+                    _ => {}
+                }
+            }
+            let most_specific = answers
+                .iter()
+                .position(|a| answers.iter().all(|b| a.is_subtype_of(b)));
+            return match most_specific {
+                Some(idx) => Some(answers.swap_remove(idx)),
+                None if answers.is_empty() => any_mixed.then(PhpType::mixed),
+                None => Some(PhpType::intersection(answers)),
+            };
+        }
         _ => {}
     }
 
@@ -303,19 +326,19 @@ fn index_segment(
     let class_element = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         base,
         &ctx.current_class.map(|cls| cls.fqn()).unwrap_or_default(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     )
     .into_iter()
     .find_map(|cls| {
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             &cls,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
-        crate::type_engine::variable::foreach_resolution::extract_iterable_element_type_from_class(
+        crate::type_engine::variable::iterable_elements::extract_iterable_element_type_from_class(
             &merged,
-            ctx.class_loader,
+            ctx.file.class_loader,
         )
     });
     if let Some(element) = class_element {
@@ -497,7 +520,7 @@ pub(crate) fn class_string_inner_binding(
         {
             return None;
         }
-        let fqn = match (ctx.class_loader)(content) {
+        let fqn = match (ctx.file.class_loader)(Fqn::new(content)) {
             Some(cls) => cls.fqn().to_string(),
             None => content.to_string(),
         };

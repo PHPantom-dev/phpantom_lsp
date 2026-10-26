@@ -1,8 +1,8 @@
 use crate::common::{
-    complete_at_opened, create_psr4_workspace, create_test_backend, method_names, property_names,
+    complete_at_opened, create_psr4_workspace, create_test_backend, method_names, open_php,
+    property_names,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Basic Spread: single spread variable ───────────────────────────────────
 
@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::*;
 async fn test_spread_single_list_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_single.php").unwrap();
+    let uri = Uri::parse("file:///spread_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -24,15 +24,7 @@ async fn test_spread_single_list_variable() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 8, 10).await;
     assert!(
@@ -61,7 +53,7 @@ async fn test_spread_single_list_variable() {
 async fn test_spread_multiple_variables_union() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_union.php").unwrap();
+    let uri = Uri::parse("file:///spread_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -81,15 +73,7 @@ async fn test_spread_multiple_variables_union() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 15, 10).await;
     assert!(
@@ -117,7 +101,7 @@ async fn test_spread_multiple_variables_union() {
 async fn test_spread_array_generic_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_array_generic.php").unwrap();
+    let uri = Uri::parse("file:///spread_array_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -130,15 +114,7 @@ async fn test_spread_array_generic_annotation() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 8, 10).await;
     assert!(
@@ -167,7 +143,7 @@ async fn test_spread_array_generic_annotation() {
 async fn test_spread_type_array_shorthand() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_shorthand.php").unwrap();
+    let uri = Uri::parse("file:///spread_shorthand.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -180,15 +156,7 @@ async fn test_spread_type_array_shorthand() {
         "$merged[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 8, 12).await;
     assert!(
@@ -212,7 +180,7 @@ async fn test_spread_type_array_shorthand() {
 async fn test_spread_with_keyed_entries() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_keyed.php").unwrap();
+    let uri = Uri::parse("file:///spread_keyed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -226,15 +194,7 @@ async fn test_spread_with_keyed_entries() {
         "$config['\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 9, 9).await;
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
@@ -257,7 +217,7 @@ async fn test_spread_with_keyed_entries() {
 async fn test_spread_inside_class_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_method.php").unwrap();
+    let uri = Uri::parse("file:///spread_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -280,15 +240,7 @@ async fn test_spread_inside_class_method() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 16, 18).await;
     assert!(
@@ -319,7 +271,7 @@ async fn test_spread_inside_class_method() {
 async fn test_spread_with_foreach_annotated() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_foreach.php").unwrap();
+    let uri = Uri::parse("file:///spread_foreach.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -339,15 +291,7 @@ async fn test_spread_with_foreach_annotated() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Verify element access still works (the core spread feature).
     let items = complete_at_opened(&backend, &uri, 15, 10).await;
@@ -376,7 +320,7 @@ async fn test_spread_with_foreach_annotated() {
 async fn test_spread_combined_with_push() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_push.php").unwrap();
+    let uri = Uri::parse("file:///spread_push.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -394,15 +338,7 @@ async fn test_spread_combined_with_push() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 13, 10).await;
     assert!(
@@ -430,7 +366,7 @@ async fn test_spread_combined_with_push() {
 async fn test_spread_array_function_syntax() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_array_syntax.php").unwrap();
+    let uri = Uri::parse("file:///spread_array_syntax.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -443,15 +379,7 @@ async fn test_spread_array_function_syntax() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 8, 10).await;
     assert!(
@@ -524,16 +452,8 @@ async fn test_spread_cross_file_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///service.php").unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: service_php.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    let uri = Uri::parse("file:///service.php").unwrap();
+    open_php(&backend, &uri, service_php).await;
 
     let items = complete_at_opened(&backend, &uri, 11, 18).await;
     assert!(
@@ -561,7 +481,7 @@ async fn test_spread_cross_file_psr4() {
 async fn test_spread_param_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_param.php").unwrap();
+    let uri = Uri::parse("file:///spread_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -579,15 +499,7 @@ async fn test_spread_param_annotation() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 11, 18).await;
     assert!(
@@ -610,7 +522,7 @@ async fn test_spread_param_annotation() {
 async fn test_spread_empty_array() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_empty.php").unwrap();
+    let uri = Uri::parse("file:///spread_empty.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -620,15 +532,7 @@ async fn test_spread_empty_array() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Should not crash, just no completions.
     let items = complete_at_opened(&backend, &uri, 5, 10).await;
@@ -643,7 +547,7 @@ async fn test_spread_empty_array() {
 async fn test_spread_deduplicates_same_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_dedup.php").unwrap();
+    let uri = Uri::parse("file:///spread_dedup.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -658,15 +562,7 @@ async fn test_spread_deduplicates_same_type() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 10, 10).await;
     assert!(
@@ -696,7 +592,7 @@ async fn test_spread_deduplicates_same_type() {
 async fn test_spread_three_variables() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_three.php").unwrap();
+    let uri = Uri::parse("file:///spread_three.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -718,15 +614,7 @@ async fn test_spread_three_variables() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 17, 10).await;
     assert!(
@@ -760,7 +648,7 @@ async fn test_spread_three_variables() {
 async fn test_spread_source_from_push_assignments() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_from_push.php").unwrap();
+    let uri = Uri::parse("file:///spread_from_push.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -773,15 +661,7 @@ async fn test_spread_source_from_push_assignments() {
         "$all[0]->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     let items = complete_at_opened(&backend, &uri, 8, 10).await;
     // This may or may not work depending on whether the resolver can

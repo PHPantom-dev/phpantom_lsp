@@ -1,13 +1,13 @@
 use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async fn prepare_at(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
 ) -> Vec<TypeHierarchyItem> {
@@ -71,7 +71,7 @@ fn item_names(items: &[TypeHierarchyItem]) -> Vec<String> {
 #[tokio::test]
 async fn prepare_on_class_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",           // 0
         "class MyClass {\n", // 1
@@ -82,13 +82,13 @@ async fn prepare_on_class_declaration() {
     let items = prepare_at(&backend, &uri, 1, 8).await;
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].name, "MyClass");
-    assert_eq!(items[0].kind, SymbolKind::CLASS);
+    assert_eq!(items[0].kind, SymbolKind::Class);
 }
 
 #[tokio::test]
 async fn prepare_on_interface_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                   // 0
         "interface MyInterface {\n", // 1
@@ -99,13 +99,13 @@ async fn prepare_on_interface_declaration() {
     let items = prepare_at(&backend, &uri, 1, 12).await;
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].name, "MyInterface");
-    assert_eq!(items[0].kind, SymbolKind::INTERFACE);
+    assert_eq!(items[0].kind, SymbolKind::Interface);
 }
 
 #[tokio::test]
 async fn prepare_on_enum_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",         // 0
         "enum MyEnum {\n", // 1
@@ -117,13 +117,13 @@ async fn prepare_on_enum_declaration() {
     let items = prepare_at(&backend, &uri, 1, 7).await;
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].name, "MyEnum");
-    assert_eq!(items[0].kind, SymbolKind::ENUM);
+    assert_eq!(items[0].kind, SymbolKind::Enum);
 }
 
 #[tokio::test]
 async fn prepare_on_trait_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",           // 0
         "trait MyTrait {\n", // 1
@@ -135,7 +135,7 @@ async fn prepare_on_trait_declaration() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].name, "MyTrait");
     // Traits map to STRUCT in the LSP symbol kind.
-    assert_eq!(items[0].kind, SymbolKind::STRUCT);
+    assert_eq!(items[0].kind, SymbolKind::Struct);
 }
 
 // ─── Prepare: class reference ───────────────────────────────────────────────
@@ -143,7 +143,7 @@ async fn prepare_on_trait_declaration() {
 #[tokio::test]
 async fn prepare_on_class_reference_in_extends() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                      // 0
         "class Base {\n",               // 1
@@ -162,7 +162,7 @@ async fn prepare_on_class_reference_in_extends() {
 #[tokio::test]
 async fn prepare_on_class_reference_in_implements() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "interface Renderable {\n",                              // 1
@@ -178,7 +178,7 @@ async fn prepare_on_class_reference_in_implements() {
     let items = prepare_at(&backend, &uri, 4, 26).await;
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].name, "Renderable");
-    assert_eq!(items[0].kind, SymbolKind::INTERFACE);
+    assert_eq!(items[0].kind, SymbolKind::Interface);
 }
 
 // ─── Prepare: self / static / parent ────────────────────────────────────────
@@ -186,7 +186,7 @@ async fn prepare_on_class_reference_in_implements() {
 #[tokio::test]
 async fn prepare_on_self_keyword() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "class Foo {\n",                        // 1
@@ -206,7 +206,7 @@ async fn prepare_on_self_keyword() {
 #[tokio::test]
 async fn prepare_on_parent_keyword() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "class Base {\n",                          // 1
@@ -231,7 +231,7 @@ async fn prepare_on_parent_keyword() {
 #[tokio::test]
 async fn prepare_on_parent_keyword_with_imported_parent() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // 0
         "namespace Lib {\n",                          // 1
@@ -261,7 +261,7 @@ async fn prepare_on_parent_keyword_with_imported_parent() {
 #[tokio::test]
 async fn prepare_on_variable_returns_none() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",           // 0
         "$x = new Foo();\n", // 1
@@ -278,7 +278,7 @@ async fn prepare_on_variable_returns_none() {
 #[tokio::test]
 async fn prepare_includes_namespace_in_detail() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                  // 0
         "namespace App\\Models;\n", // 1
@@ -299,7 +299,7 @@ async fn prepare_includes_namespace_in_detail() {
 #[tokio::test]
 async fn prepare_deprecated_class_has_tag() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                      // 0
         "/** @deprecated Use New */\n", // 1
@@ -310,7 +310,7 @@ async fn prepare_deprecated_class_has_tag() {
 
     let items = prepare_at(&backend, &uri, 2, 8).await;
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].tags, Some(SymbolTag::DEPRECATED));
+    assert_eq!(items[0].tags, Some(vec![SymbolTag::Deprecated]));
 }
 
 // ─── Supertypes: parent class ───────────────────────────────────────────────
@@ -318,7 +318,7 @@ async fn prepare_deprecated_class_has_tag() {
 #[tokio::test]
 async fn supertypes_returns_parent_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                      // 0
         "class Base {\n",               // 1
@@ -345,7 +345,7 @@ async fn supertypes_returns_parent_class() {
 #[tokio::test]
 async fn supertypes_returns_interfaces() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                         // 0
         "interface Printable {\n",                         // 1
@@ -383,7 +383,7 @@ async fn supertypes_returns_interfaces() {
 #[tokio::test]
 async fn supertypes_returns_parent_and_interfaces() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "interface Serializable {\n",                               // 1
@@ -419,7 +419,7 @@ async fn supertypes_returns_parent_and_interfaces() {
 #[tokio::test]
 async fn supertypes_interface_extends_interface() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "interface Countable {\n",                           // 1
@@ -448,7 +448,7 @@ async fn supertypes_interface_extends_interface() {
 #[tokio::test]
 async fn supertypes_no_parent_returns_empty() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",          // 0
         "class Orphan {\n", // 1
@@ -472,7 +472,7 @@ async fn supertypes_no_parent_returns_empty() {
 #[tokio::test]
 async fn subtypes_returns_subclasses() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                      // 0
         "class Animal {\n",             // 1
@@ -513,7 +513,7 @@ async fn subtypes_returns_subclasses() {
 #[tokio::test]
 async fn subtypes_returns_interface_implementors() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "interface Renderable {\n",                              // 1
@@ -550,7 +550,7 @@ async fn subtypes_returns_interface_implementors() {
 #[tokio::test]
 async fn subtypes_includes_abstract_subclasses() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                             // 0
         "interface Shape {\n",                                 // 1
@@ -600,7 +600,7 @@ async fn subtypes_includes_abstract_subclasses() {
 #[tokio::test]
 async fn subtypes_final_class_has_no_subtypes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                // 0
         "final class Sealed {\n", // 1
@@ -624,7 +624,7 @@ async fn subtypes_final_class_has_no_subtypes() {
 #[tokio::test]
 async fn full_hierarchy_navigation_up_and_down() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "interface HasName {\n",                                  // 1
@@ -679,7 +679,7 @@ async fn full_hierarchy_navigation_up_and_down() {
 #[tokio::test]
 async fn subtypes_enum_implementing_interface() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "interface HasLabel {\n",                  // 1
@@ -710,7 +710,7 @@ async fn subtypes_enum_implementing_interface() {
     // Supertypes of Status enum should include HasLabel.
     let enum_items = prepare_at(&backend, &uri, 4, 7).await;
     assert_eq!(enum_items.len(), 1);
-    assert_eq!(enum_items[0].kind, SymbolKind::ENUM);
+    assert_eq!(enum_items[0].kind, SymbolKind::Enum);
 
     let enum_supers = supertypes_of(&backend, &enum_items[0]).await;
     let super_names = item_names(&enum_supers);
@@ -745,7 +745,7 @@ async fn prepare_and_supertypes_cross_file_psr4() {
 
     let (backend, _dir) = create_psr4_workspace(composer, files);
 
-    let uri = Url::parse("file:///main.php").unwrap();
+    let uri = Uri::parse("file:///main.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Models\\UserRepository;\n",
@@ -775,7 +775,7 @@ async fn prepare_and_supertypes_cross_file_psr4() {
 #[tokio::test]
 async fn data_field_contains_fqn() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",              // 0
         "namespace My\\App;\n", // 1
@@ -794,7 +794,7 @@ async fn data_field_contains_fqn() {
 #[tokio::test]
 async fn subtypes_transitive_via_parent_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "interface Loggable {\n",                      // 1
@@ -844,7 +844,7 @@ async fn subtypes_transitive_via_parent_chain() {
 #[tokio::test]
 async fn supertypes_class_with_multiple_interfaces() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                       // 0
         "interface JsonSerializable {\n",                                // 1
@@ -881,7 +881,7 @@ async fn supertypes_class_with_multiple_interfaces() {
 #[tokio::test]
 async fn supertypes_have_correct_symbol_kinds() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "interface Iface {\n",                              // 1
@@ -903,8 +903,8 @@ async fn supertypes_have_correct_symbol_kinds() {
     assert!(parent_item.is_some(), "Should find Parent1 in supertypes");
     assert!(iface_item.is_some(), "Should find Iface in supertypes");
 
-    assert_eq!(parent_item.unwrap().kind, SymbolKind::CLASS);
-    assert_eq!(iface_item.unwrap().kind, SymbolKind::INTERFACE);
+    assert_eq!(parent_item.unwrap().kind, SymbolKind::Class);
+    assert_eq!(iface_item.unwrap().kind, SymbolKind::Interface);
 }
 
 // ─── Subtypes items carry correct data for further navigation ───────────────
@@ -912,7 +912,7 @@ async fn supertypes_have_correct_symbol_kinds() {
 #[tokio::test]
 async fn subtype_items_have_data_for_further_navigation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                       // 0
         "class Base {\n",                // 1
@@ -950,7 +950,7 @@ async fn subtype_items_have_data_for_further_navigation() {
 #[tokio::test]
 async fn subtypes_returns_only_direct_children() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                       // 0
         "class Base {\n",                // 1
@@ -990,7 +990,7 @@ async fn subtypes_returns_only_direct_children() {
 #[tokio::test]
 async fn prepare_selection_range_covers_class_name() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     //                     0         1         2
     //                     0123456789012345678901234
     let text = concat!(
@@ -1017,7 +1017,7 @@ async fn prepare_selection_range_covers_class_name() {
 #[tokio::test]
 async fn subtypes_items_have_nonzero_selection_range() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "interface Renderable {\n",                              // 1
@@ -1050,7 +1050,7 @@ async fn subtypes_items_have_nonzero_selection_range() {
 #[tokio::test]
 async fn supertypes_items_have_nonzero_selection_range() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                      // 0
         "class Base {\n",               // 1
@@ -1112,14 +1112,14 @@ async fn subtypes_includes_unopened_children_when_some_are_indexed() {
     // parses it and records App\UserRepository as a child of
     // App\Repository in the reverse inheritance index — but
     // AdminRepository stays on disk, discovered only by a wider scan.
-    let iface_uri = Url::from_file_path(dir.path().join("src/Repository.php")).unwrap();
+    let iface_uri = Uri::from_file_path(dir.path().join("src/Repository.php")).unwrap();
     open_php(
         &backend,
         &iface_uri,
         "<?php\nnamespace App;\ninterface Repository {\n}\n",
     )
     .await;
-    let user_uri = Url::from_file_path(dir.path().join("src/UserRepository.php")).unwrap();
+    let user_uri = Uri::from_file_path(dir.path().join("src/UserRepository.php")).unwrap();
     open_php(
         &backend,
         &user_uri,
@@ -1161,9 +1161,9 @@ async fn subtypes_of_a_trait_are_the_classes_that_use_it() {
             ("src/Models/Post.php", post),
         ],
     );
-    let post_uri = Url::from_file_path(dir.path().join("src/Models/Post.php")).unwrap();
+    let post_uri = Uri::from_file_path(dir.path().join("src/Models/Post.php")).unwrap();
     open_php(&backend, &post_uri, post).await;
-    let uri = Url::from_file_path(dir.path().join("src/Concerns/Sluggable.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Concerns/Sluggable.php")).unwrap();
     open_php(&backend, &uri, sluggable).await;
 
     let items = prepare_at(&backend, &uri, 2, 8).await;
@@ -1182,9 +1182,9 @@ async fn subtypes_forget_a_class_edited_to_extend_something_else() {
         r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
         &[("src/Base.php", base), ("src/Child.php", child)],
     );
-    let child_uri = Url::from_file_path(dir.path().join("src/Child.php")).unwrap();
+    let child_uri = Uri::from_file_path(dir.path().join("src/Child.php")).unwrap();
     open_php(&backend, &child_uri, child).await;
-    let uri = Url::from_file_path(dir.path().join("src/Base.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Base.php")).unwrap();
     open_php(&backend, &uri, base).await;
 
     let items = prepare_at(&backend, &uri, 2, 7).await;

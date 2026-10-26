@@ -22,7 +22,8 @@ pub(crate) struct ExternalToolWorker {
     pub(crate) pending_uri: Arc<Mutex<Option<String>>>,
     /// Last-published diagnostics per file URI, merged into fast/slow
     /// diagnostic publishes so results stay visible between tool runs.
-    pub(crate) last_diags: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
+    pub(crate) last_diags:
+        Arc<Mutex<HashMap<String, Vec<tower_lsp_server::gen_lsp_types::Diagnostic>>>>,
     /// Per-URI write counter, bumped every time this worker stores a
     /// single-file result in [`last_diags`].
     ///
@@ -48,7 +49,7 @@ impl ExternalToolWorker {
     pub(crate) fn store_file_result(
         &self,
         uri: &str,
-        diags: Vec<tower_lsp::lsp_types::Diagnostic>,
+        diags: Vec<tower_lsp_server::gen_lsp_types::Diagnostic>,
     ) {
         let mut cache = self.last_diags.lock();
         cache.insert(uri.to_string(), diags);
@@ -72,7 +73,7 @@ impl ExternalToolWorker {
         &self,
         snapshot: &HashMap<String, u64>,
         uri: &str,
-        diags: Vec<tower_lsp::lsp_types::Diagnostic>,
+        diags: Vec<tower_lsp_server::gen_lsp_types::Diagnostic>,
     ) -> bool {
         let mut cache = self.last_diags.lock();
         if self.generations.lock().get(uri).copied() != snapshot.get(uri).copied() {

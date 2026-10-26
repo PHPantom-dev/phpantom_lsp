@@ -9,7 +9,7 @@ use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action_containing, get_code_actions_at,
     inject_phpstan_diag, resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── Basic: adds #[Override] to a simple method (no namespace) ───────────────
 
@@ -36,7 +36,7 @@ class Child extends Base {
     let action = find_action_containing(&actions, "#[Override]")
         .expect("should offer Add #[Override] action");
 
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
     assert!(
         action.title.contains("foo"),
@@ -869,7 +869,7 @@ class Child extends Base {
     );
 
     let action = override_action.unwrap();
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
     assert!(
         action.title.contains("foo"),

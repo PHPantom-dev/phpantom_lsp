@@ -241,7 +241,7 @@ pub(crate) fn walk_closures_in_expr<'b>(
 
             // Walk the closure body.
             {
-                let _barrier = suspend_return_edges();
+                let _barrier = suspend_return_edges(ctx.flow);
                 walk_body_for_diagnostics(closure.body.statements.iter(), &mut closure_scope, ctx);
             }
 
@@ -367,7 +367,9 @@ pub(crate) fn walk_closures_in_expr<'b>(
         Expression::Match(m) => {
             walk_closures_in_expr(m.expression, outer_scope, ctx, None);
             let class_subject =
-                crate::type_engine::types::narrowing::match_class_subject_var(m.expression);
+                crate::type_engine::type_ops::condition_facts::match_class_subject_var(
+                    m.expression,
+                );
             for arm in m.arms.iter() {
                 let MatchArm::Expression(expr_arm) = arm else {
                     walk_closures_in_expr(arm.expression(), outer_scope, ctx, None);
@@ -402,7 +404,7 @@ pub(crate) fn walk_closures_in_expr<'b>(
             // The anonymous class's own method bodies have their own
             // `$this` (the anonymous class), so walk them separately.
             {
-                let _barrier = suspend_return_edges();
+                let _barrier = suspend_return_edges(ctx.flow);
                 walk_anonymous_class_member_bodies(anon, ctx);
             }
 

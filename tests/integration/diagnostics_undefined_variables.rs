@@ -1,5 +1,6 @@
 use crate::common::create_test_backend;
-use tower_lsp::lsp_types::*;
+use crate::common::message_text;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -27,8 +28,8 @@ function test(): void {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$nmae"));
-    assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+    assert!(message_text(&diags[0].message).contains("$nmae"));
+    assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
 }
 
 #[test]
@@ -41,7 +42,7 @@ function test(): void {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$y"));
+    assert!(message_text(&diags[0].message).contains("$y"));
 }
 
 #[test]
@@ -70,7 +71,7 @@ function test(): void {
     assert_eq!(diags.len(), 1);
     assert_eq!(
         diags[0].code,
-        Some(NumberOrString::String("unknown_variable".to_string())),
+        Some(Code::String("unknown_variable".to_string())),
     );
     assert_eq!(diags[0].source, Some("phpantom".to_string()));
 }
@@ -85,7 +86,7 @@ function test(): string {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$missing"));
+    assert!(message_text(&diags[0].message).contains("$missing"));
 }
 
 #[test]
@@ -98,7 +99,7 @@ function test(): void {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$notDefined"));
+    assert!(message_text(&diags[0].message).contains("$notDefined"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -158,7 +159,9 @@ function test(): void {
 "#,
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("$e")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("$e")),
         "Got: {:?}",
         diags,
     );
@@ -319,7 +322,9 @@ class Foo {
 "#,
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("$this")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("$this")),
         "Got: {:?}",
         diags,
     );
@@ -489,7 +494,9 @@ function other(): void {
 "#,
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("$name")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("$name")),
         "Expected undefined $name in other(), got: {:?}",
         diags
     );
@@ -548,7 +555,9 @@ function test(): void {
 "#,
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("$outer")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("$outer")),
         "Expected undefined $outer in closure, got: {:?}",
         diags,
     );
@@ -606,7 +615,7 @@ function test(): void {
         "A by-value capture reads the outer variable. Got: {:?}",
         diags,
     );
-    assert!(diags[0].message.contains("$total"));
+    assert!(message_text(&diags[0].message).contains("$total"));
 }
 
 #[test]
@@ -628,7 +637,7 @@ function test(): void {
         "The capture declares the variable at the `use` site, not before it. Got: {:?}",
         diags,
     );
-    assert!(diags[0].message.contains("$total"));
+    assert!(message_text(&diags[0].message).contains("$total"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -676,7 +685,7 @@ class Foo {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$undefined"));
+    assert!(message_text(&diags[0].message).contains("$undefined"));
 }
 
 #[test]
@@ -761,7 +770,7 @@ class Foo {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$prop"));
+    assert!(message_text(&diags[0].message).contains("$prop"));
 }
 
 #[test]
@@ -790,7 +799,7 @@ class Foo {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$suffix"));
+    assert!(message_text(&diags[0].message).contains("$suffix"));
 }
 
 #[test]
@@ -823,7 +832,7 @@ trait MyTrait {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$undefined"));
+    assert!(message_text(&diags[0].message).contains("$undefined"));
 }
 
 #[test]
@@ -840,7 +849,7 @@ enum Status {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$undefined"));
+    assert!(message_text(&diags[0].message).contains("$undefined"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -873,7 +882,7 @@ function test(): void {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$undefined"));
+    assert!(message_text(&diags[0].message).contains("$undefined"));
 }
 
 #[test]
@@ -890,7 +899,7 @@ class Foo {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$undefined"));
+    assert!(message_text(&diags[0].message).contains("$undefined"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -961,7 +970,7 @@ function test(): \Generator {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$undefined"));
+    assert!(message_text(&diags[0].message).contains("$undefined"));
 }
 
 #[test]
@@ -997,7 +1006,7 @@ function bar(): void {
     );
     // $a is defined in foo() but not in bar().
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$a"));
+    assert!(message_text(&diags[0].message).contains("$a"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1014,7 +1023,7 @@ function test(): string {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$maybeUndefined"));
+    assert!(message_text(&diags[0].message).contains("$maybeUndefined"));
 }
 
 #[test]
@@ -1043,7 +1052,7 @@ function test(): void {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$name"));
+    assert!(message_text(&diags[0].message).contains("$name"));
 }
 
 #[test]
@@ -1143,7 +1152,7 @@ namespace App {
 "#,
     );
     assert_eq!(diags.len(), 1);
-    assert!(diags[0].message.contains("$undefined"));
+    assert!(message_text(&diags[0].message).contains("$undefined"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1253,7 +1262,7 @@ function test(): void {
     // $x inside isset() should not be flagged, but $x is never assigned, so
     // the echo inside the if body is still a read of an undefined variable.
     assert_eq!(diags.len(), 1, "Got: {:?}", diags);
-    assert!(diags[0].message.contains("$x"));
+    assert!(message_text(&diags[0].message).contains("$x"));
 }
 
 #[test]
@@ -1297,7 +1306,7 @@ function test(): void {
 "#,
     );
     assert_eq!(diags.len(), 1, "Got: {:?}", diags);
-    assert!(diags[0].message.contains("$y"));
+    assert!(message_text(&diags[0].message).contains("$y"));
 }
 
 #[test]
@@ -1364,7 +1373,7 @@ function test(array $tokens): void {
         "The read outside the guarded branch is still unproven. Got: {:?}",
         diags,
     );
-    assert!(diags[0].message.contains("$tokenType"));
+    assert!(message_text(&diags[0].message).contains("$tokenType"));
 }
 
 #[test]
@@ -1384,7 +1393,7 @@ function test(): void {
         "With no write anywhere the isset() can never hold. Got: {:?}",
         diags,
     );
-    assert!(diags[0].message.contains("$tpyo"));
+    assert!(message_text(&diags[0].message).contains("$tpyo"));
 }
 
 #[test]
@@ -1408,7 +1417,7 @@ function test(array $tokens): void {
         "An `||` branch can be entered without the isset() holding. Got: {:?}",
         diags,
     );
-    assert!(diags[0].message.contains("$tokenType"));
+    assert!(message_text(&diags[0].message).contains("$tokenType"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1435,7 +1444,7 @@ function test(): void {
         "Closure without use() should not see parent closure variables. Got: {:?}",
         diags,
     );
-    assert!(diags[0].message.contains("$local"));
+    assert!(message_text(&diags[0].message).contains("$local"));
 }
 
 #[test]
@@ -2243,7 +2252,9 @@ namespace App {{
     // nothing says `$result` is written.
     let unimported = undefined_var_diagnostics(&php(""));
     assert!(
-        unimported.iter().any(|d| d.message.contains("$result")),
+        unimported
+            .iter()
+            .any(|d| message_text(&d.message).contains("$result")),
         "an unimported global class does not answer for `Helper`. Got: {:?}",
         unimported,
     );
@@ -2317,7 +2328,7 @@ function test(): void {
         diags,
     );
     assert!(
-        diags[0].message.contains("$undefined"),
+        message_text(&diags[0].message).contains("$undefined"),
         "Diagnostic should be for $undefined",
     );
 }
@@ -2346,7 +2357,7 @@ class Person {
         "A typo inside a block-bodied hook should be flagged. Got: {:?}",
         diags,
     );
-    assert!(diags[0].message.contains("$frist"));
+    assert!(message_text(&diags[0].message).contains("$frist"));
 }
 
 #[test]
@@ -2367,7 +2378,7 @@ class Person {
         "A typo inside an arrow-bodied hook should be flagged. Got: {:?}",
         diags,
     );
-    assert!(diags[0].message.contains("$frist"));
+    assert!(message_text(&diags[0].message).contains("$frist"));
 }
 
 #[test]
@@ -2389,7 +2400,7 @@ class Person {
         "A typo inside a promoted property's hook should be flagged. Got: {:?}",
         diags,
     );
-    assert!(diags[0].message.contains("$frist"));
+    assert!(message_text(&diags[0].message).contains("$frist"));
 }
 
 #[test]
@@ -2481,7 +2492,7 @@ class Person {
         "Each hook is its own scope. Got: {:?}",
         diags,
     );
-    assert!(diags[0].message.contains("$local"));
+    assert!(message_text(&diags[0].message).contains("$local"));
 }
 
 /// A parameter named inside a closure type is part of the type, not the
@@ -2498,7 +2509,9 @@ function test(): void {
 "#,
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("$x")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("$x")),
         "`$x` is only a parameter of the closure type, got: {diags:?}"
     );
 }

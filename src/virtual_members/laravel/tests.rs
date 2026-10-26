@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{
     make_class, make_method, make_method_with_params, make_param, no_loader,
@@ -28,7 +29,8 @@ fn applies_to_model_subclass() {
     user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -52,13 +54,16 @@ fn model_type_operators_preserve_unions_keys_and_nested_positions() {
     user_builder.parent_class = Some(atom(ELOQUENT_BUILDER_FQN));
     let mut post = make_class("App\\Models\\Post");
     post.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
-    let loader = |name: &str| match name {
-        ELOQUENT_MODEL_FQN => Some(Arc::new(model.clone())),
-        ELOQUENT_BUILDER_FQN => Some(Arc::new(make_class(ELOQUENT_BUILDER_FQN))),
-        "App\\Models\\User" => Some(Arc::new(user.clone())),
-        "App\\Models\\Post" => Some(Arc::new(post.clone())),
-        "App\\Builders\\UserBuilder" => Some(Arc::new(user_builder.clone())),
-        _ => None,
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        match name {
+            ELOQUENT_MODEL_FQN => Some(Arc::new(model.clone())),
+            ELOQUENT_BUILDER_FQN => Some(Arc::new(make_class(ELOQUENT_BUILDER_FQN))),
+            "App\\Models\\User" => Some(Arc::new(user.clone())),
+            "App\\Models\\Post" => Some(Arc::new(post.clone())),
+            "App\\Builders\\UserBuilder" => Some(Arc::new(user_builder.clone())),
+            _ => None,
+        }
     };
     assert_eq!(
         expand_model_type(
@@ -109,11 +114,14 @@ fn model_type_operators_fall_back_to_the_framework_base_classes() {
     user.laravel_mut().custom_builder = Some(PhpType::named(atom("App\\Builders\\Missing")));
     user.laravel_mut().custom_collection = Some(PhpType::named(atom("App\\Collections\\Missing")));
     let service = make_class("App\\Services\\NotAModel");
-    let loader = |name: &str| match name {
-        ELOQUENT_MODEL_FQN => Some(Arc::new(model.clone())),
-        "App\\Models\\User" => Some(Arc::new(user.clone())),
-        "App\\Services\\NotAModel" => Some(Arc::new(service.clone())),
-        _ => None,
+    let loader = |name: Fqn<'_>| {
+        let name = name.as_str();
+        match name {
+            ELOQUENT_MODEL_FQN => Some(Arc::new(model.clone())),
+            "App\\Models\\User" => Some(Arc::new(user.clone())),
+            "App\\Services\\NotAModel" => Some(Arc::new(service.clone())),
+            _ => None,
+        }
     };
 
     let model_named = PhpType::named(atom(ELOQUENT_MODEL_FQN));
@@ -302,7 +310,7 @@ fn schema_id_column_takes_precedence_over_implicit_primary_key() {
         parse_schema_dump("primary", "CREATE TABLE users (id bigint NOT NULL);"),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     let ids: Vec<_> = result
@@ -332,7 +340,7 @@ fn synthesizes_schema_columns_with_cast_source_precedence() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     let email = result
@@ -382,7 +390,7 @@ fn cast_source_includes_attribute_default() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     let active = result
@@ -419,7 +427,7 @@ fn schema_timestamp_columns_keep_database_source_and_configured_date_type() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     let created_at = result
@@ -457,7 +465,7 @@ fn schema_lookup_uses_snake_plural_table_convention() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&category, &no_loader, Some(&cache));
     assert!(result.properties.iter().any(|p| p.name == "label"));
@@ -478,7 +486,7 @@ fn schema_lookup_skips_convention_when_get_table_is_overridden() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     assert!(!result.properties.iter().any(|p| p.name == "email"));
@@ -500,7 +508,7 @@ fn explicit_table_still_allows_schema_lookup_when_get_table_exists() {
         ),
     );
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     assert!(result.properties.iter().any(|p| p.name == "email"));
@@ -1251,7 +1259,8 @@ fn provide_includes_builder_forwarded_methods() {
         ),
     ]);
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_BUILDER_FQN {
@@ -1307,7 +1316,8 @@ fn provide_scope_beats_builder_method_with_same_name() {
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
     let builder = make_builder(vec![make_method("where", Some("static"))]);
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_BUILDER_FQN {
@@ -1352,7 +1362,8 @@ fn synthesizes_legacy_accessor_property() {
     )));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -1386,7 +1397,8 @@ fn synthesizes_modern_accessor_property() {
     )));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -1419,7 +1431,8 @@ fn synthesizes_modern_accessor_property_with_generic_type() {
     )));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -1459,7 +1472,7 @@ fn schema_backed_modern_accessor_keeps_accessor_source() {
     assert!(tables[0].column("name").is_some());
     let schema = SchemaIndex::from_tables(Some("primary".to_string()), tables);
     let cache = crate::virtual_members::new_resolved_class_cache();
-    cache.write().set_schema_index(schema);
+    cache.write().laravel_mut().set_schema_index(schema);
 
     let result = provider.provide(&user, &no_loader, Some(&cache));
     let prop = result
@@ -1491,7 +1504,8 @@ fn synthesizes_modern_accessor_property_short_name_generic() {
         .push(Arc::new(make_method("age", Some("Attribute<int>"))));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -1520,7 +1534,8 @@ fn accessor_and_relationship_coexist() {
     )));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -1550,7 +1565,8 @@ fn get_attribute_method_not_treated_as_accessor() {
         .push(Arc::new(make_method("getAttribute", Some("mixed"))));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -1598,7 +1614,8 @@ fn accessor_scope_and_relationship_all_coexist() {
     )));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -1633,7 +1650,8 @@ fn legacy_accessor_preserves_deprecated() {
     user.methods.push(Arc::new(accessor));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -1664,7 +1682,8 @@ fn synthesizes_property_from_body_inferred_has_many() {
         .push(Arc::new(make_method("posts", Some("HasMany<Post>"))));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -1692,7 +1711,8 @@ fn synthesizes_property_from_body_inferred_morph_to() {
         .push(Arc::new(make_method("commentable", Some("MorphTo"))));
 
     let model = make_class("Illuminate\\Database\\Eloquent\\Model");
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Model" {
             Some(Arc::new(model.clone()))
         } else {
@@ -2707,7 +2727,8 @@ fn builder_scope_returns_empty_when_model_not_found() {
 
 #[test]
 fn builder_scope_returns_empty_for_non_model() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Plain" {
             Some(Arc::new(make_class("App\\Models\\Plain")))
         } else {
@@ -2732,7 +2753,8 @@ fn builder_scope_extracts_scope_methods_as_instance() {
         .methods
         .push(Arc::new(make_method("getName", Some("string"))));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\User" {
             Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_MODEL_FQN {
@@ -2770,7 +2792,8 @@ fn builder_scope_substitutes_static_in_return_type() {
         .methods
         .push(Arc::new(make_method("scopePopular", Some("void"))));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Brand" {
             Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_MODEL_FQN {
@@ -2811,7 +2834,8 @@ fn builder_scope_strips_query_parameter() {
         ],
     )));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Task" {
             Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_MODEL_FQN {
@@ -2839,7 +2863,8 @@ fn builder_scope_with_custom_return_type() {
         Some("\\Illuminate\\Database\\Eloquent\\Builder<static>"),
     )));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Post" {
             Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_MODEL_FQN {
@@ -2869,7 +2894,8 @@ fn builder_scope_preserves_deprecated() {
     scope.extras_mut().deprecation_message = Some("Use scopeNew() instead".into());
     model.methods.push(Arc::new(scope));
 
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Models\\Item" {
             Some(Arc::new(model.clone()))
         } else if name == ELOQUENT_MODEL_FQN {
@@ -2888,7 +2914,8 @@ fn builder_scope_preserves_deprecated() {
 
 /// Loader for a model that collects into a non-generic custom collection
 /// (the common `@extends Collection<int, User>` shape).
-fn collection_loader(name: &str) -> Option<Arc<ClassInfo>> {
+fn collection_loader(name: Fqn<'_>) -> Option<Arc<ClassInfo>> {
+    let name = name.as_str();
     match name {
         "App\\Models\\User" => {
             let mut user = make_class("App\\Models\\User");
@@ -2918,13 +2945,14 @@ fn replace_eloquent_collection_in_return_type() {
 
 #[test]
 fn replace_eloquent_collection_keeps_arity_of_a_generic_collection() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Collections\\UserCollection" {
             let mut coll = make_class("App\\Collections\\UserCollection");
             coll.template_params = vec![atom("TKey"), atom("TModel")];
             Some(Arc::new(coll))
         } else {
-            collection_loader(name)
+            collection_loader(Fqn::new(name))
         }
     };
     let result = replace_eloquent_collections_in_type(

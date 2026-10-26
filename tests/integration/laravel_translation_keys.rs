@@ -14,8 +14,8 @@ use crate::common::{
     create_psr4_workspace, definitions_at, hover_on, messages_with_code, open_blade_template,
     position_after,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// An application that also carries a package under `packages/billing`,
 /// autoloaded from the root `composer.json` the way a path package is.
@@ -105,7 +105,7 @@ async fn workspace(
     composer: &str,
     files: &[(&str, &str)],
     body: &str,
-) -> (phpantom_lsp::Backend, tempfile::TempDir, Url, String) {
+) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri, String) {
     let content = caller(body);
     let mut all: Vec<(&str, &str)> = files.to_vec();
     all.push(("app/Demo.php", content.as_str()));
@@ -116,7 +116,7 @@ async fn workspace(
 }
 
 /// The `invalid_laravel_trans` messages the slow pass reports on `uri`.
-fn trans_diagnostics(backend: &phpantom_lsp::Backend, uri: &Url, content: &str) -> Vec<String> {
+fn trans_diagnostics(backend: &phpantom_lsp::Backend, uri: &Uri, content: &str) -> Vec<String> {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diags);
     messages_with_code(&diags, "invalid_laravel_trans")
@@ -1074,7 +1074,7 @@ async fn completion_offers_package_keys_under_their_namespace() {
 
 /// Open `template` as `resources/views/welcome.blade.php` in a scanned
 /// workspace that ships `lang/en/messages.php`.
-async fn blade_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+async fn blade_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(
         LARAVEL_APP_COMPOSER,
         &[

@@ -21,7 +21,7 @@ pub(crate) fn apply_member_exists_narrowing<'b>(
         let var_names = scope_keys_named_by(operand, scope);
         for var_name in &var_names {
             let Some((member, is_method, negated)) =
-                narrowing::try_extract_member_exists_guard(operand, var_name)
+                condition_facts::try_extract_member_exists_guard(operand, var_name)
             else {
                 continue;
             };

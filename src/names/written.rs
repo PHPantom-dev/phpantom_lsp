@@ -6,6 +6,7 @@
 //! name no class answers to still comes out as the FQN PHP reads it, so a
 //! later lookup cannot land on a global class of the same short name.
 
+use crate::class_lookup::{Fqn, ResolvedClassLoader, SourceClassLoader};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -130,10 +131,10 @@ pub(crate) fn shorten_type_for_file(
     ty: &crate::php_type::PhpType,
     use_map: &HashMap<String, String>,
     namespace: &Option<String>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> crate::php_type::PhpType {
     ty.resolve_names(&|name| {
-        if crate::class_lookup::load_resolved_name(name, class_loader).is_some() {
+        if class_loader(Fqn::new(name)).is_some() {
             shorten_class_fqn(name, use_map, namespace)
         } else {
             shorten_from_fqn(name, use_map, namespace)
@@ -172,9 +173,9 @@ fn shorten_to_import_or_namespace(
 /// or already-resolved type hints).
 pub(crate) fn resolve_name_via_loader(
     name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> String {
-    class_loader(name)
+    class_loader(Fqn::new(name))
         .map(|cls| cls.fqn().to_string())
         .unwrap_or_else(|| name.to_string())
 }
@@ -183,7 +184,7 @@ fn find_source_class_name(
     name: &str,
     namespace: Option<&str>,
     local_classes: &[Arc<crate::types::ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
 ) -> Option<String> {
     if !name.contains('\\')
         && let Some(local) = local_classes.iter().find(|c| {
@@ -227,7 +228,7 @@ pub(crate) fn resolve_code_class_name(
     namespace: Option<&str>,
     imports: Option<&HashMap<String, String>>,
     local_classes: &[Arc<crate::types::ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+    class_loader: &SourceClassLoader<'_>,
 ) -> String {
     find_source_class_name(name, namespace, local_classes, class_loader)
         .or_else(|| qualify_unknown_code_name(name, namespace, imports))
@@ -293,17 +294,23 @@ fn namespace_relative_code_name<'a>(
         .then_some(ns)
 }
 
-/// Resolve all class names inside a [`PhpType`] to their fully-qualified
-/// forms using the class loader.  Scalar/keyword types are left untouched.
+/// Resolve all class names inside a [`PhpType`] written in source to their
+/// fully-qualified forms through `source_class_loader`, keeping a name no
+/// class answers to as written.  Scalar/keyword types are left untouched.
 ///
 /// This should be called on any `PhpType` that originates from raw source
 /// text (docblock annotations, AST identifiers) before it is stored in a
 /// [`ResolvedType`](crate::types::ResolvedType).
 pub(crate) fn resolve_php_type_names(
     ty: &crate::php_type::PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+    source_class_loader: &SourceClassLoader<'_>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> crate::php_type::PhpType {
-    let resolved = ty.resolve_names(&|name| resolve_name_via_loader(name, class_loader));
+    let resolved = ty.resolve_names(&|name| {
+        source_class_loader(name)
+            .map(|cls| cls.fqn().to_string())
+            .unwrap_or_else(|| name.to_string())
+    });
     fill_generic_type_defaults(&resolved, class_loader)
 }
 
@@ -332,9 +339,9 @@ pub(crate) fn resolve_php_type_names(
 /// key slot for every consumer that reads the arguments positionally.
 ///
 /// [`build_generic_subs`]: crate::inheritance::build_generic_subs
-fn fill_generic_type_defaults(
+pub(crate) fn fill_generic_type_defaults(
     ty: &crate::php_type::PhpType,
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> crate::php_type::PhpType {
     use crate::php_type::{PhpType, TypeKind};
 
@@ -345,10 +352,7 @@ fn fill_generic_type_defaults(
                 .iter()
                 .map(|a| fill_generic_type_defaults(a, class_loader))
                 .collect();
-            // The name is already resolved, so a source-name loader must not
-            // resolve a global FQN such as `Iterator` against the file's
-            // namespace again.
-            let fq_class = crate::class_lookup::load_resolved_name(g.name.as_str(), class_loader);
+            let fq_class = class_loader(Fqn::new(&g.name));
             let filled_args = fq_class.and_then(|cls| {
                 let written = args.len();
                 let offset = crate::inheritance::generic_arg_offset(&cls, written);
@@ -381,17 +385,19 @@ fn fill_generic_type_defaults(
 /// parameter, a closure's return type, a `catch`), where every name is a
 /// class: each one follows [`resolve_code_class_name`], so a name no class
 /// answers to is still qualified the way PHP reads it.
+///
+/// Unlike [`resolve_php_type_names`], omitted generic arguments are left
+/// for the caller to fill with [`fill_generic_type_defaults`].
 pub(crate) fn resolve_code_php_type_names(
     ty: &crate::php_type::PhpType,
     namespace: Option<&str>,
     imports: Option<&HashMap<String, String>>,
     local_classes: &[Arc<crate::types::ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+    source_class_loader: &SourceClassLoader<'_>,
 ) -> crate::php_type::PhpType {
-    let resolved = ty.resolve_names(&|name| {
-        resolve_code_class_name(name, namespace, imports, local_classes, class_loader)
-    });
-    fill_generic_type_defaults(&resolved, class_loader)
+    ty.resolve_names(&|name| {
+        resolve_code_class_name(name, namespace, imports, local_classes, source_class_loader)
+    })
 }
 
 /// [`resolve_php_type_names`] for a type written as source the reader
@@ -410,6 +416,9 @@ pub(crate) fn resolve_code_php_type_names(
 /// parameter or a type alias for a declaration that reaches `region`
 /// (see [`written_name_region`]).  Those keep their spelling for the
 /// declaration in scope to read.
+///
+/// Omitted generic arguments are left for the caller to fill with
+/// [`fill_generic_type_defaults`].
 pub(crate) fn resolve_source_php_type_names(
     ty: &crate::php_type::PhpType,
     namespace: Option<&str>,
@@ -417,17 +426,16 @@ pub(crate) fn resolve_source_php_type_names(
     content: &str,
     region: (u32, u32),
     local_classes: &[Arc<crate::types::ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+    source_class_loader: &SourceClassLoader<'_>,
 ) -> crate::php_type::PhpType {
-    let resolved = ty.resolve_names(&|name| {
-        find_source_class_name(name, namespace, local_classes, class_loader)
+    ty.resolve_names(&|name| {
+        find_source_class_name(name, namespace, local_classes, source_class_loader)
             .or_else(|| {
                 qualify_unknown_code_name(name, namespace, imports)
                     .filter(|_| !declares_docblock_type_name(content, name, region))
             })
             .unwrap_or_else(|| name.to_string())
-    });
-    fill_generic_type_defaults(&resolved, class_loader)
+    })
 }
 
 /// The byte range of `content` a type written at `cursor_offset` inside

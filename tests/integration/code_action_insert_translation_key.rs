@@ -1,22 +1,22 @@
 use crate::common::{create_psr4_workspace, lsp_pos_to_offset, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str =
     r#"{"require":{"laravel/framework":"^13.0"},"autoload":{"psr-4":{"App\\":"src/"}}}"#;
 
 fn translation_diagnostics(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     content: &str,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
-    diagnostics.into_iter().filter(|diagnostic| matches!(&diagnostic.code, Some(NumberOrString::String(code)) if code == "invalid_laravel_trans")).collect()
+    diagnostics.into_iter().filter(|diagnostic| matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_trans")).collect()
 }
 
 fn actions(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     content: &str,
     diagnostics: Vec<Diagnostic>,
 ) -> Vec<CodeAction> {
@@ -29,7 +29,7 @@ fn actions(
                 range: Range::new(Position::new(0, 0), Position::new(100, 0)),
                 context: CodeActionContext {
                     diagnostics,
-                    only: Some(vec![CodeActionKind::QUICKFIX]),
+                    only: Some(vec![CodeActionKind::QuickFix]),
                     trigger_kind: None,
                 },
                 work_done_progress_params: Default::default(),
@@ -38,7 +38,7 @@ fn actions(
         )
         .into_iter()
         .filter_map(|action| match action {
-            CodeActionOrCommand::CodeAction(action)
+            CodeActionResponse::CodeAction(action)
                 if action.title.starts_with("Insert translation") =>
             {
                 Some(action)
@@ -60,14 +60,14 @@ async fn translation_insertion_quick_fix_edits_existing_groups_in_both_roots() {
             ("resources/lang/fr/messages.php", lang),
         ],
     );
-    let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
     open_php(&backend, &uri, source).await;
     let diagnostics = translation_diagnostics(&backend, &uri, source);
     assert_eq!(diagnostics.len(), 1);
     let fixes = actions(&backend, &uri, source, diagnostics.clone());
     assert_eq!(fixes.len(), 2);
     for fix in fixes {
-        assert_eq!(fix.kind, Some(CodeActionKind::QUICKFIX));
+        assert_eq!(fix.kind, Some(CodeActionKind::QuickFix));
         assert_eq!(fix.diagnostics, Some(diagnostics.clone()));
         let edit = fix.edit.unwrap();
         assert!(edit.document_changes.is_none(), "must not create files");
@@ -108,7 +108,7 @@ async fn translation_insertion_quick_fix_passes_over_an_undecodable_key() {
         COMPOSER,
         &[("src/usage.php", source), ("lang/en/messages.php", lang)],
     );
-    let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
     open_php(&backend, &uri, source).await;
     let diagnostics = translation_diagnostics(&backend, &uri, source);
     assert_eq!(diagnostics.len(), 1);
@@ -159,7 +159,7 @@ async fn translation_insertion_quick_fix_leaves_installed_packages_alone() {
         .flat_map(|fix| fix.edit.unwrap().changes.unwrap().into_keys())
         .map(|file| file.to_string())
         .collect();
-    let published = Url::from_file_path(dir.path().join("lang/vendor/billing/en/invoice.php"))
+    let published = Uri::from_file_path(dir.path().join("lang/vendor/billing/en/invoice.php"))
         .unwrap()
         .to_string();
     assert_eq!(targets, vec![published]);
@@ -178,7 +178,7 @@ async fn translation_insertion_quick_fix_requires_a_diagnostic_and_existing_safe
             ),
         ],
     );
-    let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
     open_php(&backend, &uri, source).await;
     assert!(actions(&backend, &uri, source, vec![]).is_empty());
     let diagnostics = translation_diagnostics(&backend, &uri, source);

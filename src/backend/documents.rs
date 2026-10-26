@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::server::{run_blocking_cancel_safe, spawn_blocking_detached};
@@ -18,20 +18,24 @@ impl Backend {
 
         // Track files opened with languageId "blade" so they get
         // Blade preprocessing even without a .blade.php extension.
-        if doc.language_id == "blade" && !crate::blade::is_blade_file(&uri) {
-            self.blade_uris.write().insert(uri.clone());
+        if doc.language_id.as_str() == "blade" && !crate::blade::is_blade_file(&uri) {
+            self.blade.uris.write().insert(uri.clone());
         }
 
         self.open_files
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        // A file that can be a Twig template is one only once root
+        // discovery has seen what it references.
+        self.note_twig_source(&uri, &text);
+
         // Resource documents are not PHP source. Build a lightweight symbol
         // map so navigation, references, rename, and PHP declaration lenses
         // all consume the same indexed occurrences.
-        if crate::resource_navigation::is_resource_document(&uri) {
+        if self.is_resource_uri(&uri) {
             self.update_resource_symbol_index(&uri, &text);
-            self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
+            self.log(MessageType::Info, format!("Opened resource file: {}", uri))
                 .await;
             return;
         }
@@ -75,12 +79,16 @@ impl Backend {
         // `did_save`.)
         self.schedule_external_diagnostics(uri.clone());
 
-        self.log(MessageType::INFO, format!("Opened file: {}", uri))
+        self.log(MessageType::Info, format!("Opened file: {}", uri))
             .await;
     }
 
     pub(crate) async fn on_did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri.to_string();
+        let uri = params
+            .text_document
+            .text_document_identifier
+            .uri
+            .to_string();
 
         if params.content_changes.is_empty() {
             return;
@@ -98,18 +106,25 @@ impl Backend {
             drop(open_files);
 
             for change in &params.content_changes {
-                if let Some(range) = change.range {
-                    let start =
-                        crate::text_position::position_to_byte_offset(&current, range.start);
-                    let end = crate::text_position::position_to_byte_offset(&current, range.end);
-                    // A range whose start lies after its end would panic
-                    // `replace_range`, and this runs on the service loop
-                    // where a panic takes the whole server down.
-                    let (start, end) = (start.min(end), start.max(end));
-                    current.replace_range(start..end, &change.text);
-                } else {
-                    // Full content replacement (fallback)
-                    current = change.text.clone();
+                match change {
+                    TextDocumentContentChangeEvent::TextDocumentContentChangePartial(partial) => {
+                        let range = partial.range;
+                        let start =
+                            crate::text_position::position_to_byte_offset(&current, range.start);
+                        let end =
+                            crate::text_position::position_to_byte_offset(&current, range.end);
+                        // A range whose start lies after its end would panic
+                        // `replace_range`, and this runs on the service loop
+                        // where a panic takes the whole server down.
+                        let (start, end) = (start.min(end), start.max(end));
+                        current.replace_range(start..end, &partial.text);
+                    }
+                    TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                        whole,
+                    ) => {
+                        // Full content replacement (fallback)
+                        current = whole.text.clone();
+                    }
                 }
             }
             Arc::new(current)
@@ -125,7 +140,7 @@ impl Backend {
         // service loop for every keystroke would stall interactive
         // requests, and refreshing lenses per keystroke would make the
         // client re-pull them faster than it can render them.
-        if crate::resource_navigation::is_resource_document(&uri) {
+        if self.is_resource_uri(&uri) {
             if self.sync_ast_updates {
                 self.update_resource_symbol_index(&uri, &text);
                 return;
@@ -228,7 +243,7 @@ impl Backend {
         // across an editing session.
         self.whole_file_coalesce.forget_uri(&uri);
 
-        if crate::resource_navigation::is_resource_document(&uri) {
+        if self.is_resource_uri(&uri) {
             if let Some(content) = self.get_file_content(&uri) {
                 self.update_resource_symbol_index(&uri, &content);
             } else {
@@ -242,12 +257,13 @@ impl Backend {
             // for a provider or config file) goes to a blocking task, as
             // `did_change` does, so closing a file does not stall the
             // service loop.
-            let reparse = move |backend: &Backend, uri: &str| match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    backend.update_ast(uri, &content);
-                }
-                Err(_) => backend.forget_closed_file(uri),
-            };
+            let reparse =
+                move |backend: &Backend, uri: &str| match crate::util::read_php_source(&path) {
+                    Some(content) => {
+                        backend.update_ast(uri, &content);
+                    }
+                    None => backend.forget_closed_file(uri),
+                };
             if self.sync_ast_updates {
                 reparse(self, &uri);
             } else {
@@ -272,13 +288,13 @@ impl Backend {
         // Clear diagnostics so stale warnings don't linger after the file is closed
         self.clear_diagnostics_for_file(&uri).await;
 
-        self.log(MessageType::INFO, format!("Closed file: {}", uri))
+        self.log(MessageType::Info, format!("Closed file: {}", uri))
             .await;
     }
 
     pub(crate) async fn on_did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
-        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_resource = self.is_resource_uri(&uri);
 
         if let Some(text) = params.text {
             let text = Arc::new(text);
@@ -293,6 +309,17 @@ impl Backend {
         }
 
         if is_resource {
+            return;
+        }
+
+        // A file that can be a Twig template but is none yet may have just
+        // started naming one, which can make it a template.  Its edits are
+        // only read for that once saved.
+        if self.is_twig_project() && crate::twig::roots::is_candidate_uri(&uri) {
+            let content = self.open_files.read().get(&uri).cloned();
+            if let Some(content) = content {
+                self.update_resource_symbol_index(&uri, &content);
+            }
             return;
         }
 

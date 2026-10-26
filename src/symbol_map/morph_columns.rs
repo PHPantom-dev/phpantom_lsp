@@ -44,9 +44,9 @@ impl MorphColumnSite {
         super::SymbolSpan {
             start: self.start,
             end: self.end,
-            kind: super::SymbolKind::LaravelStringKey {
+            kind: super::SymbolKind::StringKey {
                 key: self.key.clone(),
-                kind: super::LaravelStringKind::MorphAlias,
+                kind: super::StringKeyKind::MorphAlias,
                 is_write: false,
                 is_optional: false,
             },

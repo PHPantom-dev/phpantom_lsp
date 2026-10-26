@@ -10,7 +10,7 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -116,7 +116,7 @@ pub(crate) fn resolve_path_helper_definition(
     }
 
     Some(crate::definition::point_location(
-        Url::from_file_path(&target).ok()?,
+        crate::util::path_to_url(&target)?,
         Position::new(0, 0),
     ))
 }
@@ -163,7 +163,7 @@ fn path_helper_root(backend: &Backend, content: &str) -> Option<PathBuf> {
     if !content.contains("_path(") {
         return None;
     }
-    if !backend.resolved_class_cache.read().is_laravel() {
+    if !backend.resolved_class_cache.read().laravel().is_enabled() {
         return None;
     }
     backend.workspace.workspace_root.read().clone()

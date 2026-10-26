@@ -1,9 +1,11 @@
 //! Integration tests for resolving the authenticated-user model from
 //! `config/auth.php` (`Request::user()` / `Guard::user()`).
 
-use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php_at};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{
+    complete_labels_at_opened, completion_response, create_psr4_workspace, goto_definition_at,
+    open_php, open_php_at,
+};
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "autoload": {
@@ -530,35 +532,16 @@ class StoreRequest extends FormRequest {
 }
 ";
     let (backend, dir) = create_psr4_workspace(COMPOSER, &files);
-    let uri = Url::from_file_path(dir.path().join("src/StoreRequest.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: form_request.to_string(),
-            },
-        })
-        .await;
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 5,
-                    character: 23,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/StoreRequest.php")).unwrap();
+    open_php(&backend, &uri, form_request).await;
+    let result = completion_response(&backend, &uri, 5, 23, None).await;
     let labels: Vec<String> = match result {
-        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-        Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
+        Some(CompletionResponse::CompletionItemList(items)) => {
+            items.into_iter().map(|i| i.label).collect()
+        }
+        Some(CompletionResponse::CompletionList(list)) => {
+            list.items.into_iter().map(|i| i.label).collect()
+        }
         _ => Vec::new(),
     };
     assert!(
@@ -651,39 +634,17 @@ class C {
         ("src/helpers.php", AUTH_HELPER_PHP),
         ("src/C.php", controller),
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
+        open_php(&backend, &uri, text).await;
     }
 
     // Cursor on `isSuperUser` in `auth('admin')->user()->isSuperUser()`.
-    let uri = Url::from_file_path(dir.path().join("src/C.php")).unwrap();
-    let result = backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 4,
-                    character: 33,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/C.php")).unwrap();
+    let result = goto_definition_at(&backend, &uri, 4, 33).await;
 
     let location = match result.expect("isSuperUser() should resolve on the admin guard's model") {
-        GotoDefinitionResponse::Scalar(location) => location,
-        GotoDefinitionResponse::Array(locations) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => location,
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => {
             locations.into_iter().next().expect("at least one location")
         }
         other => panic!("Expected a location, got: {other:?}"),

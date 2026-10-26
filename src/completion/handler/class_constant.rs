@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
@@ -121,7 +121,7 @@ fn append_semicolon_to_insert_text(items: Vec<CompletionItem>) -> Vec<Completion
             // They should not receive a trailing semicolon because
             // the user will continue typing after selecting one
             // (e.g. `use App\Models\` → pick a class next).
-            if item.kind == Some(CompletionItemKind::MODULE) {
+            if item.kind == Some(CompletionItemKind::Module) {
                 return item;
             }
             if let Some(ref mut text) = item.insert_text
@@ -129,7 +129,7 @@ fn append_semicolon_to_insert_text(items: Vec<CompletionItem>) -> Vec<Completion
             {
                 text.push(';');
             }
-            if let Some(CompletionTextEdit::Edit(ref mut edit)) = item.text_edit
+            if let Some(CompletionItemTextEdit::TextEdit(ref mut edit)) = item.text_edit
                 && !edit.new_text.ends_with(';')
             {
                 edit.new_text.push(';');
@@ -169,7 +169,7 @@ impl Backend {
                 .enumerate()
                 .map(|(idx, t)| CompletionItem {
                     label: t.to_string(),
-                    kind: Some(CompletionItemKind::KEYWORD),
+                    kind: Some(CompletionItemKind::Keyword),
                     detail: Some("PHP built-in type".to_string()),
                     insert_text: Some(format!("{}{}", space_prefix, t)),
                     filter_text: Some(t.to_string()),
@@ -198,8 +198,8 @@ impl Backend {
                 if let Some(ref txt) = item.insert_text {
                     item.insert_text = Some(format!(" {}", txt));
                 }
-                if let Some(CompletionTextEdit::Edit(ref te)) = item.text_edit {
-                    item.text_edit = Some(CompletionTextEdit::Edit(TextEdit {
+                if let Some(CompletionItemTextEdit::TextEdit(ref te)) = item.text_edit {
+                    item.text_edit = Some(CompletionItemTextEdit::TextEdit(TextEdit {
                         range: te.range,
                         new_text: format!(" {}", te.new_text),
                     }));
@@ -215,9 +215,11 @@ impl Backend {
             // through to named-arg or class+constant+function completion.
             None
         } else {
-            Some(CompletionResponse::List(CompletionList {
+            Some(CompletionResponse::CompletionList(CompletionList {
                 is_incomplete: class_incomplete,
                 items,
+                apply_kind: None,
+                item_defaults: None,
             }))
         }
     }
@@ -250,7 +252,7 @@ impl Backend {
 
             let mut item = CompletionItem {
                 label: keyword.to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
+                kind: Some(CompletionItemKind::Keyword),
                 detail: Some("Instantiate current class".to_string()),
                 filter_text: Some(keyword.to_string()),
                 sort_text: Some(format!("0_{keyword}")),
@@ -261,10 +263,10 @@ impl Backend {
                 let snippet =
                     crate::completion::builder::build_callable_snippet(keyword, &ctor.parameters);
                 item.insert_text = Some(snippet);
-                item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+                item.insert_text_format = Some(InsertTextFormat::Snippet);
             } else {
                 item.insert_text = Some(format!("{}()$0", keyword));
-                item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+                item.insert_text_format = Some(InsertTextFormat::Snippet);
             }
 
             items.push(item);
@@ -276,7 +278,7 @@ impl Backend {
         {
             let mut item = CompletionItem {
                 label: "parent".to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
+                kind: Some(CompletionItemKind::Keyword),
                 detail: Some(format!("Instantiate parent class ({})", parent_name)),
                 filter_text: Some("parent".to_string()),
                 sort_text: Some("0_parent".to_string()),
@@ -290,14 +292,14 @@ impl Backend {
                         &ctor.parameters,
                     );
                     item.insert_text = Some(snippet);
-                    item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+                    item.insert_text_format = Some(InsertTextFormat::Snippet);
                 } else {
                     item.insert_text = Some("parent()$0".to_string());
-                    item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+                    item.insert_text_format = Some(InsertTextFormat::Snippet);
                 }
             } else {
                 item.insert_text = Some("parent()$0".to_string());
-                item.insert_text_format = Some(InsertTextFormat::SNIPPET);
+                item.insert_text_format = Some(InsertTextFormat::Snippet);
             }
 
             items.push(item);
@@ -325,21 +327,21 @@ impl Backend {
 
         let item = CompletionItem {
             label: name.clone(),
-            kind: Some(CompletionItemKind::CLASS),
+            kind: Some(CompletionItemKind::Class),
             detail: Some("Match filename".to_string()),
             insert_text: Some(name),
             ..CompletionItem::default()
         };
 
-        Some(CompletionResponse::Array(vec![item]))
+        Some(CompletionResponse::CompletionItemList(vec![item]))
     }
 
     /// Extract the filename without extension from a `file://` URI.
     ///
     /// For example, `file:///home/user/Test.php` returns `Some("Test")`.
     fn filename_class_name(uri: &str) -> Option<String> {
-        let url = Url::parse(uri).ok()?;
-        let file_path = url.to_file_path().ok()?;
+        let url = crate::util::parse_url(uri)?;
+        let file_path = crate::util::url_to_path(&url)?;
         let stem = file_path.file_stem()?;
         let name = stem.to_string_lossy();
         if name.is_empty() {
@@ -373,7 +375,7 @@ impl Backend {
             if items.is_empty() {
                 return None;
             }
-            return Some(CompletionResponse::Array(items));
+            return Some(CompletionResponse::CompletionItemList(items));
         }
 
         // Method/function/const *names* are not type/class positions.
@@ -388,13 +390,12 @@ impl Backend {
         let class_ctx = detect_class_name_context(content, position);
         let keyword_ctx = {
             let cursor_offset = position_to_offset(content, position);
-            let maps = self.symbol_maps.read();
-            let map = maps.get(current_uri);
+            let map = self.symbol_map_for(current_uri);
             crate::completion::keyword_completion::build_keyword_context(
                 content,
                 position,
                 cursor_offset,
-                map.map(|m| m.as_ref()),
+                map.as_deref(),
                 &ctx.classes,
             )
         };
@@ -421,7 +422,7 @@ impl Backend {
                     if items.is_empty() {
                         return None;
                     }
-                    return Some(CompletionResponse::Array(items));
+                    return Some(CompletionResponse::CompletionItemList(items));
                 } else {
                     return None;
                 }
@@ -440,9 +441,11 @@ impl Backend {
             );
             let function_items = filter_current_file_functions(function_items, current_uri, self);
             let items = append_semicolon_to_insert_text(function_items);
-            return Some(CompletionResponse::List(CompletionList {
+            return Some(CompletionResponse::CompletionList(CompletionList {
                 is_incomplete: func_incomplete,
                 items,
+                apply_kind: None,
+                item_defaults: None,
             }));
         }
 
@@ -452,9 +455,11 @@ impl Backend {
                 self.build_constant_completions(&partial, current_uri, position);
             let constant_items = filter_current_file_constants(constant_items, current_uri, self);
             let items = append_semicolon_to_insert_text(constant_items);
-            return Some(CompletionResponse::List(CompletionList {
+            return Some(CompletionResponse::CompletionList(CompletionList {
                 is_incomplete: const_incomplete,
                 items,
+                apply_kind: None,
+                item_defaults: None,
             }));
         }
 
@@ -462,9 +467,11 @@ impl Backend {
         if matches!(class_ctx, ClassNameContext::NamespaceDeclaration) {
             let (ns_items, ns_incomplete) =
                 self.build_namespace_completions(&partial, position, current_uri);
-            return Some(CompletionResponse::List(CompletionList {
+            return Some(CompletionResponse::CompletionList(CompletionList {
                 is_incomplete: ns_incomplete,
                 items: ns_items,
+                apply_kind: None,
+                item_defaults: None,
             }));
         }
 
@@ -523,7 +530,7 @@ impl Backend {
                     0,
                     CompletionItem {
                         label: "function".to_string(),
-                        kind: Some(CompletionItemKind::KEYWORD),
+                        kind: Some(CompletionItemKind::Keyword),
                         detail: Some("use function import".to_string()),
                         insert_text: Some("function ".to_string()),
                         filter_text: Some("function".to_string()),
@@ -537,7 +544,7 @@ impl Backend {
                     0,
                     CompletionItem {
                         label: "const".to_string(),
-                        kind: Some(CompletionItemKind::KEYWORD),
+                        kind: Some(CompletionItemKind::Keyword),
                         detail: Some("use const import".to_string()),
                         insert_text: Some("const ".to_string()),
                         filter_text: Some("const".to_string()),
@@ -546,9 +553,11 @@ impl Backend {
                     },
                 );
             }
-            return Some(CompletionResponse::List(CompletionList {
+            return Some(CompletionResponse::CompletionList(CompletionList {
                 is_incomplete: class_incomplete,
                 items,
+                apply_kind: None,
+                item_defaults: None,
             }));
         }
 
@@ -575,9 +584,11 @@ impl Backend {
                 return None;
             }
 
-            return Some(CompletionResponse::List(CompletionList {
+            return Some(CompletionResponse::CompletionList(CompletionList {
                 is_incomplete: class_incomplete,
                 items,
+                apply_kind: None,
+                item_defaults: None,
             }));
         }
 
@@ -618,9 +629,11 @@ impl Backend {
             items
         };
 
-        Some(CompletionResponse::List(CompletionList {
+        Some(CompletionResponse::CompletionList(CompletionList {
             is_incomplete: class_incomplete || const_incomplete || func_incomplete,
             items,
+            apply_kind: None,
+            item_defaults: None,
         }))
     }
 }

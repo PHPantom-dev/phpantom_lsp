@@ -6,33 +6,37 @@ use crate::common::{
     prepare_rename, rename,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Namespace rename tests ─────────────────────────────────────────────────
 
 #[tokio::test]
 async fn prepare_rename_namespace_returns_full_range() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///a.php").unwrap();
+    let uri = Uri::parse("file:///a.php").unwrap();
     let text = "<?php\nnamespace App\\Models\\User;\nclass User {}\n";
     open_php(&backend, &uri, text).await;
 
     // Cursor on "Models" (line 1, char 14 is inside the namespace).
     let resp = prepare_rename(&backend, &uri, 1, 14).await;
     assert!(resp.is_some(), "Expected prepare rename to succeed");
-    if let Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) = resp {
+    if let Some(PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+        range,
+        placeholder,
+    })) = resp
+    {
         assert_eq!(placeholder, "App\\Models\\User");
         assert_eq!(range.start.character, 10);
         assert_eq!(range.end.character, 25);
     } else {
-        panic!("Expected RangeWithPlaceholder");
+        panic!("Expected PrepareRenamePlaceholder");
     }
 }
 
 #[tokio::test]
 async fn prepare_rename_namespace_first_segment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///a.php").unwrap();
+    let uri = Uri::parse("file:///a.php").unwrap();
     let text = "<?php\nnamespace App\\Models;\nclass Foo {}\n";
     open_php(&backend, &uri, text).await;
 
@@ -42,20 +46,24 @@ async fn prepare_rename_namespace_first_segment() {
         resp.is_some(),
         "Expected prepare rename to succeed for namespace"
     );
-    if let Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) = resp {
+    if let Some(PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+        range,
+        placeholder,
+    })) = resp
+    {
         assert_eq!(placeholder, "App\\Models");
         assert_eq!(range.start.character, 10);
         assert_eq!(range.end.character, 20);
     } else {
-        panic!("Expected RangeWithPlaceholder");
+        panic!("Expected PrepareRenamePlaceholder");
     }
 }
 
 #[tokio::test]
 async fn rename_namespace_full_placeholder_can_replace_multiple_segments() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -94,7 +102,7 @@ async fn rename_namespace_full_placeholder_can_replace_multiple_segments() {
 #[tokio::test]
 async fn rename_namespace_updates_declaration_same_file() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///a.php").unwrap();
+    let uri = Uri::parse("file:///a.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Services;\n",
@@ -123,8 +131,8 @@ async fn rename_namespace_updates_declaration_same_file() {
 #[tokio::test]
 async fn rename_namespace_updates_use_statements_cross_file() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -174,8 +182,8 @@ async fn rename_namespace_updates_use_statements_cross_file() {
 #[tokio::test]
 async fn rename_namespace_updates_a_plain_use_statement_wrapped_across_lines() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -219,8 +227,8 @@ async fn rename_namespace_updates_use_statements_in_unopened_usage_only_file() {
     let _ = std::fs::create_dir_all(&workspace);
 
     let backend = Backend::new_test_with_workspace(workspace.clone(), Vec::new());
-    let uri_a = Url::from_file_path(workspace.join("a.php")).unwrap();
-    let uri_b = Url::from_file_path(workspace.join("b.php")).unwrap();
+    let uri_a = Uri::from_file_path(workspace.join("a.php")).unwrap();
+    let uri_b = Uri::from_file_path(workspace.join("b.php")).unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -262,8 +270,8 @@ async fn rename_namespace_updates_use_statements_in_unopened_usage_only_file() {
 #[tokio::test]
 async fn rename_namespace_root_segment_renames_all_children() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace App\\Models;\n", "class User {}\n",);
 
@@ -308,8 +316,8 @@ async fn rename_namespace_root_segment_renames_all_children() {
 #[tokio::test]
 async fn rename_namespace_preserves_alias_in_use() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace App\\Old;\n", "class Foo {}\n",);
 
@@ -340,8 +348,8 @@ async fn rename_namespace_preserves_alias_in_use() {
 #[tokio::test]
 async fn rename_namespace_updates_group_use() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -381,8 +389,8 @@ async fn rename_namespace_updates_group_use() {
 #[tokio::test]
 async fn rename_namespace_does_not_affect_unrelated_namespaces() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace App\\Models;\n", "class User {}\n",);
 
@@ -410,8 +418,8 @@ async fn rename_namespace_does_not_affect_unrelated_namespaces() {
 #[tokio::test]
 async fn rename_namespace_updates_fqn_in_use_statement_from_symbol_map() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace App\\Services;\n", "class Mailer {}\n",);
 
@@ -450,7 +458,7 @@ async fn rename_namespace_updates_fqn_in_use_statement_from_symbol_map() {
 #[tokio::test]
 async fn rename_namespace_single_segment_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///a.php").unwrap();
+    let uri = Uri::parse("file:///a.php").unwrap();
     let text = concat!("<?php\n", "namespace App;\n", "class Config {}\n",);
     open_php(&backend, &uri, text).await;
 
@@ -489,7 +497,7 @@ async fn rename_namespace_psr4_directory_rename() {
     initialize_with_resource_operations(&backend).await;
 
     let uri =
-        Url::parse("file:///tmp/test_workspace_ns_rename/src/App/Services/Mailer.php").unwrap();
+        Uri::parse("file:///tmp/test_workspace_ns_rename/src/App/Services/Mailer.php").unwrap();
     let text = "<?php\nnamespace App\\Services;\nclass Mailer {}\n";
     open_php(&backend, &uri, text).await;
 
@@ -500,13 +508,10 @@ async fn rename_namespace_psr4_directory_rename() {
     // When PSR-4 applies and client supports file rename, the edit
     // should use document_changes with a RenameFile operation.
     if let Some(ref doc_changes) = edit.document_changes {
-        let rename_file = match doc_changes {
-            DocumentChanges::Operations(ops) => ops.iter().find_map(|op| match op {
-                DocumentChangeOperation::Op(ResourceOp::Rename(rf)) => Some(rf),
-                _ => None,
-            }),
+        let rename_file = doc_changes.iter().find_map(|op| match op {
+            DocumentChange::RenameFile(rf) => Some(rf),
             _ => None,
-        };
+        });
         assert!(
             rename_file.is_some(),
             "Expected a RenameFile operation for PSR-4 directory"
@@ -535,9 +540,9 @@ async fn rename_namespace_psr4_directory_rename() {
 #[tokio::test]
 async fn rename_namespace_multiple_files_same_namespace() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
-    let uri_c = Url::parse("file:///c.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
+    let uri_c = Uri::parse("file:///c.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace App\\Models;\n", "class User {}\n",);
     let text_b = concat!("<?php\n", "namespace App\\Models;\n", "class Post {}\n",);
@@ -586,8 +591,8 @@ async fn rename_namespace_multiple_files_same_namespace() {
 #[tokio::test]
 async fn rename_namespace_keeps_a_rooted_reference_rooted() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace App\\Legacy;\n", "class Widget {}\n",);
     let text_b = concat!(
@@ -616,8 +621,8 @@ async fn rename_namespace_keeps_a_rooted_reference_rooted() {
 #[tokio::test]
 async fn rename_namespace_rewrites_a_qualified_reference_in_a_file_with_no_namespace() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_config = Url::parse("file:///config.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_config = Uri::parse("file:///config.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace App\\Legacy;\n", "class Widget {}\n",);
     let text_config = concat!(
@@ -647,8 +652,8 @@ async fn rename_namespace_rewrites_a_qualified_reference_in_a_file_with_no_names
 #[tokio::test]
 async fn rename_namespace_leaves_a_reference_relative_to_the_moved_namespace_alone() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -687,8 +692,8 @@ async fn rename_namespace_leaves_a_reference_relative_to_the_moved_namespace_alo
 #[tokio::test]
 async fn rename_namespace_respells_a_reference_its_import_no_longer_binds() {
     let backend = create_test_backend();
-    let uri_a = Url::parse("file:///a.php").unwrap();
-    let uri_b = Url::parse("file:///b.php").unwrap();
+    let uri_a = Uri::parse("file:///a.php").unwrap();
+    let uri_b = Uri::parse("file:///b.php").unwrap();
 
     let text_a = concat!("<?php\n", "namespace App\\Legacy;\n", "class Widget {}\n",);
     // `use App\Legacy;` binds `Legacy`, and the move renames that binding
@@ -729,7 +734,7 @@ async fn rename_namespace_respells_a_reference_its_import_no_longer_binds() {
 #[tokio::test]
 async fn test_prepare_rename_phpdoc_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -755,7 +760,7 @@ async fn test_prepare_rename_phpdoc_property() {
 #[tokio::test]
 async fn rename_phpdoc_property_from_usage() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -798,7 +803,7 @@ async fn rename_phpdoc_property_from_usage() {
 #[tokio::test]
 async fn rename_phpdoc_property_from_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -838,7 +843,7 @@ async fn rename_phpdoc_property_from_declaration() {
 #[tokio::test]
 async fn test_rename_phpdoc_method_from_usage() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -877,7 +882,7 @@ async fn test_rename_phpdoc_method_from_usage() {
 #[tokio::test]
 async fn test_prepare_rename_phpdoc_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -899,7 +904,7 @@ async fn test_prepare_rename_phpdoc_method() {
 #[tokio::test]
 async fn rename_phpdoc_property_does_not_leak_to_unrelated_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -937,7 +942,7 @@ async fn rename_phpdoc_property_does_not_leak_to_unrelated_class() {
 #[tokio::test]
 async fn rename_function_param_propagates_into_nested_arrows() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function foo(?bool $abstract = false)\n",
@@ -963,7 +968,7 @@ async fn rename_function_param_propagates_into_nested_arrows() {
 #[tokio::test]
 async fn rename_function_param_propagates_into_deeply_nested_closures_with_use() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function test(string $outer) {\n",
@@ -993,7 +998,7 @@ async fn rename_function_param_propagates_into_deeply_nested_closures_with_use()
 #[tokio::test]
 async fn rename_function_param_propagates_mixed_closure_arrow_nesting() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo($v) {\n",
@@ -1023,20 +1028,24 @@ async fn prepare_rename_class_declaration_returns_fqcn_placeholder() {
     // A class declaration offers the full FQCN as the rename placeholder,
     // so the user can change the namespace to move the class in one edit.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///src/User.php").unwrap();
+    let uri = Uri::parse("file:///src/User.php").unwrap();
     let text = "<?php\nnamespace App\\Models;\nclass User {}\n";
     open_php(&backend, &uri, text).await;
 
     let response = prepare_rename(&backend, &uri, 2, 6).await;
     assert!(response.is_some(), "Expected prepare rename to succeed");
-    if let Some(PrepareRenameResponse::RangeWithPlaceholder { placeholder, range }) = response {
+    if let Some(PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+        placeholder,
+        range,
+    })) = response
+    {
         assert_eq!(placeholder, "App\\Models\\User");
         // The editable range still covers only the short name in source.
         assert_eq!(range.start.line, 2);
         assert_eq!(range.start.character, 6);
         assert_eq!(range.end.character, 10);
     } else {
-        panic!("Expected RangeWithPlaceholder, got {:?}", response);
+        panic!("Expected PrepareRenamePlaceholder, got {:?}", response);
     }
 }
 
@@ -1046,8 +1055,8 @@ async fn rename_class_move_updates_cross_file_usage() {
     // both the `use` statement and inline references in a separate file.
     let backend = create_test_backend();
 
-    let uri_decl = Url::parse("file:///src/TaskResource.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Task.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/TaskResource.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Task.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -1110,8 +1119,8 @@ async fn rename_class_move_adds_import_to_former_namespace_sibling() {
     // the import, or the sibling stops compiling.
     let backend = create_test_backend();
 
-    let uri_decl = Url::parse("file:///src/BuilderHelper.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/BuilderHelper.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Builder.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -1162,8 +1171,8 @@ async fn rename_class_move_adds_import_to_former_namespace_sibling() {
 async fn rename_class_move_adds_import_when_short_name_also_changes() {
     let backend = create_test_backend();
 
-    let uri_decl = Url::parse("file:///src/BuilderHelper.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/BuilderHelper.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Builder.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -1215,9 +1224,9 @@ async fn rename_class_move_aliases_added_import_on_short_name_collision() {
     // and the references rewritten to that alias.
     let backend = create_test_backend();
 
-    let uri_decl = Url::parse("file:///src/Helper.php").unwrap();
-    let uri_other = Url::parse("file:///src/Other/Widget.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/Helper.php").unwrap();
+    let uri_other = Uri::parse("file:///src/Other/Widget.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Builder.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -1277,8 +1286,8 @@ async fn rename_class_move_skips_import_for_fqn_only_reference() {
     // there is nothing for an import to fix.
     let backend = create_test_backend();
 
-    let uri_decl = Url::parse("file:///src/BuilderHelper.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/BuilderHelper.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Builder.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -1330,8 +1339,8 @@ async fn rename_class_move_into_referencing_files_namespace_adds_no_import() {
     // short-name reference keeps resolving without an import.
     let backend = create_test_backend();
 
-    let uri_decl = Url::parse("file:///src/Support/BuilderHelper.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/Support/BuilderHelper.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Builder.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -1375,8 +1384,8 @@ async fn rename_class_move_into_referencing_files_namespace_adds_no_import() {
 async fn rename_class_move_from_global_namespace_adds_import() {
     let backend = create_test_backend();
 
-    let uri_decl = Url::parse("file:///src/Legacy.php").unwrap();
-    let uri_usage = Url::parse("file:///src/Caller.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/Legacy.php").unwrap();
+    let uri_usage = Uri::parse("file:///src/Caller.php").unwrap();
 
     let text_decl = concat!("<?php\n", "\n", "class Legacy {}\n");
     let text_usage = concat!(

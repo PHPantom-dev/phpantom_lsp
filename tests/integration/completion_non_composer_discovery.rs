@@ -5,7 +5,7 @@
 //! into completion, go-to-definition, and hover correctly.
 
 use crate::common::{complete_at, create_test_backend};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Function completion from autoload index
@@ -37,7 +37,7 @@ function formatDate(string $date): string {
     }
 
     // Open a file that calls the function.
-    let uri = Url::parse("file:///test_caller.php").unwrap();
+    let uri = Uri::parse("file:///test_caller.php").unwrap();
     let src = "<?php\nformat";
 
     let items = complete_at(&backend, &uri, src, 1, 6).await;
@@ -67,7 +67,7 @@ async fn autoload_function_index_deduplicates_with_global_functions() {
         idx.insert("myFunc".to_string(), helper_path);
     }
 
-    let uri = Url::parse("file:///test_dedup.php").unwrap();
+    let uri = Uri::parse("file:///test_dedup.php").unwrap();
     let src = "<?php\nmyFu";
 
     let items = complete_at(&backend, &uri, src, 1, 4).await;
@@ -101,7 +101,7 @@ async fn autoload_constant_index_appears_in_completion() {
         idx.insert("DEBUG_MODE".to_string(), config_path);
     }
 
-    let uri = Url::parse("file:///test_const.php").unwrap();
+    let uri = Uri::parse("file:///test_const.php").unwrap();
     let src = "<?php\nAPP_";
 
     let items = complete_at(&backend, &uri, src, 1, 4).await;
@@ -131,7 +131,7 @@ async fn autoload_constant_index_deduplicates_with_global_defines() {
         idx.insert("MY_CONST".to_string(), config_path);
     }
 
-    let uri = Url::parse("file:///test_dedup_const.php").unwrap();
+    let uri = Uri::parse("file:///test_dedup_const.php").unwrap();
     let src = "<?php\nMY_CO";
 
     let items = complete_at(&backend, &uri, src, 1, 5).await;
@@ -295,7 +295,7 @@ async fn namespaced_function_completion_from_autoload_index() {
         idx.insert("App\\Helpers\\formatMoney".to_string(), helper_path);
     }
 
-    let uri = Url::parse("file:///test_ns_func.php").unwrap();
+    let uri = Uri::parse("file:///test_ns_func.php").unwrap();
     let src = "<?php\nformatMon";
 
     let items = complete_at(&backend, &uri, src, 1, 9).await;

@@ -10,8 +10,8 @@
 //! configuration.
 
 use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php_str};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const PROVIDERS_PHP: &str = "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n";
 
@@ -70,7 +70,7 @@ async fn removing_date_use_from_provider_clears_configured_class() {
     // Deleting the `Date::use()` call from the provider must clear the
     // selection so the helpers fall back to the framework default, rather
     // than keeping the stale class until the server restarts.
-    let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
+    let provider_uri = Uri::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
     open_php_str(&backend, &provider_uri, PROVIDER_WITHOUT_USE).await;
@@ -114,7 +114,7 @@ class AppServiceProvider {
     }
 }
 ";
-    let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
+    let provider_uri = Uri::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
     open_php_str(&backend, &provider_uri, changed).await;

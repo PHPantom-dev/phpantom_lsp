@@ -55,7 +55,7 @@ struct ClassDocblockInfo {
     /// URLs from `@link` and `@see` tags in the class-level docblock.
     links: Vec<String>,
     /// `@see` references from the class-level docblock.
-    see_refs: Vec<String>,
+    see_refs: Vec<crate::types::SeeRef>,
     /// Raw class-level docblock text, kept for the consumers that render
     /// or re-scan the original text.
     raw_docblock: Option<String>,
@@ -133,7 +133,7 @@ fn extract_class_docblock<'a>(
             .map(|n| atom(&n))
             .collect(),
         links: docblock::extract_link_urls_from_info(&info),
-        see_refs: docblock::extract_see_references_from_info(&info),
+        see_refs: docblock::extract_see_refs_from_info(&info),
         raw_docblock: Some(doc_text.to_string()),
         docblock_start,
         doc_members: DocblockMembers::from_info(&info),
@@ -213,9 +213,9 @@ pub(super) fn extract_class<'a>(
     ClassInfo {
         kind: ClassLikeKind::Class,
         name: atom_bytes(class.name.value),
-        methods: methods.into_iter().map(Arc::new).collect(),
-        properties: properties.into_iter().map(Arc::new).collect(),
-        constants: constants.into_iter().map(Arc::new).collect(),
+        methods: crate::types::into_arcs(methods).into(),
+        properties: crate::types::into_arcs(properties).into(),
+        constants: crate::types::into_arcs(constants).into(),
         start_offset: class.left_brace.start.offset,
         end_offset: class.right_brace.end.offset,
         keyword_offset,
@@ -304,9 +304,9 @@ pub(super) fn extract_interface<'a>(
     ClassInfo {
         kind: ClassLikeKind::Interface,
         name: atom_bytes(iface.name.value),
-        methods: methods.into_iter().map(Arc::new).collect(),
-        properties: properties.into_iter().map(Arc::new).collect(),
-        constants: constants.into_iter().map(Arc::new).collect(),
+        methods: crate::types::into_arcs(methods).into(),
+        properties: crate::types::into_arcs(properties).into(),
+        constants: crate::types::into_arcs(constants).into(),
         start_offset: iface.left_brace.start.offset,
         end_offset: iface.right_brace.end.offset,
         keyword_offset,
@@ -374,9 +374,9 @@ pub(super) fn extract_trait<'a>(
     ClassInfo {
         kind: ClassLikeKind::Trait,
         name: atom_bytes(trait_def.name.value),
-        methods: methods.into_iter().map(Arc::new).collect(),
-        properties: properties.into_iter().map(Arc::new).collect(),
-        constants: constants.into_iter().map(Arc::new).collect(),
+        methods: crate::types::into_arcs(methods).into(),
+        properties: crate::types::into_arcs(properties).into(),
+        constants: crate::types::into_arcs(constants).into(),
         start_offset: trait_def.left_brace.start.offset,
         end_offset: trait_def.right_brace.end.offset,
         keyword_offset,
@@ -475,9 +475,9 @@ pub(super) fn extract_enum<'a>(
     ClassInfo {
         kind: ClassLikeKind::Enum,
         name: atom_bytes(enum_def.name.value),
-        methods: methods.into_iter().map(Arc::new).collect(),
-        properties: properties.into_iter().map(Arc::new).collect(),
-        constants: constants.into_iter().map(Arc::new).collect(),
+        methods: crate::types::into_arcs(methods).into(),
+        properties: crate::types::into_arcs(properties).into(),
+        constants: crate::types::into_arcs(constants).into(),
         start_offset: enum_def.left_brace.start.offset,
         end_offset: enum_def.right_brace.end.offset,
         keyword_offset,

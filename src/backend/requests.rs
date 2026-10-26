@@ -6,15 +6,74 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
+use tower_lsp_server::jsonrpc::Result;
 
 use parking_lot::Mutex;
 
 use crate::Backend;
 use crate::server::run_blocking_cancel_safe;
 
+/// The caches every LSP request resolves types under, held for the
+/// request's lifetime.
+///
+/// Entered by [`Backend::with_file_content`], by the entry points that
+/// fetch their own content (completion and its resolve, code-action
+/// resolve), and by the `handle_*` methods that in-process callers reach
+/// without a request (hover, code actions), so no feature answers with a
+/// colder cache than the one next to it.  Each guard is re-entrant:
+/// entering a scope inside another one keeps the outer caches.  Fields drop in declaration order, so the parse cache,
+/// the most recently installed guard, is released first.
+pub(crate) struct RequestScope<'a> {
+    // Parse the document at most once per request.  The type engine
+    // reaches the AST through `with_parsed_program` from many places
+    // (variable resolution, closures, property narrowing, …); without the
+    // cache each of those re-parses the whole file, so a hover or
+    // completion that resolves a few expressions parses it several times
+    // over while diagnostics parse it once.
+    _parse: crate::parser::ParseCacheGuard<'a>,
+    // Hand the workspace's resolved classes to the handler.  A class
+    // resolution that is not given a cache builds a throwaway one, so
+    // without this every call that reaches `resolve_class_fully` re-runs
+    // the whole inheritance merge, virtual-member synthesis, and (on
+    // Laravel) builder forwarding for a model that the diagnostic pass
+    // resolved long ago.
+    _resolved_classes: crate::virtual_members::ResolvedCacheGuard,
+    _type_engine: crate::type_engine::call_resolution::TypeEngineCaches,
+    // Shared chain prefixes (e.g. `$model->where(...)` in
+    // `$model->where(...)->orderBy(...)`) are resolved once and reused.
+    _chain: crate::type_engine::resolver::ChainCacheGuard,
+}
+
 impl Backend {
+    /// Enter a [`RequestScope`] for `content`, which the parse cache
+    /// shares instead of copying.
+    pub(crate) fn enter_request_scope(&self, content: Arc<String>) -> RequestScope<'static> {
+        self.request_scope_with(|| crate::parser::with_parse_cache_arc(content))
+    }
+
+    /// [`enter_request_scope`](Self::enter_request_scope) for a caller
+    /// that only borrows the content.
+    pub(crate) fn enter_request_scope_borrowed<'a>(&self, content: &'a str) -> RequestScope<'a> {
+        self.request_scope_with(|| crate::parser::with_parse_cache(content))
+    }
+
+    fn request_scope_with<'a>(
+        &self,
+        parse: impl FnOnce() -> crate::parser::ParseCacheGuard<'a>,
+    ) -> RequestScope<'a> {
+        let _chain = crate::type_engine::resolver::with_chain_resolution_cache();
+        let _type_engine = crate::type_engine::call_resolution::activate_type_engine_caches();
+        let _resolved_classes =
+            crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
+        RequestScope {
+            _parse: parse(),
+            _resolved_classes,
+            _type_engine,
+            _chain,
+        }
+    }
+
     /// Fetch the open-file content for `uri`, run `f` inside a panic
     /// guard, and return the result.
     ///
@@ -40,9 +99,7 @@ impl Backend {
         // map, so a file passes through here once; a file the parser panics
         // on publishes nothing and is retried, which is the same work its
         // next keystroke would do anyway.
-        if !crate::resource_navigation::is_resource_document(uri)
-            && !self.symbol_maps.read().contains_key(uri)
-        {
+        if !self.is_resource_uri(uri) && self.symbol_map_for(uri).is_none() {
             let content = self.get_file_content(uri)?;
             self.update_ast(uri, &content);
         }
@@ -57,38 +114,7 @@ impl Backend {
             None => (self.analysable_content(uri)?, None),
         };
 
-        // Activate the chain resolution cache so that shared chain prefixes
-        // (e.g. `$model->where(...)` in `$model->where(...)->orderBy(...)`)
-        // are resolved once and reused across all LSP handlers, not just
-        // diagnostics.  The guard is re-entrant safe: if a diagnostic pass
-        // already activated the cache, this is a no-op.
-        let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
-
-        // Activate the type-engine resolvers here rather than per feature.
-        // Every LSP handler needs the file content, so this is the one
-        // place none of them can bypass: go-to-definition, find-references,
-        // signature help, code actions, rename, and inlay hints resolve an
-        // expression with the same facilities hover and diagnostics have,
-        // instead of a poorer answer for the identical code.
-        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
-
-        // For the same reason, hand the workspace's resolved classes to the
-        // handler.  A class resolution that is not given a cache builds a
-        // throwaway one, so without this every call that reaches
-        // `resolve_class_fully` without one re-runs the whole inheritance
-        // merge, virtual-member synthesis, and (on Laravel) builder
-        // forwarding for a model that the diagnostic pass resolved long ago.
-        let _resolved_classes_guard =
-            crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
-
-        // Parse the document at most once per request.  The type engine
-        // reaches the AST through `with_parsed_program` from many places
-        // (variable resolution, closures, property narrowing, …); without
-        // the cache each of those re-parses the whole file, so a hover or
-        // completion that resolves a few expressions parses it several
-        // times over while diagnostics parse it once.
-        let _parse_guard = crate::parser::with_parse_cache_arc(Arc::clone(&content));
-
+        let _scope = self.enter_request_scope(Arc::clone(&content));
         crate::util::catch_panic_unwind_safe(handler_name, uri, pos, || f(&content, pos))
     }
 

@@ -117,6 +117,12 @@ pub(crate) struct Alias {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ProviderResources {
     pub config_files: Vec<ProviderResource>,
+    /// Config namespaces a provider registers from a file this scan could
+    /// not locate: their keys exist, but cannot be enumerated.
+    pub unread_config_namespaces: Vec<String>,
+    /// A provider registered a config file under a namespace that is not a
+    /// literal, so any config root may be one the application has.
+    pub open_config_namespace: bool,
     /// Config keys a provider writes at runtime rather than ships in a file,
     /// in dot notation: `laravel/sanctum` adds its guard with
     /// `config(['auth.guards.sanctum' => …])` from `register()`.
@@ -181,6 +187,9 @@ pub(crate) struct ProviderResources {
 impl ProviderResources {
     pub fn merge(&mut self, other: ProviderResources) {
         self.config_files.extend(other.config_files);
+        self.unread_config_namespaces
+            .extend(other.unread_config_namespaces);
+        self.open_config_namespace |= other.open_config_namespace;
         self.config_writes.extend(other.config_writes);
         self.view_dirs.extend(other.view_dirs);
         self.trans_dirs.extend(other.trans_dirs);

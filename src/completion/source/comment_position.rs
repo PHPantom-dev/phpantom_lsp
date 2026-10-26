@@ -9,7 +9,7 @@
 //! The functions here are pure — they take `(content, Position)` and
 //! return a result without any shared state.
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 // Re-export the canonical position-to-byte-offset helper so callers can
 // import it from this module rather than from `text_position` directly.

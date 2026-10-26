@@ -18,7 +18,8 @@ use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::cst::{Access, Expression, Variable};
 
 use crate::atom::bytes_to_str;
-use crate::php_type::{LiteralValue, PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, TypeKind, with_keyword_lowercase};
+use crate::type_engine::type_ops::int_interval::IntInterval;
 use crate::types::ResolvedType;
 
 /// One known scalar value.
@@ -72,7 +73,7 @@ impl Scalar {
     }
 
     /// The string PHP converts the value to (`(string)`, `.`, interpolation).
-    fn to_php_string(&self) -> Option<String> {
+    pub(super) fn to_php_string(&self) -> Option<String> {
         Some(match self {
             Scalar::Int(value) => value.to_string(),
             Scalar::Float(value) => php_float_to_string(*value)?,
@@ -183,6 +184,257 @@ pub(super) fn fold_concat(lhs: &Scalar, rhs: &Scalar) -> Option<PhpType> {
 /// either admits more than one.
 pub(crate) fn fold_concat_types(lhs: &PhpType, rhs: &PhpType) -> Option<PhpType> {
     fold_concat(&Scalar::from_type(lhs)?, &Scalar::from_type(rhs)?)
+}
+
+/// How much the string an operand converts to is known not to be empty.
+/// Ordered so the weakest member of a union is its minimum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum StringEmptiness {
+    MaybeEmpty,
+    /// Never `''`, but possibly `'0'`.
+    NonEmpty,
+    /// Never `''` or `'0'`.
+    NonFalsy,
+}
+
+impl StringEmptiness {
+    /// What converting any value of the resolved operand to a string is
+    /// guaranteed to give. An unresolved operand promises nothing.
+    pub(super) fn of_operand(types: &[ResolvedType]) -> Self {
+        types
+            .iter()
+            .map(|resolved| Self::of_type(&resolved.type_string))
+            .min()
+            .unwrap_or(Self::MaybeEmpty)
+    }
+
+    fn of_type(ty: &PhpType) -> Self {
+        let from_falsy = |falsy: bool| {
+            if falsy {
+                Self::NonEmpty
+            } else {
+                Self::NonFalsy
+            }
+        };
+        match ty.kind() {
+            TypeKind::Union(members) => members
+                .iter()
+                .map(Self::of_type)
+                .min()
+                .unwrap_or(Self::MaybeEmpty),
+            TypeKind::Intersection(members) => members
+                .iter()
+                .map(Self::of_type)
+                .max()
+                .unwrap_or(Self::MaybeEmpty),
+            TypeKind::Nullable(_) => Self::MaybeEmpty,
+            _ if ty.is_true() => Self::NonFalsy,
+            TypeKind::Literal(_) => match Scalar::from_type(ty).and_then(|s| s.to_php_string()) {
+                Some(text) if text.is_empty() => Self::MaybeEmpty,
+                Some(text) => from_falsy(text == "0"),
+                None => Self::MaybeEmpty,
+            },
+            TypeKind::IntRange(min, max) => {
+                let bound = |b: &crate::atom::Atom| b.parse::<i64>().ok();
+                from_falsy(
+                    bound(min).is_none_or(|min| min <= 0) && bound(max).is_none_or(|max| max >= 0),
+                )
+            }
+            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Self::NonFalsy,
+            TypeKind::Named(name) => with_keyword_lowercase(name, |lower| match lower {
+                "positive-int" | "negative-int" | "non-zero-int" | "non-falsy-string"
+                | "truthy-string" | "class-string" | "interface-string" | "trait-string"
+                | "enum-string" => Self::NonFalsy,
+                // Every int and float prints at least one digit.
+                "int"
+                | "integer"
+                | "non-negative-int"
+                | "non-positive-int"
+                | "float"
+                | "double"
+                | "numeric"
+                | "numeric-string"
+                | "non-empty-string"
+                | "non-empty-lowercase-string"
+                | "non-empty-uppercase-string"
+                | "non-empty-literal-string" => Self::NonEmpty,
+                _ => Self::MaybeEmpty,
+            }),
+            _ => Self::MaybeEmpty,
+        }
+    }
+
+    /// The string type `lhs . rhs` gives: two non-empty halves join into at
+    /// least two characters, which cannot be `'0'`. `literal` says both
+    /// halves are written in the source, so the result is a
+    /// `literal-string` too, and `numeric` that the halves join into a
+    /// number (see [`NumericConcat`]).
+    pub(super) fn concat_type(lhs: Self, rhs: Self, literal: bool, numeric: bool) -> PhpType {
+        let joined = if lhs >= Self::NonEmpty && rhs >= Self::NonEmpty {
+            Self::NonFalsy
+        } else {
+            lhs.max(rhs)
+        };
+        let mut parts = Vec::with_capacity(3);
+        if literal {
+            parts.push(if joined == Self::NonEmpty && !numeric {
+                PhpType::non_empty_literal_string()
+            } else {
+                PhpType::literal_string()
+            });
+        }
+        if numeric {
+            parts.push(PhpType::numeric_string());
+        }
+        match joined {
+            Self::NonFalsy => parts.push(PhpType::non_falsy_string()),
+            // A numeric string is never empty, and `non-empty-literal-string`
+            // already says it.
+            Self::NonEmpty if parts.is_empty() => parts.push(PhpType::non_empty_string()),
+            _ => {}
+        }
+        match parts.len() {
+            0 => PhpType::string(),
+            1 => parts.pop().unwrap_or_else(PhpType::string),
+            _ => PhpType::intersection(parts),
+        }
+    }
+}
+
+/// The string type `lhs . rhs` gives for operands that do not fold to one
+/// value. `rhs` is only resolved when the left side leaves the answer
+/// open: a non-falsy left side that is neither written out nor a number
+/// decides it alone.
+pub(super) fn concat_result(
+    lhs: &[ResolvedType],
+    rhs: impl FnOnce() -> Vec<ResolvedType>,
+) -> PhpType {
+    let lhs_emptiness = StringEmptiness::of_operand(lhs);
+    let lhs_literal = is_literal_operand(lhs);
+    let lhs_numeric = NumericConcat::of_lhs(lhs);
+    if lhs_emptiness == StringEmptiness::NonFalsy && !lhs_literal && lhs_numeric.is_none() {
+        return PhpType::non_falsy_string();
+    }
+    let rhs = rhs();
+    StringEmptiness::concat_type(
+        lhs_emptiness,
+        StringEmptiness::of_operand(&rhs),
+        lhs_literal && is_literal_operand(&rhs),
+        lhs_numeric.is_some_and(|rule| rule.admits(&rhs)),
+    )
+}
+
+/// Whether converting any value of the resolved operand to a string gives
+/// a `literal-string`. An unresolved operand is not.
+pub(super) fn is_literal_operand(types: &[ResolvedType]) -> bool {
+    !types.is_empty()
+        && types
+            .iter()
+            .all(|resolved| is_literal_string_type(&resolved.type_string))
+}
+
+/// Whether converting any value of `ty` to a string gives a
+/// `literal-string`: every member is one known scalar or already a literal
+/// string.
+pub(crate) fn is_literal_string_type(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Union(members) => members.iter().all(is_literal_string_type),
+        TypeKind::Intersection(members) => members.iter().any(is_literal_string_type),
+        TypeKind::Named(name) => with_keyword_lowercase(name, |lower| {
+            matches!(lower, "literal-string" | "non-empty-literal-string")
+        }),
+        _ => Scalar::from_type(ty).is_some(),
+    }
+}
+
+/// Whether every value of `ty` is a `numeric-string`.
+fn is_numeric_string_type(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Intersection(members) => members.iter().any(is_numeric_string_type),
+        TypeKind::Named(name) => name.eq_ignore_ascii_case("numeric-string"),
+        _ => false,
+    }
+}
+
+/// What the left operand of a concatenation lets the right one append
+/// while the result stays a number, the way PHPStan's
+/// `InitializerExprTypeResolver::resolveConcatType()` decides it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum NumericConcat {
+    /// An integer: a fraction or more digits keep it a number (`5 . '.01'`).
+    AfterInt,
+    /// A numeric string, which may already hold a `.` or an exponent: only
+    /// more digits are safe.
+    AfterNumericString,
+}
+
+impl NumericConcat {
+    /// The rule for a left operand, or `None` when it is not always a
+    /// number. A `''` alternative is ignored: appending to it leaves the
+    /// right operand as it was.
+    pub(super) fn of_lhs(types: &[ResolvedType]) -> Option<Self> {
+        let mut rule = None;
+        for member in types.iter().flat_map(|rt| rt.type_string.union_members()) {
+            let member_rule = if IntInterval::of_int(member).is_some() {
+                Self::AfterInt
+            } else if is_numeric_string_type(member)
+                || Scalar::from_type(member).is_some_and(|s| s.is_numeric_string())
+            {
+                Self::AfterNumericString
+            } else if matches!(Scalar::from_type(member), Some(Scalar::String(s)) if s.is_empty()) {
+                continue;
+            } else {
+                return None;
+            };
+            rule = Some(match rule {
+                Some(Self::AfterNumericString) => Self::AfterNumericString,
+                _ => member_rule,
+            });
+        }
+        rule
+    }
+
+    /// Whether appending any value of the right operand keeps the left one
+    /// a number: a non-negative integer, or written-out strings that
+    /// continue the number.
+    pub(super) fn admits(self, rhs: &[ResolvedType]) -> bool {
+        let members: Vec<&PhpType> = rhs
+            .iter()
+            .flat_map(|rt| rt.type_string.union_members())
+            .collect();
+        if members.is_empty() {
+            return false;
+        }
+        if members
+            .iter()
+            .all(|m| IntInterval::of_int(m).is_some_and(|i| i.min.is_some_and(|min| min >= 0)))
+        {
+            return true;
+        }
+        let mut appended = false;
+        for member in members {
+            let Some(text) = Scalar::from_type(member).and_then(|s| s.to_php_string()) else {
+                return false;
+            };
+            if text.is_empty() {
+                continue;
+            }
+            let continues = match self {
+                Self::AfterNumericString => text.bytes().all(|b| b.is_ascii_digit()),
+                // A sign, or whitespace PHP would skip, would land in the
+                // middle of the number.
+                Self::AfterInt => {
+                    text.starts_with(|c: char| c.is_ascii_digit() || c == '.')
+                        && LiteralValue::string_value(&text).is_numeric_string()
+                }
+            };
+            if !continues {
+                return false;
+            }
+            appended = true;
+        }
+        appended
+    }
 }
 
 /// An interpolated string (`"$a-$b"`, a heredoc) whose every embedded

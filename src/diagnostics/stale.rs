@@ -9,7 +9,7 @@
 //! fix applied by hand, …) shows the diagnostic no longer applies, so
 //! `assemble_and_push` can prune it eagerly.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Check whether a cached PHPStan diagnostic is stale given the current
 /// file content.
@@ -22,15 +22,14 @@ use tower_lsp::lsp_types::*;
 /// branch for details. Any identifier is also considered stale when the
 /// diagnostic's line now carries a `@phpstan-ignore` comment listing it.
 ///
-/// A few identifiers are deliberately not covered here: `throws.unusedType`,
-/// `missingType.checkedException`, and `method.missingOverride` are
-/// cleared eagerly by `codeAction/resolve` instead (see
+/// A few identifiers are deliberately not covered here: `throws.unusedType`
+/// and `missingType.checkedException` are cleared eagerly by `codeAction/resolve` instead (see
 /// `clear_phpstan_diagnostics_after_resolve` in `code_actions`);
 /// `return.type` has no heuristic at all because no content-based check
 /// can tell whether the right fix is to change the type or the code.
 pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> bool {
     let identifier = match &diag.code {
-        Some(NumberOrString::String(s)) => s.as_str(),
+        Some(Code::String(s)) => s.as_str(),
         _ => return false,
     };
 
@@ -59,14 +58,15 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
         );
     }
 
-    // ── method.tentativeReturnType — #[\ReturnTypeWillChange] added ─
-    // The user may add the attribute by hand, so check whether it is
-    // now present near the diagnostic line.
-    if identifier == "method.tentativeReturnType" {
-        return crate::code_actions::phpstan::add_return_type_will_change::is_add_return_type_will_change_stale(
-            content,
-            diag.range.start.line as usize,
-        );
+    // ── method.missingOverride / method.tentativeReturnType ─────────
+    // The user may add `#[\Override]` or `#[\ReturnTypeWillChange]` by
+    // hand, so check whether it is now written on the method.
+    if let Some(stale) = crate::code_actions::phpstan::add_attribute::is_add_attribute_stale(
+        content,
+        diag.range.start.line as usize,
+        identifier,
+    ) {
+        return stale;
     }
 
     // ── PHPDoc type mismatch (return.phpDocType, parameter.phpDocType,
@@ -78,7 +78,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
         return crate::code_actions::phpstan::fix_phpdoc_type::is_fix_phpdoc_type_stale(
             content,
             diag.range.start.line as usize,
-            &diag.message,
+            crate::util::message_text(&diag.message),
             identifier,
         );
     }
@@ -101,7 +101,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
         return crate::code_actions::phpstan::fix_prefixed_class::is_fix_prefixed_class_stale(
             content,
             diag.range.start.line as usize,
-            &diag.message,
+            crate::util::message_text(&diag.message),
         );
     }
 
@@ -110,7 +110,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
     // identifier).  The diagnostic is stale when `assert(` no longer
     // appears on the diagnostic line.
     if identifier == "function.alreadyNarrowedType"
-        && diag.message.starts_with("Call to function assert()")
+        && crate::util::message_text(&diag.message).starts_with("Call to function assert()")
     {
         return crate::code_actions::phpstan::remove_assert::is_remove_assert_stale(
             content,
@@ -130,6 +130,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
             content,
             diag.range.start.line as usize,
             identifier,
+            crate::util::message_text(&diag.message),
         );
     }
 
@@ -146,7 +147,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
         return crate::code_actions::phpstan::add_iterable_type::is_add_iterable_type_stale(
             content,
             diag.range.start.line as usize,
-            &diag.message,
+            crate::util::message_text(&diag.message),
         );
     }
 
@@ -155,7 +156,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
         return crate::code_actions::phpstan::remove_unused_return_type::is_remove_unused_return_type_stale(
             content,
             diag.range.start.line as usize,
-            &diag.message,
+            crate::util::message_text(&diag.message),
         );
     }
 
@@ -179,58 +180,14 @@ fn line_has_ignore_for(content: &str, diag_line: u32, identifier: &str) -> bool 
     let line_idx = diag_line as usize;
 
     // Check the diagnostic line itself and the line before it.
-    for idx in [line_idx, line_idx.wrapping_sub(1)] {
-        if let Some(line) = content.split('\n').nth(idx)
-            && let Some(ignore_pos) = line.find("@phpstan-ignore")
-        {
-            let after = &line[ignore_pos + "@phpstan-ignore".len()..];
-            // `@phpstan-ignore-line` and `@phpstan-ignore-next-line`
-            // suppress everything — we can't attribute them to any
-            // single identifier, so skip them.
-            if after.starts_with("-line") || after.starts_with("-next-line") {
-                continue;
-            }
-            // Parse the identifier list.  Each entry may have a
-            // parenthesized reason whose text can contain commas:
-            //   @phpstan-ignore id1 (reason, with commas), id2 (reason)
-            // A naive `split(',')` would break inside reasons, so we
-            // walk the string and only split on commas at paren depth 0.
-            let ids_text = after.trim_start();
-            let ids_end = ids_text.find("*/").unwrap_or(ids_text.len());
-            let ids_region = &ids_text[..ids_end];
-
-            let mut depth: u32 = 0;
-            let mut start = 0;
-            for (i, ch) in ids_region.char_indices() {
-                match ch {
-                    '(' => depth += 1,
-                    ')' => depth = depth.saturating_sub(1),
-                    ',' if depth == 0 => {
-                        let entry = ids_region[start..i].trim();
-                        let id = match entry.find(" (") {
-                            Some(pos) => &entry[..pos],
-                            None => entry,
-                        };
-                        if id == identifier {
-                            return true;
-                        }
-                        start = i + 1;
-                    }
-                    _ => {}
-                }
-            }
-            // Last (or only) entry after the final comma.
-            let entry = ids_region[start..].trim();
-            let id = match entry.find(" (") {
-                Some(pos) => &entry[..pos],
-                None => entry,
-            };
-            if id == identifier {
-                return true;
-            }
-        }
-    }
-    false
+    // `@phpstan-ignore-line` and `@phpstan-ignore-next-line` list no
+    // identifiers, so they never match.
+    [line_idx, line_idx.wrapping_sub(1)].into_iter().any(|idx| {
+        content.split('\n').nth(idx).is_some_and(|line| {
+            crate::phpstan_ignore::parse_ignore_comment(line)
+                .is_some_and(|comment| comment.ids(line).any(|id| id == identifier))
+        })
+    })
 }
 
 #[cfg(test)]
@@ -256,10 +213,10 @@ mod tests {
     fn make_phpstan_diag(line: u32, code: &str, message: &str) -> Diagnostic {
         Diagnostic {
             range: make_range(line, 0, line, 200),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String(code.to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String(code.to_string())),
             source: Some("PHPStan".to_string()),
-            message: message.to_string(),
+            message: message.to_string().into(),
             ..Default::default()
         }
     }
@@ -387,10 +344,7 @@ mod tests {
     // ── method.missingOverride — heuristic removed ──────────────────
 
     #[test]
-    fn missing_override_not_stale_via_heuristic() {
-        // Previously this was detected as stale because #[Override]
-        // was found above the method.  Now only codeAction/resolve
-        // clears it.
+    fn missing_override_stale_once_the_attribute_is_written() {
         let content = "<?php\nclass Foo extends Bar {\n    #[\\Override]\n    public function baz(): void {}\n}\n";
         let diag = make_phpstan_diag(
             3,
@@ -398,8 +352,8 @@ mod tests {
             "Method Foo::baz() overrides method Bar::baz() but is missing the #[\\Override] attribute.",
         );
         assert!(
-            !is_stale_phpstan_diagnostic(&diag, content),
-            "method.missingOverride should NOT be stale via heuristic (cleared by resolve instead)"
+            is_stale_phpstan_diagnostic(&diag, content),
+            "method.missingOverride should be stale once #[\\Override] is written"
         );
     }
 
@@ -557,10 +511,10 @@ mod tests {
         let content = "<?php\n// @phpstan-ignore return.type\nfoo();";
         let diag = Diagnostic {
             range: make_range(1, 0, 1, 200),
-            severity: Some(DiagnosticSeverity::ERROR),
+            severity: Some(DiagnosticSeverity::Error),
             code: None,
             source: Some("PHPStan".to_string()),
-            message: "Some error.".to_string(),
+            message: "Some error.".to_string().into(),
             ..Default::default()
         };
         assert!(

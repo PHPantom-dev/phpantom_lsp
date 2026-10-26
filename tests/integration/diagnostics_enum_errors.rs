@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::common::collect_diagnostics_with;
+    use crate::common::message_text;
     use phpantom_lsp::Backend;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     fn collect(php: &str) -> Vec<Diagnostic> {
         collect_diagnostics_with(
@@ -57,10 +58,10 @@ enum MyType {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 2);
-        assert!(diags[0].message.contains("must not have a value"));
-        assert!(diags[0].message.contains("MyType::Any"));
-        assert!(diags[1].message.contains("MyType::Array"));
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(message_text(&diags[0].message).contains("must not have a value"));
+        assert!(message_text(&diags[0].message).contains("MyType::Any"));
+        assert!(message_text(&diags[1].message).contains("MyType::Array"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -73,9 +74,9 @@ enum MyType: int {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("must have a value"));
-        assert!(diags[0].message.contains("MyType::Array"));
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(message_text(&diags[0].message).contains("must have a value"));
+        assert!(message_text(&diags[0].message).contains("MyType::Array"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -88,9 +89,9 @@ enum TypeDescriptor: bool {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("must be 'int' or 'string'"));
-        assert!(diags[0].message.contains("bool"));
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(message_text(&diags[0].message).contains("must be 'int' or 'string'"));
+        assert!(message_text(&diags[0].message).contains("bool"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -103,7 +104,8 @@ enum Weight: float {
 "#;
         let diags = collect(php);
         assert!(diags.iter().any(
-            |d| d.message.contains("must be 'int' or 'string'") && d.message.contains("float")
+            |d| message_text(&d.message).contains("must be 'int' or 'string'")
+                && message_text(&d.message).contains("float")
         ),);
     }
 
@@ -117,10 +119,10 @@ enum Test: string {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Duplicate value"));
-        assert!(diags[0].message.contains("BAR"));
-        assert!(diags[0].message.contains("FOO"));
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(message_text(&diags[0].message).contains("Duplicate value"));
+        assert!(message_text(&diags[0].message).contains("BAR"));
+        assert!(message_text(&diags[0].message).contains("FOO"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -134,9 +136,9 @@ enum Numbers: int {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Duplicate value"));
-        assert!(diags[0].message.contains("C"));
-        assert!(diags[0].message.contains("A"));
+        assert!(message_text(&diags[0].message).contains("Duplicate value"));
+        assert!(message_text(&diags[0].message).contains("C"));
+        assert!(message_text(&diags[0].message).contains("A"));
     }
 
     #[test]
@@ -173,7 +175,7 @@ enum Test: string {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("invalid_enum_case".to_string()))
+            Some(Code::String("invalid_enum_case".to_string()))
         );
     }
 
@@ -185,10 +187,11 @@ enum Flags: bool {
 }
 "#;
         let diags = collect(php);
-        assert!(diags.iter().any(|d| d.code
-            == Some(NumberOrString::String(
-                "invalid_enum_backing_type".to_string()
-            ))),);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == Some(Code::String("invalid_enum_backing_type".to_string()))),
+        );
     }
 
     /// An unusable backing type leaves the enum indistinguishable from a
@@ -206,9 +209,7 @@ enum Ratio: float {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String(
-                "invalid_enum_backing_type".to_string()
-            ))
+            Some(Code::String("invalid_enum_backing_type".to_string()))
         );
     }
 
@@ -256,9 +257,7 @@ enum Ratio /* exact */ : float {
         assert_eq!(diags.len(), 1, "got: {diags:?}");
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String(
-                "invalid_enum_backing_type".to_string()
-            ))
+            Some(Code::String("invalid_enum_backing_type".to_string()))
         );
     }
 }

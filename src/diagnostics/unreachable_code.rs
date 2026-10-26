@@ -9,7 +9,7 @@
 //! }
 //! ```
 //!
-//! Reported as a `Hint` carrying [`DiagnosticTag::UNNECESSARY`], so editors
+//! Reported as a `Hint` carrying [`DiagnosticTag::Unnecessary`], so editors
 //! grey the text out rather than underlining it.  Dead code is tidying, not
 //! a defect, and it is rendered the way unused imports already are.
 //!
@@ -55,11 +55,11 @@
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::parser::with_parsed_program;
-use crate::type_engine::types::narrowing::{contains_entry_label, statement_leaves_block};
+use crate::type_engine::type_ops::condition_facts::{contains_entry_label, statement_leaves_block};
 
 use super::helpers::make_diagnostic;
 
@@ -98,11 +98,11 @@ impl Backend {
             };
             let mut diagnostic = make_diagnostic(
                 range,
-                DiagnosticSeverity::HINT,
+                DiagnosticSeverity::Hint,
                 UNREACHABLE_CODE_CODE,
                 "Unreachable code".to_string(),
             );
-            diagnostic.tags = Some(vec![DiagnosticTag::UNNECESSARY]);
+            diagnostic.tags = Some(vec![DiagnosticTag::Unnecessary]);
             out.push(diagnostic);
         }
     }

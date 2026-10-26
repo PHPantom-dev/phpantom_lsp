@@ -2,7 +2,7 @@ use super::join_call_site_types;
 use crate::Backend;
 use crate::atom::atom;
 use crate::php_type::PhpType;
-use tower_lsp::lsp_types::Url;
+use tower_lsp_server::gen_lsp_types::Uri;
 
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
@@ -27,7 +27,7 @@ fn union_order_is_independent_of_visit_order() {
 #[test]
 fn headless_view_snapshot_builds_local_candidates() {
     let mut backend = Backend::new_test();
-    backend.skip_reference_index = true;
+    backend.state_mut().skip_reference_index = true;
     let uri = "file:///project/app/Controller.php";
     backend.update_ast(uri, "<?php\nview('shop', ['item' => new Item()]);\n");
 
@@ -64,9 +64,9 @@ fn headless_inference_skips_non_candidate_callers() {
     std::fs::write(&unrelated, unrelated_source).expect("failed to write unrelated caller");
 
     let mut backend = Backend::new_test_with_workspace(root, Vec::new());
-    backend.skip_reference_index = true;
+    backend.state_mut().skip_reference_index = true;
     for (path, source) in [(&matching, matching_source), (&unrelated, unrelated_source)] {
-        let uri = Url::from_file_path(path).expect("caller path should become a file URI");
+        let uri = Uri::from_file_path(path).expect("caller path should become a file URI");
         backend.update_ast(uri.as_str(), source);
     }
 
@@ -79,7 +79,7 @@ fn headless_inference_skips_non_candidate_callers() {
     assert_eq!(by_view.get("shop").map(Vec::len), Some(1));
     assert_eq!(by_view.get("other").map(Vec::len), Some(1));
 
-    let target_uri = Url::from_file_path(target).expect("target path should become a file URI");
+    let target_uri = Uri::from_file_path(target).expect("target path should become a file URI");
     assert_eq!(
         backend.view_names_for_blade_uri(target_uri.as_str()),
         vec!["shop"]
@@ -110,7 +110,7 @@ fn view_name_resolution_normalizes_aliased_file_paths() {
     std::fs::write(&real_template, "").expect("failed to write view");
     let linked_template = linked_root.join("resources/views/shop.blade.php");
     let linked_uri =
-        Url::from_file_path(&linked_template).expect("view path should become a file URI");
+        Uri::from_file_path(&linked_template).expect("view path should become a file URI");
     let backend = Backend::new_test_with_workspace(linked_root, Vec::new());
 
     assert_eq!(
@@ -142,7 +142,7 @@ fn view_name_resolution_keeps_symlinked_templates() {
     let template = views.join("shop.blade.php");
     symlink(&shared_template, &template).expect("failed to link view into the root");
 
-    let uri = Url::from_file_path(&template).expect("view path should become a file URI");
+    let uri = Uri::from_file_path(&template).expect("view path should become a file URI");
     let backend = Backend::new_test_with_workspace(root, Vec::new());
 
     assert_eq!(backend.view_names_for_blade_uri(uri.as_str()), vec!["shop"]);

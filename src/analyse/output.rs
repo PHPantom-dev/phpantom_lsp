@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use serde::Serialize;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::{FileDiagnostic, OutputFormat};
 
@@ -23,7 +23,7 @@ pub(super) fn print_github_annotations(file_diagnostics: &[(String, Vec<FileDiag
     for (path, diagnostics) in file_diagnostics {
         for diag in diagnostics {
             let level = match diag.severity {
-                DiagnosticSeverity::ERROR | DiagnosticSeverity::WARNING => {
+                DiagnosticSeverity::Error | DiagnosticSeverity::Warning => {
                     severity_name(diag.severity)
                 }
                 _ => "notice",
@@ -180,10 +180,10 @@ struct AnalyseReport<'a> {
 /// Name a severity the way the JSON and GitHub formats spell it.
 fn severity_name(severity: DiagnosticSeverity) -> &'static str {
     match severity {
-        DiagnosticSeverity::ERROR => "error",
-        DiagnosticSeverity::WARNING => "warning",
-        DiagnosticSeverity::INFORMATION => "info",
-        DiagnosticSeverity::HINT => "hint",
+        DiagnosticSeverity::Error => "error",
+        DiagnosticSeverity::Warning => "warning",
+        DiagnosticSeverity::Information => "info",
+        DiagnosticSeverity::Hint => "hint",
         _ => "unknown",
     }
 }
@@ -416,7 +416,7 @@ mod tests {
             column: 0,
             message: message.to_string(),
             identifier: identifier.map(str::to_string),
-            severity: DiagnosticSeverity::ERROR,
+            severity: DiagnosticSeverity::Error,
         }
     }
 

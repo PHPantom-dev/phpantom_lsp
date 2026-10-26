@@ -49,6 +49,12 @@ pub(super) fn record_package_call(
         file.content,
         file.scope,
     ) else {
+        // A config file named after a package name we cannot read lives
+        // under a root we cannot name.
+        if method == b"hasconfigfile" {
+            resources.open_config_namespace = true;
+            return true;
+        }
         return false;
     };
     record_package_tools_registration(
@@ -182,17 +188,51 @@ fn record_package_tools_registration(
             );
         }
         b"hasconfigfile" => {
-            let config_name = first_arg_name.unwrap_or_else(|| ctx.short_name.to_string());
-            let resolved = ctx
-                .package_base_dir
-                .join("..")
-                .join("config")
-                .join(format!("{config_name}.php"));
-            resources.config_files.push(ProviderResource {
-                path: resolved.canonicalize().unwrap_or(resolved),
-                namespace: config_name.replace(['/', '\\'], "."),
-            });
+            let config_names = match argument_list.arguments.iter().next() {
+                None => Some(vec![ctx.short_name.to_string()]),
+                Some(arg) => match (first_arg_name, arg.value()) {
+                    (Some(name), _) => Some(vec![name]),
+                    (None, Expression::Array(array)) => {
+                        const_string_list(array.elements.iter(), file)
+                    }
+                    (None, Expression::LegacyArray(array)) => {
+                        const_string_list(array.elements.iter(), file)
+                    }
+                    (None, _) => None,
+                },
+            };
+            // A name computed at runtime registers a config file this scan
+            // cannot name, so any config root may be one it registered.
+            let Some(config_names) = config_names else {
+                resources.open_config_namespace = true;
+                return;
+            };
+            for config_name in config_names {
+                let resolved = ctx
+                    .package_base_dir
+                    .join("..")
+                    .join("config")
+                    .join(format!("{config_name}.php"));
+                resources.config_files.push(ProviderResource {
+                    path: resolved.canonicalize().unwrap_or(resolved),
+                    namespace: config_name.replace(['/', '\\'], "."),
+                });
+            }
         }
         _ => {}
     }
+}
+
+/// The names an array literal lists, or `None` when any element is not a
+/// constant string.
+fn const_string_list<'a, 'arena: 'a>(
+    elements: impl Iterator<Item = &'a ArrayElement<'arena>>,
+    file: &ProviderFile<'_, '_>,
+) -> Option<Vec<String>> {
+    elements
+        .map(|element| match element {
+            ArrayElement::Value(value) => const_string(value.value, file.content, file.scope),
+            _ => None,
+        })
+        .collect()
 }

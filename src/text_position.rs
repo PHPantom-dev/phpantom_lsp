@@ -7,7 +7,7 @@
 //! and LSP `Position`/`Range` values (UTF-16 code units per the LSP
 //! spec).
 
-use tower_lsp::lsp_types::{Position, Range, TextEdit};
+use tower_lsp_server::gen_lsp_types::{Position, Range, TextEdit};
 
 /// Check whether two LSP ranges overlap (share at least one character
 /// position).
@@ -198,6 +198,29 @@ pub(crate) fn line_ending(content: &str) -> &'static str {
     }
 }
 
+/// Rewrite the bare `\n` line breaks of edit text to `eol`, the terminator
+/// of the file the text goes into (see [`line_ending`]).  A `\r\n` the text
+/// already carries is kept as is.
+///
+/// Edit builders write `\n`; the request handlers run their edits through
+/// this before answering, so a `\r\n` file does not end up with mixed line
+/// endings.
+pub(crate) fn match_line_ending(text: &mut String, eol: &str) {
+    if eol == "\n" || !text.contains('\n') {
+        return;
+    }
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut rest = text.as_str();
+    while let Some(i) = rest.find('\n') {
+        let line = &rest[..i];
+        out.push_str(line.strip_suffix('\r').unwrap_or(line));
+        out.push_str(eol);
+        rest = &rest[i + 1..];
+    }
+    out.push_str(rest);
+    *text = out;
+}
+
 /// [`LineIndex::position`] over a table built by [`line_starts`] for the
 /// same `content`.
 pub(crate) fn position_in(content: &str, line_starts: &[usize], offset: usize) -> Position {
@@ -245,6 +268,23 @@ pub(crate) fn line_start_byte_offset(content: &str, line_idx: usize) -> usize {
         }
     }
     content.len()
+}
+
+/// Return the byte offset of the start of the line holding byte `offset`
+/// (just past the preceding `\n`, or 0 on the first line).
+pub(crate) fn find_line_start(content: &str, offset: usize) -> usize {
+    content[..offset.min(content.len())]
+        .rfind('\n')
+        .map_or(0, |nl| nl + 1)
+}
+
+/// Return the byte offset just past the `\n` that ends the line holding
+/// byte `offset`, or `content.len()` on the last line.
+pub(crate) fn find_line_end(content: &str, offset: usize) -> usize {
+    let offset = offset.min(content.len());
+    content[offset..]
+        .find('\n')
+        .map_or(content.len(), |nl| offset + nl + 1)
 }
 
 /// Convert an LSP `Position` (line, character) to a byte offset in
@@ -343,6 +383,23 @@ pub(crate) fn utf16_col_to_byte_offset(line: &str, utf16_col: u32) -> usize {
         col += ch.len_utf16() as u32;
     }
     line.len()
+}
+
+/// Convert a UTF-16 column offset to a character index within a single
+/// line, for code that walks the line as a `Vec<char>`.
+///
+/// Returns the line's character count if `utf16_col` is past the end.
+pub(crate) fn utf16_col_to_char_index(line: &str, utf16_col: u32) -> usize {
+    let mut col = 0u32;
+    let mut idx = 0usize;
+    for ch in line.chars() {
+        if col >= utf16_col {
+            return idx;
+        }
+        col += ch.len_utf16() as u32;
+        idx += 1;
+    }
+    idx
 }
 
 /// Convert a byte offset within a single line to a UTF-16 column offset.
@@ -545,6 +602,17 @@ mod tests {
         assert_eq!(line_ending("<?php\r\necho 1;\r\n"), "\r\n");
         assert_eq!(line_ending("<?php\necho 1;\n"), "\n");
         assert_eq!(line_ending("<?php echo 1;"), "\n");
+    }
+
+    #[test]
+    fn match_line_ending_rewrites_bare_line_feeds_only() {
+        let mut text = "use Foo;\nuse Bar;\r\n\n".to_string();
+        match_line_ending(&mut text, "\r\n");
+        assert_eq!(text, "use Foo;\r\nuse Bar;\r\n\r\n");
+
+        let mut text = "use Foo;\n".to_string();
+        match_line_ending(&mut text, "\n");
+        assert_eq!(text, "use Foo;\n");
     }
 
     #[test]

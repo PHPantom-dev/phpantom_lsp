@@ -6,9 +6,10 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::FileChangeType;
+use tower_lsp_server::gen_lsp_types::FileChangeType;
 
 use crate::Backend;
+use crate::classmap_scanner::{ScanResult, WorkspaceScanResult};
 use crate::types::ClassInfo;
 
 impl Backend {
@@ -139,16 +140,16 @@ impl Backend {
                 // A deleted file no longer declares the config keys it wrote
                 // at runtime.  A file that was merely changed re-registers
                 // them when it is re-parsed below.
-                self.laravel_runtime_config_keys.write().remove(uri);
+                self.laravel.runtime_config_keys.write().remove(uri);
                 // The Laravel registries a file fed (macros, storage drivers,
                 // commands, morph aliases, gates, provider resources) are
                 // refreshed only when the file is parsed, which a deleted
                 // file never is again.
-                if *change_type == FileChangeType::DELETED {
+                if *change_type == FileChangeType::Deleted {
                     self.forget_laravel_file_contributions(uri);
                 }
             }
-            if *change_type == FileChangeType::DELETED {
+            if *change_type == FileChangeType::Deleted {
                 self.forget_workspace_diagnostics(&spellings);
             }
         }
@@ -158,7 +159,7 @@ impl Backend {
         for (uri_str, path, change_type) in changes {
             if !matches!(
                 *change_type,
-                FileChangeType::CREATED | FileChangeType::CHANGED
+                FileChangeType::Created | FileChangeType::Changed
             ) {
                 continue;
             }
@@ -180,19 +181,13 @@ impl Backend {
             // one fallback pass per still-missing name.
             functions_retired = true;
 
-            let scan = crate::classmap_scanner::scan_file_full(path);
-            {
-                let mut fi = self.symbols.autoload_function_index.write();
-                for fqn in scan.functions {
-                    fi.or_insert_with(fqn, || path.clone());
-                }
-            }
-            {
-                let mut ci = self.symbols.autoload_constant_index.write();
-                for name in scan.constants {
-                    ci.entry(name).or_insert_with(|| path.clone());
-                }
-            }
+            // The classes were noted above, under the editor's URI.
+            let scan = ScanResult {
+                classes: Vec::new(),
+                ..crate::classmap_scanner::scan_file_full(path)
+            };
+            self.symbols
+                .merge_scan(WorkspaceScanResult::from_file(scan, path));
         }
 
         self.symbols.prune_orphaned_origins();
@@ -215,16 +210,17 @@ impl Backend {
         // them up in its own walk, but one in flight may already be past
         // them.
         if self
-            .workspace_indexed
+            .workspace_index
+            .indexed
             .load(std::sync::atomic::Ordering::Acquire)
-            || self.workspace_index_lock.is_locked()
+            || self.workspace_index.lock.is_locked()
         {
             let reparse: Vec<(String, PathBuf)> = changes
                 .iter()
                 .filter(|(_, _, change_type)| {
                     matches!(
                         *change_type,
-                        FileChangeType::CREATED | FileChangeType::CHANGED
+                        FileChangeType::Created | FileChangeType::Changed
                     )
                 })
                 .filter_map(|(_, path, _)| {

@@ -1,7 +1,5 @@
-use std::sync::Arc;
-
 use super::*;
-use crate::types::ClassInfo;
+use crate::class_lookup::ResolvedClassLoader;
 
 /// Simplify unions in a scope by collapsing child/parent class pairs.
 ///
@@ -23,7 +21,7 @@ use crate::types::ClassInfo;
 pub(crate) fn simplify_class_hierarchy_unions(
     scope: &mut ScopeState,
     joined_from: &Locals,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) {
     let mut keys: Vec<Atom> = Vec::new();
     let _ = scope.locals.diff::<()>(joined_from, |key, now, _| {

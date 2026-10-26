@@ -25,11 +25,11 @@
 //! payload but no `edit`.  Phase 2 (`resolve_remove_assert`) recomputes
 //! the workspace edit on demand when the user picks the action.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, deferred_quickfix};
 
 // ── PHPStan identifier ──────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ impl Backend {
         uri: &str,
         _content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -69,30 +69,23 @@ impl Backend {
             // Only handle `assert()` calls — other functions with the
             // same identifier (e.g. `is_bool()`) appear inside
             // conditions where removal would change control flow.
-            if !diag.message.starts_with(ASSERT_MESSAGE_PREFIX) {
+            if !crate::util::message_text(&diag.message).starts_with(ASSERT_MESSAGE_PREFIX) {
                 continue;
             }
 
-            let diag_line = diag.range.start.line as usize;
+            let _diag_line = diag.range.start.line as usize;
 
             let title = "Remove always-true assert()".to_string();
 
-            let extra = serde_json::json!({
-                "diagnostic_line": diag_line,
-            });
-
-            let data = make_code_action_data(ACTION_KIND, uri, &params.range, extra);
-
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(deferred_quickfix(
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
-                diagnostics: Some(vec![diag.clone()]),
-                edit: None,
-                command: None,
-                is_preferred: Some(true),
-                disabled: None,
-                data: Some(data),
-            }));
+                ACTION_KIND,
+                uri,
+                &params.range,
+                vec![diag.clone()],
+                true,
+                serde_json::Value::Null,
+            ));
         }
     }
 
@@ -108,7 +101,7 @@ impl Backend {
 
         let edit = build_remove_assert_edit(content, diag_line)?;
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 }
@@ -144,8 +137,9 @@ fn build_remove_assert_edit(content: &str, diag_line: usize) -> Option<TextEdit>
 
     // Walk forward from `assert(` to find the matching `)` respecting
     // nesting (assert can contain function calls, ternaries, etc.).
-    let after_paren = assert_byte + "assert(".len();
-    let close_paren_byte = find_matching_close_paren(content, after_paren)?;
+    let open_paren_byte = assert_byte + "assert".len();
+    let close_paren_byte =
+        crate::text_scan::find_matching_forward(content, open_paren_byte, b'(', b')')?;
 
     // After the closing `)` there should be a `;`.  Skip optional
     // whitespace between `)` and `;`.
@@ -181,140 +175,41 @@ fn build_remove_assert_edit(content: &str, diag_line: usize) -> Option<TextEdit>
         true
     };
 
-    if is_only_statement && after_semi {
+    let (remove_start, remove_end) = if is_only_statement && after_semi {
         // Delete the entire line(s) from the start of the first line
         // to the start of the next line after the statement.
-        let delete_end_byte = if stmt_end_byte < content.len() {
-            // Include the trailing newline of the last line.
-            content[stmt_end_byte..]
-                .find('\n')
-                .map(|p| stmt_end_byte + p + 1)
-                .unwrap_or(content.len())
-        } else {
-            content.len()
-        };
-
-        let start_pos = Position::new(diag_line as u32, 0);
-        let end_line = content[..delete_end_byte].matches('\n').count();
-        let end_col = if delete_end_byte <= content.len() {
-            delete_end_byte
-                - content[..delete_end_byte]
-                    .rfind('\n')
-                    .map(|p| p + 1)
-                    .unwrap_or(0)
-        } else {
-            0
-        };
-
-        Some(TextEdit {
-            range: Range {
-                start: start_pos,
-                end: Position::new(end_line as u32, end_col as u32),
-            },
-            new_text: String::new(),
-        })
+        let delete_end_byte = content[stmt_end_byte..]
+            .find('\n')
+            .map(|p| stmt_end_byte + p + 1)
+            .unwrap_or(content.len());
+        (line_start_byte, delete_end_byte)
     } else if is_only_statement {
         // The assert is at the start (after whitespace) but there is
         // code after the semicolon.  Remove from line start to after
-        // the semicolon.
-        let start_pos = Position::new(diag_line as u32, 0);
-        // Also consume any trailing whitespace after the semicolon so
-        // the code that follows on the same line isn't left with a
-        // stray leading space.
+        // the semicolon, also consuming any trailing whitespace so the
+        // code that follows on the same line isn't left with a stray
+        // leading space.
         let trailing_space = content[stmt_end_byte..]
-            .chars()
-            .take_while(|c| *c == ' ' || *c == '\t')
+            .bytes()
+            .take_while(|b| *b == b' ' || *b == b'\t')
             .count();
-
-        // For same-line: use the end line from the statement.
-        let end_offset = stmt_end_byte + trailing_space;
-        let end_line_num = content[..end_offset].matches('\n').count();
-        let end_line_start = content[..end_offset]
-            .rfind('\n')
-            .map(|p| p + 1)
-            .unwrap_or(0);
-        let end_col_final = (end_offset - end_line_start) as u32;
-
-        Some(TextEdit {
-            range: Range {
-                start: start_pos,
-                end: Position::new(end_line_num as u32, end_col_final),
-            },
-            new_text: String::new(),
-        })
+        (line_start_byte, stmt_end_byte + trailing_space)
     } else {
         // There is code before the assert on the same line.  Remove
         // just the `assert(…);` portion (including any leading
         // whitespace before `assert`).
         let leading_space = content[..assert_byte]
-            .chars()
+            .bytes()
             .rev()
-            .take_while(|c| *c == ' ' || *c == '\t')
+            .take_while(|b| *b == b' ' || *b == b'\t')
             .count();
-        let remove_start = assert_byte - leading_space;
-        let remove_start_col = (remove_start - line_start_byte) as u32;
+        (assert_byte - leading_space, stmt_end_byte)
+    };
 
-        let end_line_num = content[..stmt_end_byte].matches('\n').count();
-        let end_line_start = content[..stmt_end_byte]
-            .rfind('\n')
-            .map(|p| p + 1)
-            .unwrap_or(0);
-        let end_col = (stmt_end_byte - end_line_start) as u32;
-
-        Some(TextEdit {
-            range: Range {
-                start: Position::new(diag_line as u32, remove_start_col),
-                end: Position::new(end_line_num as u32, end_col),
-            },
-            new_text: String::new(),
-        })
-    }
-}
-
-/// Find the byte offset of the closing `)` that matches the opening
-/// paren whose content starts at `start_byte`.
-///
-/// Respects nesting of parentheses and skips string literals (single
-/// and double quoted) so that parentheses inside strings are ignored.
-fn find_matching_close_paren(content: &str, start_byte: usize) -> Option<usize> {
-    let bytes = content.as_bytes();
-    let mut depth: u32 = 1;
-    let mut i = start_byte;
-
-    while i < bytes.len() && depth > 0 {
-        match bytes[i] {
-            b'(' => {
-                depth += 1;
-                i += 1;
-            }
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-                i += 1;
-            }
-            b'\'' | b'"' => {
-                let quote = bytes[i];
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\\' {
-                        i += 2; // skip escaped character
-                    } else if bytes[i] == quote {
-                        i += 1;
-                        break;
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
-            _ => {
-                i += 1;
-            }
-        }
-    }
-
-    None
+    Some(TextEdit {
+        range: crate::text_position::byte_range_to_lsp_range(content, remove_start, remove_end),
+        new_text: String::new(),
+    })
 }
 
 /// Check whether a `function.alreadyNarrowedType` diagnostic for
@@ -336,45 +231,6 @@ pub(crate) fn is_remove_assert_stale(content: &str, diag_line: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── find_matching_close_paren ───────────────────────────────────
-
-    #[test]
-    fn simple_paren() {
-        let s = "true);";
-        // content starts after `assert(`, so index 0 = 't'
-        assert_eq!(find_matching_close_paren(s, 0), Some(4));
-    }
-
-    #[test]
-    fn nested_parens() {
-        let s = "is_string($x));";
-        assert_eq!(find_matching_close_paren(s, 0), Some(13));
-    }
-
-    #[test]
-    fn string_with_parens() {
-        let s = r#""foo(bar)" !== null);"#;
-        assert_eq!(find_matching_close_paren(s, 0), Some(19));
-    }
-
-    #[test]
-    fn single_quoted_string() {
-        let s = "'a)b' === true);";
-        assert_eq!(find_matching_close_paren(s, 0), Some(14));
-    }
-
-    #[test]
-    fn escaped_quote_in_string() {
-        let s = r#""foo\")" !== null);"#;
-        assert_eq!(find_matching_close_paren(s, 0), Some(17));
-    }
-
-    #[test]
-    fn unmatched_returns_none() {
-        let s = "true";
-        assert_eq!(find_matching_close_paren(s, 0), None);
-    }
 
     // ── build_remove_assert_edit ────────────────────────────────────
 
@@ -406,6 +262,14 @@ mod tests {
     }
 
     #[test]
+    fn removes_assert_with_parens_in_strings_and_comments() {
+        let content = "<?php\n    assert($x !== ')' /* ) */\n        && $y);\n    echo 'ok';\n";
+        let edit = build_remove_assert_edit(content, 1).unwrap();
+        assert_eq!(edit.range.start, Position::new(1, 0));
+        assert_eq!(edit.range.end, Position::new(3, 0));
+    }
+
+    #[test]
     fn preserves_code_before_assert() {
         let content = "<?php\n$a = 1; assert(true);\n";
         let edit = build_remove_assert_edit(content, 1).unwrap();
@@ -413,6 +277,15 @@ mod tests {
         assert_eq!(edit.range.start.line, 1);
         assert!(edit.range.start.character > 0);
         assert_eq!(edit.new_text, "");
+    }
+
+    #[test]
+    fn columns_count_utf16_units_after_non_ascii_text() {
+        let content = "<?php\n$größe = 1; assert(true);\n";
+        let edit = build_remove_assert_edit(content, 1).unwrap();
+        // `$größe = 1;` is 11 UTF-16 units but 13 bytes.
+        assert_eq!(edit.range.start, Position::new(1, 11));
+        assert_eq!(edit.range.end, Position::new(1, 25));
     }
 
     #[test]
@@ -461,10 +334,10 @@ mod tests {
                 start: Position::new(line, 0),
                 end: Position::new(line, 100),
             },
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String(code.to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String(code.to_string())),
             source: Some("PHPStan".to_string()),
-            message: message.to_string(),
+            message: message.to_string().into(),
             ..Default::default()
         }
     }
@@ -485,7 +358,7 @@ mod tests {
     fn rejects_wrong_identifier() {
         let diag = make_diagnostic(1, "Call to function assert() with ...", "some.other");
         let identifier = match &diag.code {
-            Some(NumberOrString::String(s)) => s.as_str(),
+            Some(Code::String(s)) => s.as_str(),
             _ => "",
         };
         assert_ne!(identifier, ALREADY_NARROWED_ID);
@@ -499,10 +372,10 @@ mod tests {
             ALREADY_NARROWED_ID,
         );
         let identifier = match &diag.code {
-            Some(NumberOrString::String(s)) => s.as_str(),
+            Some(Code::String(s)) => s.as_str(),
             _ => "",
         };
         assert_eq!(identifier, ALREADY_NARROWED_ID);
-        assert!(diag.message.starts_with(ASSERT_MESSAGE_PREFIX));
+        assert!(crate::util::message_text(&diag.message).starts_with(ASSERT_MESSAGE_PREFIX));
     }
 }

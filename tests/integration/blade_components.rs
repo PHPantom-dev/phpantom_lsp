@@ -3,12 +3,13 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::common::message_text;
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
         complete_labels_at_opened_with_trigger, create_psr4_workspace, hover_text_at,
         markup_hover_at, open_document, template_diagnostics, workspace_path, workspace_uri,
     };
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     const ANONYMOUS_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
         class AnonymousComponent extends Component {\n\
@@ -18,7 +19,7 @@ mod tests {
     /// One component class per naming shape the index has to cover: a
     /// plain one, one in a sub-directory, and an index component
     /// (`Card\Card`, which `<x-card>` reaches).
-    fn workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+    fn workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
         let (backend, dir) = create_psr4_workspace(
             BLADE_COMPONENT_COMPOSER,
             &[
@@ -113,7 +114,7 @@ mod tests {
 
     /// Open a second template from the same workspace, for the cases that
     /// need a caller and a callee.
-    async fn open_view(backend: &phpantom_lsp::Backend, relative: &str) -> Url {
+    async fn open_view(backend: &phpantom_lsp::Backend, relative: &str) -> Uri {
         let uri = workspace_uri(backend, relative);
         let text = std::fs::read_to_string(workspace_path(backend, relative)).unwrap();
         open_document(backend, &uri, "blade", &text).await;
@@ -299,7 +300,9 @@ mod tests {
         let mut diags = Vec::new();
         backend.collect_unused_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
         assert!(
-            !diags.iter().any(|d| d.message.contains("$component")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$component")),
             "$component is synthesized, not authored: {diags:?}"
         );
     }

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::completion::builder::{build_use_edit, use_import_conflicts};
@@ -277,7 +277,7 @@ impl ClassItemCtx<'_> {
                 ctor_params.unwrap_or(&[]),
             );
             if snippet.contains("$0") {
-                (snippet, Some(InsertTextFormat::SNIPPET))
+                (snippet, Some(InsertTextFormat::Snippet))
             } else {
                 // No constructor params — bare name, no snippet syntax.
                 (snippet, None)
@@ -330,19 +330,19 @@ impl ClassItemCtx<'_> {
         CompletionItem {
             label,
             label_details,
-            kind: Some(CompletionItemKind::CLASS),
+            kind: Some(CompletionItemKind::Class),
             detail: Some(fqn.to_string()),
             insert_text: Some(insert_text.clone()),
             insert_text_format,
             filter_text: Some(filter_text),
             sort_text: Some(sort_text),
             tags: if is_deprecated {
-                Some(vec![CompletionItemTag::DEPRECATED])
+                Some(vec![CompletionItemTag::Deprecated])
             } else {
                 None
             },
             text_edit: self.fqn_replace_range.map(|range| {
-                CompletionTextEdit::Edit(TextEdit {
+                CompletionItemTextEdit::TextEdit(TextEdit {
                     range,
                     new_text: insert_text.clone(),
                 })

@@ -26,12 +26,12 @@
 //! recomputes the workspace edit on demand when the user picks the
 //! action.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
 use crate::code_actions::{
-    CodeActionData, DocblockAbove, find_docblock_above_line, make_code_action_data,
+    CodeActionData, DocblockAbove, deferred_quickfix, find_docblock_above_line,
 };
 use crate::docblock::strip_docblock_line_delimiters;
 
@@ -80,7 +80,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -93,10 +93,11 @@ impl Backend {
                 continue;
             }
 
-            let mismatch = match parse_mismatch(&diag.message, identifier) {
-                Some(m) => m,
-                None => continue,
-            };
+            let mismatch =
+                match parse_mismatch(crate::util::message_text(&diag.message), identifier) {
+                    Some(m) => m,
+                    None => continue,
+                };
 
             let diag_line = diag.range.start.line as usize;
 
@@ -109,54 +110,32 @@ impl Backend {
                 continue;
             }
 
-            let extra = serde_json::json!({
-                "diagnostic_message": diag.message,
-                "diagnostic_line": diag_line,
-                "diagnostic_code": identifier,
-            });
-
             // ── Action 1: Update tag type ───────────────────────────
             {
                 let title = build_update_title(&mismatch);
-                let data = make_code_action_data(
+                out.push(deferred_quickfix(
+                    title,
                     "phpstan.fixPhpDocType.update",
                     uri,
                     &params.range,
-                    extra.clone(),
-                );
-
-                out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                    title,
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: Some(vec![diag.clone()]),
-                    edit: None,
-                    command: None,
-                    is_preferred: Some(false),
-                    disabled: None,
-                    data: Some(data),
-                }));
+                    vec![diag.clone()],
+                    false,
+                    serde_json::Value::Null,
+                ));
             }
 
             // ── Action 2: Remove tag (preferred) ────────────────────
             {
                 let title = build_remove_title(&mismatch);
-                let data = make_code_action_data(
+                out.push(deferred_quickfix(
+                    title,
                     "phpstan.fixPhpDocType.remove",
                     uri,
                     &params.range,
-                    extra,
-                );
-
-                out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                    title,
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: Some(vec![diag.clone()]),
-                    edit: None,
-                    command: None,
-                    is_preferred: Some(true),
-                    disabled: None,
-                    data: Some(data),
-                }));
+                    vec![diag.clone()],
+                    true,
+                    serde_json::Value::Null,
+                ));
             }
         }
     }
@@ -187,7 +166,7 @@ impl Backend {
             build_remove_tag_edit(content, &docblock, &mismatch)?
         };
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 }

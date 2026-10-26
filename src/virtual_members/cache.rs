@@ -15,7 +15,6 @@ use parking_lot::RwLock;
 
 use crate::atom::Atom;
 use crate::types::{ClassInfo, MethodInfo, PropertyInfo};
-use crate::virtual_members::laravel::database_schema::SchemaIndex;
 use crate::virtual_members::member_pool::MemberPool;
 
 /// Cache key for [`ResolvedClassCache`]: fully-qualified class name
@@ -47,6 +46,7 @@ pub type ResolvedClassCacheKey = (Atom, Vec<String>);
 ///
 /// All three structures are kept consistent by going through [`Self::insert`],
 /// [`Self::clear`], and [`evict_fqn`]; callers never mutate the map directly.
+#[derive(Default)]
 pub struct ResolvedCacheInner {
     /// Resolved classes keyed by FQN + concrete generic args.
     map: HashMap<ResolvedClassCacheKey, Arc<ClassInfo>>,
@@ -58,35 +58,8 @@ pub struct ResolvedCacheInner {
     /// fully-qualified name or a short name), mirroring the dual FQN /
     /// short-name matching that eviction performs.
     reverse_deps: HashMap<String, HashSet<ResolvedClassCacheKey>>,
-    /// Whether the current project uses Laravel (or a standalone Illuminate
-    /// component).  When `false`, `resolve_class_fully_inner` skips the
-    /// Laravel virtual member providers, the contract to concrete-class
-    /// mixin bindings, and the post-resolution Laravel patches, so a
-    /// non-Laravel project pays none of that scanning cost.
-    ///
-    /// Defaults to `true`: Laravel analysis stays enabled unless the server
-    /// has parsed `composer.json` and confirmed no Laravel/Illuminate
-    /// dependency.  This keeps behaviour unchanged for the CLI test
-    /// backends and any code path that resolves without a project context.
-    /// Not touched by [`Self::clear`] — it reflects the project, not the
-    /// per-edit cache contents.
-    is_laravel: bool,
-    schema_index: SchemaIndex,
-    /// Laravel's alias tables, shared by handle with the [`Backend`] that
-    /// builds them (see
-    /// [`LaravelAliasSlot`](crate::virtual_members::laravel::LaravelAliasSlot)).
-    ///
-    /// A virtual member provider receives this cache but never the
-    /// `Backend`, and a facade whose `getFacadeAccessor()` names a container
-    /// binding (`return 'sentry';`) needs the container table to reach the
-    /// class it forwards to.  Sharing the slot rather than a snapshot means
-    /// the provider always reads the table the `Backend` most recently
-    /// built, including after a rebuild.  A cache created without a
-    /// `Backend` (tests, the throwaway cache a cache-less resolution falls
-    /// back to) holds an empty slot and simply forwards nothing.
-    ///
-    /// [`Backend`]: crate::Backend
-    laravel_aliases: crate::virtual_members::laravel::LaravelAliasSlot,
+    /// The project facts the Laravel providers read.
+    laravel: crate::virtual_members::laravel::LaravelCacheState,
     /// Classes currently being resolved by `resolve_class_fully_inner`,
     /// keyed per thread so one thread's in-progress resolution never
     /// degrades another thread's independent resolution of the same
@@ -311,26 +284,6 @@ fn sweep_dead_witnesses<K, V>(
     *swept_len = map.len();
 }
 
-impl Default for ResolvedCacheInner {
-    fn default() -> Self {
-        ResolvedCacheInner {
-            map: HashMap::new(),
-            fqn_keys: HashMap::new(),
-            reverse_deps: HashMap::new(),
-            is_laravel: true,
-            schema_index: SchemaIndex::default(),
-            laravel_aliases: crate::virtual_members::laravel::new_alias_slot(),
-            in_flight: HashSet::new(),
-            pending: HashMap::new(),
-            substituted_methods: SubstitutedMembers::default(),
-            substituted_properties: SubstitutedMembers::default(),
-            linked_classes: HashMap::new(),
-            linked_classes_swept_len: 0,
-            member_pool: parking_lot::Mutex::default(),
-        }
-    }
-}
-
 impl ResolvedCacheInner {
     /// Look up a resolved class by its `(FQN, generic args)` key.
     pub fn get(&self, key: &ResolvedClassCacheKey) -> Option<&Arc<ClassInfo>> {
@@ -360,19 +313,15 @@ impl ResolvedCacheInner {
         self.map.contains_key(key)
     }
 
-    /// Whether the project uses Laravel / Illuminate.  See the
-    /// [`is_laravel`](ResolvedCacheInner::is_laravel) field.
-    pub fn is_laravel(&self) -> bool {
-        self.is_laravel
+    /// The project facts the Laravel providers read.
+    pub(crate) fn laravel(&self) -> &crate::virtual_members::laravel::LaravelCacheState {
+        &self.laravel
     }
 
-    /// Record whether the project uses Laravel / Illuminate.
-    ///
-    /// Set once by the server after parsing `composer.json`.  Left
-    /// untouched by [`Self::clear`] so cache invalidation on file edits
-    /// does not lose the project classification.
-    pub fn set_laravel(&mut self, is_laravel: bool) {
-        self.is_laravel = is_laravel;
+    pub(crate) fn laravel_mut(
+        &mut self,
+    ) -> &mut crate::virtual_members::laravel::LaravelCacheState {
+        &mut self.laravel
     }
 
     /// Mark `fqn` as being resolved on the current thread.  Returns
@@ -412,35 +361,6 @@ impl ResolvedCacheInner {
     /// Whether another thread currently holds a fresh claim on `key`.
     pub(crate) fn is_pending(&self, key: &ResolvedClassCacheKey) -> bool {
         self.pending.contains_key(key)
-    }
-
-    pub fn schema_index(&self) -> &SchemaIndex {
-        &self.schema_index
-    }
-
-    /// The concrete class FQN a Laravel container binding key is bound to,
-    /// or `None` when the alias tables are not built or the key is bound
-    /// only at runtime.
-    ///
-    /// The slot lock is only ever held for the length of a read or a
-    /// single assignment (never across the build itself), so taking it
-    /// under the cache lock cannot deadlock.
-    pub(crate) fn container_alias_concrete_fqn(&self, key: &str) -> Option<String> {
-        self.laravel_aliases.peek()?.container.get(key).cloned()
-    }
-
-    /// Share the `Backend`'s alias slot into this cache.  Called once at
-    /// construction; the slot's contents are then always the tables the
-    /// `Backend` most recently built.
-    pub(crate) fn set_laravel_aliases(
-        &mut self,
-        slot: crate::virtual_members::laravel::LaravelAliasSlot,
-    ) {
-        self.laravel_aliases = slot;
-    }
-
-    pub fn set_schema_index(&mut self, schema_index: SchemaIndex) {
-        self.schema_index = schema_index;
     }
 
     /// Number of cached entries (used by eviction tests).

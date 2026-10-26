@@ -1,0 +1,21 @@
+// test: class template in @return wins over a scalar union native return type
+// feature: hover
+// expect: string
+// expect_absent: int
+// expect_absent: null
+---
+<?php
+
+/** @template TInput of string|int|null */
+final class InputBag
+{
+    /** @return TInput */
+    public function first(): string|int|null {}
+}
+
+function demo(): void
+{
+    /** @var InputBag<string> $query */
+    $value = $query->first();
+    $val<>ue;
+}

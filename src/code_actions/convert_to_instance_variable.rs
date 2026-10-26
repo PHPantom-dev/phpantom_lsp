@@ -28,7 +28,7 @@ use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
 use mago_syntax::cst::class_like::property::Property;
 use mago_syntax::cst::sequence::Sequence;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -42,7 +42,7 @@ use crate::parser::with_parsed_program;
 use crate::scope_collector::{
     AccessRole, ClosureUseList, Frame, FrameKind, ScopeMap, collect_function_scope,
 };
-use crate::text_position::{offset_to_position, position_to_byte_offset};
+use crate::text_position::{byte_range_to_lsp_range, offset_to_position, position_to_byte_offset};
 use crate::types::{ClassInfo, Visibility};
 use crate::virtual_members::resolve_class_fully_cached;
 
@@ -189,11 +189,11 @@ fn plan_conversion(content: &str, cursor_offset: u32) -> Option<Conversion> {
             // the method assigns a variable of that function, not of the
             // method.
             let owner = find_enclosing_function(
-                &program.statements,
+                program,
                 assignment.variable.span().start.offset,
                 FunctionKinds::All,
             )?;
-            if owner.span != method.span() {
+            if owner.span() != method.span() {
                 return None;
             }
             let var_name = bytes_to_str(assignment.variable.name).to_string();
@@ -376,7 +376,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let cursor_offset = position_to_byte_offset(content, params.range.start) as u32;
 
@@ -394,9 +394,9 @@ impl Backend {
             format!("Convert {} to instance variable", info.var_name)
         };
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title,
-            kind: Some(CodeActionKind::new("refactor.extract")),
+            kind: Some(CodeActionKind::RefactorExtract),
             diagnostics: None,
             edit: None,
             command: None,
@@ -408,6 +408,7 @@ impl Backend {
                 &params.range,
                 serde_json::json!({}),
             )),
+            tags: None,
         }));
     }
 
@@ -428,7 +429,7 @@ impl Backend {
             return None;
         }
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         let mut edits: Vec<TextEdit> = Vec::new();
 
         let insert_pos = offset_to_position(content, conversion.insert_offset);
@@ -460,10 +461,7 @@ impl Backend {
                     }
                 }
                 Rewrite::Delete(start, end) => edits.push(TextEdit {
-                    range: Range {
-                        start: offset_to_position(content, start as usize),
-                        end: offset_to_position(content, end as usize),
-                    },
+                    range: byte_range_to_lsp_range(content, start as usize, end as usize),
                     new_text: String::new(),
                 }),
             }

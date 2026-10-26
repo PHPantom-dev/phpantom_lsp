@@ -1,6 +1,5 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── DefineInfo value extraction correctness ────────────────────────────────
 
@@ -143,7 +142,7 @@ async fn test_const_declaration_value_clean() {
 async fn test_goto_definition_constant_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///constants.php").unwrap();
+    let uri = Uri::parse("file:///constants.php").unwrap();
     let text = concat!(
         "<?php\n",                           // 0
         "define('APP_VERSION', '1.0.0');\n", // 1
@@ -152,37 +151,17 @@ async fn test_goto_definition_constant_same_file() {
         "echo APP_VERSION;\n",               // 4
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "APP_VERSION" on line 4
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 4,
-                character: 7,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 4, 7).await;
     assert!(
         result.is_some(),
         "Should resolve constant APP_VERSION to its define() call"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -203,7 +182,7 @@ async fn test_goto_definition_constant_same_file() {
 async fn test_goto_definition_constant_same_file_second_constant() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///constants2.php").unwrap();
+    let uri = Uri::parse("file:///constants2.php").unwrap();
     let text = concat!(
         "<?php\n",                           // 0
         "define('APP_VERSION', '1.0.0');\n", // 1
@@ -212,37 +191,17 @@ async fn test_goto_definition_constant_same_file_second_constant() {
         "echo APP_NAME;\n",                  // 4
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "APP_NAME" on line 4
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 4,
-                character: 7,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 4, 7).await;
     assert!(
         result.is_some(),
         "Should resolve constant APP_NAME to its define() call"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -258,7 +217,7 @@ async fn test_goto_definition_constant_same_file_second_constant() {
 async fn test_goto_definition_constant_double_quoted() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_dq.php").unwrap();
+    let uri = Uri::parse("file:///const_dq.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "define(\"DB_HOST\", 'localhost');\n", // 1
@@ -266,37 +225,17 @@ async fn test_goto_definition_constant_double_quoted() {
         "echo DB_HOST;\n",                     // 3
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "DB_HOST" on line 3
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 3,
-                character: 7,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 3, 7).await;
     assert!(
         result.is_some(),
         "Should resolve double-quoted define constant"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 1, "DB_HOST is defined on line 1");
         }
@@ -310,7 +249,7 @@ async fn test_goto_definition_constant_double_quoted() {
 async fn test_goto_definition_constant_indented_define() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_indent.php").unwrap();
+    let uri = Uri::parse("file:///const_indent.php").unwrap();
     let text = concat!(
         "<?php\n",                           // 0
         "if (!defined('DEBUG_MODE')) {\n",   // 1
@@ -320,34 +259,14 @@ async fn test_goto_definition_constant_indented_define() {
         "echo DEBUG_MODE;\n",                // 5
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "DEBUG_MODE" on line 5
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 7,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 5, 7).await;
     assert!(result.is_some(), "Should resolve indented define constant");
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -396,59 +315,27 @@ async fn test_goto_definition_constant_cross_file() {
 
     // Open the constants file first so define() calls are registered
     let constants_path = _dir.path().join("src/constants.php");
-    let constants_uri = Url::from_file_path(&constants_path).unwrap();
+    let constants_uri = Uri::from_file_path(&constants_path).unwrap();
     let constants_text = std::fs::read_to_string(&constants_path).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: constants_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: constants_text,
-            },
-        })
-        .await;
+    open_php(&backend, &constants_uri, &constants_text).await;
 
     // Open the service file
     let service_path = _dir.path().join("src/Service.php");
-    let service_uri = Url::from_file_path(&service_path).unwrap();
+    let service_uri = Uri::from_file_path(&service_path).unwrap();
     let service_text = std::fs::read_to_string(&service_path).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: service_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: service_text,
-            },
-        })
-        .await;
+    open_php(&backend, &service_uri, &service_text).await;
 
     // Click on "DEFAULT_TIMEOUT" on line 4 in Service.php
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier {
-                uri: service_uri.clone(),
-            },
-            position: Position {
-                line: 4,
-                character: 18,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &service_uri, 4, 18).await;
     assert!(
         result.is_some(),
         "Should resolve DEFAULT_TIMEOUT to its define() in constants.php"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, constants_uri, "Should jump to constants.php");
             assert_eq!(
                 location.range.start.line, 2,
@@ -490,59 +377,27 @@ async fn test_goto_definition_constant_cross_file_first_constant() {
 
     // Open the constants file first
     let constants_path = _dir.path().join("src/constants.php");
-    let constants_uri = Url::from_file_path(&constants_path).unwrap();
+    let constants_uri = Uri::from_file_path(&constants_path).unwrap();
     let constants_text = std::fs::read_to_string(&constants_path).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: constants_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: constants_text,
-            },
-        })
-        .await;
+    open_php(&backend, &constants_uri, &constants_text).await;
 
     // Open the worker file
     let worker_path = _dir.path().join("src/Worker.php");
-    let worker_uri = Url::from_file_path(&worker_path).unwrap();
+    let worker_uri = Uri::from_file_path(&worker_path).unwrap();
     let worker_text = std::fs::read_to_string(&worker_path).unwrap();
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: worker_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: worker_text,
-            },
-        })
-        .await;
+    open_php(&backend, &worker_uri, &worker_text).await;
 
     // Click on "MAX_RETRIES" on line 4 in Worker.php
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier {
-                uri: worker_uri.clone(),
-            },
-            position: Position {
-                line: 4,
-                character: 35,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &worker_uri, 4, 35).await;
     assert!(
         result.is_some(),
         "Should resolve MAX_RETRIES to its define() in constants.php"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, constants_uri, "Should jump to constants.php");
             assert_eq!(
                 location.range.start.line, 1,
@@ -560,7 +415,7 @@ async fn test_goto_definition_constant_cross_file_first_constant() {
 async fn test_goto_definition_constant_in_function_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_arg.php").unwrap();
+    let uri = Uri::parse("file:///const_arg.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "define('LOG_LEVEL', 'info');\n",              // 1
@@ -569,37 +424,17 @@ async fn test_goto_definition_constant_in_function_arg() {
         "setLevel(LOG_LEVEL);\n",                      // 4
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "LOG_LEVEL" on line 4, inside the function argument
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 4,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 4, 12).await;
     assert!(
         result.is_some(),
         "Should resolve LOG_LEVEL used as function argument"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -615,7 +450,7 @@ async fn test_goto_definition_constant_in_function_arg() {
 async fn test_goto_definition_constant_inside_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_class.php").unwrap();
+    let uri = Uri::parse("file:///const_class.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "define('BASE_URL', 'https://example.com');\n", // 1
@@ -627,37 +462,17 @@ async fn test_goto_definition_constant_inside_class() {
         "}\n",                                          // 7
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "BASE_URL" on line 5
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 18,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 5, 18).await;
     assert!(
         result.is_some(),
         "Should resolve BASE_URL used inside a class method"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -673,36 +488,16 @@ async fn test_goto_definition_constant_inside_class() {
 async fn test_goto_definition_constant_unknown_returns_none() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_unknown.php").unwrap();
+    let uri = Uri::parse("file:///const_unknown.php").unwrap();
     let text = concat!(
         "<?php\n",                  // 0
         "echo UNKNOWN_CONSTANT;\n", // 1
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "UNKNOWN_CONSTANT" on line 1
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 1,
-                character: 10,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 1, 10).await;
     assert!(
         result.is_none(),
         "Unknown constant should not resolve to any definition"
@@ -714,7 +509,7 @@ async fn test_goto_definition_constant_unknown_returns_none() {
 async fn test_goto_definition_constant_in_array_index() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_array.php").unwrap();
+    let uri = Uri::parse("file:///const_array.php").unwrap();
     let text = concat!(
         "<?php\n",                        // 0
         "define('KEY_NAME', 'name');\n",  // 1
@@ -723,37 +518,17 @@ async fn test_goto_definition_constant_in_array_index() {
         "echo $data[KEY_NAME];\n",        // 4
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "KEY_NAME" on line 4, inside the array brackets
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 4,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 4, 14).await;
     assert!(
         result.is_some(),
         "Should resolve KEY_NAME used as array index"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -770,7 +545,7 @@ async fn test_goto_definition_constant_in_array_index() {
 async fn test_goto_definition_constant_multiple_defines() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multi_const.php").unwrap();
+    let uri = Uri::parse("file:///multi_const.php").unwrap();
     let text = concat!(
         "<?php\n",                // 0
         "define('FIRST', 1);\n",  // 1
@@ -780,37 +555,17 @@ async fn test_goto_definition_constant_multiple_defines() {
         "echo THIRD;\n",          // 5
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "THIRD" on line 5
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 7,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 5, 7).await;
     assert!(
         result.is_some(),
         "Should resolve THIRD to its specific define() call"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -827,7 +582,7 @@ async fn test_goto_definition_constant_multiple_defines() {
 async fn test_goto_definition_constant_spaces_in_define() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_spaces.php").unwrap();
+    let uri = Uri::parse("file:///const_spaces.php").unwrap();
     let text = concat!(
         "<?php\n",                         // 0
         "define( 'SPACED_CONST', 42 );\n", // 1
@@ -835,37 +590,17 @@ async fn test_goto_definition_constant_spaces_in_define() {
         "echo SPACED_CONST;\n",            // 3
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "SPACED_CONST" on line 3
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 3,
-                character: 7,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 3, 7).await;
     assert!(
         result.is_some(),
         "Should resolve define() with spaces after paren"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -883,7 +618,7 @@ async fn test_goto_definition_constant_spaces_in_define() {
 async fn test_goto_definition_constant_in_comparison() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_cmp.php").unwrap();
+    let uri = Uri::parse("file:///const_cmp.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "define('STATUS_ACTIVE', 1);\n",            // 1
@@ -894,37 +629,17 @@ async fn test_goto_definition_constant_in_comparison() {
         "}\n",                                      // 6
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "STATUS_ACTIVE" on line 5
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 27,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 5, 27).await;
     assert!(
         result.is_some(),
         "Should resolve STATUS_ACTIVE used in comparison"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -945,7 +660,7 @@ async fn test_goto_definition_constant_in_comparison() {
 async fn test_goto_definition_constant_inside_class_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_in_method.php").unwrap();
+    let uri = Uri::parse("file:///const_in_method.php").unwrap();
     let text = concat!(
         "<?php\n",                                   // 0
         "class Demo {\n",                            // 1
@@ -956,37 +671,17 @@ async fn test_goto_definition_constant_inside_class_method() {
         "}\n",                                       // 6
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "APP_VERSION" in `echo APP_VERSION;` on line 4
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 4,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 4, 15).await;
     assert!(
         result.is_some(),
         "GTD on APP_VERSION usage inside class method should jump to define() call"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -1004,7 +699,7 @@ async fn test_goto_definition_constant_inside_class_method() {
 async fn test_goto_definition_constant_inside_namespace_class_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_ns_method.php").unwrap();
+    let uri = Uri::parse("file:///const_ns_method.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // 0
         "namespace Demo {\n",                            // 1
@@ -1017,37 +712,17 @@ async fn test_goto_definition_constant_inside_namespace_class_method() {
         "}\n",                                           // 8
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Click on "APP_VERSION" in `echo APP_VERSION;` on line 5
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position {
-                line: 5,
-                character: 20,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    let result = backend.goto_definition(params).await.unwrap();
+    let result = goto_definition_at(&backend, &uri, 5, 20).await;
     assert!(
         result.is_some(),
         "GTD on APP_VERSION usage in namespace class method should jump to define() call"
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 4,
@@ -1084,32 +759,13 @@ async fn test_goto_definition_namespaced_constant_every_spelling() {
         (12, 19, "\\App\\Config\\GRADES"),
     ] {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///ns_const.php").unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
+        let uri = Uri::parse("file:///ns_const.php").unwrap();
+        open_php(&backend, &uri, text).await;
 
-        let result = backend
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
-            .await
-            .unwrap();
+        let result = goto_definition_at(&backend, &uri, line, character).await;
 
         match result {
-            Some(GotoDefinitionResponse::Scalar(location)) => assert_eq!(
+            Some(DefinitionResponse::Definition(Definition::Location(location))) => assert_eq!(
                 location.range.start.line, 3,
                 "`{spelling}` should land on the declaration"
             ),

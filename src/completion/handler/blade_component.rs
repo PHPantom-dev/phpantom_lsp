@@ -13,15 +13,16 @@
 //! to no component at all, so neither the name nor a plain attribute ever
 //! appears in the virtual PHP anywhere near where it is written.
 
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit, InsertTextFormat,
-    Position, Range, TextEdit,
+use tower_lsp_server::gen_lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionItemTextEdit, CompletionResponse,
+    InsertTextFormat, Position, Range, TextEdit,
 };
 
 use crate::Backend;
 use crate::blade::component_names::view_names_for_component_tag;
 use crate::blade::component_tags::{TagContext, TagCursor, TagKind, kebab_case, tag_context_at};
 use crate::blade::signature;
+use crate::class_lookup::Fqn;
 use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::types::Visibility;
 
@@ -62,7 +63,7 @@ impl Backend {
             TagCursor::Name => self.blade_component_name_items(ctx.kind, &prefix, range),
             TagCursor::Attribute => self.blade_component_attribute_items(&ctx, &prefix, range),
         };
-        Some(CompletionResponse::Array(items))
+        Some(CompletionResponse::CompletionItemList(items))
     }
 
     /// The component names a tag of `kind` can be written with.
@@ -109,8 +110,8 @@ impl Backend {
             .map(|(index, (name, fqn))| CompletionItem {
                 label: name.clone(),
                 kind: Some(match fqn {
-                    Some(_) => CompletionItemKind::CLASS,
-                    None => CompletionItemKind::MODULE,
+                    Some(_) => CompletionItemKind::Class,
+                    None => CompletionItemKind::Module,
                 }),
                 detail: Some(match fqn {
                     Some(fqn) => format!("\\{}", fqn.trim_matches('\\')),
@@ -118,7 +119,7 @@ impl Backend {
                 }),
                 sort_text: Some(format!("{index:05}")),
                 filter_text: Some(name.clone()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range,
                     new_text: name.clone(),
                 })),
@@ -161,7 +162,7 @@ impl Backend {
                     continue;
                 }
                 items.push(CompletionItem {
-                    kind: Some(CompletionItemKind::FIELD),
+                    kind: Some(CompletionItemKind::Field),
                     detail: Some(attribute.detail.clone()),
                     // Required attributes first, in declaration order,
                     // since a tag missing one is reported as a missing
@@ -172,11 +173,11 @@ impl Backend {
                         u8::from(bound)
                     )),
                     filter_text: Some(label.clone()),
-                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                         range,
                         new_text: format!("{label}=\"$1\""),
                     })),
-                    insert_text_format: Some(InsertTextFormat::SNIPPET),
+                    insert_text_format: Some(InsertTextFormat::Snippet),
                     label,
                     ..CompletionItem::default()
                 });
@@ -197,7 +198,7 @@ impl Backend {
         let Some(class) = self.find_or_load_class(fqn.trim_matches('\\')) else {
             return Vec::new();
         };
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             &class,
             &loader,
@@ -293,7 +294,7 @@ impl Backend {
         // reading one is the template declaring an attribute implicitly
         // (see [`crate::blade::implicit_props`]).
         let implicit = {
-            let directives = self.blade_directives.read();
+            let directives = self.blade.directives.read();
             crate::blade::implicit_props::implicit_props(&source, &directives)
         };
         if implicit.is_empty() {

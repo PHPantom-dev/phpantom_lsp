@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, FunctionInfo, MethodExtras, MethodInfo};
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 // ── Low-level scanning tests ────────────────────────────────────────
 
@@ -241,7 +242,7 @@ fn uncaught_names(content: &str) -> Vec<String> {
 /// loaders.
 fn uncaught_names_with(
     content: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
     function_loader: crate::types::FunctionLoader<'_>,
     use_map: &HashMap<String, String>,
 ) -> Vec<String> {
@@ -249,7 +250,8 @@ fn uncaught_names_with(
         content,
         docblock_cursor(content),
         Some(&ThrowsContext {
-            class_loader,
+            class_loader: crate::test_fixtures::fqn_source_loader(class_loader),
+            resolved_class_loader: class_loader,
             function_loader,
             use_map,
             local_classes: &[],
@@ -274,12 +276,14 @@ fn uncaught_names_in(backend: &crate::Backend, content: &str) -> Vec<String> {
     backend.update_ast(uri, content);
     let file_ctx = backend.file_context(uri);
     let class_loader = backend.class_loader(&file_ctx);
+    let resolved_class_loader = backend.resolved_class_loader(&file_ctx);
     let function_loader = backend.function_loader(&file_ctx);
     find_uncaught_throw_types_with_context(
         content,
         docblock_cursor(content),
         Some(&ThrowsContext {
             class_loader: &class_loader,
+            resolved_class_loader: &resolved_class_loader,
             function_loader: Some(&function_loader),
             use_map: &file_ctx.use_map,
             local_classes: &file_ctx.classes,
@@ -638,8 +642,9 @@ fn make_class_with_throws(name: &str, methods: Vec<(&str, Vec<&str>)>) -> Arc<Cl
     })
 }
 
-fn loader_for(classes: Vec<Arc<ClassInfo>>) -> impl Fn(&str) -> Option<Arc<ClassInfo>> {
-    move |name: &str| {
+fn loader_for(classes: Vec<Arc<ClassInfo>>) -> impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> {
+    move |name: Fqn<'_>| {
+        let name = name.as_str();
         classes
             .iter()
             .find(|cls| cls.fqn() == name.trim_start_matches('\\'))

@@ -1,0 +1,8 @@
+// test: A relation as a nullable primary key
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityRelationRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/MyEntityRelationNullablePrimaryKey.php
+// expect_diagnostic: 15: Property PHPStan\Rules\Doctrine\ORM\MyEntityRelationNullablePrimaryKey::$id type mapping mismatch: property can contain PHPStan\Rules\Doctrine\ORM\MyEntity|null but database expects PHPStan\Rules\Doctrine\ORM\MyEntity. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

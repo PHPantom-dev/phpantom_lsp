@@ -5,7 +5,9 @@
 use std::collections::HashMap;
 
 use mago_syntax::cst::Statement;
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Position};
+use tower_lsp_server::gen_lsp_types::{
+    CompletionItem, CompletionItemKind, InsertTextFormat, Position,
+};
 
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
 use crate::completion::use_edit::{analyze_use_block, build_use_edit};
@@ -66,7 +68,7 @@ pub(super) fn push_smart_tag_items(
                 def,
                 "@var Type $var".to_string(),
                 "var ${1:Type} \\$${2:var}".to_string(),
-                Some(InsertTextFormat::SNIPPET),
+                Some(InsertTextFormat::Snippet),
                 format!("1_{}", def.tag.to_lowercase()),
             ));
             true
@@ -85,7 +87,7 @@ fn tag_item(
 ) -> CompletionItem {
     CompletionItem {
         label,
-        kind: Some(CompletionItemKind::KEYWORD),
+        kind: Some(CompletionItemKind::Keyword),
         detail: Some(def.detail.to_string()),
         insert_text: Some(insert),
         insert_text_format: format,
@@ -122,19 +124,22 @@ fn push_throws_items(site: &TagSite, def: &TagDef, items: &mut Vec<CompletionIte
         smart,
         ..
     } = *site;
-    let uncaught = match smart.class_loader {
-        Some(class_loader) => throws_analysis::find_uncaught_throw_types_with_context(
-            content,
-            position,
-            Some(&ThrowsContext {
-                class_loader,
-                function_loader: smart.function_loader,
-                use_map,
-                local_classes: smart.local_classes,
-                backend: smart.import_target.map(|(backend, _)| backend),
-            }),
-        ),
-        None => throws_analysis::find_uncaught_throw_types(content, position),
+    let uncaught = match (smart.class_loader, smart.resolved_class_loader) {
+        (Some(class_loader), Some(resolved_class_loader)) => {
+            throws_analysis::find_uncaught_throw_types_with_context(
+                content,
+                position,
+                Some(&ThrowsContext {
+                    class_loader,
+                    resolved_class_loader,
+                    function_loader: smart.function_loader,
+                    use_map,
+                    local_classes: smart.local_classes,
+                    backend: smart.import_target.map(|(backend, _)| backend),
+                }),
+            )
+        }
+        _ => throws_analysis::find_uncaught_throw_types(content, position),
     };
     let existing_throws = find_existing_throws_tags(content, position);
     let missing: Vec<String> = uncaught
@@ -197,7 +202,7 @@ fn push_param_items(site: &TagSite, def: &TagDef, items: &mut Vec<CompletionItem
                     Some(snippet) => (
                         format!("param {} {}", snippet, name.replace('$', "\\$")),
                         label,
-                        Some(InsertTextFormat::SNIPPET),
+                        Some(InsertTextFormat::Snippet),
                     ),
                     None => (format!("param {label_type} {name}"), label, None),
                 }
@@ -228,7 +233,7 @@ fn push_return_item(site: &TagSite, def: &TagDef, items: &mut Vec<CompletionItem
         Some(ret) => {
             let (label_type, snippet) = enriched_type(site, ret);
             let (insert, format) = match snippet {
-                Some(snippet) => (format!("return {snippet}"), Some(InsertTextFormat::SNIPPET)),
+                Some(snippet) => (format!("return {snippet}"), Some(InsertTextFormat::Snippet)),
                 None => (format!("return {label_type}"), None),
             };
             items.push(tag_item(
@@ -281,7 +286,7 @@ fn push_declared_var_item(site: &TagSite, def: &TagDef, items: &mut Vec<Completi
     };
     let (label_type, snippet) = enriched_type(site, th);
     let (insert, format) = match snippet {
-        Some(snippet) => (format!("var {snippet}"), Some(InsertTextFormat::SNIPPET)),
+        Some(snippet) => (format!("var {snippet}"), Some(InsertTextFormat::Snippet)),
         None => (format!("var {label_type}"), None),
     };
     items.push(tag_item(
@@ -299,7 +304,7 @@ fn push_declared_var_item(site: &TagSite, def: &TagDef, items: &mut Vec<Completi
 /// pre-filled when the assignment's type can be inferred.
 fn inline_var_item(site: &TagSite, def: &TagDef) -> CompletionItem {
     let sort_text = format!("0a_{}", def.tag.to_lowercase());
-    let snippet = Some(InsertTextFormat::SNIPPET);
+    let snippet = Some(InsertTextFormat::Snippet);
     match &site.smart.inferred_inline_var_type {
         Some(ty) => {
             let (label_type, type_snippet) = enriched_type(site, ty);

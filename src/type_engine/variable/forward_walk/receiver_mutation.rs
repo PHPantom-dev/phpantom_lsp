@@ -8,8 +8,9 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::types::narrowing;
+use crate::type_engine::type_ops::condition_facts;
 
 use super::scope_state::{ClosureCaptureEffect, MemberInvalidation};
 
@@ -102,9 +103,9 @@ fn apply_invalidations(
                 let key: &str = key;
                 key != invalidation.subject
                     && !kept.iter().any(|k| k == key)
-                    && !narrowing::is_call_key(key)
+                    && !condition_facts::is_call_key(key)
                     && key.ends_with(|c: char| c.is_alphanumeric() || c == '_')
-                    && narrowing::key_reads_variable(key, &invalidation.subject)
+                    && condition_facts::key_reads_variable(key, &invalidation.subject)
             })
             .map(|key| key.to_string())
             .collect();
@@ -153,7 +154,7 @@ fn forget_static_properties_after_impure_call(
         .map(|key| key.to_string())
         .collect();
     for key in keys {
-        let declared = if narrowing::is_call_key(&key) {
+        let declared = if condition_facts::is_call_key(&key) {
             Vec::new()
         } else {
             super::cond_narrowing::declared_key_type(&key, scope, ctx)
@@ -228,7 +229,7 @@ pub(crate) fn forget_impure_call_results(
             forget_impure_call_results(bin.rhs, scope, ctx);
         }
         Expression::Call(call) => {
-            let Some(key) = narrowing::expr_to_subject_key(condition) else {
+            let Some(key) = condition_facts::expr_to_subject_key(condition) else {
                 return;
             };
             if !scope.contains(&key) {
@@ -531,7 +532,7 @@ fn call_node_invalidations<'b>(
                     // chain, which a fluent chain pays at every link, so it
                     // is skipped when nothing could read through it.
                     let receiver = scope_tracks_paths(scope)
-                        .then(|| narrowing::expr_to_subject_key(object))
+                        .then(|| condition_facts::expr_to_subject_key(object))
                         .flatten();
                     let receiver_has_state = receiver
                         .as_deref()
@@ -665,7 +666,7 @@ fn collect_closure_invalidations<'b>(
     out.extend(closure_out.into_iter().filter(|invalidation| {
         captured.iter().any(|name| {
             invalidation.subject == *name
-                || narrowing::key_reads_variable(&invalidation.subject, name)
+                || condition_facts::key_reads_variable(&invalidation.subject, name)
         })
     }));
 }
@@ -818,7 +819,7 @@ fn push_receiver_invalidation(
     let made = if effect.forgets_own_result() {
         None
     } else {
-        narrowing::expr_to_subject_key(call)
+        condition_facts::expr_to_subject_key(call)
     };
     push_unique(
         out,
@@ -841,7 +842,7 @@ fn push_argument_invalidations(
     out: &mut Vec<Invalidation>,
 ) {
     for arg in args.arguments.iter() {
-        let Some(key) = narrowing::expr_to_subject_key(arg.value()) else {
+        let Some(key) = condition_facts::expr_to_subject_key(arg.value()) else {
             continue;
         };
         if !scope_reads_through(scope, &key) {
@@ -897,7 +898,7 @@ fn push_unique(out: &mut Vec<Invalidation>, invalidation: Invalidation) {
 fn any_argument_has_state(args: &ArgumentList<'_>, scope: &ScopeState) -> bool {
     scope_tracks_paths(scope)
         && args.arguments.iter().any(|arg| {
-            narrowing::expr_to_subject_key(arg.value())
+            condition_facts::expr_to_subject_key(arg.value())
                 .is_some_and(|key| scope_reads_through(scope, &key))
         })
 }
@@ -921,7 +922,8 @@ fn scope_holds_call_state(scope: &ScopeState) -> bool {
 /// Whether the scope holds any synthetic key read through `subject`.
 fn scope_reads_through(scope: &ScopeState, subject: &str) -> bool {
     let reads = |key: &str| {
-        key != subject && crate::type_engine::types::narrowing::key_reads_variable(key, subject)
+        key != subject
+            && crate::type_engine::type_ops::condition_facts::key_reads_variable(key, subject)
     };
     scope.locals.compound_keys().any(|k| reads(k))
         || scope
@@ -942,10 +944,10 @@ fn written_object(expr: &Expression<'_>) -> Option<String> {
             Expression::ArrayAccess(access) => target = access.array,
             Expression::ArrayAppend(append) => target = append.array,
             Expression::Access(Access::Property(pa)) => {
-                return narrowing::expr_to_subject_key(pa.object);
+                return condition_facts::expr_to_subject_key(pa.object);
             }
             Expression::Access(Access::NullSafeProperty(pa)) => {
-                return narrowing::expr_to_subject_key(pa.object);
+                return condition_facts::expr_to_subject_key(pa.object);
             }
             _ => return None,
         }
@@ -976,7 +978,7 @@ fn untouched_property_keys(
     }
     let classes: Vec<Arc<crate::types::ClassInfo>> = subject_class_names(subject, scope, ctx)
         .iter()
-        .filter_map(|name| (ctx.class_loader)(name))
+        .filter_map(|name| (ctx.file.class_loader)(Fqn::new(name)))
         .collect();
     if classes.is_empty() {
         return Vec::new();
@@ -997,7 +999,7 @@ fn untouched_property_keys(
                 {
                     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                         cls,
-                        ctx.class_loader,
+                        ctx.file.class_loader,
                         ctx.resolved_class_cache,
                     );
                     merged
@@ -1023,14 +1025,14 @@ fn inherits_method(cls: &crate::types::ClassInfo, method: &str, ctx: &ForwardWal
     let Some(parent) = cls
         .parent_class
         .as_ref()
-        .and_then(|p| (ctx.class_loader)(p))
+        .and_then(|p| (ctx.file.class_loader)(Fqn::new(p)))
     else {
         return false;
     };
-    narrowing::find_method_in_chain_where(
+    condition_facts::find_method_in_chain_where(
         &parent,
         method,
-        ctx.class_loader,
+        ctx.file.class_loader,
         &|_| true,
         &mut Vec::new(),
         0,
@@ -1059,7 +1061,7 @@ fn declares_method(cls: &crate::types::ClassInfo, method: &str, ctx: &ForwardWal
                 return false;
             }
             visited.push(*name);
-            (ctx.class_loader)(name).is_some_and(|t| walk(&t, method, ctx, visited))
+            (ctx.file.class_loader)(Fqn::new(name)).is_some_and(|t| walk(&t, method, ctx, visited))
         })
     }
     walk(cls, method, ctx, &mut Vec::new())
@@ -1097,7 +1099,7 @@ fn method_call_effect(
             vec![ctx.current_class.fqn().to_string()]
         }
         _ => {
-            let Some(key) = narrowing::expr_to_subject_key(object) else {
+            let Some(key) = condition_facts::expr_to_subject_key(object) else {
                 return CallEffect::Unknown;
             };
             subject_class_names(&key, scope, ctx)
@@ -1108,7 +1110,7 @@ fn method_call_effect(
     }
     class_names
         .iter()
-        .map(|name| match (ctx.class_loader)(name) {
+        .map(|name| match (ctx.file.class_loader)(Fqn::new(name)) {
             Some(cls) => class_method_effect(&cls, method_name, ctx).0,
             None => CallEffect::Unknown,
         })
@@ -1137,7 +1139,7 @@ fn class_method_effect(
 ) -> (CallEffect, bool) {
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         cls,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     let Some(method) = merged.get_method_ci(method_name) else {
@@ -1216,10 +1218,10 @@ fn declared_purity(
     method_name: &str,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<bool> {
-    narrowing::find_method_in_chain_where(
+    condition_facts::find_method_in_chain_where(
         cls,
         method_name,
-        ctx.class_loader,
+        ctx.file.class_loader,
         &|m| m.is_pure || m.is_impure,
         &mut Vec::new(),
         0,
@@ -1247,9 +1249,9 @@ fn static_receiver_class(
     let name = crate::class_lookup::class_expression_name(
         expr,
         ctx.current_class,
-        ctx.all_classes,
-        ctx.source_class_loader,
-        ctx.source_imports,
+        ctx.file.all_classes,
+        ctx.file.source_class_loader,
+        ctx.file.source_imports,
     )?;
-    (ctx.class_loader)(&name)
+    (ctx.file.class_loader)(Fqn::new(&name))
 }

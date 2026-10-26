@@ -14,7 +14,7 @@ use std::borrow::Borrow;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::{Class, Program};
-use tower_lsp::lsp_types::{Range, TextEdit};
+use tower_lsp_server::gen_lsp_types::TextEdit;
 
 use crate::code_actions::cursor_context::{FunctionKinds, find_enclosing_function};
 use crate::docblock::strip_docblock_line_delimiters;
@@ -22,7 +22,6 @@ use crate::docblock::type_strings::split_type_token;
 use crate::php_type::PhpType;
 use crate::text_position::{
     byte_range_to_lsp_range, line_ending, line_start_byte_offset, lines_with_offsets,
-    offset_to_position,
 };
 
 /// Information about a docblock found above a given line.
@@ -95,10 +94,7 @@ impl DocblockAbove {
 
     fn replace_edit(&self, content: &str, new_text: String) -> TextEdit {
         TextEdit {
-            range: Range {
-                start: offset_to_position(content, self.start),
-                end: offset_to_position(content, self.end),
-            },
+            range: byte_range_to_lsp_range(content, self.start, self.end),
             new_text,
         }
     }
@@ -109,6 +105,23 @@ impl DocblockAbove {
 /// The diagnostic line is the function/method/property signature.  The
 /// docblock (if any) sits directly above it, possibly separated by blank
 /// lines or attribute (`#[…]`) lines.
+/// A new docblock at `indent` holding `lines`, each written as ` * line`
+/// (a bare ` *` for an empty one), every line ending with `eol`.
+pub(crate) fn render_docblock<S: AsRef<str>>(indent: &str, lines: &[S], eol: &str) -> String {
+    let mut doc = format!("{indent}/**{eol}");
+    for line in lines {
+        let line = line.as_ref();
+        doc.push_str(indent);
+        doc.push_str(if line.is_empty() { " *" } else { " * " });
+        doc.push_str(line);
+        doc.push_str(eol);
+    }
+    doc.push_str(indent);
+    doc.push_str(" */");
+    doc.push_str(eol);
+    doc
+}
+
 pub(crate) fn find_docblock_above_line(content: &str, line: usize) -> Option<DocblockAbove> {
     let lines: Vec<&str> = content.lines().collect();
     if line == 0 || line > lines.len() {
@@ -262,7 +275,7 @@ impl DocblockPlacement {
             return insert_edit(
                 content,
                 self.insert_at,
-                format!("{indent}/**{eol}{indent} * {tag}{eol}{indent} */{eol}"),
+                render_docblock(indent, &[tag], eol),
             );
         };
 
@@ -275,11 +288,15 @@ impl DocblockPlacement {
                 .and_then(|s| s.strip_suffix("*/"))
                 .map(str::trim)
                 .unwrap_or("");
-            let mut new_doc = format!("{indent}/**{eol}");
-            if !inner.is_empty() {
-                new_doc.push_str(&format!("{indent} * {inner}{eol}{indent} *{eol}"));
-            }
-            new_doc.push_str(&format!("{indent} * {tag}{eol}{indent} */"));
+            let lines: &[&str] = if inner.is_empty() {
+                &[tag]
+            } else {
+                &[inner, "", tag]
+            };
+            // The rewritten docblock replaces the closing line, whose
+            // line break stays.
+            let mut new_doc = render_docblock(indent, lines, eol);
+            new_doc.truncate(new_doc.len() - eol.len());
             return TextEdit {
                 range: byte_range_to_lsp_range(
                     content,
@@ -357,6 +374,15 @@ pub(crate) struct FunctionDocblock {
 }
 
 impl FunctionDocblock {
+    /// The docblock of the function-like declaration spanning `decl`, read
+    /// from the `program` parsed from `content`.
+    pub(crate) fn of(program: &Program<'_>, content: &str, decl: mago_span::Span) -> Self {
+        Self {
+            docblock: docblock_of(program, content, &decl),
+            placement: DocblockPlacement::above(content, decl.start.offset as usize),
+        }
+    }
+
     /// The line of the `@return` tag: the byte offset it starts at and its
     /// text.
     pub(crate) fn return_tag(&self) -> Option<(usize, &str)> {
@@ -439,17 +465,14 @@ fn insert_edit(content: &str, offset: usize, new_text: String) -> TextEdit {
 
 /// The docblock of the innermost function-like declaration of `kinds`
 /// whose span contains `offset`, as [`docblock_of`] reads it.
-pub(crate) fn function_docblock_at(
+fn function_docblock_at(
     content: &str,
     offset: usize,
     kinds: FunctionKinds,
 ) -> Option<FunctionDocblock> {
     crate::parser::with_parsed_program(content, "function_docblock_at", |program, content| {
-        let decl = find_enclosing_function(&program.statements, offset as u32, kinds)?.span;
-        Some(FunctionDocblock {
-            docblock: docblock_of(program, content, &decl),
-            placement: DocblockPlacement::above(content, decl.start.offset as usize),
-        })
+        let decl = find_enclosing_function(program, offset as u32, kinds)?.span();
+        Some(FunctionDocblock::of(program, content, decl))
     })
 }
 
@@ -465,12 +488,4 @@ pub(crate) fn function_docblock_at_line(
     let text = content.get(line_start..)?.lines().next()?;
     let first = text.find(|c: char| !c.is_whitespace())?;
     function_docblock_at(content, line_start + first, kinds)
-}
-
-/// Find the line containing the `function` keyword by walking backward
-/// from a given line.
-pub(crate) fn find_function_keyword_line(lines: &[&str], from_line: usize) -> Option<usize> {
-    (0..=from_line)
-        .rev()
-        .find(|&i| lines[i].contains("function ") || lines[i].contains("function("))
 }

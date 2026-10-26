@@ -54,7 +54,9 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
     //  - Parameterised types (`array<int>`, `int<0, max>`) — these
     //    carry type information the native hint doesn't have.
     //  - Shapes, callables, slices — these also carry extra info.
-    if doc_inner.is_bare_primitive_scalar() {
+    // `true` and `false` are the exception: each is one half of a native
+    // `bool`, so `@param true` on `bool $flag` is a refinement like any other.
+    if doc_inner.is_bare_primitive_scalar() && !doc_inner.is_true() && !doc_inner.is_false() {
         return false;
     }
 
@@ -404,23 +406,31 @@ pub fn resolve_effective_type_with_template_bounds(
                 .iter()
                 .map(|(name, bound)| (name.to_string(), bound.clone()))
                 .collect();
-            let doc_owned = doc.non_null_type();
-            let doc_inner = doc_owned.as_ref().unwrap_or(doc);
-            let native_owned = native.non_null_type();
-            let native_inner = native_owned.as_ref().unwrap_or(native);
-            let resolved = doc_inner.substitute(&subs);
+            let resolved = doc.substitute(&subs);
+            let fits = |resolved: &PhpType, native: &PhpType| {
+                resolved.is_subtype_of(native) || resolved.equivalent(native)
+            };
             // A bound the parser could not evaluate (`key-of<Alias>`) is a
             // refinement however it evaluates, as for the docblock itself
-            // in `should_override_type_typed`.
+            // in `should_override_type_typed`.  The native `null` is judged
+            // apart from the rest, since the docblock may leave it to the
+            // nullability kept below.
             if resolved.contains_unevaluated_operator()
-                || resolved.is_subtype_of(native_inner)
-                || resolved.equivalent(native_inner)
+                || fits(&resolved, native)
+                || fits(
+                    &resolved.non_null_type().unwrap_or_else(|| resolved.clone()),
+                    &native.non_null_type().unwrap_or_else(|| native.clone()),
+                )
             {
-                return Some(if native.accepts_null() && !native.is_mixed() {
-                    doc.clone().or_null()
-                } else {
-                    doc.clone()
-                });
+                // A bound that takes `null` already says when the value is
+                // `null`; the native one would add it to every binding.
+                return Some(
+                    if native.accepts_null() && !native.is_mixed() && !resolved.accepts_null() {
+                        doc.clone().or_null()
+                    } else {
+                        doc.clone()
+                    },
+                );
             }
         }
     }

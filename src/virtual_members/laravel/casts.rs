@@ -10,11 +10,12 @@
 //! return type inspection), enum casts, and `Castable` implementations.
 
 use crate::atom::atom;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::util::short_name;
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
 /// The short name of the `CastsAttributes` interface, used to look up
 /// `@implements` generic arguments on custom cast classes.
@@ -106,7 +107,7 @@ const CASTABLE_FQN: &str = "Illuminate\\Contracts\\Database\\Eloquent\\Castable"
 /// resolving the class.
 pub(super) fn cast_type_to_php_type(
     cast_type: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> PhpType {
     // 1. Check the built-in mapping table.
     let lower = cast_type.to_lowercase();
@@ -155,7 +156,7 @@ pub(super) fn cast_type_to_php_type(
     //    and `split(':')` would stop at the first colon of that separator.
     let class_name = cast_class_name(cast_type);
 
-    if let Some(cast_class) = class_loader(class_name) {
+    if let Some(cast_class) = class_loader(Fqn::new(class_name)) {
         // 8a. Enums — the property type is the enum itself.
         if cast_class.kind == ClassLikeKind::Enum {
             return PhpType::named(atom(class_name));

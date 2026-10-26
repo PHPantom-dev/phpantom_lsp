@@ -272,7 +272,7 @@ impl Backend {
     fn blade_addressable_names(&self, view_name: &str) -> Vec<String> {
         let uri = self
             .blade_view_path(view_name)
-            .and_then(|path| tower_lsp::lsp_types::Url::from_file_path(path).ok());
+            .and_then(|path| crate::util::path_to_url(&path));
         let names = uri
             .map(|uri| self.view_names_for_blade_uri(uri.as_str()))
             .unwrap_or_default();
@@ -295,7 +295,7 @@ impl Backend {
     ) -> impl Fn(&PhpType) -> PhpType + '_ {
         let uri = self
             .blade_view_path(view_name)
-            .and_then(|path| tower_lsp::lsp_types::Url::from_file_path(path).ok());
+            .and_then(|path| crate::util::path_to_url(&path));
         // An unknown URI yields an empty import map, which leaves a short
         // name to resolve globally — the same fallback the rest of the
         // Blade pipeline uses for a template it has never parsed.

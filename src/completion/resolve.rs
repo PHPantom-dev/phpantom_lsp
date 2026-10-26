@@ -25,9 +25,10 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::hover::{MemberKindForOrigin, find_declaring_class, hover_for_function};
 use crate::types::*;
 
@@ -74,11 +75,11 @@ pub(crate) struct CompletionItemData {
 
 /// Extract the markdown string from a `Hover` value.
 ///
-/// The hover methods always produce `HoverContents::Markup`, so this
+/// The hover methods always produce `Contents::MarkupContent`, so this
 /// just unwraps the inner `MarkupContent::value`.
 fn extract_hover_markdown(hover: Hover) -> Option<String> {
     match hover.contents {
-        HoverContents::Markup(mc) => Some(mc.value),
+        Contents::MarkupContent(mc) => Some(mc.value),
         _ => None,
     }
 }
@@ -116,13 +117,12 @@ impl Backend {
         };
 
         // This handler builds the same hovers `textDocument/hover` does
-        // but fetches the file content itself, so it has to activate the
-        // type-engine resolvers on its own to describe a member the same
-        // way hover would.
-        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+        // but fetches the file content itself, so it enters the request
+        // scope on its own to describe a member the same way hover would.
+        let content = self.get_file_content_arc(&data.uri).unwrap_or_default();
+        let _scope = self.enter_request_scope(std::sync::Arc::clone(&content));
 
         let ctx = self.file_context(&data.uri);
-        let content = self.get_file_content(&data.uri).unwrap_or_default();
 
         match data.kind.as_str() {
             // ── Class member kinds ──────────────────────────────────
@@ -179,12 +179,13 @@ impl Backend {
         let mut seen_declaring: Vec<String> = Vec::new();
 
         for class_name in &all_class_names {
-            let class_info: Option<Arc<ClassInfo>> = class_loader(class_name).or_else(|| {
-                ctx.classes
-                    .iter()
-                    .find(|c| c.fqn() == class_name.as_str())
-                    .cloned()
-            });
+            let class_info: Option<Arc<ClassInfo>> =
+                class_loader(Fqn::new(class_name)).or_else(|| {
+                    ctx.classes
+                        .iter()
+                        .find(|c| c.fqn() == class_name.as_str())
+                        .cloned()
+                });
 
             let Some(class_info) = class_info else {
                 continue;
@@ -292,7 +293,7 @@ impl Backend {
         content: &str,
     ) {
         let class_loader = self.resolved_class_loader(ctx);
-        if let Some(cls) = class_loader(&data.member_name) {
+        if let Some(cls) = class_loader(Fqn::new(&data.member_name)) {
             let hover = self.hover_for_class_info(&cls, &data.uri, content);
             if let Some(md) = extract_hover_markdown(hover) {
                 set_documentation(item, md);

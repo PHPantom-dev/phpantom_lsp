@@ -1,5 +1,5 @@
 use crate::common::{block_on, complete_labels_at, create_psr4_workspace, create_test_backend};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Multi-line method chain completion tests ───────────────────────────────
 //
@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::*;
 #[tokio::test]
 async fn test_multiline_chain_basic() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_basic.php").unwrap();
+    let uri = Uri::parse("file:///multiline_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Repo {\n",
@@ -44,7 +44,7 @@ async fn test_multiline_chain_basic() {
 #[tokio::test]
 async fn test_multiline_chain_three_lines() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_three.php").unwrap();
+    let uri = Uri::parse("file:///multiline_three.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -82,7 +82,7 @@ async fn test_multiline_chain_three_lines() {
 #[tokio::test]
 async fn test_multiline_chain_nullsafe_continuation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_nullsafe.php").unwrap();
+    let uri = Uri::parse("file:///multiline_nullsafe.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class City { public function getName(): string { return ''; } }\n",
@@ -111,7 +111,7 @@ async fn test_multiline_chain_nullsafe_continuation() {
 #[tokio::test]
 async fn test_multiline_chain_static_base() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_static.php").unwrap();
+    let uri = Uri::parse("file:///multiline_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class QBuilder {\n",
@@ -143,7 +143,7 @@ async fn test_multiline_chain_static_base() {
 #[tokio::test]
 async fn test_multiline_chain_with_variable_assignment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_assign.php").unwrap();
+    let uri = Uri::parse("file:///multiline_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Paginator { public function total(): int { return 0; } }\n",
@@ -174,7 +174,7 @@ async fn test_multiline_chain_with_variable_assignment() {
 #[tokio::test]
 async fn test_multiline_chain_with_arguments() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_args.php").unwrap();
+    let uri = Uri::parse("file:///multiline_args.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Fluent {\n",
@@ -210,7 +210,7 @@ async fn test_multiline_chain_with_arguments() {
 #[tokio::test]
 async fn test_single_line_chain_still_works() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///single_line.php").unwrap();
+    let uri = Uri::parse("file:///single_line.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item { public function getName(): string { return ''; } }\n",
@@ -270,7 +270,7 @@ async fn test_multiline_chain_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///test_multiline_cross.php").unwrap();
+    let uri = Uri::parse("file:///test_multiline_cross.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Builder;\n",
@@ -302,7 +302,7 @@ async fn test_multiline_chain_cross_file() {
 #[tokio::test]
 async fn test_multiline_chain_partial_identifier() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_partial.php").unwrap();
+    let uri = Uri::parse("file:///multiline_partial.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pipeline {\n",
@@ -338,7 +338,7 @@ async fn test_multiline_chain_partial_identifier() {
 #[tokio::test]
 async fn test_multiline_chain_this_on_own_line() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_this.php").unwrap();
+    let uri = Uri::parse("file:///multiline_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -369,7 +369,7 @@ async fn test_multiline_chain_this_on_own_line() {
 #[tokio::test]
 async fn test_multiline_chain_with_blank_line() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_blank.php").unwrap();
+    let uri = Uri::parse("file:///multiline_blank.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Repo {\n",
@@ -398,7 +398,7 @@ async fn test_multiline_chain_with_blank_line() {
 #[tokio::test]
 async fn test_multiline_chain_with_multiple_blank_lines() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_multi_blank.php").unwrap();
+    let uri = Uri::parse("file:///multiline_multi_blank.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -434,7 +434,7 @@ async fn test_multiline_chain_with_multiple_blank_lines() {
 #[tokio::test]
 async fn test_multiline_chain_with_whitespace_only_line() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_ws.php").unwrap();
+    let uri = Uri::parse("file:///multiline_ws.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Repo {\n",
@@ -462,7 +462,7 @@ async fn test_multiline_chain_with_whitespace_only_line() {
 #[tokio::test]
 async fn test_multiline_chain_with_closure_arg() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_closure.php").unwrap();
+    let uri = Uri::parse("file:///multiline_closure.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Collection {\n",
@@ -496,7 +496,7 @@ async fn test_multiline_chain_with_closure_arg() {
 #[tokio::test]
 async fn test_multiline_chain_same_line_after_closure_arg_close() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_closure_same_line.php").unwrap();
+    let uri = Uri::parse("file:///multiline_closure_same_line.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Collection {\n",
@@ -532,7 +532,7 @@ async fn test_multiline_chain_same_line_after_bracket_close_does_not_misresolve(
     // "no completions" is correct here; resolving to the wrong receiver's
     // members would not be.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multiline_bracket_same_line.php").unwrap();
+    let uri = Uri::parse("file:///multiline_bracket_same_line.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Box {\n",
@@ -580,7 +580,7 @@ fn test_long_union_return_chain_completes_quickly() {
     // work finishes). Without a hard bound the whole test binary hangs
     // until CI gives up, or the OOM killer takes every other test in it
     // down as collateral.
-    let uri = Url::parse("file:///union_chain_blowup.php").unwrap();
+    let uri = Uri::parse("file:///union_chain_blowup.php").unwrap();
     let mut text = concat!(
         "<?php\n",
         "class A {\n",

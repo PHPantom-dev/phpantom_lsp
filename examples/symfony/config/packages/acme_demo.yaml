@@ -1,0 +1,4 @@
+acme_demo:
+  api_key: local-development-key
+  mailer:
+    dsn: smtp://localhost

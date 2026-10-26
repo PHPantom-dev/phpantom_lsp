@@ -1,0 +1,9 @@
+// test: A test may get a private service from the test container
+// feature: diagnostics
+// Ported from PHPStan's Symfony extension,
+// ContainerInterfacePrivateServiceRuleTest::testGetPrivateServiceInTest.
+// Getting a private service from the container is not reported yet, so no
+// code is compared; this guards the test container once it is.
+// project: phpstan_symfony
+// file: rules/Symfony/ExampleTest.php
+---

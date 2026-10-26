@@ -1,6 +1,8 @@
-use crate::common::{create_psr4_workspace, create_test_backend, open_php};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{
+    create_psr4_workspace, create_test_backend, open_document, open_php, references_response,
+};
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: open a file in the backend and return its code lenses.
 fn get_code_lenses(backend: &phpantom_lsp::Backend, uri: &str, content: &str) -> Vec<CodeLens> {
@@ -60,25 +62,12 @@ final class LargeTestCase {
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[("src/LargeTestCase.php", content)],
     );
-    let uri = Url::from_file_path(dir.path().join("src/LargeTestCase.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/LargeTestCase.php")).unwrap();
     open_php(&backend, &uri, content).await;
 
     // Drive workspace indexing through the public LSP path, as a real client
     // would before requesting lenses from an index reported as ready.
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(3, 12),
-            },
-            context: ReferenceContext {
-                include_declaration: true,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    references_response(&backend, &uri, Position::new(3, 12), true).await;
 
     let lenses = backend
         .code_lens(CodeLensParams {
@@ -134,23 +123,10 @@ function persistUnrelated(Unrelated $value): void {
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[("src/Order.php", order), ("src/Unrelated.php", unrelated)],
     );
-    let uri = Url::from_file_path(dir.path().join("src/Order.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Order.php")).unwrap();
     open_php(&backend, &uri, order).await;
 
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(3, 20),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    references_response(&backend, &uri, Position::new(3, 20), false).await;
 
     let lenses = backend
         .code_lens(CodeLensParams {
@@ -222,26 +198,14 @@ function persist(Order $order): void {
     assert!(matches!(
         initialize.capabilities.code_lens_provider,
         Some(CodeLensOptions {
-            resolve_provider: Some(true)
+            resolve_provider: Some(true),
+            ..
         })
     ));
 
-    let uri = Url::from_file_path(dir.path().join("src/Order.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Order.php")).unwrap();
     open_php(&backend, &uri, content).await;
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(3, 20),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    references_response(&backend, &uri, Position::new(3, 20), false).await;
 
     let params = CodeLensParams {
         text_document: TextDocumentIdentifier { uri },
@@ -307,22 +271,9 @@ makeWidget();
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[("src/functions.php", content)],
     );
-    let uri = Url::from_file_path(dir.path().join("src/functions.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/functions.php")).unwrap();
     open_php(&backend, &uri, content).await;
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(2, 12),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+    references_response(&backend, &uri, Position::new(2, 12), false).await;
 
     let lenses = backend
         .code_lens(CodeLensParams {
@@ -357,7 +308,7 @@ makeWidget();
 /// that displays it does.
 async fn resolved_reference_title(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
 ) -> Option<String> {
     let lenses = backend
@@ -381,21 +332,8 @@ async fn resolved_reference_title(
 }
 
 /// Drive workspace indexing the way a client does before asking for lenses.
-async fn warm_workspace_index(backend: &phpantom_lsp::Backend, uri: &Url, position: Position) {
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position,
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap();
+async fn warm_workspace_index(backend: &phpantom_lsp::Backend, uri: &Uri, position: Position) {
+    references_response(backend, uri, position, false).await;
 }
 
 /// The implementation lens on `line`, resolved the way a client that
@@ -437,7 +375,7 @@ async fn indexed_lenses(content: &str) -> (phpantom_lsp::Backend, Vec<CodeLens>)
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[("src/Shapes.php", content)],
     );
-    let uri = Url::from_file_path(dir.path().join("src/Shapes.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Shapes.php")).unwrap();
     open_php(&backend, &uri, content).await;
     warm_workspace_index(&backend, &uri, Position::new(2, 12)).await;
     let lenses = backend
@@ -545,7 +483,7 @@ async fn a_function_lens_counts_unqualified_calls_from_a_namespaced_file() {
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[("src/helpers.php", helpers), ("src/Service.php", service)],
     );
-    let uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/helpers.php")).unwrap();
     open_php(&backend, &uri, helpers).await;
     warm_workspace_index(&backend, &uri, Position::new(1, 9)).await;
 
@@ -556,7 +494,7 @@ async fn a_function_lens_counts_unqualified_calls_from_a_namespaced_file() {
     );
 }
 
-async fn close_document(backend: &phpantom_lsp::Backend, uri: &Url) {
+async fn close_document(backend: &phpantom_lsp::Backend, uri: &Uri) {
     backend
         .did_close(DidCloseTextDocumentParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -576,11 +514,11 @@ async fn closing_a_workspace_file_keeps_its_references_in_the_lens() {
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[("src/helpers.php", helpers), ("src/Service.php", service)],
     );
-    let helpers_uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    let helpers_uri = Uri::from_file_path(dir.path().join("src/helpers.php")).unwrap();
     open_php(&backend, &helpers_uri, helpers).await;
     warm_workspace_index(&backend, &helpers_uri, Position::new(1, 9)).await;
 
-    let service_uri = Url::from_file_path(dir.path().join("src/Service.php")).unwrap();
+    let service_uri = Uri::from_file_path(dir.path().join("src/Service.php")).unwrap();
     open_php(&backend, &service_uri, service).await;
     close_document(&backend, &service_uri).await;
 
@@ -604,11 +542,11 @@ async fn closing_a_workspace_file_reindexes_it_from_disk() {
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[("src/helpers.php", helpers), ("src/Service.php", service)],
     );
-    let helpers_uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    let helpers_uri = Uri::from_file_path(dir.path().join("src/helpers.php")).unwrap();
     open_php(&backend, &helpers_uri, helpers).await;
     warm_workspace_index(&backend, &helpers_uri, Position::new(1, 9)).await;
 
-    let service_uri = Url::from_file_path(dir.path().join("src/Service.php")).unwrap();
+    let service_uri = Uri::from_file_path(dir.path().join("src/Service.php")).unwrap();
     let unsaved = "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n    helper();\n}\n";
     open_php(&backend, &service_uri, unsaved).await;
     assert_eq!(
@@ -629,12 +567,12 @@ async fn closing_a_workspace_file_reindexes_it_from_disk() {
     );
 }
 
-async fn notify_watched_file(backend: &phpantom_lsp::Backend, uri: &Url, typ: FileChangeType) {
+async fn notify_watched_file(backend: &phpantom_lsp::Backend, uri: &Uri, typ: FileChangeType) {
     backend
         .did_change_watched_files(DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
                 uri: uri.clone(),
-                typ,
+                kind: typ,
             }],
         })
         .await;
@@ -652,7 +590,7 @@ async fn a_file_changed_on_disk_keeps_counting_in_the_lens() {
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[("src/helpers.php", helpers), ("src/Service.php", service)],
     );
-    let helpers_uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    let helpers_uri = Uri::from_file_path(dir.path().join("src/helpers.php")).unwrap();
     open_php(&backend, &helpers_uri, helpers).await;
     warm_workspace_index(&backend, &helpers_uri, Position::new(1, 9)).await;
 
@@ -662,8 +600,8 @@ async fn a_file_changed_on_disk_keeps_counting_in_the_lens() {
         "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n    helper();\n}\n",
     )
     .unwrap();
-    let service_uri = Url::from_file_path(&service_path).unwrap();
-    notify_watched_file(&backend, &service_uri, FileChangeType::CHANGED).await;
+    let service_uri = Uri::from_file_path(&service_path).unwrap();
+    notify_watched_file(&backend, &service_uri, FileChangeType::Changed).await;
 
     assert_eq!(
         resolved_reference_title(&backend, &helpers_uri, 1)
@@ -683,7 +621,7 @@ async fn a_file_created_on_disk_counts_in_the_lens() {
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[("src/helpers.php", helpers), ("src/Service.php", service)],
     );
-    let helpers_uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    let helpers_uri = Uri::from_file_path(dir.path().join("src/helpers.php")).unwrap();
     open_php(&backend, &helpers_uri, helpers).await;
     warm_workspace_index(&backend, &helpers_uri, Position::new(1, 9)).await;
 
@@ -693,8 +631,8 @@ async fn a_file_created_on_disk_counts_in_the_lens() {
         "<?php\nnamespace App;\nfunction job(): void {\n    helper();\n}\n",
     )
     .unwrap();
-    let job_uri = Url::from_file_path(&job_path).unwrap();
-    notify_watched_file(&backend, &job_uri, FileChangeType::CREATED).await;
+    let job_uri = Uri::from_file_path(&job_path).unwrap();
+    notify_watched_file(&backend, &job_uri, FileChangeType::Created).await;
 
     assert_eq!(
         resolved_reference_title(&backend, &helpers_uri, 1)
@@ -713,7 +651,7 @@ async fn a_function_lens_ignores_the_case_a_call_is_spelled_with() {
         r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
         &[("src/helpers.php", helpers), ("src/Service.php", service)],
     );
-    let uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/helpers.php")).unwrap();
     open_php(&backend, &uri, helpers).await;
     warm_workspace_index(&backend, &uri, Position::new(1, 9)).await;
 
@@ -774,27 +712,14 @@ class User extends Model {}
         "src/Models/User.php",
         "usage.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         let text = std::fs::read_to_string(dir.path().join(path)).unwrap();
         open_php(&backend, &uri, &text).await;
     }
 
-    let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
+    let builder_uri = Uri::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
     // Drive the workspace index the way a client would before asking for lenses.
-    backend
-        .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier::new(builder_uri.clone()),
-                position: Position::new(5, 21),
-            },
-            context: ReferenceContext {
-                include_declaration: false,
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        })
-        .await
-        .unwrap();
+    references_response(&backend, &builder_uri, Position::new(5, 21), false).await;
 
     let lenses = backend
         .code_lens(CodeLensParams {
@@ -1151,7 +1076,7 @@ fn lens_command_uses_show_references_without_show_document() {
     let args = cmd.arguments.as_ref().unwrap();
     assert_eq!(args.len(), 3);
 
-    serde_json::from_value::<Url>(args[0].clone()).expect("first argument is the target uri");
+    serde_json::from_value::<Uri>(args[0].clone()).expect("first argument is the target uri");
     serde_json::from_value::<Position>(args[1].clone())
         .expect("second argument is the target position");
     let locations: Vec<Location> =
@@ -1770,6 +1695,32 @@ function persist(Order $order): void {
 }
 
 #[test]
+fn a_property_and_a_method_of_the_same_name_are_counted_apart() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class User {
+    public string $email = '';
+    public function email(): string { return $this->email; }
+}
+function show(User $user): string {
+    $user->email();
+    return $user->email();
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+    assert_eq!(
+        title_on_line(&backend, &lenses, 2).as_deref(),
+        Some("1 reference")
+    );
+    assert_eq!(
+        title_on_line(&backend, &lenses, 3).as_deref(),
+        Some("2 references")
+    );
+}
+
+#[test]
 fn a_member_lens_counts_references_through_a_subclass() {
     let backend = create_test_backend();
     let content = r#"<?php
@@ -2043,7 +1994,7 @@ function persist(Order $order): void {
 
     let params = CodeLensParams {
         text_document: TextDocumentIdentifier {
-            uri: Url::parse(URI).unwrap(),
+            uri: Uri::parse(URI).unwrap(),
         },
         work_done_progress_params: Default::default(),
         partial_result_params: Default::default(),
@@ -2131,5 +2082,133 @@ function list_author(\App\Author $author): void {
     assert_eq!(
         unresolved_title_on_line(&lenses, 8).as_deref(),
         Some("2 references")
+    );
+}
+
+// ─── Doctrine entity and repository lenses ─────────────────────────────────
+
+const DOCTRINE_COMPOSER: &str = r#"{
+    "require": { "doctrine/doctrine-bundle": "^2.10" },
+    "autoload": { "psr-4": {
+        "App\\": "src/",
+        "Doctrine\\Bundle\\DoctrineBundle\\Repository\\": "vendor-stubs/"
+    } }
+}"#;
+
+const SERVICE_ENTITY_REPOSITORY: &str = "<?php\nnamespace Doctrine\\Bundle\\DoctrineBundle\\Repository;\nclass ServiceEntityRepository {}\n";
+
+fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
+    Uri::from_file_path(dir.path().join(rel)).unwrap()
+}
+
+/// The lenses of the classes in `rel`, after opening every file in `files`.
+async fn doctrine_lens_titles(files: &[(&str, &str)], rel: &str) -> Vec<String> {
+    let (backend, dir) = create_psr4_workspace(DOCTRINE_COMPOSER, files);
+    for (path, content) in files {
+        let language = if path.ends_with(".php") {
+            "php"
+        } else if path.ends_with(".xml") {
+            "xml"
+        } else {
+            "yaml"
+        };
+        open_document(&backend, &uri_for(&dir, path), language, content).await;
+    }
+    let content = files.iter().find(|(path, _)| *path == rel).unwrap().1;
+    let lenses = backend
+        .handle_code_lens(uri_for(&dir, rel).as_ref(), content)
+        .unwrap_or_default();
+    lens_titles(&lenses)
+        .into_iter()
+        .filter(|title| title.starts_with("Doctrine"))
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn doctrine_mapping_lenses_link_entity_and_configured_repository() {
+    let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Storage;\nclass SpecialUserStore {}\n";
+    let doctrine_xml = r#"<doctrine-mapping>
+  <entity name="App\Entity\User" repository-class="App\Storage\SpecialUserStore" />
+</doctrine-mapping>
+"#;
+    let files = [
+        ("src/Entity/User.php", entity_php),
+        ("src/Storage/SpecialUserStore.php", repo_php),
+        ("config/doctrine/User.orm.xml", doctrine_xml),
+    ];
+
+    assert_eq!(
+        doctrine_lens_titles(&files, "src/Entity/User.php").await,
+        vec!["Doctrine repository: SpecialUserStore"]
+    );
+    assert_eq!(
+        doctrine_lens_titles(&files, "src/Storage/SpecialUserStore.php").await,
+        vec!["Doctrine entity: User"]
+    );
+}
+
+#[tokio::test]
+async fn doctrine_yaml_mapping_names_the_repository() {
+    let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Storage;\nclass SpecialUserStore {}\n";
+    let doctrine_yaml =
+        "App\\Entity\\User:\n  type: entity\n  repositoryClass: App\\Storage\\SpecialUserStore\n";
+    let files = [
+        ("src/Entity/User.php", entity_php),
+        ("src/Storage/SpecialUserStore.php", repo_php),
+        ("config/doctrine/User.orm.yaml", doctrine_yaml),
+    ];
+
+    assert_eq!(
+        doctrine_lens_titles(&files, "src/Entity/User.php").await,
+        vec!["Doctrine repository: SpecialUserStore"]
+    );
+}
+
+#[tokio::test]
+async fn doctrine_repository_convention_links_entity_and_repository() {
+    let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Repository;\nuse Doctrine\\Bundle\\DoctrineBundle\\Repository\\ServiceEntityRepository;\nclass UserRepository extends ServiceEntityRepository {}\n";
+    let files = [
+        ("src/Entity/User.php", entity_php),
+        ("src/Repository/UserRepository.php", repo_php),
+        (
+            "vendor-stubs/ServiceEntityRepository.php",
+            SERVICE_ENTITY_REPOSITORY,
+        ),
+    ];
+
+    assert_eq!(
+        doctrine_lens_titles(&files, "src/Repository/UserRepository.php").await,
+        vec!["Doctrine entity: User"]
+    );
+    assert_eq!(
+        doctrine_lens_titles(&files, "src/Entity/User.php").await,
+        vec!["Doctrine repository: UserRepository"]
+    );
+}
+
+/// A class that only shares Doctrine's naming convention is not a Doctrine
+/// repository, so neither it nor the class it is named after gets a lens.
+#[tokio::test]
+async fn a_repository_by_name_alone_gets_no_doctrine_lenses() {
+    let model_php = "<?php\nnamespace App\\Models;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Repositories;\nclass UserRepository {}\n";
+    let files = [
+        ("src/Models/User.php", model_php),
+        ("src/Repositories/UserRepository.php", repo_php),
+    ];
+
+    assert!(
+        doctrine_lens_titles(&files, "src/Models/User.php")
+            .await
+            .is_empty()
+    );
+    assert!(
+        doctrine_lens_titles(&files, "src/Repositories/UserRepository.php")
+            .await
+            .is_empty()
     );
 }

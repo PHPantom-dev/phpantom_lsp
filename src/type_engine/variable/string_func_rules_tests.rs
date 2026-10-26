@@ -20,6 +20,9 @@ impl ArrayFuncArgs for Args {
     fn is_spread(&self, _index: usize) -> bool {
         false
     }
+    fn is_named(&self, _index: usize) -> bool {
+        false
+    }
     fn callback_declared_return_type(&self, _index: usize) -> Option<PhpType> {
         None
     }
@@ -51,7 +54,7 @@ fn lit(value: &str) -> Option<PhpType> {
 }
 
 fn fold(func: &str, types: &[Option<PhpType>]) -> Option<String> {
-    string_func_literal_type(func, &args(types)).map(|ty| ty.to_string())
+    string_func_return_type(func, &args(types)).map(|ty| ty.to_string())
 }
 
 #[test]
@@ -120,23 +123,32 @@ fn str_repeat_folds_a_literal_count_and_declines_an_absurd_one() {
 }
 
 #[test]
-fn a_non_literal_argument_declines() {
-    assert_eq!(fold("strtolower", &[Some(PhpType::string())]), None);
-    assert_eq!(fold("strtolower", &[None]), None);
+fn a_non_literal_argument_is_only_known_by_its_case() {
+    assert_eq!(
+        fold("strtolower", &[Some(PhpType::string())]).as_deref(),
+        Some("lowercase-string")
+    );
+    assert_eq!(fold("strtolower", &[]), None);
 }
 
 #[test]
-fn a_union_with_one_non_literal_member_declines_as_a_whole() {
+fn a_union_with_one_non_literal_member_does_not_fold() {
     let subject = PhpType::union(vec![
         PhpType::literal_string_value("Interface"),
         PhpType::string(),
     ]);
-    assert_eq!(fold("strtolower", &[Some(subject)]), None);
+    assert_eq!(
+        fold("strtolower", &[Some(subject)]).as_deref(),
+        Some("lowercase-string")
+    );
 }
 
 #[test]
-fn a_multibyte_subject_declines_rather_than_guessing_a_unicode_mapping() {
-    assert_eq!(fold("strtoupper", &[lit("Ä")]), None);
+fn a_multibyte_subject_does_not_fold_to_a_guessed_unicode_mapping() {
+    assert_eq!(
+        fold("strtoupper", &[lit("Ä")]).as_deref(),
+        Some("non-empty-uppercase-string&non-falsy-string")
+    );
 }
 
 #[test]
@@ -154,7 +166,7 @@ fn alternatives_that_fold_to_the_same_value_collapse() {
 #[test]
 fn an_argument_written_as_a_constant_declines() {
     let subject = [PhpType::literal_string_value("5.3.6")];
-    let from_source = string_func_literal_type(
+    let from_source = string_func_return_type(
         "strtolower",
         &Args(subject.iter().cloned().map(Some).collect(), Vec::new()),
     );
@@ -162,16 +174,155 @@ fn an_argument_written_as_a_constant_declines() {
         from_source.map(|ty| ty.to_string()).as_deref(),
         Some("'5.3.6'")
     );
-    let from_constant = string_func_literal_type(
+    let from_constant = string_func_return_type(
         "strtolower",
         &Args(subject.into_iter().map(Some).collect(), vec![0]),
     );
-    assert_eq!(from_constant, None);
+    assert_eq!(
+        from_constant.map(|ty| ty.to_string()).as_deref(),
+        Some("lowercase-string")
+    );
 }
 
 #[test]
 fn a_function_outside_the_table_is_not_folded() {
-    assert_eq!(fold("sprintf", &[lit("a")]), None);
-    assert!(!is_foldable_string_func("sprintf"));
-    assert!(is_foldable_string_func("\\strtolower"));
+    assert_eq!(fold("str_pad", &[lit("a")]), None);
+    assert!(!has_string_func_rule("str_pad"));
+    assert!(has_string_func_rule("\\strtolower"));
+}
+
+fn named(name: &str) -> Option<PhpType> {
+    Some(PhpType::parse(name))
+}
+
+#[test]
+fn a_case_mapping_keeps_how_far_from_empty_its_subject_was() {
+    assert_eq!(
+        fold("strtolower", &[named("non-empty-string")]).as_deref(),
+        Some("non-empty-lowercase-string")
+    );
+    assert_eq!(
+        fold("mb_strtoupper", &[named("non-falsy-string")]).as_deref(),
+        Some("non-empty-uppercase-string&non-falsy-string")
+    );
+    assert_eq!(
+        fold("strtolower", &[named("numeric-string")]).as_deref(),
+        Some("non-empty-lowercase-string&numeric-string")
+    );
+}
+
+#[test]
+fn recasing_the_first_character_keeps_the_case_the_rest_had() {
+    assert_eq!(
+        fold("lcfirst", &[named("lowercase-string")]).as_deref(),
+        Some("lowercase-string")
+    );
+    assert_eq!(
+        fold("ucfirst", &[named("non-empty-lowercase-string")]).as_deref(),
+        Some("non-empty-string")
+    );
+    assert_eq!(fold("ucfirst", &[Some(PhpType::string())]), None);
+}
+
+#[test]
+fn sprintf_with_text_outside_its_placeholders_is_non_empty() {
+    let s = Some(PhpType::string());
+    assert_eq!(
+        fold("sprintf", &[lit("key-%s"), s.clone()]).as_deref(),
+        Some("non-falsy-string")
+    );
+    assert_eq!(
+        fold("sprintf", &[lit("0%s"), s.clone()]).as_deref(),
+        Some("non-empty-string")
+    );
+    assert_eq!(fold("sprintf", &[lit("%s%s"), s.clone(), s.clone()]), None);
+    assert_eq!(
+        fold("sprintf", &[lit("%%%s"), s.clone()]).as_deref(),
+        Some("non-falsy-string")
+    );
+    assert_eq!(
+        fold("vsprintf", &[lit("[%s]"), named("array")]).as_deref(),
+        Some("non-falsy-string")
+    );
+}
+
+#[test]
+fn sprintf_placeholders_that_always_write_count_towards_the_length() {
+    let int = Some(PhpType::int());
+    assert_eq!(
+        fold("sprintf", &[lit("%d%d"), int.clone(), int.clone()]).as_deref(),
+        Some("non-falsy-string")
+    );
+    assert_eq!(
+        fold("sprintf", &[lit("%5s"), Some(PhpType::string())]).as_deref(),
+        Some("non-falsy-string")
+    );
+    // `%c` ignores its width, and a lone byte can be `"0"`.
+    assert_eq!(
+        fold("sprintf", &[lit("%5c"), int.clone()]).as_deref(),
+        Some("non-empty-string")
+    );
+}
+
+#[test]
+fn sprintf_with_a_lone_placeholder_reads_its_value() {
+    assert_eq!(
+        fold("sprintf", &[lit("%d"), Some(PhpType::int())]).as_deref(),
+        Some("numeric-string")
+    );
+    assert_eq!(
+        fold("sprintf", &[lit("%s"), named("non-empty-string")]).as_deref(),
+        Some("non-empty-string")
+    );
+    assert_eq!(
+        fold(
+            "sprintf",
+            &[lit("%2$s"), Some(PhpType::int()), named("lowercase-string")]
+        )
+        .as_deref(),
+        Some("lowercase-string")
+    );
+    assert_eq!(fold("sprintf", &[lit("%s"), Some(PhpType::int())]), None);
+    assert_eq!(
+        fold("sprintf", &[lit("%x"), Some(PhpType::int())]).as_deref(),
+        Some("non-empty-string")
+    );
+}
+
+#[test]
+fn a_malformed_or_unknown_format_declines() {
+    let s = Some(PhpType::string());
+    assert_eq!(fold("sprintf", &[lit("key-%y"), s.clone()]), None);
+    assert_eq!(fold("sprintf", &[lit("key-%0$s"), s.clone()]), None);
+    assert_eq!(fold("sprintf", &[Some(PhpType::string()), s]), None);
+}
+
+#[test]
+fn number_format_is_numeric_without_a_thousands_separator() {
+    let float = Some(PhpType::float());
+    let two = Some(PhpType::literal_int("2"));
+    assert_eq!(
+        fold(
+            "number_format",
+            &[float.clone(), two.clone(), lit("."), lit("")]
+        )
+        .as_deref(),
+        Some("numeric-string")
+    );
+    assert_eq!(
+        fold(
+            "number_format",
+            &[float.clone(), two.clone(), named("null"), lit("")]
+        )
+        .as_deref(),
+        Some("numeric-string")
+    );
+    assert_eq!(
+        fold(
+            "number_format",
+            &[float.clone(), two.clone(), lit(","), lit("")]
+        ),
+        None
+    );
+    assert_eq!(fold("number_format", &[float, two]), None);
 }

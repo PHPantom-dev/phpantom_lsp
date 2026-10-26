@@ -4,7 +4,7 @@
 //! preceding keyword (`new`, `extends`, `implements`, `use`, …) without
 //! requiring a full parse, since completion runs on text the user is
 //! still typing (and thus often unparseable).
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use crate::completion::named_args::position_to_char_offset;
 #[cfg(test)]

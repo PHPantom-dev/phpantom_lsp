@@ -53,9 +53,8 @@
 //!   error, offer to add `@phpstan-ignore <identifier>`.  When PHPStan
 //!   reports an unnecessary ignore, offer to remove it.
 
+pub(crate) mod add_attribute;
 pub(crate) mod add_iterable_type;
-mod add_override;
-pub(crate) mod add_return_type_will_change;
 pub(crate) mod add_throws;
 mod attributes;
 pub(crate) mod fix_phpdoc_type;
@@ -69,7 +68,7 @@ mod remove_throws;
 pub(crate) mod remove_unreachable;
 pub(crate) mod remove_unused_return_type;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::CodeActionData;
@@ -100,9 +99,20 @@ impl Backend {
 /// `return.type`.
 pub(super) fn phpstan_identifier(diag: &Diagnostic) -> Option<&str> {
     match &diag.code {
-        Some(NumberOrString::String(s)) => Some(s),
+        Some(Code::String(s)) => Some(s),
         _ => None,
     }
+}
+
+/// The short name of the first member a PHPStan message names as
+/// `Class::member`: `bar` in "Method App\Foo::bar() overrides …", `$baz`
+/// in "Property App\Foo::$baz has …".
+pub(super) fn phpstan_member_name(message: &str) -> Option<&str> {
+    let after = &message[message.find("::")? + 2..];
+    let end = after
+        .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
+        .unwrap_or(after.len());
+    (end > 0).then(|| &after[..end])
 }
 
 /// Split a PHPStan diagnostic message into the primary message and optional tip.
@@ -131,7 +141,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         // ── PHPStan ignore / remove unnecessary ignore ──────────────
         self.collect_phpstan_ignore_actions(uri, content, params, out);
@@ -142,14 +152,11 @@ impl Backend {
         // ── Remove invalid/unused @throws ───────────────────────────
         self.collect_remove_throws_actions(uri, content, params, out);
 
-        // ── Add #[Override] for overriding methods ──────────────────
-        self.collect_add_override_actions(uri, content, params, out);
+        // ── Add #[Override] / #[\ReturnTypeWillChange] ──────────────
+        self.collect_add_attribute_actions(uri, content, params, out);
 
         // ── Remove #[Override] from non-overriding members ──────────
         self.collect_remove_override_actions(uri, content, params, out);
-
-        // ── Add #[\ReturnTypeWillChange] for tentative return types ─
-        self.collect_add_return_type_will_change_actions(uri, content, params, out);
 
         // ── Fix unsafe `new static()` ───────────────────────────────
         self.collect_new_static_actions(uri, content, params, out);
@@ -233,10 +240,11 @@ impl Backend {
             }
 
             // Must be for the same exception class.
-            let cached_fqn: String = match extract_exception_fqn(&cached_d.message) {
-                Some(fqn) => fqn,
-                None => continue,
-            };
+            let cached_fqn: String =
+                match extract_exception_fqn(crate::util::message_text(&cached_d.message)) {
+                    Some(fqn) => fqn,
+                    None => continue,
+                };
             if !cached_fqn.eq_ignore_ascii_case(&exception_fqn) {
                 continue;
             }
@@ -285,6 +293,35 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn member_name_from_phpstan_messages() {
+        for (message, expected) in [
+            (
+                "Method App\\Http\\UserController::index() overrides method App\\Http\\Controller::index() but is missing the #[\\Override] attribute.",
+                Some("index"),
+            ),
+            (
+                "Return type (int) of method Foo::count() should be covariant with return type (int) of method Countable::count()",
+                Some("count"),
+            ),
+            (
+                "Method App\\Foo::__construct() has #[\\Override] attribute but does not override any method.",
+                Some("__construct"),
+            ),
+            (
+                "Property App\\Foo::$baz has #[\\Override] attribute but does not override any property.",
+                Some("$baz"),
+            ),
+            (
+                "Attribute class Override can be used with properties only on PHP 8.5 and later.",
+                None,
+            ),
+            ("Some other PHPStan error about something.", None),
+        ] {
+            assert_eq!(phpstan_member_name(message), expected, "{message}");
+        }
+    }
 
     #[test]
     fn splits_message_with_tip() {

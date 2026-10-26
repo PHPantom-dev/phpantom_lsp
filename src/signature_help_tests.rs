@@ -366,8 +366,8 @@ fn build_signature_parameter_offsets() {
     // label: "($a, $b): mixed"
     //         0123456789...
     let pi = sig.parameters.unwrap();
-    assert_eq!(pi[0].label, ParameterLabel::LabelOffsets([1, 3])); // "$a"
-    assert_eq!(pi[1].label, ParameterLabel::LabelOffsets([5, 7])); // "$b"
+    assert_eq!(pi[0].label, ParameterInformationLabel::Tuple((1, 3))); // "$a"
+    assert_eq!(pi[1].label, ParameterInformationLabel::Tuple((5, 7))); // "$b"
 }
 
 #[test]
@@ -420,9 +420,9 @@ fn build_signature_with_default_values() {
     // Verify offsets still track the labels correctly.
     let pi = sig.parameters.unwrap();
     // "(" = 1 char, then "string $name = 'World'" = 22 chars
-    assert_eq!(pi[0].label, ParameterLabel::LabelOffsets([1, 23]));
+    assert_eq!(pi[0].label, ParameterInformationLabel::Tuple((1, 23)));
     // ", " = 2 chars, then "int $count = 1" = 14 chars
-    assert_eq!(pi[1].label, ParameterLabel::LabelOffsets([25, 39]));
+    assert_eq!(pi[1].label, ParameterInformationLabel::Tuple((25, 39)));
 }
 
 #[test]
@@ -1070,7 +1070,8 @@ fn fcc_extract_simple_function() {
     // cursor_offset should be somewhere on line 6 (`$fn();`)
     // Find the offset of `$fn()` on line 6.
     let cursor_offset = content.find("$fn();").unwrap() as u32 + 4; // inside parens
-    let result = Backend::extract_callable_target_from_variable("$fn", content, cursor_offset);
+    let result = Backend::extract_callable_target_from_variable("$fn", content, cursor_offset)
+        .map(|c| c.target);
     assert_eq!(result, Some("makePen".to_string()));
 }
 
@@ -1078,7 +1079,8 @@ fn fcc_extract_simple_function() {
 fn fcc_extract_latest_assignment_before_cursor() {
     let content = "<?php\n$fn = first(...);\n$fn = second(...);\n$fn();\n$fn = third(...);\n";
     let cursor_offset = content.find("$fn();").unwrap() as u32 + 4;
-    let result = Backend::extract_callable_target_from_variable("$fn", content, cursor_offset);
+    let result = Backend::extract_callable_target_from_variable("$fn", content, cursor_offset)
+        .map(|c| c.target);
     assert_eq!(result, Some("second".to_string()));
 }
 
@@ -1088,7 +1090,9 @@ fn fcc_extract_respects_function_scope() {
     let in_a = content.find("$fn();").unwrap() as u32 + 4;
     let in_b = content[in_a as usize..].find("$fn();").unwrap() as u32 + in_a + 4;
     let at_top = content.rfind("$fn();").unwrap() as u32 + 4;
-    let extract = |offset| Backend::extract_callable_target_from_variable("$fn", content, offset);
+    let extract = |offset| {
+        Backend::extract_callable_target_from_variable("$fn", content, offset).map(|c| c.target)
+    };
     assert_eq!(extract(in_a), Some("inner".to_string()));
     assert_eq!(extract(in_b), Some("outer".to_string()));
     assert_eq!(extract(at_top), Some("outer".to_string()));
@@ -1100,7 +1104,9 @@ fn fcc_extract_from_cached_file() {
     let _guard = crate::parser::with_parse_cache(content);
     let in_method = content.find("$fn();").unwrap() as u32 + 4;
     let at_top = content.rfind("$fn();").unwrap() as u32 + 4;
-    let extract = |offset| Backend::extract_callable_target_from_variable("$fn", content, offset);
+    let extract = |offset| {
+        Backend::extract_callable_target_from_variable("$fn", content, offset).map(|c| c.target)
+    };
     assert_eq!(extract(in_method), Some("$this->other".to_string()));
     assert_eq!(extract(at_top), None);
 }

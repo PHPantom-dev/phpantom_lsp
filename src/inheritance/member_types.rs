@@ -1,7 +1,6 @@
 //! Reading one member's type through the inheritance chain.
 
-use std::sync::Arc;
-
+use crate::class_lookup::ResolvedClassLoader;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::ClassInfo;
 
@@ -19,7 +18,7 @@ use crate::types::ClassInfo;
 pub(crate) fn resolve_method_return_type(
     class: &ClassInfo,
     method_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     // Try the class directly first — it may already be fully resolved
     // with generic substitutions applied.  Falling through to the cache
@@ -60,7 +59,7 @@ pub(crate) fn resolve_method_return_type(
 pub(crate) fn resolve_property_type_hint(
     class: &ClassInfo,
     prop_name: &str,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<PhpType> {
     // Try the class directly first — it may already have the property
     // with generic substitutions applied.

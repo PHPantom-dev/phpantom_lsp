@@ -1,6 +1,6 @@
 //! Buffer verification for the edit-producing rename paths.
 //!
-//! `symbol_maps` is refreshed on a background task after each `didChange`
+//! A file's symbol map is refreshed on a background task after each `didChange`
 //! and is left untouched entirely when a parse panics, so a request can
 //! read a map whose byte offsets index an *older* version of the file.
 //! Every other read-only feature degrades to a wrong hover or a missing
@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::Backend;
 use crate::symbol_map::{SymbolKind, SymbolSpan};
@@ -56,9 +56,7 @@ impl Backend {
     /// nothing to invalidate; the per-range check below still applies to
     /// the locations it produced through other indices.
     pub(super) fn rename_map_matches(&self, uri: &str, content: &str) -> bool {
-        self.symbol_maps
-            .read()
-            .get(uri)
+        self.symbol_map_for(uri)
             .is_none_or(|map| map.matches_source(content))
     }
 
@@ -146,7 +144,7 @@ fn span_name(kind: &SymbolKind) -> Option<&str> {
         | SymbolKind::NamespaceDeclaration { name } => Some(name.as_str()),
         SymbolKind::MemberAccess { member_name, .. } => Some(member_name.as_str()),
         SymbolKind::LaravelMacroString { name } => Some(name),
-        SymbolKind::LaravelStringKey { key, .. } => Some(key),
+        SymbolKind::StringKey { key, .. } => Some(key),
         SymbolKind::SelfStaticParent(_)
         | SymbolKind::CommandOwnParam { .. }
         | SymbolKind::Keyword
@@ -172,7 +170,7 @@ fn expected_text(kind: &SymbolKind) -> Expected<'_> {
             Expected::Exact(name.as_str())
         }
         SymbolKind::LaravelMacroString { name } => Expected::Exact(name),
-        SymbolKind::LaravelStringKey { key, .. } => Expected::Key(key),
+        SymbolKind::StringKey { key, .. } => Expected::Key(key),
         _ => Expected::Name,
     }
 }
@@ -229,7 +227,7 @@ pub(super) fn range_text(content: &str, range: Range) -> Option<&str> {
 
 /// Whether `new_name` is something a symbol of `kind` can be renamed to.
 ///
-/// Only PHP names are checked.  A Laravel string key is free text (it may
+/// Only PHP names are checked.  A string key is free text (it may
 /// hold dots, dashes, or slashes), so it is left to its own rename path.
 pub(super) fn is_valid_new_name(kind: &SymbolKind, new_name: &str) -> bool {
     match kind {

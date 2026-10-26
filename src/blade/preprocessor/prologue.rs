@@ -88,13 +88,19 @@ pub(super) fn emit(
     // (the expression is emitted verbatim, so anything the type engine can
     // resolve works); an entry without one is a *required* prop, whose
     // value the caller supplies, so it is declared `mixed` rather than
-    // being invented as `null`.
+    // being invented as `null`. A `null` default says the same thing,
+    // that the caller supplies the value, and typing the prop `null`
+    // would make every use of it a type error.
     let entries = crate::blade::signature::extract_props(content)
         .into_iter()
         .chain(crate::blade::signature::extract_aware(content))
         .flatten();
     for entry in entries {
-        let decl = match &entry.default {
+        let default = entry
+            .default
+            .as_deref()
+            .filter(|default| !default.trim().eq_ignore_ascii_case("null"));
+        let decl = match default {
             Some(default) => format!("${} = {};\n", entry.name, default),
             None => format!(
                 "/** @var mixed ${name} */\n${name} = null;\n",

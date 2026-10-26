@@ -9,9 +9,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document};
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use crate::common::message_text;
+    use crate::common::{create_psr4_workspace, goto_definition_at, open_document};
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     const COMPOSER: &str = r#"{
         "require": { "laravel/framework": "^11.0" },
@@ -110,24 +111,16 @@ mod tests {
         backend.initialized(InitializedParams {}).await;
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         open_document(backend, &uri, language_id, &text).await;
 
-        let response = backend
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
-            .await
-            .unwrap()?;
+        let response = goto_definition_at(backend, &uri, line, character).await?;
         let target = match &response {
-            GotoDefinitionResponse::Scalar(location) => location.uri.clone(),
-            GotoDefinitionResponse::Array(locations) => locations.first()?.uri.clone(),
-            GotoDefinitionResponse::Link(links) => links.first()?.target_uri.clone(),
+            DefinitionResponse::Definition(Definition::Location(location)) => location.uri.clone(),
+            DefinitionResponse::Definition(Definition::LocationList(locations)) => {
+                locations.first()?.uri.clone()
+            }
+            DefinitionResponse::DefinitionLinkList(links) => links.first()?.target_uri.clone(),
         };
         Some(target.to_string())
     }
@@ -143,7 +136,7 @@ mod tests {
         backend.initialized(InitializedParams {}).await;
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         open_document(backend, &uri, language_id, &text).await;
 
         let effective = backend.blade_virtual_php(uri.as_str()).unwrap_or(text);
@@ -153,8 +146,8 @@ mod tests {
         diags
             .into_iter()
             .filter_map(|d| match &d.code {
-                Some(NumberOrString::String(code)) if code.ends_with("_view_variable") => {
-                    Some((code.clone(), d.message))
+                Some(Code::String(code)) if code.ends_with("_view_variable") => {
+                    Some((code.clone(), message_text(&d.message).to_string()))
                 }
                 _ => None,
             })
@@ -172,7 +165,7 @@ mod tests {
         backend.initialized(InitializedParams {}).await;
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         open_document(backend, &uri, language_id, &text).await;
 
         let effective = backend.blade_virtual_php(uri.as_str()).unwrap_or(text);
@@ -182,7 +175,7 @@ mod tests {
         diags
             .into_iter()
             .filter_map(|d| match d.code {
-                Some(NumberOrString::String(code)) => Some(code),
+                Some(Code::String(code)) => Some(code),
                 _ => None,
             })
             .collect()
@@ -325,18 +318,18 @@ mod tests {
         backend.initialized(InitializedParams {}).await;
         let path = dir.path().join("resources/views/page.blade.php");
         let text = std::fs::read_to_string(&path).unwrap();
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         open_document(&backend, &uri, "blade", &text).await;
 
         let effective = backend.blade_virtual_php(uri.as_str()).unwrap_or(text);
         let mut diags = Vec::new();
         backend.collect_slow_diagnostics(uri.as_str(), &effective, &mut diags);
-        let invalid: Vec<&String> = diags
+        let invalid: Vec<&str> = diags
             .iter()
             .filter(
-                |d| matches!(&d.code, Some(NumberOrString::String(code)) if code == "invalid_laravel_view"),
+                |d| matches!(&d.code, Some(Code::String(code)) if code == "invalid_laravel_view"),
             )
-            .map(|d| &d.message)
+            .map(|d| message_text(&d.message))
             .collect();
         assert_eq!(
             invalid.len(),

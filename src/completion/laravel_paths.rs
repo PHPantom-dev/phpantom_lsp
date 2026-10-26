@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::completion::source::code_context::CodeContext;
@@ -169,13 +169,13 @@ impl Backend {
                 CompletionItem {
                     label: entry.name,
                     kind: Some(if entry.is_directory {
-                        CompletionItemKind::FOLDER
+                        CompletionItemKind::Folder
                     } else {
-                        CompletionItemKind::FILE
+                        CompletionItemKind::File
                     }),
                     sort_text: Some(format!("{:05}", index)),
                     filter_text: Some(new_text.clone()),
-                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                         range: edit_range,
                         new_text,
                     })),
@@ -189,9 +189,11 @@ impl Backend {
         }
         // A cut-short listing is reported as such, so the editor asks again
         // as the name narrows rather than presenting the cap as the answer.
-        Some(CompletionResponse::List(CompletionList {
+        Some(CompletionResponse::CompletionList(CompletionList {
             is_incomplete: truncated,
             items,
+            apply_kind: None,
+            item_defaults: None,
         }))
     }
 }
@@ -335,14 +337,14 @@ mod tests {
             .try_path_helper_completion(content, position, &code)
             .expect("the views directory has a matching entry");
 
-        let CompletionResponse::List(list) = response else {
+        let CompletionResponse::CompletionList(list) = response else {
             panic!("expected a completion list");
         };
         assert!(!list.is_incomplete);
         let items = list.items;
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].label, "welcome.blade.php");
-        let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+        let Some(CompletionItemTextEdit::TextEdit(edit)) = &items[0].text_edit else {
             panic!("expected a text edit");
         };
         assert_eq!(

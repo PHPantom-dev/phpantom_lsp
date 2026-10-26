@@ -14,7 +14,7 @@ use phpantom_lsp::config;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::net::TcpListener;
 #[cfg(not(target_arch = "wasm32"))]
-use tower_lsp::{LspService, Server};
+use tower_lsp_server::{LspService, Server};
 
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Yellow.on_default().bold())
@@ -117,7 +117,8 @@ enum Command {
     /// Runs the same formatter the editor runs on save: a Laravel Pint,
     /// php-cs-fixer, or PHP_CodeSniffer the project depends on, and the
     /// built-in formatter otherwise. Blade templates are reindented by
-    /// the built-in reindenter unless the project formats them with Pint.
+    /// the built-in reindenter unless the project formats them with Pint
+    /// or blade-formatter.
     ///
     /// With --check nothing is written: the files that are not formatted
     /// are listed and the command exits non-zero, so a CI job can require
@@ -238,8 +239,11 @@ impl ProjectArgs {
     /// Settle the root (exiting when the current directory is unknown),
     /// the colour choice, and the output format.
     fn resolve(self) -> ProjectOptions {
+        // Every file the run reaches is named by an absolute URI, so a
+        // relative root would never be a prefix of one.
         let workspace_root = self
             .project_root
+            .map(|root| std::path::absolute(&root).unwrap_or(root))
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| {
                 eprintln!("Error: cannot determine project root directory");

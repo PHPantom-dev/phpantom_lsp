@@ -21,8 +21,8 @@
 
 use std::time::Duration;
 
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, jsonrpc::Result};
+use tower_lsp_server::gen_lsp_types::*;
+use tower_lsp_server::{Client, LanguageServer, jsonrpc::Result};
 
 use crate::common::lsp_transport::serve;
 
@@ -34,7 +34,6 @@ const COMPLETION_DELAY: Duration = Duration::from_millis(150);
 /// instant. Everything else uses the trait defaults.
 struct SlowServer;
 
-#[tower_lsp::async_trait]
 impl LanguageServer for SlowServer {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult::default())

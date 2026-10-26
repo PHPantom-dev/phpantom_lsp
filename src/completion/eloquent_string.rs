@@ -18,9 +18,10 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::completion::source::code_context::{CodeContext, Operator};
 use crate::completion::source::string_argument::{
     StringArgument, StringArgumentPosition, string_argument,
@@ -418,7 +419,7 @@ impl Backend {
         if items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::Array(items))
+            Some(CompletionResponse::CompletionItemList(items))
         }
     }
 
@@ -451,13 +452,12 @@ impl Backend {
             if let Some(cls) = &rt.class_info
                 && is_model(cls)
             {
-                return class_loader(&cls.fqn());
+                return class_loader(Fqn::new(&cls.fqn()));
             }
             if let TypeKind::Generic(g) = rt.type_string.kind() {
-                let model = g
-                    .args
-                    .iter()
-                    .find_map(|arg| class_loader(arg.base_name()?).filter(|cls| is_model(cls)));
+                let model = g.args.iter().find_map(|arg| {
+                    class_loader(Fqn::new(arg.base_name()?)).filter(|cls| is_model(cls))
+                });
                 if model.is_some() {
                     return model;
                 }
@@ -471,7 +471,7 @@ impl Backend {
         &self,
         model: &ClassInfo,
         es_ctx: &EloquentStringContext,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        class_loader: &ResolvedClassLoader<'_>,
     ) -> Vec<CompletionItem> {
         let partial = &es_ctx.partial;
 
@@ -485,7 +485,7 @@ impl Backend {
             else {
                 return Vec::new();
             };
-            let Some(resolved_model) = class_loader(&resolved_fqn) else {
+            let Some(resolved_model) = class_loader(Fqn::new(&resolved_fqn)) else {
                 return Vec::new();
             };
             // Resolve with inheritance for full method list.
@@ -538,7 +538,7 @@ impl Backend {
 
             items.push(CompletionItem {
                 label: format!("{}{}", prefix, method_name),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some(detail),
                 insert_text: Some(insert_text),
                 filter_text: Some(method_name),
@@ -594,13 +594,13 @@ impl Backend {
 
             items.push(CompletionItem {
                 label: col.clone(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some("column".to_string()),
                 insert_text: Some(col.clone()),
                 sort_text: (es_ctx.kind == EloquentStringKind::AttributeKey)
                     .then(|| format!("{}_{col}", if fillable { 0 } else { 1 })),
                 text_edit: range.map(|range| {
-                    CompletionTextEdit::Edit(TextEdit {
+                    CompletionItemTextEdit::TextEdit(TextEdit {
                         range,
                         new_text: col.clone(),
                     })
@@ -672,7 +672,7 @@ impl Backend {
 
         let class_loader = self.resolved_class_loader(ctx);
 
-        let model_class = class_loader(model_name)?;
+        let model_class = class_loader(Fqn::new(model_name))?;
         let resolved = crate::virtual_members::resolve_class_fully_cached(
             &model_class,
             &class_loader,
@@ -692,7 +692,7 @@ impl Backend {
             }
             items.push(CompletionItem {
                 label: col.clone(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some("model property".to_string()),
                 insert_text: Some(col.clone()),
                 ..Default::default()
@@ -702,7 +702,7 @@ impl Backend {
         if items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::Array(items))
+            Some(CompletionResponse::CompletionItemList(items))
         }
     }
 }

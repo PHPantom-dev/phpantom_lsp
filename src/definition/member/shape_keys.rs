@@ -5,7 +5,7 @@
 //! `$fillable`, etc.) so that go-to-definition can jump to the right
 //! position in the source file.
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use crate::Backend;
 
@@ -35,12 +35,10 @@ impl Backend {
         // base word) at brace depth 0, enter shape-scanning mode and
         // look for the key.
 
-        let mut matches: Vec<(usize, u32, u32)> = Vec::new(); // (byte_offset, line, col)
+        let mut matches: Vec<usize> = Vec::new(); // byte offsets of the keys
         let mut in_docblock = false;
 
-        for (line_idx, (byte_offset, line)) in
-            crate::text_position::lines_with_offsets(content).enumerate()
-        {
+        for (byte_offset, line) in crate::text_position::lines_with_offsets(content) {
             // Track docblock boundaries.
             if line.contains("/**") {
                 in_docblock = true;
@@ -50,8 +48,7 @@ impl Backend {
                 // Search for object shape property keys in this line.
                 // Look for `object{` patterns (possibly preceded by `?` or `\`).
                 if let Some(pos) = Self::find_shape_key_in_line(line, key_name) {
-                    let abs_offset = byte_offset + pos;
-                    matches.push((abs_offset, line_idx as u32, pos as u32));
+                    matches.push(byte_offset + pos);
                 }
             }
 
@@ -63,16 +60,11 @@ impl Backend {
         // Pick the match closest to the cursor.  When no near_offset
         // is given, return the last match (highest line number).
         let best = match near_offset {
-            Some(cursor) => matches
-                .into_iter()
-                .min_by_key(|(off, _, _)| cursor.abs_diff(*off)),
+            Some(cursor) => matches.into_iter().min_by_key(|off| cursor.abs_diff(*off)),
             None => matches.into_iter().last(),
         };
 
-        best.map(|(_, line, col)| Position {
-            line,
-            character: col,
-        })
+        best.map(|offset| crate::text_position::offset_to_position(content, offset))
     }
 
     /// Search a single line for a property key inside an `object{…}`
@@ -101,7 +93,7 @@ impl Backend {
                             break;
                         }
                     }
-                    _ if depth == 1 => {
+                    _ if depth == 1 && line.is_char_boundary(i) => {
                         // At depth 1 we are inside the outermost `object{…}`.
                         // Check if the key starts here.
                         if let Some(col) = Self::match_shape_key_at(line, i, key_name) {

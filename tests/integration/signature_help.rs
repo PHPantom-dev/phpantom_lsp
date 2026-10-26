@@ -1,24 +1,16 @@
-use crate::common::{create_test_backend, create_test_backend_with_function_stubs};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{create_test_backend, create_test_backend_with_function_stubs, open_php};
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: open a file and request signature help at the given line/character.
 async fn sig_help_at(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     text: &str,
     line: u32,
     character: u32,
 ) -> Option<SignatureHelp> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(backend, uri, text).await;
 
     let params = SignatureHelpParams {
         text_document_position_params: TextDocumentPositionParams {
@@ -34,7 +26,10 @@ async fn sig_help_at(
 
 /// Extract the active parameter index from a SignatureHelp response.
 fn active_param(sh: &SignatureHelp) -> u32 {
-    sh.active_parameter.unwrap_or(0)
+    match sh.active_parameter {
+        Some(ActiveParameter::Int(n)) => n,
+        Some(ActiveParameter::Null) | None => 0,
+    }
 }
 
 /// Extract the signature label from the first (and usually only) signature.
@@ -49,8 +44,8 @@ fn param_labels(sh: &SignatureHelp) -> Vec<String> {
     params
         .iter()
         .map(|pi| match &pi.label {
-            ParameterLabel::Simple(s) => s.clone(),
-            ParameterLabel::LabelOffsets([start, end]) => {
+            ParameterInformationLabel::String(s) => s.clone(),
+            ParameterInformationLabel::Tuple((start, end)) => {
                 sig.label[*start as usize..*end as usize].to_string()
             }
         })
@@ -64,7 +59,7 @@ fn param_labels(sh: &SignatureHelp) -> Vec<String> {
 #[tokio::test]
 async fn standalone_function_first_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_func.php").unwrap();
+    let uri = Uri::parse("file:///sig_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function greet(string $name, int $age): void {}\n",
@@ -81,7 +76,7 @@ async fn standalone_function_first_param() {
 #[tokio::test]
 async fn imported_function_shadows_a_global_one() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_imported_func.php").unwrap();
+    let uri = Uri::parse("file:///sig_imported_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace {\n",
@@ -100,10 +95,54 @@ async fn imported_function_shadows_a_global_one() {
     assert_eq!(sig_label(&sh), "(string $name): void");
 }
 
+/// Until its `)` is typed, a call swallows the `}` of the braced block it is
+/// in.  It still resolves against that block's imports, not the namespace
+/// of the block before it.
+#[tokio::test]
+async fn unclosed_call_resolves_through_its_braced_blocks_imports() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///sig_unclosed_braced_import.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Lib {\n",
+        "    function greet(string $name): void {}\n",
+        "}\n",
+        "namespace Other {\n",
+        "    function greet(int $count): void {}\n",
+        "}\n",
+        "namespace App {\n",
+        "    use function Lib\\greet;\n",
+        "    greet(\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 9, 10).await.unwrap();
+    assert_eq!(sig_label(&sh), "(string $name): void");
+}
+
+#[tokio::test]
+async fn unclosed_call_to_a_function_its_braced_block_declares() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///sig_unclosed_braced_local.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace Other {\n",
+        "    function greet(int $count): void {}\n",
+        "}\n",
+        "namespace App {\n",
+        "    function greet(string $name): void {}\n",
+        "    greet(\n",
+        "}\n",
+    );
+
+    let sh = sig_help_at(&backend, &uri, text, 6, 10).await.unwrap();
+    assert_eq!(sig_label(&sh), "(string $name): void");
+}
+
 #[tokio::test]
 async fn qualified_function_expands_through_a_class_import() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_class_import_func.php").unwrap();
+    let uri = Uri::parse("file:///sig_class_import_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Helpers {\n",
@@ -125,24 +164,15 @@ async fn qualified_function_expands_through_a_class_import() {
 #[tokio::test]
 async fn qualified_function_from_another_file_through_a_class_import() {
     let backend = create_test_backend();
-    let lib_uri = Url::parse("file:///sig_lib_helpers.php").unwrap();
+    let lib_uri = Uri::parse("file:///sig_lib_helpers.php").unwrap();
     let lib = concat!(
         "<?php\n",
         "namespace Lib\\Helpers;\n",
         "function greet(string $name, int $times): void {}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: lib_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: lib.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &lib_uri, lib).await;
 
-    let uri = Url::parse("file:///sig_app_caller.php").unwrap();
+    let uri = Uri::parse("file:///sig_app_caller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -158,7 +188,7 @@ async fn qualified_function_from_another_file_through_a_class_import() {
 #[tokio::test]
 async fn standalone_function_second_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_func2.php").unwrap();
+    let uri = Uri::parse("file:///sig_func2.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function greet(string $name, int $age): void {}\n",
@@ -172,7 +202,7 @@ async fn standalone_function_second_param() {
 #[tokio::test]
 async fn standalone_function_no_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_noparam.php").unwrap();
+    let uri = Uri::parse("file:///sig_noparam.php").unwrap();
     let text = concat!("<?php\n", "function doWork(): void {}\n", "doWork(\n",);
 
     let sh = sig_help_at(&backend, &uri, text, 2, 7).await.unwrap();
@@ -187,7 +217,7 @@ async fn standalone_function_no_params() {
 #[tokio::test]
 async fn this_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_this.php").unwrap();
+    let uri = Uri::parse("file:///sig_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Greeter {\n",
@@ -208,7 +238,7 @@ async fn this_method_call() {
 #[tokio::test]
 async fn this_method_second_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_this2.php").unwrap();
+    let uri = Uri::parse("file:///sig_this2.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Greeter {\n",
@@ -232,7 +262,7 @@ async fn this_method_second_param() {
 #[tokio::test]
 async fn variable_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_var.php").unwrap();
+    let uri = Uri::parse("file:///sig_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Calculator {\n",
@@ -259,7 +289,7 @@ async fn variable_method_call() {
 #[tokio::test]
 async fn static_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_static.php").unwrap();
+    let uri = Uri::parse("file:///sig_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class MathUtil {\n",
@@ -280,7 +310,7 @@ async fn static_method_call() {
 #[tokio::test]
 async fn static_method_third_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_static3.php").unwrap();
+    let uri = Uri::parse("file:///sig_static3.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class MathUtil {\n",
@@ -302,7 +332,7 @@ async fn static_method_third_param() {
 #[tokio::test]
 async fn self_static_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_self.php").unwrap();
+    let uri = Uri::parse("file:///sig_self.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -326,7 +356,7 @@ async fn self_static_method_call() {
 #[tokio::test]
 async fn constructor_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_ctor.php").unwrap();
+    let uri = Uri::parse("file:///sig_ctor.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -344,7 +374,7 @@ async fn constructor_call() {
 #[tokio::test]
 async fn constructor_second_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_ctor2.php").unwrap();
+    let uri = Uri::parse("file:///sig_ctor2.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -360,7 +390,7 @@ async fn constructor_second_param() {
 #[tokio::test]
 async fn constructor_self_keyword() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_ctor_self.php").unwrap();
+    let uri = Uri::parse("file:///sig_ctor_self.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -380,7 +410,7 @@ async fn constructor_self_keyword() {
 #[tokio::test]
 async fn constructor_static_keyword() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_ctor_static.php").unwrap();
+    let uri = Uri::parse("file:///sig_ctor_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -400,7 +430,7 @@ async fn constructor_static_keyword() {
 #[tokio::test]
 async fn constructor_parent_keyword() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_ctor_parent.php").unwrap();
+    let uri = Uri::parse("file:///sig_ctor_parent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -422,7 +452,7 @@ async fn constructor_parent_keyword() {
 #[tokio::test]
 async fn constructor_parent_keyword_with_new() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_ctor_new_parent.php").unwrap();
+    let uri = Uri::parse("file:///sig_ctor_new_parent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -447,7 +477,7 @@ async fn constructor_parent_keyword_with_new() {
 #[tokio::test]
 async fn no_help_outside_parens() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_none.php").unwrap();
+    let uri = Uri::parse("file:///sig_none.php").unwrap();
     let text = concat!("<?php\n", "foo();\n",);
 
     let sh = sig_help_at(&backend, &uri, text, 1, 6).await;
@@ -457,7 +487,7 @@ async fn no_help_outside_parens() {
 #[tokio::test]
 async fn no_help_on_unknown_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_unknown.php").unwrap();
+    let uri = Uri::parse("file:///sig_unknown.php").unwrap();
     let text = concat!("<?php\n", "unknownFunc(\n",);
 
     let sh = sig_help_at(&backend, &uri, text, 1, 12).await;
@@ -471,7 +501,7 @@ async fn no_help_on_unknown_function() {
 #[tokio::test]
 async fn nested_call_inner_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_nested.php").unwrap();
+    let uri = Uri::parse("file:///sig_nested.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function outer(string $x): void {}\n",
@@ -492,7 +522,7 @@ async fn nested_call_inner_function() {
 #[tokio::test]
 async fn variadic_parameter_clamped() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_variadic.php").unwrap();
+    let uri = Uri::parse("file:///sig_variadic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function logMessage(string $level, string ...$parts): void {}\n",
@@ -512,7 +542,7 @@ async fn variadic_parameter_clamped() {
 #[tokio::test]
 async fn inherited_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_inherit.php").unwrap();
+    let uri = Uri::parse("file:///sig_inherit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -538,7 +568,7 @@ async fn inherited_method() {
 #[tokio::test]
 async fn trait_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_trait.php").unwrap();
+    let uri = Uri::parse("file:///sig_trait.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Greetable {\n",
@@ -566,7 +596,7 @@ async fn trait_method() {
 #[tokio::test]
 async fn stub_function() {
     let backend = create_test_backend_with_function_stubs();
-    let uri = Url::parse("file:///sig_stub.php").unwrap();
+    let uri = Uri::parse("file:///sig_stub.php").unwrap();
     let text = concat!("<?php\n", "str_contains(\n",);
 
     let sh = sig_help_at(&backend, &uri, text, 1, 13).await.unwrap();
@@ -578,7 +608,7 @@ async fn stub_function() {
 #[tokio::test]
 async fn stub_function_second_param() {
     let backend = create_test_backend_with_function_stubs();
-    let uri = Url::parse("file:///sig_stub2.php").unwrap();
+    let uri = Uri::parse("file:///sig_stub2.php").unwrap();
     let text = concat!("<?php\n", "str_contains('hello', \n",);
 
     let sh = sig_help_at(&backend, &uri, text, 1, 22).await.unwrap();
@@ -592,7 +622,7 @@ async fn stub_function_second_param() {
 #[tokio::test]
 async fn parameter_label_offsets_match_label() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_offsets.php").unwrap();
+    let uri = Uri::parse("file:///sig_offsets.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function mix(string $a, int $b, bool $c): void {}\n",
@@ -605,7 +635,7 @@ async fn parameter_label_offsets_match_label() {
 
     for pi in params {
         match &pi.label {
-            ParameterLabel::LabelOffsets([start, end]) => {
+            ParameterInformationLabel::Tuple((start, end)) => {
                 let substr = &sig.label[*start as usize..*end as usize];
                 // Each extracted label should be a valid parameter representation.
                 assert!(
@@ -614,7 +644,7 @@ async fn parameter_label_offsets_match_label() {
                     substr
                 );
             }
-            ParameterLabel::Simple(s) => {
+            ParameterInformationLabel::String(s) => {
                 assert!(
                     sig.label.contains(s.as_str()),
                     "Simple label '{}' should be substring of '{}'",
@@ -633,7 +663,7 @@ async fn parameter_label_offsets_match_label() {
 #[tokio::test]
 async fn string_with_commas_ignored() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_strcomma.php").unwrap();
+    let uri = Uri::parse("file:///sig_strcomma.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function pair(string $a, string $b): void {}\n",
@@ -652,7 +682,7 @@ async fn string_with_commas_ignored() {
 #[tokio::test]
 async fn nested_call_args_not_counted() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_nestedcount.php").unwrap();
+    let uri = Uri::parse("file:///sig_nestedcount.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function outer(int $x, int $y): void {}\n",
@@ -674,7 +704,7 @@ async fn nested_call_args_not_counted() {
 #[tokio::test]
 async fn parent_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_parent.php").unwrap();
+    let uri = Uri::parse("file:///sig_parent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -701,7 +731,7 @@ async fn parent_method_call() {
 #[tokio::test]
 async fn cursor_right_after_open_paren() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_openparen.php").unwrap();
+    let uri = Uri::parse("file:///sig_openparen.php").unwrap();
     let text = concat!("<?php\n", "function test(int $x): void {}\n", "test(",);
 
     let sh = sig_help_at(&backend, &uri, text, 2, 5).await.unwrap();
@@ -716,7 +746,7 @@ async fn cursor_right_after_open_paren() {
 #[tokio::test]
 async fn cursor_after_comma_with_spaces() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_spaces.php").unwrap();
+    let uri = Uri::parse("file:///sig_spaces.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function pair(string $a, string $b): void {}\n",
@@ -766,31 +796,13 @@ async fn cross_file_psr4_method() {
         ],
     );
 
-    let service_uri = Url::from_file_path(_dir.path().join("src/Service.php")).unwrap();
-    let client_uri = Url::from_file_path(_dir.path().join("src/Client.php")).unwrap();
+    let service_uri = Uri::from_file_path(_dir.path().join("src/Service.php")).unwrap();
+    let client_uri = Uri::from_file_path(_dir.path().join("src/Client.php")).unwrap();
 
     // Open both files
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: service_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: service_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &service_uri, service_php).await;
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: client_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: client_php.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &client_uri, client_php).await;
 
     let params = SignatureHelpParams {
         text_document_position_params: TextDocumentPositionParams {
@@ -818,7 +830,7 @@ async fn cross_file_psr4_method() {
 #[tokio::test]
 async fn return_type_in_label() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_ret.php").unwrap();
+    let uri = Uri::parse("file:///sig_ret.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function compute(int $x): float {}\n",
@@ -836,7 +848,7 @@ async fn return_type_in_label() {
 #[tokio::test]
 async fn no_return_type_shows_mixed() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_noret.php").unwrap();
+    let uri = Uri::parse("file:///sig_noret.php").unwrap();
     let text = concat!("<?php\n", "function doStuff($x) {}\n", "doStuff(\n",);
 
     let sh = sig_help_at(&backend, &uri, text, 2, 8).await.unwrap();
@@ -850,7 +862,7 @@ async fn no_return_type_shows_mixed() {
 #[tokio::test]
 async fn reference_parameter() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_ref.php").unwrap();
+    let uri = Uri::parse("file:///sig_ref.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function swap(int &$a, int &$b): void {}\n",
@@ -870,7 +882,7 @@ async fn reference_parameter() {
 #[tokio::test]
 async fn variadic_parameter_in_label() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_variadic_label.php").unwrap();
+    let uri = Uri::parse("file:///sig_variadic_label.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function collect(string ...$items): array {}\n",
@@ -892,7 +904,7 @@ async fn variadic_parameter_in_label() {
 #[tokio::test]
 async fn cursor_mid_argument() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_mid.php").unwrap();
+    let uri = Uri::parse("file:///sig_mid.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function pair(string $a, string $b): void {}\n",
@@ -911,7 +923,7 @@ async fn cursor_mid_argument() {
 #[tokio::test]
 async fn single_signature_returned() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_single.php").unwrap();
+    let uri = Uri::parse("file:///sig_single.php").unwrap();
     let text = concat!("<?php\n", "function doIt(int $n): void {}\n", "doIt(\n",);
 
     let sh = sig_help_at(&backend, &uri, text, 2, 5).await.unwrap();
@@ -926,7 +938,7 @@ async fn single_signature_returned() {
 #[tokio::test]
 async fn property_chain_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_prop_chain.php").unwrap();
+    let uri = Uri::parse("file:///sig_prop_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Inner {\n",
@@ -953,7 +965,7 @@ async fn property_chain_method_call() {
 #[tokio::test]
 async fn this_property_chain_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_this_prop_chain.php").unwrap();
+    let uri = Uri::parse("file:///sig_this_prop_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -976,7 +988,7 @@ async fn this_property_chain_method_call() {
 #[tokio::test]
 async fn deep_property_chain_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_deep_chain.php").unwrap();
+    let uri = Uri::parse("file:///sig_deep_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Engine {\n",
@@ -1006,7 +1018,7 @@ async fn deep_property_chain_method_call() {
 #[tokio::test]
 async fn method_return_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_method_chain.php").unwrap();
+    let uri = Uri::parse("file:///sig_method_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -1029,7 +1041,7 @@ async fn method_return_chain() {
 #[tokio::test]
 async fn function_return_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_func_chain.php").unwrap();
+    let uri = Uri::parse("file:///sig_func_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -1052,7 +1064,7 @@ async fn function_return_chain() {
 #[tokio::test]
 async fn static_method_return_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_static_chain.php").unwrap();
+    let uri = Uri::parse("file:///sig_static_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Query {\n",
@@ -1074,7 +1086,7 @@ async fn static_method_return_chain() {
 #[tokio::test]
 async fn new_expression_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_new_chain.php").unwrap();
+    let uri = Uri::parse("file:///sig_new_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Printer {\n",
@@ -1095,7 +1107,7 @@ async fn new_expression_chain() {
 #[tokio::test]
 async fn nullsafe_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_nullsafe.php").unwrap();
+    let uri = Uri::parse("file:///sig_nullsafe.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Formatter {\n",
@@ -1118,7 +1130,7 @@ async fn nullsafe_method_call() {
 #[tokio::test]
 async fn property_then_method_chain_second_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_chain_2nd.php").unwrap();
+    let uri = Uri::parse("file:///sig_chain_2nd.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -1144,7 +1156,7 @@ async fn property_then_method_chain_second_param() {
 #[tokio::test]
 async fn nested_call_correct_site() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_nested_site.php").unwrap();
+    let uri = Uri::parse("file:///sig_nested_site.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function outer(int $a, int $b): int { return 0; }\n",
@@ -1161,7 +1173,7 @@ async fn nested_call_correct_site() {
 #[tokio::test]
 async fn zero_param_method_closed_parens() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_zero_param.php").unwrap();
+    let uri = Uri::parse("file:///sig_zero_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen {\n",
@@ -1188,7 +1200,7 @@ async fn zero_param_method_closed_parens() {
 #[tokio::test]
 async fn constructor_no_explicit_ctor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_no_ctor.php").unwrap();
+    let uri = Uri::parse("file:///sig_no_ctor.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Simple {\n",
@@ -1210,7 +1222,7 @@ async fn constructor_no_explicit_ctor() {
 #[tokio::test]
 async fn generic_chain_with_new_expression_arg() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_generic_new_arg.php").unwrap();
+    let uri = Uri::parse("file:///sig_generic_new_arg.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -1248,7 +1260,7 @@ async fn generic_chain_with_new_expression_arg() {
 #[tokio::test]
 async fn array_access_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_array_access.php").unwrap();
+    let uri = Uri::parse("file:///sig_array_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen {\n",
@@ -1276,7 +1288,7 @@ async fn array_access_method_call() {
 #[tokio::test]
 async fn class_string_variable_static_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_class_string.php").unwrap();
+    let uri = Uri::parse("file:///sig_class_string.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen {\n",
@@ -1299,7 +1311,7 @@ async fn class_string_variable_static_call() {
 #[tokio::test]
 async fn first_class_callable_invocation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_fcc.php").unwrap();
+    let uri = Uri::parse("file:///sig_fcc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function makePen(string $ink): Pen { return new Pen(); }\n",
@@ -1319,9 +1331,33 @@ async fn first_class_callable_invocation() {
 }
 
 #[tokio::test]
+async fn partial_application_invocation_shows_the_open_parameters() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///sig_pfa.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "function makePen(int $size, string $ink, bool $cap = true): Pen { return new Pen(); }\n",
+        "class Pen {}\n",
+        "class Demo {\n",
+        "    public function test() {\n",
+        "        $fn = makePen(1, ?, cap: false);\n",
+        "        $fn();\n",
+        "    }\n",
+        "}\n",
+    );
+    let sh = sig_help_at(&backend, &uri, text, 6, 12).await.unwrap();
+    let label = sig_label(&sh);
+    assert!(label.contains("string $ink"), "got: {label}");
+    assert!(
+        !label.contains("$size") && !label.contains("$cap"),
+        "got: {label}"
+    );
+}
+
+#[tokio::test]
 async fn first_class_callable_invocation_in_enum_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_fcc_enum.php").unwrap();
+    let uri = Uri::parse("file:///sig_fcc_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function makePen(string $ink): Pen { return new Pen(); }\n",
@@ -1346,7 +1382,7 @@ async fn first_class_callable_invocation_in_enum_method() {
 #[tokio::test]
 async fn default_value_in_label() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_default.php").unwrap();
+    let uri = Uri::parse("file:///sig_default.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function greet(string $name = 'World', int $count = 1): void {}\n",
@@ -1374,7 +1410,7 @@ async fn default_value_in_label() {
 #[tokio::test]
 async fn required_param_no_default_suffix() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_req.php").unwrap();
+    let uri = Uri::parse("file:///sig_req.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function process(string $input): void {}\n",
@@ -1388,7 +1424,7 @@ async fn required_param_no_default_suffix() {
 #[tokio::test]
 async fn method_default_value_in_label() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_meth_def.php").unwrap();
+    let uri = Uri::parse("file:///sig_meth_def.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -1428,7 +1464,7 @@ fn param_docs(sh: &SignatureHelp) -> Vec<Option<String>> {
 #[tokio::test]
 async fn param_description_from_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_param_doc.php").unwrap();
+    let uri = Uri::parse("file:///sig_param_doc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1448,7 +1484,7 @@ async fn param_description_from_docblock() {
 #[tokio::test]
 async fn param_without_description_has_no_doc() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_param_nodoc.php").unwrap();
+    let uri = Uri::parse("file:///sig_param_nodoc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function simple(int $x): void {}\n",
@@ -1462,7 +1498,7 @@ async fn param_without_description_has_no_doc() {
 #[tokio::test]
 async fn method_param_description() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_mparam_doc.php").unwrap();
+    let uri = Uri::parse("file:///sig_mparam_doc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -1492,7 +1528,7 @@ async fn method_param_description() {
 #[tokio::test]
 async fn param_doc_shows_effective_type_when_different_from_native() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_eff.php").unwrap();
+    let uri = Uri::parse("file:///sig_eff.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1517,7 +1553,7 @@ async fn param_doc_shows_effective_type_when_different_from_native() {
 #[tokio::test]
 async fn param_doc_no_effective_prefix_when_types_match() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_same.php").unwrap();
+    let uri = Uri::parse("file:///sig_same.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1540,7 +1576,7 @@ async fn param_doc_no_effective_prefix_when_types_match() {
 #[tokio::test]
 async fn combined_defaults_and_docs() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_combined.php").unwrap();
+    let uri = Uri::parse("file:///sig_combined.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1571,7 +1607,7 @@ async fn combined_defaults_and_docs() {
 #[tokio::test]
 async fn param_doc_class_string_effective_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///sig_class_string.php").unwrap();
+    let uri = Uri::parse("file:///sig_class_string.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1610,7 +1646,7 @@ async fn param_doc_class_string_effective_type() {
 #[tokio::test]
 async fn sig_help_scope_survives_builder_cache_poisoning() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let content = r#"<?php
 namespace Illuminate\Database\Eloquent {
     abstract class Model {
@@ -1667,15 +1703,7 @@ namespace App {
 "#;
 
     // Open the file (triggers update_ast + diagnostics, populating caches).
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, content).await;
 
     // ── Step 1: Signature help on get() on PlainModel to seed Builder cache ──
     // We trigger signature help on get() first so the Builder FQN is
@@ -1766,7 +1794,7 @@ namespace App {
 #[tokio::test]
 async fn no_help_inside_closure_body_argument() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/sig_closure_body.php").unwrap();
+    let uri = Uri::parse("file:///test/sig_closure_body.php").unwrap();
 
     // Line 0:  <?php
     // Line 1:  class Builder {
@@ -1813,7 +1841,7 @@ async fn no_help_inside_closure_body_argument() {
 #[tokio::test]
 async fn help_still_fires_in_closure_param_list() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/sig_closure_params.php").unwrap();
+    let uri = Uri::parse("file:///test/sig_closure_params.php").unwrap();
 
     // Line 0:  <?php
     // Line 1:  class Builder {
@@ -1862,7 +1890,7 @@ async fn help_still_fires_in_closure_param_list() {
 #[tokio::test]
 async fn inner_call_inside_closure_body_shows_inner_sig() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/sig_closure_inner.php").unwrap();
+    let uri = Uri::parse("file:///test/sig_closure_inner.php").unwrap();
 
     // Line 0:  <?php
     // Line 1:  class Builder {
@@ -1919,7 +1947,7 @@ async fn inner_call_inside_closure_body_shows_inner_sig() {
 #[tokio::test]
 async fn no_help_inside_closure_body_with_use_clause() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/sig_closure_use.php").unwrap();
+    let uri = Uri::parse("file:///test/sig_closure_use.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -1946,7 +1974,7 @@ async fn no_help_inside_closure_body_with_use_clause() {
 #[tokio::test]
 async fn no_help_inside_arrow_fn_body_argument() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/sig_arrow_fn_body.php").unwrap();
+    let uri = Uri::parse("file:///test/sig_arrow_fn_body.php").unwrap();
 
     // Line 0:  <?php
     // Line 1:  function array_map(callable $callback, array $array): array { return []; }
@@ -1983,7 +2011,7 @@ async fn no_help_inside_arrow_fn_body_argument() {
 #[tokio::test]
 async fn no_help_inside_arrow_fn_body_no_inner_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/sig_arrow_fn_no_inner.php").unwrap();
+    let uri = Uri::parse("file:///test/sig_arrow_fn_no_inner.php").unwrap();
 
     // Line 0:  <?php
     // Line 1:  class Collection {

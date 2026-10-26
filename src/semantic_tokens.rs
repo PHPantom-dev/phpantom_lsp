@@ -17,9 +17,10 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::config::SemanticTokensMode;
 use crate::diagnostics::member_lookup::member_exists;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
@@ -85,32 +86,38 @@ pub fn legend() -> SemanticTokensLegend {
     };
 
     SemanticTokensLegend {
-        token_types: vec![
-            SemanticTokenType::NAMESPACE,      // 0
-            SemanticTokenType::CLASS,          // 1
-            SemanticTokenType::INTERFACE,      // 2
-            SemanticTokenType::ENUM,           // 3
-            SemanticTokenType::TYPE,           // 4
-            SemanticTokenType::TYPE_PARAMETER, // 5
-            SemanticTokenType::PARAMETER,      // 6
-            SemanticTokenType::VARIABLE,       // 7
-            SemanticTokenType::PROPERTY,       // 8
-            SemanticTokenType::FUNCTION,       // 9
-            SemanticTokenType::METHOD,         // 10
-            SemanticTokenType::DECORATOR,      // 11
-            SemanticTokenType::ENUM_MEMBER,    // 12
-            SemanticTokenType::KEYWORD,        // 13
-            SemanticTokenType::COMMENT,        // 14
-        ],
-        token_modifiers: vec![
-            SemanticTokenModifier::DECLARATION,     // bit 0
-            SemanticTokenModifier::STATIC,          // bit 1
-            SemanticTokenModifier::READONLY,        // bit 2
-            SemanticTokenModifier::DEPRECATED,      // bit 3
-            SemanticTokenModifier::ABSTRACT,        // bit 4
-            SemanticTokenModifier::DEFINITION,      // bit 5
-            SemanticTokenModifier::DEFAULT_LIBRARY, // bit 6
-        ],
+        token_types: [
+            SemanticTokenTypes::Namespace,     // 0
+            SemanticTokenTypes::Class,         // 1
+            SemanticTokenTypes::Interface,     // 2
+            SemanticTokenTypes::Enum,          // 3
+            SemanticTokenTypes::Type,          // 4
+            SemanticTokenTypes::TypeParameter, // 5
+            SemanticTokenTypes::Parameter,     // 6
+            SemanticTokenTypes::Variable,      // 7
+            SemanticTokenTypes::Property,      // 8
+            SemanticTokenTypes::Function,      // 9
+            SemanticTokenTypes::Method,        // 10
+            SemanticTokenTypes::Decorator,     // 11
+            SemanticTokenTypes::EnumMember,    // 12
+            SemanticTokenTypes::Keyword,       // 13
+            SemanticTokenTypes::Comment,       // 14
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect(),
+        token_modifiers: [
+            SemanticTokenModifiers::Declaration,    // bit 0
+            SemanticTokenModifiers::Static,         // bit 1
+            SemanticTokenModifiers::Readonly,       // bit 2
+            SemanticTokenModifiers::Deprecated,     // bit 3
+            SemanticTokenModifiers::Abstract,       // bit 4
+            SemanticTokenModifiers::Definition,     // bit 5
+            SemanticTokenModifiers::DefaultLibrary, // bit 6
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect(),
     }
 }
 
@@ -131,20 +138,16 @@ impl Backend {
     /// tokens for every classified span.  For `ClassReference` spans
     /// the symbol is resolved to determine whether it is a class,
     /// interface, enum, or trait.
-    pub fn handle_semantic_tokens_full(
-        &self,
-        uri: &str,
-        content: &str,
-    ) -> Option<SemanticTokensResult> {
-        let symbol_map = self.symbol_maps.read().get(uri)?.clone();
+    pub fn handle_semantic_tokens_full(&self, uri: &str, content: &str) -> Option<SemanticTokens> {
+        let symbol_map = self.symbol_map_for(uri)?;
         let ctx = self.file_context(uri);
         let mode = self.config().semantic_tokens.mode();
 
         if mode == SemanticTokensMode::Off {
-            return Some(SemanticTokensResult::Tokens(SemanticTokens {
+            return Some(SemanticTokens {
                 result_id: None,
                 data: Vec::new(),
-            }));
+            });
         }
 
         let virtual_php = self.blade_virtual_php_arc(uri);
@@ -212,7 +215,7 @@ impl Backend {
             {
                 tokens.extend(Self::collect_blade_tokens(
                     &blade_content,
-                    &self.blade_directives.read(),
+                    &self.blade.directives.read(),
                 ));
             }
 
@@ -237,10 +240,10 @@ impl Backend {
 
         let delta_tokens = encode_deltas(&tokens);
 
-        Some(SemanticTokensResult::Tokens(SemanticTokens {
+        Some(SemanticTokens {
             result_id: None,
             data: delta_tokens,
-        }))
+        })
     }
 
     /// Walk the symbol map and produce absolute-positioned tokens.
@@ -359,7 +362,9 @@ impl Backend {
                     }
                 }
 
-                SymbolKind::MemberDeclaration { name, is_static } => {
+                SymbolKind::MemberDeclaration {
+                    name, is_static, ..
+                } => {
                     if mode == SemanticTokensMode::Contextual {
                         continue;
                     }
@@ -469,7 +474,7 @@ impl Backend {
                     (TT_COMMENT, 0)
                 }
 
-                SymbolKind::LaravelStringKey { .. }
+                SymbolKind::StringKey { .. }
                 | SymbolKind::LaravelMacroString { .. }
                 | SymbolKind::CommandOwnParam { .. } => {
                     continue;
@@ -638,7 +643,7 @@ impl Backend {
             return unverified;
         }
 
-        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let resolved = crate::virtual_members::resolve_class_fully_cached(
             &base,
             &class_loader,

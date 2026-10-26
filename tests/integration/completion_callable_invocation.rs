@@ -1,15 +1,15 @@
 use crate::common::{
-    complete_at, create_psr4_workspace, create_test_backend, method_names, property_names,
+    complete_at, completion_response, create_psr4_workspace, create_test_backend, method_names,
+    open_php, property_names,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Closure literal with native return type hint ───────────────────────────
 
 #[tokio::test]
 async fn test_closure_literal_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_invoke.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_invoke.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -43,7 +43,7 @@ async fn test_closure_literal_return_type() {
 #[tokio::test]
 async fn test_arrow_function_literal_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/arrow_invoke.php").unwrap();
+    let uri = Uri::parse("file:///test/arrow_invoke.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -79,7 +79,7 @@ async fn test_arrow_function_literal_return_type() {
 #[tokio::test]
 async fn test_docblock_closure_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/docblock_closure.php").unwrap();
+    let uri = Uri::parse("file:///test/docblock_closure.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -114,7 +114,7 @@ async fn test_docblock_closure_return_type() {
 #[tokio::test]
 async fn test_docblock_callable_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/docblock_callable.php").unwrap();
+    let uri = Uri::parse("file:///test/docblock_callable.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -150,7 +150,7 @@ async fn test_docblock_callable_return_type() {
 #[tokio::test]
 async fn test_callable_with_params_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/callable_params.php").unwrap();
+    let uri = Uri::parse("file:///test/callable_params.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -180,7 +180,7 @@ async fn test_callable_with_params_return_type() {
 #[tokio::test]
 async fn test_variable_assigned_from_closure_invocation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/var_closure_result.php").unwrap();
+    let uri = Uri::parse("file:///test/var_closure_result.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -211,7 +211,7 @@ async fn test_variable_assigned_from_closure_invocation() {
 #[tokio::test]
 async fn test_variable_assigned_from_docblock_callable_invocation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/var_callable_result.php").unwrap();
+    let uri = Uri::parse("file:///test/var_callable_result.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -244,7 +244,7 @@ async fn test_variable_assigned_from_docblock_callable_invocation() {
 #[tokio::test]
 async fn test_closure_with_use_clause_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_use.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_use.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -277,7 +277,7 @@ async fn test_closure_with_use_clause_return_type() {
 #[tokio::test]
 async fn test_closure_invocation_top_level() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_toplevel.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -301,7 +301,7 @@ async fn test_closure_invocation_top_level() {
 #[tokio::test]
 async fn test_closure_nullable_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_nullable.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_nullable.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -333,7 +333,7 @@ async fn test_closure_nullable_return_type() {
 #[tokio::test]
 async fn test_callable_invocation_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/callable_chain.php").unwrap();
+    let uri = Uri::parse("file:///test/callable_chain.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -387,7 +387,7 @@ async fn test_callable_invocation_cross_file() {
     );
 
     // The "current" file references Entity via FQN in the closure return type
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Repo {\n",
@@ -397,44 +397,23 @@ async fn test_callable_invocation_cross_file() {
         "    }\n",
         "}\n",
     );
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$factory()->` on line 4
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 4,
-                character: 20,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 4, 20, None).await;
     assert!(result.is_some(), "Completion should resolve $factory()->");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(names.contains(&"save"), "Expected save in {:?}", names,);
             assert!(names.contains(&"delete"), "Expected delete in {:?}", names,);
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -443,7 +422,7 @@ async fn test_callable_invocation_cross_file() {
 #[tokio::test]
 async fn test_docblock_fqn_closure_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/fqn_closure.php").unwrap();
+    let uri = Uri::parse("file:///test/fqn_closure.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -477,7 +456,7 @@ async fn test_docblock_fqn_closure_return_type() {
 #[tokio::test]
 async fn test_callable_return_type_properties() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/callable_props.php").unwrap();
+    let uri = Uri::parse("file:///test/callable_props.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -513,7 +492,7 @@ async fn test_callable_return_type_properties() {
 #[tokio::test]
 async fn test_inline_var_callable_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inline_var_callable.php").unwrap();
+    let uri = Uri::parse("file:///test/inline_var_callable.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -547,7 +526,7 @@ async fn test_inline_var_callable_return_type() {
 #[tokio::test]
 async fn test_invoke_return_type_simple() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/invoke_simple.php").unwrap();
+    let uri = Uri::parse("file:///test/invoke_simple.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -571,7 +550,7 @@ async fn test_invoke_return_type_simple() {
 #[tokio::test]
 async fn test_invoke_return_type_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/invoke_chain.php").unwrap();
+    let uri = Uri::parse("file:///test/invoke_chain.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -598,7 +577,7 @@ async fn test_invoke_return_type_chain() {
 #[tokio::test]
 async fn test_invoke_return_type_from_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/invoke_method.php").unwrap();
+    let uri = Uri::parse("file:///test/invoke_method.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -626,7 +605,7 @@ async fn test_invoke_return_type_from_method() {
 #[tokio::test]
 async fn test_invoke_return_type_assigned_new() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/invoke_new.php").unwrap();
+    let uri = Uri::parse("file:///test/invoke_new.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -650,7 +629,7 @@ async fn test_invoke_return_type_assigned_new() {
 #[tokio::test]
 async fn test_invoke_docblock_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/invoke_docblock.php").unwrap();
+    let uri = Uri::parse("file:///test/invoke_docblock.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -677,7 +656,7 @@ async fn test_invoke_docblock_return_type() {
 #[tokio::test]
 async fn test_invoke_parenthesized_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/invoke_paren_prop.php").unwrap();
+    let uri = Uri::parse("file:///test/invoke_paren_prop.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -707,7 +686,7 @@ async fn test_invoke_parenthesized_property() {
 #[tokio::test]
 async fn test_invoke_callable_typed_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/invoke_callable_prop.php").unwrap();
+    let uri = Uri::parse("file:///test/invoke_callable_prop.php").unwrap();
 
     let src = concat!(
         "<?php\n",

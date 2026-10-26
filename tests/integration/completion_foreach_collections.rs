@@ -1,9 +1,8 @@
 use crate::common::{
-    assert_assigned_types, complete_at, create_psr4_workspace, create_test_backend,
-    create_test_backend_with_full_stubs,
+    assert_assigned_types, complete_at, completion_response, create_psr4_workspace,
+    create_test_backend, create_test_backend_with_full_stubs, open_php,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Foreach over collection class assigned via `new` ───────────────────────
 
@@ -13,7 +12,7 @@ use tower_lsp::lsp_types::*;
 #[tokio::test]
 async fn test_foreach_collection_new_with_extends_generics() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_collection_new.php").unwrap();
+    let uri = Uri::parse("file:///foreach_collection_new.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class PaymentOptionLocale {\n",
@@ -60,7 +59,7 @@ async fn test_foreach_collection_new_with_extends_generics() {
 #[tokio::test]
 async fn test_foreach_collection_from_method_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_collection_method.php").unwrap();
+    let uri = Uri::parse("file:///foreach_collection_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -107,7 +106,7 @@ async fn test_foreach_collection_from_method_return_type() {
 #[tokio::test]
 async fn test_foreach_collection_with_implements_generics() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_implements_generic.php").unwrap();
+    let uri = Uri::parse("file:///foreach_implements_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -156,7 +155,7 @@ async fn test_foreach_collection_with_implements_generics() {
 #[tokio::test]
 async fn test_foreach_laravel_style_collection_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_laravel_chain.php").unwrap();
+    let uri = Uri::parse("file:///foreach_laravel_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class PaymentOptionLocale {\n",
@@ -215,7 +214,7 @@ async fn test_foreach_laravel_style_collection_chain() {
 #[tokio::test]
 async fn test_foreach_collection_from_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_collection_prop.php").unwrap();
+    let uri = Uri::parse("file:///foreach_collection_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -311,40 +310,19 @@ async fn test_foreach_collection_cross_file() {
     );
 
     let service_path = _dir.path().join("src/Services/LanguageService.php");
-    let uri = Url::from_file_path(&service_path).unwrap();
+    let uri = Uri::from_file_path(&service_path).unwrap();
     let text = std::fs::read_to_string(&service_path).unwrap();
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 7,
-                character: 19,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 7, 19, None).await;
     assert!(
         result.is_some(),
         "Completion should return results for foreach over cross-file collection"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("code")),
@@ -357,7 +335,7 @@ async fn test_foreach_collection_cross_file() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -367,7 +345,7 @@ async fn test_foreach_collection_cross_file() {
 #[tokio::test]
 async fn test_foreach_collection_top_level() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_collection_top.php").unwrap();
+    let uri = Uri::parse("file:///foreach_collection_top.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -410,7 +388,7 @@ async fn test_foreach_collection_top_level() {
 #[tokio::test]
 async fn test_foreach_collection_variable_from_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_collection_var_method.php").unwrap();
+    let uri = Uri::parse("file:///foreach_collection_var_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Invoice {\n",
@@ -458,7 +436,7 @@ async fn test_foreach_collection_variable_from_method_call() {
 #[tokio::test]
 async fn test_foreach_collection_single_generic_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_single_param.php").unwrap();
+    let uri = Uri::parse("file:///foreach_single_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Task {\n",
@@ -504,7 +482,7 @@ async fn test_foreach_collection_single_generic_param() {
 #[tokio::test]
 async fn test_foreach_var_annotation_still_works_with_collection() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_var_precedence.php").unwrap();
+    let uri = Uri::parse("file:///foreach_var_precedence.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Account {\n",
@@ -551,7 +529,7 @@ async fn test_foreach_var_annotation_still_works_with_collection() {
 #[tokio::test]
 async fn test_foreach_collection_element_has_inherited_members() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_element_inherited.php").unwrap();
+    let uri = Uri::parse("file:///foreach_element_inherited.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class BaseModel {\n",
@@ -611,7 +589,7 @@ async fn test_foreach_collection_element_has_inherited_members() {
 #[tokio::test]
 async fn test_foreach_collection_from_static_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_static_method.php").unwrap();
+    let uri = Uri::parse("file:///foreach_static_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Tag {\n",
@@ -657,7 +635,7 @@ async fn test_foreach_collection_from_static_method() {
 #[tokio::test]
 async fn test_foreach_this_property_generic_list() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_this_prop.php").unwrap();
+    let uri = Uri::parse("file:///foreach_this_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -691,7 +669,7 @@ async fn test_foreach_this_property_generic_list() {
 #[tokio::test]
 async fn test_foreach_nested_generic_array_property_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_nested_generic.php").unwrap();
+    let uri = Uri::parse("file:///foreach_nested_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Rule {\n",
@@ -734,7 +712,7 @@ async fn test_foreach_nested_generic_array_property_access() {
 #[tokio::test]
 async fn test_foreach_simplexmlelement_resolves_via_current_method() {
     let backend = create_test_backend_with_full_stubs();
-    let uri = Url::parse("file:///foreach_simplexml.php").unwrap();
+    let uri = Uri::parse("file:///foreach_simplexml.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function process(SimpleXMLElement $xml): void {\n",
@@ -770,7 +748,7 @@ async fn test_foreach_simplexmlelement_resolves_via_current_method() {
 #[tokio::test]
 async fn test_foreach_filter_iterator_subclass_three_generic_params() {
     let backend = create_test_backend_with_full_stubs();
-    let uri = Url::parse("file:///foreach_filter_iterator.php").unwrap();
+    let uri = Uri::parse("file:///foreach_filter_iterator.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -804,7 +782,7 @@ async fn test_foreach_filter_iterator_subclass_three_generic_params() {
 #[tokio::test]
 async fn test_foreach_new_directory_iterator() {
     let backend = create_test_backend_with_full_stubs();
-    let uri = Url::parse("file:///foreach_directory_iterator.php").unwrap();
+    let uri = Uri::parse("file:///foreach_directory_iterator.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function process(string $dir): void {\n",
@@ -839,7 +817,7 @@ async fn test_foreach_new_directory_iterator() {
 #[tokio::test]
 async fn test_foreach_inline_var_retypes_mixed_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_inline_var_mixed.php").unwrap();
+    let uri = Uri::parse("file:///foreach_inline_var_mixed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Subscription {\n",
@@ -878,7 +856,7 @@ async fn test_foreach_inline_var_retypes_mixed_param() {
 #[tokio::test]
 async fn test_foreach_chain_iterable_base_var_seeded_from_inline_var() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_chain_inline_var.php").unwrap();
+    let uri = Uri::parse("file:///foreach_chain_inline_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -915,7 +893,7 @@ async fn test_foreach_chain_iterable_base_var_seeded_from_inline_var() {
 #[tokio::test]
 async fn test_foreach_chain_iterable_inline_var_retypes_mixed_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_chain_inline_var_mixed.php").unwrap();
+    let uri = Uri::parse("file:///foreach_chain_inline_var_mixed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -950,7 +928,7 @@ async fn test_foreach_chain_iterable_inline_var_retypes_mixed_param() {
 #[tokio::test]
 async fn test_foreach_chain_iterable_inline_var_overrides_assignment_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///foreach_chain_var_override.php").unwrap();
+    let uri = Uri::parse("file:///foreach_chain_var_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Admin {\n",

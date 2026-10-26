@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::literal_bytes_to_str;
@@ -226,7 +226,7 @@ impl Backend {
         let (names, kind, detail) = if !array && args.parameter == Some(call.locale) {
             (
                 catalog.locales.clone(),
-                CompletionItemKind::VALUE,
+                CompletionItemKind::Value,
                 "Translation locale",
             )
         } else if array && args.parameter.is_some() && args.parameter == call.replace {
@@ -237,7 +237,7 @@ impl Backend {
                 }
             }
             names.retain(|name| !args.used.contains(name));
-            (names, CompletionItemKind::FIELD, "Translation placeholder")
+            (names, CompletionItemKind::Field, "Translation placeholder")
         } else {
             return None;
         };
@@ -246,7 +246,7 @@ impl Backend {
             offset_to_position(content, quote + 1),
             offset_to_position(content, args.string_end.max(cursor)),
         );
-        Some(CompletionResponse::Array(
+        Some(CompletionResponse::CompletionItemList(
             names
                 .into_iter()
                 .filter(|name| name.starts_with(prefix))
@@ -254,7 +254,7 @@ impl Backend {
                     label: name.clone(),
                     kind: Some(kind),
                     detail: Some(detail.to_string()),
-                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                         range,
                         new_text: name,
                     })),

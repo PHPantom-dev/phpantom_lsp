@@ -22,7 +22,7 @@
 use std::cmp::Reverse;
 use std::collections::HashSet;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::use_line_deletion::{build_line_deletion_edit, range_touches_use_import};
 use super::{CodeActionData, make_code_action_data};
@@ -43,7 +43,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         // ── Collect all unused-import diagnostics for this file ─────────
         let mut all_unused_diags: Vec<Diagnostic> = Vec::new();
@@ -62,15 +62,15 @@ impl Backend {
         for diag in &overlapping {
             let title = format!(
                 "Remove {}",
-                diag.message
+                crate::util::message_text(&diag.message)
                     .strip_prefix("Unused import ")
                     .map(|rest| format!("unused import {rest}"))
                     .unwrap_or_else(|| "unused import".to_string())
             );
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title,
-                kind: Some(CodeActionKind::QUICKFIX),
+                kind: Some(CodeActionKind::QuickFix),
                 diagnostics: Some(vec![(*diag).clone()]),
                 edit: None,
                 command: None,
@@ -82,6 +82,7 @@ impl Backend {
                     &params.range,
                     serde_json::json!({}),
                 )),
+                tags: None,
             }));
         }
 
@@ -90,9 +91,9 @@ impl Backend {
         // import (used or unused), so it doesn't pop up on unrelated
         // lines elsewhere in the file.
         if range_touches_use_import(content, &params.range) {
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: "Remove all unused imports".to_string(),
-                kind: Some(CodeActionKind::new("source.organizeImports")),
+                kind: Some(CodeActionKind::SourceOrganizeImports),
                 diagnostics: Some(all_unused_diags),
                 edit: None,
                 command: None,
@@ -104,6 +105,7 @@ impl Backend {
                     &params.range,
                     serde_json::json!({}),
                 )),
+                tags: None,
             }));
         }
     }
@@ -120,7 +122,7 @@ impl Backend {
         content: &str,
         diagnostics: Option<&[Diagnostic]>,
     ) -> Option<WorkspaceEdit> {
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         let diags = diagnostics?;
 
         if diags.is_empty() {

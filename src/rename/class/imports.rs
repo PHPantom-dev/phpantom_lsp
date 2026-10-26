@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::text_position::offset_to_position;
 use crate::util::strip_fqn_prefix;

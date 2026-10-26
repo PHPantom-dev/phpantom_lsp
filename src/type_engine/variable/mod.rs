@@ -7,7 +7,7 @@
 //! - **forward_walk**: The forward walker shared by all type-resolution consumers
 //! - **class_string_resolution**: Class-string variable resolution (`$cls = User::class`)
 //! - **raw_type_inference**: Array literal inference, array function helpers, generator yield inference
-//! - **foreach_resolution**: Iterable element/key type extraction from generic annotations
+//! - **iterable_elements**: Iterable element/key type extraction from generic annotations
 //! - **closure_resolution**: Closure `$this` binding and callable parameter inference helpers
 
 pub(crate) mod array_func_rules;
@@ -15,8 +15,8 @@ pub(crate) mod array_shape_writes;
 pub(crate) mod callback_narrowing;
 pub(crate) mod class_string_resolution;
 pub(crate) mod closure_resolution;
-pub(crate) mod foreach_resolution;
 pub(crate) mod forward_walk;
+pub(crate) mod iterable_elements;
 pub(crate) mod raw_type_inference;
 pub(crate) mod resolution;
 pub(crate) mod rhs_resolution;

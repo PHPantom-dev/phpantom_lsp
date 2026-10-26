@@ -18,6 +18,7 @@ use std::sync::Arc;
 use super::component_tags::kebab_case;
 use super::preprocessor::{ComponentBinding, ComponentParameter, ComponentTarget};
 use crate::Backend;
+use crate::class_lookup::Fqn;
 use crate::composer::psr4_directories_for_namespace;
 
 /// The namespace tail Laravel looks for class-based components under when no
@@ -52,7 +53,7 @@ impl Backend {
     /// until an edit invalidates it.
     pub(crate) fn blade_discovery(&self) -> Arc<BladeDiscovery> {
         self.cached_laravel_enumeration(
-            &self.laravel_string_key_build_locks.blade_discovery,
+            &self.laravel.string_key_build_locks.blade_discovery,
             |cache| cache.blade_discovery.clone(),
             |cache, discovery| cache.blade_discovery = Some(discovery),
             || Arc::new(self.build_blade_discovery()),
@@ -120,7 +121,8 @@ impl Backend {
             }
             // Nothing built yet means nothing to drop.
             if self
-                .laravel_string_key_cache
+                .laravel
+                .string_key_cache
                 .read()
                 .blade_discovery
                 .is_none()
@@ -135,7 +137,7 @@ impl Backend {
             // A template outside every view root contributes no name at
             // all, so the index is as correct without it as with it.
             let known = names.is_empty() || {
-                let cache = self.laravel_string_key_cache.read();
+                let cache = self.laravel.string_key_cache.read();
                 let Some(discovery) = cache.blade_discovery.as_ref() else {
                     return;
                 };
@@ -145,7 +147,7 @@ impl Backend {
                 return;
             }
         }
-        let mut cache = self.laravel_string_key_cache.write();
+        let mut cache = self.laravel.string_key_cache.write();
         cache.blade_discovery = None;
         // The block index is keyed by the very names that just changed.
         cache.blade_blocks = None;
@@ -181,7 +183,7 @@ impl Backend {
     /// parallel index worker, which invalidates the index as it goes) must
     /// not pay for.
     fn built_blade_discovery(&self) -> Option<Arc<BladeDiscovery>> {
-        self.laravel_string_key_cache.read().blade_discovery.clone()
+        self.laravel.string_key_cache.read().blade_discovery.clone()
     }
 
     /// Resolve every component tag `content` references to the class
@@ -260,7 +262,7 @@ impl Backend {
     /// passing attributes to it is passing them to the attribute bag.
     fn component_signature(&self, fqn: &str, method: &str) -> Option<Vec<ComponentParameter>> {
         let class = self.find_or_load_class(fqn.trim_matches('\\'))?;
-        let loader = |name: &str| self.find_or_load_class(name);
+        let loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
             &class,
             &loader,
@@ -337,7 +339,7 @@ impl Backend {
         for root in self.laravel_view_roots().iter() {
             merge_view_root(&root.path, "", &mut views);
         }
-        for res in &self.laravel_provider_resources.read().view_dirs {
+        for res in &self.laravel.provider_resources.read().view_dirs {
             merge_view_root(&res.path, &res.namespace, &mut views);
         }
         views
@@ -349,7 +351,8 @@ impl Backend {
     /// `App\View\Components` convention, which has no prefix.
     fn component_namespaces(&self) -> Vec<(Option<String>, String)> {
         let mut namespaces: Vec<(Option<String>, String)> = self
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .read()
             .class_component_namespaces
             .iter()
@@ -764,13 +767,14 @@ mod tests {
         let backend = backend_at(root);
         let cached = |backend: &Backend| {
             backend
-                .laravel_string_key_cache
+                .laravel
+                .string_key_cache
                 .read()
                 .blade_discovery
                 .is_some()
         };
         let uri_of = |relative: &str| {
-            tower_lsp::lsp_types::Url::from_file_path(root.join(relative))
+            tower_lsp_server::gen_lsp_types::Uri::from_file_path(root.join(relative))
                 .unwrap()
                 .to_string()
         };
@@ -802,12 +806,13 @@ mod tests {
 
         let backend = backend_at(&root);
         backend.blade_discovery();
-        backend.laravel_string_key_cache.write().view_roots = None;
+        backend.laravel.string_key_cache.write().view_roots = None;
         write(&root, "resources/views/about.blade.php", "");
-        let uri =
-            tower_lsp::lsp_types::Url::from_file_path(root.join("resources/views/about.blade.php"))
-                .unwrap()
-                .to_string();
+        let uri = tower_lsp_server::gen_lsp_types::Uri::from_file_path(
+            root.join("resources/views/about.blade.php"),
+        )
+        .unwrap()
+        .to_string();
 
         let (done, finished) = std::sync::mpsc::channel();
         let refresh = backend.clone_for_blocking();
@@ -820,7 +825,8 @@ mod tests {
             .expect("the refresh must not wait on its own hold of the cache");
         assert!(
             backend
-                .laravel_string_key_cache
+                .laravel
+                .string_key_cache
                 .read()
                 .blade_discovery
                 .is_none(),
@@ -907,7 +913,8 @@ mod tests {
 
         let backend = backend_at(root);
         backend
-            .laravel_provider_resources
+            .laravel
+            .provider_resources
             .write()
             .class_component_namespaces
             .push((

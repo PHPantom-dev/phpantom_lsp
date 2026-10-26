@@ -5,7 +5,10 @@
 //! instead of being read from the first pass alone.
 
 use super::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::ops::ControlFlow;
+
+use crate::type_engine::type_ops::int_interval::widen_grown_ints;
 
 /// Where in a loop iteration `walk_loop_body_to_fixed_point` is invoking
 /// its seeding callback.
@@ -56,6 +59,7 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
     let LoopWalk {
         pre_loop_scope,
         assignment_depth,
+        self_dependent,
         fold_exit_edges,
         ctx,
         discovery_ctx,
@@ -65,10 +69,10 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
     // ── Initial walk (always performed) ─────────────────────────
     let initial_ctx = if re_walks > 0 { discovery_ctx } else { ctx };
     let mut previous_entry = (re_walks > 0).then(|| scope.clone());
-    clear_exit_frame();
+    clear_exit_frame(ctx.flow);
     walk_body_forward(body_stmts.iter().copied(), scope, initial_ctx);
     if fold_exit_edges {
-        drain_continue_edges(scope);
+        drain_continue_edges(ctx.flow, scope);
     }
     let mut walked_at_cursor = re_walks == 0;
 
@@ -87,12 +91,12 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
         // scope is left as it ended rather than advanced by `AfterBody`,
         // exactly as the check above leaves it.
         let mut walked = scope.clone();
-        let entry = merged_loop_entry_scope(pre_loop_scope, &mut walked, &mut seed);
-        if previous_entry
-            .as_ref()
-            .is_some_and(|previous| entry.walks_the_same_as(previous))
-        {
-            break;
+        let mut entry = merged_loop_entry_scope(pre_loop_scope, &mut walked, &mut seed);
+        if let Some(previous) = previous_entry.as_ref() {
+            if entry.walks_the_same_as(previous) {
+                break;
+            }
+            widen_grown_int_locals(previous, &mut entry, self_dependent);
         }
         *scope = entry;
         if iteration + 1 < re_walks {
@@ -102,24 +106,27 @@ pub(crate) fn walk_loop_body_to_fixed_point<'b>(
         // Use the real context on the final iteration so diagnostic
         // snapshots and cursor handling are correct.
         let is_final = iteration + 1 >= re_walks;
-        clear_exit_frame();
+        clear_exit_frame(ctx.flow);
         walk_body_forward(
             body_stmts.iter().copied(),
             scope,
             if is_final { ctx } else { discovery_ctx },
         );
         if fold_exit_edges {
-            drain_continue_edges(scope);
+            drain_continue_edges(ctx.flow, scope);
         }
         walked_at_cursor = is_final;
     }
 
     if !walked_at_cursor && discovery_ctx.cursor_offset != ctx.cursor_offset {
         *scope = merged_loop_entry_scope(pre_loop_scope, scope, &mut seed);
-        clear_exit_frame();
+        if let Some(previous) = previous_entry.as_ref() {
+            widen_grown_int_locals(previous, scope, self_dependent);
+        }
+        clear_exit_frame(ctx.flow);
         walk_body_forward(body_stmts.iter().copied(), scope, ctx);
         if fold_exit_edges {
-            drain_continue_edges(scope);
+            drain_continue_edges(ctx.flow, scope);
         }
     }
 }
@@ -131,6 +138,9 @@ pub(crate) struct LoopWalk<'a> {
     pub(crate) pre_loop_scope: &'a ScopeState,
     /// How many walks it takes for the body's assignment chain to settle.
     pub(crate) assignment_depth: u32,
+    /// The variables the body computes from their own previous value; see
+    /// [`LoopAssignments::self_dependent`].
+    pub(crate) self_dependent: &'a HashSet<String>,
     /// Whether the loop's own exit edges belong in the answer — false when
     /// the caller is asking about a position inside the body.
     pub(crate) fold_exit_edges: bool,
@@ -184,14 +194,49 @@ impl<'a> LoopBodyCtxs<'a> {
         &'s self,
         pre_loop_scope: &'s ScopeState,
         assignment_depth: u32,
+        self_dependent: &'s HashSet<String>,
     ) -> LoopWalk<'s> {
         LoopWalk {
             pre_loop_scope,
             assignment_depth,
+            self_dependent,
             fold_exit_edges: !self.cursor_in_body,
             ctx: &self.body_ctx,
             discovery_ctx: &self.discovery_ctx,
         }
+    }
+}
+
+/// Widen every self-dependent local of `entry` whose integers reach past
+/// what it held at the `previous` entry; see [`widen_grown_ints`].
+///
+/// A counter's next value is computed from its last one, so a bound that
+/// moved from one pass to the next keeps moving for as many passes as the
+/// loop makes, which the walks cannot count.  A variable the body assigns
+/// from elsewhere (`$state = 1`) has every value it can take by the second
+/// pass and is left exact.
+fn widen_grown_int_locals(
+    previous: &ScopeState,
+    entry: &mut ScopeState,
+    self_dependent: &HashSet<String>,
+) {
+    if self_dependent.is_empty() {
+        return;
+    }
+    let mut widened = Vec::new();
+    let _ = entry
+        .locals
+        .diff::<()>(&previous.locals, |name, now, before| {
+            if let (Some(now), Some(before)) = (now, before)
+                && self_dependent.contains(name.as_str())
+                && let Some(types) = widen_grown_ints(before, now)
+            {
+                widened.push((*name, types));
+            }
+            ControlFlow::Continue(())
+        });
+    for (name, types) in widened {
+        entry.locals.insert(name, types);
     }
 }
 

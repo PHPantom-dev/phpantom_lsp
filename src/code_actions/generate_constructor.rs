@@ -18,7 +18,7 @@ use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::property::{Property, PropertyItem};
 use mago_syntax::cst::modifier::Modifier;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use super::detect_indent_from_members;
@@ -27,7 +27,9 @@ use crate::atom::bytes_to_str;
 use crate::docblock::{extract_var_type, get_docblock_text_for_node};
 use crate::parser::extract_hint_type;
 use crate::php_type::{PhpType, TypeKind};
-use crate::text_position::offset_to_position;
+use crate::text_position::{
+    byte_range_to_lsp_range, find_line_end, find_line_start, offset_to_position,
+};
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -63,9 +65,9 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
-        let doc_uri: Url = match uri.parse() {
+        let doc_uri: Uri = match uri.parse() {
             Ok(u) => u,
             Err(_) => return,
         };
@@ -130,9 +132,9 @@ impl Backend {
                 new_text: constructor_text,
             };
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: "Generate constructor".to_string(),
-                kind: Some(CodeActionKind::REFACTOR_REWRITE),
+                kind: Some(CodeActionKind::RefactorRewrite),
                 diagnostics: None,
                 edit: Some(crate::code_actions::single_file_edit(
                     doc_uri.clone(),
@@ -142,6 +144,7 @@ impl Backend {
                 is_preferred: Some(false),
                 disabled: None,
                 data: None,
+                tags: None,
             }));
         }
 
@@ -154,11 +157,20 @@ impl Backend {
             // Sort deletions back-to-front so byte offsets stay valid.
             let mut edits: Vec<TextEdit> = Vec::new();
 
+            // Properties declared together (`private int $a, $b;`) share
+            // one declaration span and are adjacent in `props`; delete it
+            // once, since clients reject overlapping edits.
+            let mut last_span = None;
             for prop in props.iter().rev() {
-                let start = offset_to_position(content, prop.declaration_span.0);
-                let end = offset_to_position(content, prop.declaration_span.1);
+                if last_span.replace(prop.declaration_span) == Some(prop.declaration_span) {
+                    continue;
+                }
                 edits.push(TextEdit {
-                    range: Range { start, end },
+                    range: byte_range_to_lsp_range(
+                        content,
+                        prop.declaration_span.0,
+                        prop.declaration_span.1,
+                    ),
                     new_text: String::new(),
                 });
             }
@@ -175,15 +187,16 @@ impl Backend {
                 new_text: constructor_text,
             });
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: "Generate promoted constructor".to_string(),
-                kind: Some(CodeActionKind::REFACTOR_REWRITE),
+                kind: Some(CodeActionKind::RefactorRewrite),
                 diagnostics: None,
                 edit: Some(crate::code_actions::single_file_edit(doc_uri, edits)),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
                 data: None,
+                tags: None,
             }));
         }
     }
@@ -239,8 +252,12 @@ fn collect_qualifying_properties<'a>(
         // Compute the declaration span for deletion (promoted variant).
         // Start from the beginning of the line containing the property
         // (to include leading whitespace), end past the trailing newline.
+        // A `/** @var … */` docblock above the declaration goes with it;
+        // left behind it would document whatever member follows.
         let prop_span = member.span();
-        let decl_start = find_line_start(content, prop_span.start.offset as usize);
+        let line_start = find_line_start(content, prop_span.start.offset as usize);
+        let decl_start = super::docblock_edit::docblock_start_above_offset(content, line_start)
+            .unwrap_or(line_start);
         let decl_end = find_line_end(content, prop_span.end.offset as usize);
 
         for item in plain.items.iter() {
@@ -341,22 +358,6 @@ fn find_insertion_offset<'a>(members: &Sequence<'a, ClassLikeMember<'a>>, conten
         // No properties at all — shouldn't happen because we check for
         // qualifying properties, but handle gracefully.
         0
-    }
-}
-
-fn find_line_start(content: &str, offset: usize) -> usize {
-    content[..offset]
-        .rfind('\n')
-        .map(|pos| pos + 1)
-        .unwrap_or(0)
-}
-
-/// Find the end of the line at or after the given offset (past the newline).
-fn find_line_end(content: &str, offset: usize) -> usize {
-    if let Some(nl) = content[offset..].find('\n') {
-        offset + nl + 1
-    } else {
-        content.len()
     }
 }
 

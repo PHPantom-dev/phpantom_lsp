@@ -11,7 +11,7 @@
 //! and [`super::component_tags`] do, so every span it reports is already
 //! in the template's own coordinates.
 
-use tower_lsp::lsp_types::SymbolKind;
+use tower_lsp_server::gen_lsp_types::SymbolKind;
 
 use crate::Backend;
 
@@ -46,7 +46,7 @@ impl Backend {
     /// block, so the components and directives written inside one nest
     /// under it once the caller builds the tree.
     pub(crate) fn blade_outline(&self, content: &str) -> Vec<OutlineEntry> {
-        let mut entries = named_block_entries(content, &self.blade_directives.read());
+        let mut entries = named_block_entries(content, &self.blade.directives.read());
         entries.extend(self.component_tag_entries(content));
         entries.sort_by(|a, b| {
             a.span
@@ -88,7 +88,7 @@ impl Backend {
                 OutlineEntry {
                     name: format!("{}{}", &tag.kind.opening()[1..], name),
                     detail,
-                    kind: SymbolKind::CLASS,
+                    kind: SymbolKind::Class,
                     span: tag.span,
                     selection: tag.name_span,
                 }
@@ -129,7 +129,7 @@ fn named_block_entries(content: &str, known: &BladeDirectives) -> Vec<OutlineEnt
             OutlineEntry {
                 name: block.name,
                 detail: Some(content[block.directive_span].to_string()),
-                kind: SymbolKind::NAMESPACE,
+                kind: SymbolKind::Namespace,
                 span,
                 selection: block.name_span,
             }

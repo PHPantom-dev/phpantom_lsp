@@ -177,10 +177,7 @@ class RegistrationController {
         backend.update_ast(uri, content);
 
         // ── Legacy use_map ──────────────────────────────────────────
-        let use_map = backend.file_imports.read();
-        let file_map = use_map
-            .get(uri)
-            .expect("use_map should have an entry for the file");
+        let file_map = backend.file_use_map(uri);
 
         assert_eq!(
             file_map.get("Disciplines"),
@@ -202,12 +199,11 @@ class RegistrationController {
             Some(&"Models\\Common\\TournamentsLeagues".to_string()),
             "TournamentsLeagues should be in the use_map"
         );
-        drop(use_map);
 
         // ── mago-names resolved_names ───────────────────────────────
-        let resolved = backend.resolved_names.read();
-        let rn = resolved
-            .get(uri)
+        let rn = backend
+            .file_state(uri)
+            .and_then(|state| state.resolved_names.clone())
             .expect("resolved_names should have an entry for the file");
 
         // The `Disciplines` type hint in `foo(Disciplines $d)` should
@@ -242,8 +238,7 @@ class RegistrationController {
 
         backend.update_ast(uri, content);
 
-        let use_map = backend.file_imports.read();
-        let file_map = use_map.get(uri).expect("use_map entry");
+        let file_map = backend.file_use_map(uri);
 
         assert_eq!(
             file_map.get("Disc"),
@@ -280,10 +275,7 @@ class RegistrationController {
 "#;
         backend.update_ast(uri, content);
 
-        let use_map = backend.file_imports.read();
-        let file_map = use_map
-            .get(uri)
-            .expect("use_map should have an entry for the file");
+        let file_map = backend.file_use_map(uri);
 
         assert_eq!(
             file_map.get("Disciplines"),
@@ -293,11 +285,10 @@ class RegistrationController {
             file_map.get("TeamMembers"),
             Some(&"Models\\Common\\TeamMembers".to_string())
         );
-        drop(use_map);
 
-        let resolved = backend.resolved_names.read();
-        let rn = resolved
-            .get(uri)
+        let rn = backend
+            .file_state(uri)
+            .and_then(|state| state.resolved_names.clone())
             .expect("resolved_names should have an entry for the file");
 
         let hint_offset = content

@@ -25,6 +25,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::{Argument, ArgumentList, Call, ClassLikeMemberSelector, Expression};
 
 use crate::atom::{atom, bytes_to_str};
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::text_scan::split_top_level_commas;
 use crate::type_engine::resolver::ResolutionCtx;
@@ -394,7 +395,7 @@ fn receiver_is_factory(receiver: &[ResolvedType], ctx: &ResolutionCtx<'_>) -> bo
     receiver.iter().any(|rt| {
         rt.class_info
             .as_ref()
-            .is_some_and(|ci| extends_eloquent_factory(ci, ctx.class_loader))
+            .is_some_and(|ci| extends_eloquent_factory(ci, ctx.file.class_loader))
     })
 }
 
@@ -447,7 +448,7 @@ pub(crate) fn tag_static_factory_call(
         if result
             .class_info
             .as_ref()
-            .is_some_and(|ci| extends_eloquent_factory(ci, ctx.class_loader))
+            .is_some_and(|ci| extends_eloquent_factory(ci, ctx.file.class_loader))
         {
             let count =
                 *count.get_or_insert_with(|| static_count_state(method, first_arg, first_arg_type));
@@ -539,7 +540,7 @@ fn resolve_for_count(
     let factory = owners.iter().find_map(|rt| {
         rt.class_info
             .as_ref()
-            .filter(|ci| extends_eloquent_factory(ci, ctx.class_loader))
+            .filter(|ci| extends_eloquent_factory(ci, ctx.file.class_loader))
     })?;
 
     // A factory that writes its own `create()`/`make()` keeps whatever it
@@ -549,18 +550,19 @@ fn resolve_for_count(
     // may already be a merged class, so the own-member check goes through
     // the loader, which hands back the class as parsed.
     let fqn = factory.fqn();
-    if (ctx.class_loader)(fqn.as_str()).is_some_and(|raw| raw.get_method_ci(method_name).is_some())
+    if (ctx.file.class_loader)(Fqn::new(fqn.as_str()))
+        .is_some_and(|raw| raw.get_method_ci(method_name).is_some())
     {
         return None;
     }
 
-    let model = factory_model_type(factory, ctx.class_loader)?;
+    let model = factory_model_type(factory, ctx.file.class_loader)?;
 
     // The call has to resolve to *some* inherited or synthesized method;
     // a factory with no `create()` at all gets no return type from us.
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         factory,
-        ctx.class_loader,
+        ctx.file.class_loader,
         ctx.resolved_class_cache,
     );
     merged.get_method_ci(method_name)?;
@@ -571,7 +573,7 @@ fn resolve_for_count(
                 ELOQUENT_COLLECTION_FQN,
                 vec![PhpType::named(atom("int")), model],
             );
-            super::replace_eloquent_collections_in_type(&collection, ctx.class_loader)
+            super::replace_eloquent_collections_in_type(&collection, ctx.file.class_loader)
                 .unwrap_or(collection)
         }
         FactoryCount::One | FactoryCount::Unknown => model,
@@ -580,8 +582,8 @@ fn resolve_for_count(
     let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         &resolved,
         fqn.as_str(),
-        ctx.all_classes,
-        ctx.class_loader,
+        ctx.file.all_classes,
+        ctx.file.class_loader,
     );
     if classes.is_empty() {
         return None;

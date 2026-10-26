@@ -15,9 +15,9 @@
 //! declared elsewhere walks that method's body, and every resolution inside
 //! the walk parses the declaring file.  A nested [`with_parse_cache`] for a
 //! different file therefore registers it alongside the pass's own file, so
-//! all of those parses share one AST until the pass ends.  Only the most
-//! recently registered few are kept, which bounds what a pass that reaches
-//! into many files holds at once.
+//! all of those parses share one AST until the pass ends.  Only the few
+//! most recently used are kept, which bounds what a pass that reaches into
+//! many files holds at once.
 //!
 //! The cache is activated by the outermost [`with_parse_cache`], which sets
 //! it up at the start of a block and tears it down (via `Drop`) when the
@@ -41,12 +41,89 @@ use mago_syntax::cst::Program;
 /// How many files besides the pass's own one the cache keeps parsed.
 const MAX_CACHED_OTHER_FILES: usize = 4;
 
+/// A parse that owns everything its `Program` borrows: the text and the
+/// arena the nodes live in.
+struct ParsedTree {
+    /// Owns the nodes `program` points at; never read directly.
+    _arena: mago_allocator::LocalArena,
+    /// The `Program` allocated in `_arena`, borrowing it and the text the
+    /// owner of this tree keeps beside it.
+    program: *const (),
+}
+
+impl ParsedTree {
+    fn new(
+        content: &str,
+        parse: impl for<'a> FnOnce(&'a mago_allocator::LocalArena, &'a str) -> &'a Program<'a>,
+    ) -> Self {
+        let arena = mago_allocator::LocalArena::new();
+        let program: *const () = (parse(&arena, content) as *const Program<'_>).cast();
+        // The arena's chunks are heap-allocated and do not move when the
+        // arena itself does, so the pointer outlives this move.
+        Self {
+            _arena: arena,
+            program,
+        }
+    }
+
+    /// The program.
+    ///
+    /// # Safety
+    ///
+    /// The text the tree was parsed from must outlive the returned
+    /// reference.
+    unsafe fn program(&self) -> &Program<'_> {
+        // SAFETY: the pointer came from a `&Program` that borrows only the
+        // arena, owned by `self`, and the text, which the caller vouches
+        // for.
+        unsafe { &*self.program.cast::<Program<'_>>() }
+    }
+}
+
+/// A file parsed outside any pass, handed to the pass that diagnoses it so
+/// that pass does not parse the same text again.
+///
+/// `didChange` parses the buffer to rebuild the index on one thread, and
+/// the diagnostic pass for that buffer runs later on another, so this
+/// keeps the text and the arena together and is `Send`.
+pub(crate) struct ParsedFile {
+    content: Arc<String>,
+    tree: ParsedTree,
+}
+
+// SAFETY: the raw pointer is the only thing keeping the auto trait from
+// applying.  It points into `tree.arena`, which is `Send` and moves with
+// it, and the `Program` it names is `Send` and borrows only that arena and
+// `content`, which moves along too.
+unsafe impl Send for ParsedFile {}
+
+impl ParsedFile {
+    /// Parse `content` with `parse`, which receives a fresh arena and the
+    /// text to read.
+    pub(crate) fn new(
+        content: Arc<String>,
+        parse: impl for<'a> FnOnce(&'a mago_allocator::LocalArena, &'a str) -> &'a Program<'a>,
+    ) -> Self {
+        let tree = ParsedTree::new(&content, parse);
+        Self { content, tree }
+    }
+
+    pub(crate) fn content(&self) -> &Arc<String> {
+        &self.content
+    }
+
+    pub(crate) fn program(&self) -> &Program<'_> {
+        // SAFETY: `self.content` is the text the tree was parsed from and
+        // lives as long as `self`.
+        unsafe { self.tree.program() }
+    }
+}
+
 /// One file's content and, once something has asked for it, its AST.
 struct CachedFile {
     content: Arc<String>,
-    /// The arena that owns the AST nodes, and a pointer to the `Program`
-    /// allocated in it.  Unset until the first parse of this file.
-    parsed: std::cell::OnceCell<(mago_allocator::LocalArena, *const ())>,
+    /// The parse of `content`.  Unset until the first parse of this file.
+    parsed: std::cell::OnceCell<ParsedTree>,
     /// The file's `namespace` declarations, scanned on first use.
     namespaces: std::cell::OnceCell<crate::text_scan::NamespaceDecls>,
     /// The file's first-class callable assignments, collected on first use.
@@ -91,32 +168,33 @@ impl CachedFile {
     }
 
     fn program(&self) -> &Program<'_> {
-        let (_, program_ptr) = self.parsed.get_or_init(|| {
-            let arena = mago_allocator::LocalArena::new();
-            let file_id = mago_database::file::FileId::new(b"input.php");
-            let program =
-                mago_syntax::parser::parse_file_content(&arena, file_id, self.content.as_bytes());
-            // The arena's chunks are heap-allocated and do not move when
-            // the arena itself does, so the pointer outlives this move.
-            let program_ptr: *const () = (program as *const Program<'_>).cast();
-            (arena, program_ptr)
-        });
-        // SAFETY: the pointer came from a `&Program` that borrows only
-        // the arena and `self.content`, both owned by `self`, which the
-        // returned reference cannot outlive.
-        unsafe { &*program_ptr.cast::<Program<'_>>() }
+        let tree = self
+            .parsed
+            .get_or_init(|| ParsedTree::new(&self.content, super::recovery::parse_program));
+        // SAFETY: the tree was parsed from `self.content`, which lives as
+        // long as `self`.
+        unsafe { tree.program() }
     }
 }
 
 /// The files of the active pass: its own file first, then the other files
-/// it registered, least recently registered first.
+/// it registered, least recently used first.
 struct ParseCache {
     files: Vec<Rc<CachedFile>>,
 }
 
 impl ParseCache {
-    fn find(&self, content: &str) -> Option<Rc<CachedFile>> {
-        self.files.iter().find(|file| file.holds(content)).cloned()
+    /// The cached file holding `content`.  A hit on another file also marks
+    /// it as the most recently used, so eviction drops the file the pass has
+    /// gone longest without reading rather than the one registered first.
+    fn find(&mut self, content: &str) -> Option<Rc<CachedFile>> {
+        let index = self.files.iter().position(|file| file.holds(content))?;
+        if index == 0 {
+            return Some(Rc::clone(&self.files[0]));
+        }
+        let file = self.files.remove(index);
+        self.files.push(Rc::clone(&file));
+        Some(file)
     }
 
     /// Make `content` available to the pass, evicting the oldest other
@@ -143,6 +221,11 @@ impl ParseCache {
 
 thread_local! {
     static PARSE_CACHE: RefCell<Option<ParseCache>> = const { RefCell::new(None) };
+}
+
+/// The active cache's file holding `content`, if any.
+fn cached_file(content: &str) -> Option<Rc<CachedFile>> {
+    PARSE_CACHE.with(|cell| cell.borrow_mut().as_mut()?.find(content))
 }
 
 /// RAII guard that clears the thread-local parse cache on drop.
@@ -214,6 +297,24 @@ pub(crate) fn with_parse_cache_arc(content: Arc<String>) -> ParseCacheGuard<'sta
     install_parse_cache(&text, move || content).0
 }
 
+/// [`with_parse_cache_arc`] for a file already parsed, which the pass then
+/// reads instead of parsing it again.
+///
+/// The parse is dropped when the pass ends.  A pass already active that
+/// holds the same text keeps its own copy and parse of it.
+pub(crate) fn with_parsed_file_cache(parsed: ParsedFile) -> ParseCacheGuard<'static> {
+    let ParsedFile { content, tree } = parsed;
+    let text = Arc::clone(&content);
+    let (guard, file) = install_parse_cache(&text, move || content);
+    // The tree borrows `text`, so it can only live beside that very
+    // allocation, not beside an equal copy the pass registered earlier.
+    if Arc::ptr_eq(&file.content, &text) {
+        // An `Err` means the file was parsed already; this copy goes.
+        let _ = file.parsed.set(tree);
+    }
+    guard
+}
+
 fn text_address(content: &str) -> (usize, usize) {
     (content.as_ptr() as usize, content.len())
 }
@@ -248,6 +349,9 @@ fn install_parse_cache<'a>(
 /// Parse `content` with the mago-syntax parser and pass the resulting
 /// `Program` (plus the content string) to `f`.
 ///
+/// A braced `namespace` block the parser would drop whole is kept (see
+/// [`parse_program`](super::recovery::parse_program)).
+///
 /// Handles the boilerplate that every parse entry-point needs:
 /// allocating a `LocalArena` arena, creating a `FileId`, calling
 /// `parse_file_content`, and wrapping the whole thing in
@@ -266,7 +370,7 @@ pub(crate) fn with_parsed_program<T: Default>(
     // ── Fast path: check the thread-local cache ─────────────────
     // The borrow ends before `f` runs, so `f` is free to register more
     // files or parse others through the cache.
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
 
     if let Some(file) = cached {
         return with_cached_file(file, method_name, |file| {
@@ -278,9 +382,7 @@ pub(crate) fn with_parsed_program<T: Default>(
     let content_owned = content.to_string();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let arena = mago_allocator::LocalArena::new();
-        let file_id = mago_database::file::FileId::new(b"input.php");
-        let program =
-            mago_syntax::parser::parse_file_content(&arena, file_id, content_owned.as_bytes());
+        let program = super::recovery::parse_program(&arena, &content_owned);
         f(program, &content_owned)
     }));
 
@@ -327,7 +429,7 @@ fn with_cached_file<T: Default>(
 /// not rescan the text up to each one.  Other text falls back to
 /// [`text_scan::namespace_at_offset`](crate::text_scan::namespace_at_offset).
 pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> {
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
     match cached {
         Some(file) => file
             .namespaces
@@ -341,7 +443,7 @@ pub(crate) fn namespace_at_offset(content: &str, offset: usize) -> Option<&str> 
 /// `offset` in `content`, which tells the file's blocks apart, or `None`
 /// before the first one.  Answered the way [`namespace_at_offset`] is.
 pub(crate) fn namespace_decl_at(content: &str, offset: usize) -> Option<usize> {
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
     match cached {
         Some(file) => file
             .namespaces
@@ -359,7 +461,7 @@ pub(crate) fn namespace_decl_at(content: &str, offset: usize) -> Option<usize> {
 /// not rescan the file for each.  Other text is searched for `name` first
 /// and parsed for scopes only when some docblock declares it.
 pub(crate) fn declares_docblock_type_name(content: &str, name: &str, region: (u32, u32)) -> bool {
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
     match cached {
         Some(file) => file
             .docblock_type_names
@@ -382,7 +484,7 @@ pub(crate) fn with_fcc_assignments<T: Default>(
     content: &str,
     f: impl FnOnce(&[crate::signature_help::FccAssignment]) -> T,
 ) -> T {
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
     match cached {
         Some(file) => with_cached_file(file, "with_fcc_assignments", |file| {
             let assignments = file.fcc_assignments.get_or_init(|| {
@@ -448,7 +550,7 @@ fn collect_comments(program: &Program<'_>) -> Vec<CommentSpan> {
 /// forward walker can look up the docblock above every statement it visits
 /// without scanning the text before it.  Other text is parsed per call.
 pub(crate) fn with_comments<T: Default>(content: &str, f: impl FnOnce(&[CommentSpan]) -> T) -> T {
-    let cached = PARSE_CACHE.with(|cell| cell.borrow().as_ref().and_then(|c| c.find(content)));
+    let cached = cached_file(content);
     match cached {
         Some(file) => with_cached_file(file, "with_comments", |file| {
             f(file
@@ -563,6 +665,31 @@ mod with_parsed_program_tests {
     }
 
     #[test]
+    fn a_handed_over_parse_is_read_instead_of_parsing_again() {
+        let content = std::sync::Arc::new("<?php class Foo {}".to_string());
+        let parsed = super::ParsedFile::new(std::sync::Arc::clone(&content), |arena, text| {
+            crate::parser::recovery::parse_program(arena, text)
+        });
+        let handed_over = std::ptr::from_ref(parsed.program()) as usize;
+        let _guard = super::with_parsed_file_cache(parsed);
+        assert_eq!(program_address(&content), handed_over);
+    }
+
+    /// A pass that already holds the text keeps its own parse: the handed
+    /// over one borrows a different copy of the text.
+    #[test]
+    fn a_handed_over_parse_of_a_copy_is_dropped_for_the_passs_own() {
+        let own = "<?php class Foo {}";
+        let _guard = with_parse_cache(own);
+        let own_program = program_address(own);
+        let parsed = super::ParsedFile::new(std::sync::Arc::new(own.to_string()), |arena, text| {
+            crate::parser::recovery::parse_program(arena, text)
+        });
+        let _nested = super::with_parsed_file_cache(parsed);
+        assert_eq!(program_address(own), own_program);
+    }
+
+    #[test]
     fn nested_scope_shares_one_parse_of_another_file_for_the_pass() {
         let own = "<?php class Own {}";
         let other = "<?php class Other {}";
@@ -600,10 +727,38 @@ mod with_parsed_program_tests {
             super::PARSE_CACHE.with(|cell| {
                 cell.borrow()
                     .as_ref()
-                    .is_some_and(|cache| cache.find(content).is_some())
+                    .is_some_and(|cache| cache.files.iter().any(|file| file.holds(content)))
             })
         };
         assert!(!cached(&others[0]), "the oldest other file was evicted");
         assert!(others[1..].iter().all(|other| cached(other)));
+    }
+
+    #[test]
+    fn reading_an_other_file_keeps_it_from_eviction() {
+        let own = "<?php class Own {}";
+        let _guard = with_parse_cache(own);
+
+        let others: Vec<String> = (0..=super::MAX_CACHED_OTHER_FILES)
+            .map(|i| format!("<?php class Other{i} {{}}"))
+            .collect();
+        let (last, first) = others.split_last().unwrap();
+        for other in first {
+            let _nested = super::with_parse_cache(other);
+        }
+        let first_program = program_address(&first[0]);
+        let _nested = super::with_parse_cache(last);
+
+        assert_eq!(
+            program_address(&first[0]),
+            first_program,
+            "the file read most recently survives"
+        );
+        let evicted = super::PARSE_CACHE.with(|cell| {
+            cell.borrow()
+                .as_ref()
+                .is_some_and(|cache| !cache.files.iter().any(|file| file.holds(&first[1])))
+        });
+        assert!(evicted, "the least recently used file went instead");
     }
 }

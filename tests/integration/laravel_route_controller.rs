@@ -3,33 +3,24 @@
 //! Tests go-to-definition, completion, and references for method-name
 //! strings inside `Route::controller(X::class)->group(fn(){…})`.
 
-use crate::common::{complete_at, create_test_backend, open_php};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{complete_at, create_test_backend, goto_definition_at, open_php};
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async fn goto_def(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
-) -> Option<GotoDefinitionResponse> {
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-    backend.goto_definition(params).await.unwrap()
+) -> Option<DefinitionResponse> {
+    goto_definition_at(backend, uri, line, character).await
 }
 
 fn method_labels(items: &[CompletionItem]) -> Vec<String> {
     items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .filter_map(|i| i.filter_text.clone())
         .collect()
 }
@@ -39,7 +30,7 @@ fn method_labels(items: &[CompletionItem]) -> Vec<String> {
 #[tokio::test]
 async fn goto_definition_controller_method_in_group() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///routes.php").unwrap();
+    let uri = Uri::parse("file:///routes.php").unwrap();
     let text = concat!(
         "<?php\n",                                                             // 0
         "class WorkItemController {\n",                                        // 1
@@ -62,7 +53,7 @@ async fn goto_definition_controller_method_in_group() {
         "Should resolve 'cancel' to WorkItemController::cancel()"
     );
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -76,7 +67,7 @@ async fn goto_definition_controller_method_in_group() {
 #[tokio::test]
 async fn goto_definition_chained_route_with_name() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///routes_chained.php").unwrap();
+    let uri = Uri::parse("file:///routes_chained.php").unwrap();
     let text = concat!(
         "<?php\n",                                                       // 0
         "class MyController {\n",                                        // 1
@@ -97,7 +88,7 @@ async fn goto_definition_chained_route_with_name() {
         "Should resolve 'store' even when chained with ->name()"
     );
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.range.start.line, 2);
         }
         other => panic!("Expected Scalar location, got: {:?}", other),
@@ -107,7 +98,7 @@ async fn goto_definition_chained_route_with_name() {
 #[tokio::test]
 async fn goto_definition_controller_after_prefix() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///routes_prefix.php").unwrap();
+    let uri = Uri::parse("file:///routes_prefix.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                          // 0
         "class ItemController {\n",                                                         // 1
@@ -128,7 +119,7 @@ async fn goto_definition_controller_after_prefix() {
         "Should resolve 'show' when ->controller() follows ->prefix()"
     );
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.range.start.line, 2);
         }
         other => panic!("Expected Scalar location, got: {:?}", other),
@@ -140,7 +131,7 @@ async fn goto_definition_controller_after_prefix() {
 #[tokio::test]
 async fn completes_controller_methods_in_group() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///routes_complete.php").unwrap();
+    let uri = Uri::parse("file:///routes_complete.php").unwrap();
     let text = concat!(
         "<?php\n",                                                         // 0
         "class TaskController {\n",                                        // 1
@@ -179,7 +170,7 @@ async fn completes_controller_methods_in_group() {
 #[tokio::test]
 async fn completion_filters_by_prefix() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///routes_filter.php").unwrap();
+    let uri = Uri::parse("file:///routes_filter.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "class ApiController {\n",                                        // 1
@@ -218,7 +209,7 @@ async fn completion_filters_by_prefix() {
 #[tokio::test]
 async fn completion_inserts_plain_method_name() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///routes_insert.php").unwrap();
+    let uri = Uri::parse("file:///routes_insert.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Ctrl {\n",
@@ -254,7 +245,7 @@ async fn completion_inserts_plain_method_name() {
 #[tokio::test]
 async fn no_completion_outside_controller_group() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///routes_no_ctrl.php").unwrap();
+    let uri = Uri::parse("file:///routes_no_ctrl.php").unwrap();
     let text = concat!("<?php\n", "Route::get('/', '');\n",);
     let line = 1u32;
     let line_text = text.lines().nth(line as usize).unwrap();

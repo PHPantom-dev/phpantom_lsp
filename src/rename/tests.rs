@@ -9,16 +9,15 @@
 use crate::Backend;
 use crate::text_position::apply_text_edits as apply_edits;
 use crate::virtual_members::laravel::extract_macro_registrations;
-use std::sync::atomic::Ordering;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: open a file in the backend.
-async fn open_file(backend: &Backend, uri: &Url, text: &str) {
+async fn open_file(backend: &Backend, uri: &Uri, text: &str) {
     let open_params = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
             uri: uri.clone(),
-            language_id: "php".to_string(),
+            language_id: "php".to_string().into(),
             version: 1,
             text: text.to_string(),
         },
@@ -29,7 +28,7 @@ async fn open_file(backend: &Backend, uri: &Url, text: &str) {
 /// Helper: send a rename request and return the workspace edit.
 async fn rename(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
     new_name: &str,
@@ -43,13 +42,13 @@ async fn rename(
 /// message the user is shown.
 async fn rename_result(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
     new_name: &str,
 ) -> std::result::Result<Option<WorkspaceEdit>, String> {
     let params = RenameParams {
-        text_document_position: TextDocumentPositionParams {
+        text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position { line, character },
         },
@@ -63,16 +62,14 @@ async fn rename_result(
         .map_err(|e| e.message.to_string())
 }
 
-fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
-    let mut index = backend.laravel_macros.write();
+fn seed_macro_index(backend: &Backend, uri: &Uri, text: &str) {
+    let mut index = backend.laravel.macros.write();
     index.files.set_file(
         uri.to_string(),
         extract_macro_registrations(text, Some(*backend.workspace.php_version.lock())),
     );
     index.rebuild();
-    backend
-        .laravel_has_macros
-        .store(!index.is_empty(), Ordering::Relaxed);
+    backend.laravel.macros.set_has_any(!index.is_empty());
 }
 
 fn line_char_of(haystack: &str, needle: &str) -> (u32, u32) {
@@ -85,22 +82,27 @@ fn line_char_of(haystack: &str, needle: &str) -> (u32, u32) {
 }
 
 /// Collect all text edits for a given URI from a WorkspaceEdit.
-fn edits_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<TextEdit> {
+fn edits_for_uri(edit: &WorkspaceEdit, uri: &Uri) -> Vec<TextEdit> {
     if let Some(changes) = edit.changes.as_ref() {
         return changes.get(uri).cloned().unwrap_or_default();
     }
-    let Some(DocumentChanges::Operations(ops)) = &edit.document_changes else {
+    let Some(ops) = &edit.document_changes else {
         return Vec::new();
     };
     ops.iter()
         .filter_map(|op| match op {
-            DocumentChangeOperation::Edit(e) if e.text_document.uri == *uri => Some(&e.edits),
+            DocumentChange::TextDocumentEdit(e)
+                if e.text_document.text_document_identifier.uri == *uri =>
+            {
+                Some(&e.edits)
+            }
             _ => None,
         })
         .flatten()
         .map(|e| match e {
-            OneOf::Left(e) => e.clone(),
-            OneOf::Right(e) => e.text_edit.clone(),
+            Edit::TextEdit(e) => e.clone(),
+            Edit::AnnotatedTextEdit(e) => e.text_edit.clone(),
+            Edit::SnippetTextEdit(e) => panic!("unexpected snippet edit: {e:?}"),
         })
         .collect()
 }
@@ -111,8 +113,8 @@ async fn rename_namespace_updates_use_statements_in_indexed_unopened_file() {
     let workspace = dir.path().to_path_buf();
 
     let backend = Backend::new_test_with_workspace(workspace.clone(), Vec::new());
-    let uri_a = Url::from_file_path(workspace.join("a.php")).unwrap();
-    let uri_b = Url::from_file_path(workspace.join("b.php")).unwrap();
+    let uri_a = Uri::from_file_path(workspace.join("a.php")).unwrap();
+    let uri_b = Uri::from_file_path(workspace.join("b.php")).unwrap();
 
     let text_a = concat!(
         "<?php\n",
@@ -161,7 +163,7 @@ async fn rename_class_move_into_global_namespace_removes_the_namespace_statement
     // one, so leaving the statement behind would spell `namespace ;`.
     let backend = Backend::new_test();
 
-    let uri = Url::parse("file:///src/Widget.php").unwrap();
+    let uri = Uri::parse("file:///src/Widget.php").unwrap();
     let text = concat!(
         "<?php\n",
         "\n",
@@ -190,8 +192,8 @@ async fn rename_class_move_into_global_namespace_writes_siblings_where_the_names
     // has to add would land, so both have to be one edit.
     let backend = Backend::new_test();
 
-    let uri_decl = Url::parse("file:///src/Widget.php").unwrap();
-    let uri_sibling = Url::parse("file:///src/Helper.php").unwrap();
+    let uri_decl = Uri::parse("file:///src/Widget.php").unwrap();
+    let uri_sibling = Uri::parse("file:///src/Helper.php").unwrap();
 
     let text_decl = concat!(
         "<?php\n",
@@ -233,7 +235,7 @@ async fn plan_class_move_names_the_declaration_in_the_requested_namespace() {
     // the plan has to be built from its declaration and no other.
     let backend = Backend::new_test();
 
-    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let uri = Uri::parse("file:///src/Shapes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace A { class Foo {} }\n",
@@ -270,7 +272,7 @@ async fn rename_class_move_into_global_namespace_refuses_a_brace_namespace() {
     // opens, so the move says so rather than mangling the file.
     let backend = Backend::new_test();
 
-    let uri = Url::parse("file:///src/Widget.php").unwrap();
+    let uri = Uri::parse("file:///src/Widget.php").unwrap();
     let text = concat!(
         "<?php\n",
         "\n",
@@ -297,7 +299,7 @@ async fn rename_class_move_into_global_namespace_refuses_unbraced_namespace_sect
     // code ahead of the next `namespace`, which PHP refuses.
     let backend = Backend::new_test();
 
-    let uri = Url::parse("file:///src/Sections.php").unwrap();
+    let uri = Uri::parse("file:///src/Sections.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace A;\n",
@@ -328,7 +330,7 @@ async fn rename_class_move_into_global_namespace_refuses_a_shared_section() {
     // namespace along with the class.
     let backend = Backend::new_test();
 
-    let uri = Url::parse("file:///src/Widget.php").unwrap();
+    let uri = Uri::parse("file:///src/Widget.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Old;\n",
@@ -352,9 +354,9 @@ async fn rename_class_move_into_global_namespace_refuses_a_shared_section() {
 #[tokio::test]
 async fn rename_macro_registration_string_updates_call_sites() {
     let backend = Backend::new_test();
-    let class_uri = Url::parse("file:///Widget.php").unwrap();
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
-    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+    let class_uri = Uri::parse("file:///Widget.php").unwrap();
+    let provider_uri = Uri::parse("file:///Provider.php").unwrap();
+    let caller_uri = Uri::parse("file:///Caller.php").unwrap();
 
     let class_text = concat!("<?php\n", "namespace App\\Support;\n", "class Widget {}\n",);
     let provider_text = concat!(
@@ -397,9 +399,9 @@ async fn rename_macro_registration_string_updates_call_sites() {
 #[tokio::test]
 async fn rename_macro_call_site_updates_registration_string() {
     let backend = Backend::new_test();
-    let class_uri = Url::parse("file:///Widget.php").unwrap();
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
-    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+    let class_uri = Uri::parse("file:///Widget.php").unwrap();
+    let provider_uri = Uri::parse("file:///Provider.php").unwrap();
+    let caller_uri = Uri::parse("file:///Caller.php").unwrap();
 
     let class_text = concat!("<?php\n", "namespace App\\Support;\n", "class Widget {}\n",);
     let provider_text = concat!(
@@ -444,10 +446,10 @@ async fn rename_macro_call_site_updates_registration_string() {
 #[tokio::test]
 async fn rename_macro_from_descendant_call_updates_ancestor_and_sibling_calls() {
     let backend = Backend::new_test();
-    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
-    let child_uri = Url::parse("file:///EloquentCollection.php").unwrap();
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
-    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+    let base_uri = Uri::parse("file:///BaseCollection.php").unwrap();
+    let child_uri = Uri::parse("file:///EloquentCollection.php").unwrap();
+    let provider_uri = Uri::parse("file:///Provider.php").unwrap();
+    let caller_uri = Uri::parse("file:///Caller.php").unwrap();
 
     let base_text = concat!(
         "<?php\n",
@@ -503,9 +505,9 @@ async fn rename_macro_from_descendant_call_updates_ancestor_and_sibling_calls() 
 #[tokio::test]
 async fn rename_macro_registration_string_updates_unresolved_chain_call() {
     let backend = Backend::new_test();
-    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
-    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+    let base_uri = Uri::parse("file:///BaseCollection.php").unwrap();
+    let provider_uri = Uri::parse("file:///Provider.php").unwrap();
+    let caller_uri = Uri::parse("file:///Caller.php").unwrap();
 
     let base_text = concat!(
         "<?php\n",
@@ -546,9 +548,9 @@ async fn rename_macro_registration_string_updates_unresolved_chain_call() {
 #[tokio::test]
 async fn rename_macro_chain_call_updates_registration_string() {
     let backend = Backend::new_test();
-    let base_uri = Url::parse("file:///BaseCollection.php").unwrap();
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
-    let caller_uri = Url::parse("file:///Caller.php").unwrap();
+    let base_uri = Uri::parse("file:///BaseCollection.php").unwrap();
+    let provider_uri = Uri::parse("file:///Provider.php").unwrap();
+    let caller_uri = Uri::parse("file:///Caller.php").unwrap();
 
     let base_text = concat!(
         "<?php\n",

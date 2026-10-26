@@ -27,7 +27,7 @@ pub(super) fn apply_count_size_narrowing(
     ctx: &ForwardWalkCtx<'_>,
     truthy: bool,
 ) {
-    let (inner, negated) = narrowing::unwrap_condition_negation(condition);
+    let (inner, negated) = condition_facts::unwrap_condition_negation(condition);
     let Expression::Binary(bin) = inner else {
         return;
     };
@@ -152,9 +152,9 @@ fn count_call(expr: &Expression<'_>) -> Option<(String, bool)> {
     let first = args.next()?;
     let recursive = args
         .next()
-        .is_some_and(|mode| !is_count_normal(narrowing::argument_value(mode)));
+        .is_some_and(|mode| !is_count_normal(condition_facts::argument_value(mode)));
     Some((
-        expr_to_subject(narrowing::argument_value(first))?,
+        expr_to_subject(condition_facts::argument_value(first))?,
         recursive,
     ))
 }

@@ -27,13 +27,13 @@ class HelloWorld
 		$type = array_map(static function (array $result): array {
 			assertType('array{a: int}', $result);
 			$result['a'] = (string) $result['a'];
-			// PHPantom treats PHPStan's string refinements (lowercase-string, numeric-string, ...) as string.
-			assertType('array{a: string}', $result);
+			// PHPantom does not track PHPStan's lowercase-string and uppercase-string accessories here.
+			assertType('array{a: numeric-string}', $result);
 
 			return $result;
 		}, $results);
 
-		// PHPantom treats PHPStan's string refinements (lowercase-string, numeric-string, ...) as string.
-		assertType('list<array{a: string}>', $type);
+		// PHPantom does not track PHPStan's lowercase-string and uppercase-string accessories here.
+		assertType('list<array{a: numeric-string}>', $type);
 	}
 }

@@ -2,19 +2,18 @@ use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use phpantom_lsp::Backend;
 use phpantom_lsp::composer::parse_autoload_classmap;
 use std::fs;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::request::{GotoImplementationParams, GotoImplementationResponse};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 async fn implementation_at(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
 ) -> Vec<Location> {
-    let params = GotoImplementationParams {
+    let params = ImplementationParams {
         text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position { line, character },
@@ -24,9 +23,9 @@ async fn implementation_at(
     };
 
     match backend.goto_implementation(params).await.unwrap() {
-        Some(GotoImplementationResponse::Scalar(loc)) => vec![loc],
-        Some(GotoImplementationResponse::Array(locs)) => locs,
-        Some(GotoImplementationResponse::Link(links)) => links
+        Some(ImplementationResponse::Definition(Definition::Location(loc))) => vec![loc],
+        Some(ImplementationResponse::Definition(Definition::LocationList(locs))) => locs,
+        Some(ImplementationResponse::DefinitionLinkList(links)) => links
             .into_iter()
             .map(|l| Location {
                 uri: l.target_uri,
@@ -44,7 +43,7 @@ async fn implementation_at(
 async fn test_implementation_interface_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_iface.php").unwrap();
+    let uri = Uri::parse("file:///impl_iface.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "interface Renderable {\n",                              // 1
@@ -98,7 +97,7 @@ async fn test_implementation_interface_name() {
 async fn test_implementation_abstract_class_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_abstract.php").unwrap();
+    let uri = Uri::parse("file:///impl_abstract.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "abstract class Shape {\n",                             // 1
@@ -144,7 +143,7 @@ async fn test_implementation_abstract_class_name() {
 async fn test_implementation_method_on_interface() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_method.php").unwrap();
+    let uri = Uri::parse("file:///impl_method.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "interface Renderable {\n",                              // 1
@@ -195,7 +194,7 @@ async fn test_implementation_method_on_interface() {
 async fn test_implementation_method_on_abstract_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_abstract_method.php").unwrap();
+    let uri = Uri::parse("file:///impl_abstract_method.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "abstract class Shape {\n",                             // 1
@@ -243,7 +242,7 @@ async fn test_implementation_method_on_abstract_class() {
 async fn test_implementation_concrete_class_returns_subclasses() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_concrete.php").unwrap();
+    let uri = Uri::parse("file:///impl_concrete.php").unwrap();
     let text = concat!(
         "<?php\n",                      // 0
         "class User {\n",               // 1
@@ -272,7 +271,7 @@ async fn test_implementation_concrete_class_returns_subclasses() {
 async fn test_implementation_final_class_returns_none() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_final.php").unwrap();
+    let uri = Uri::parse("file:///impl_final.php").unwrap();
     let text = concat!(
         "<?php\n",                   // 0
         "final class Singleton {\n", // 1
@@ -298,7 +297,7 @@ async fn test_implementation_final_class_returns_none() {
 async fn test_implementation_concrete_class_includes_abstract_subclass() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_concrete_abstract.php").unwrap();
+    let uri = Uri::parse("file:///impl_concrete_abstract.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "class Base {\n",                         // 1
@@ -336,7 +335,7 @@ async fn test_implementation_concrete_class_includes_abstract_subclass() {
 async fn test_implementation_transitive_via_parent() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_transitive.php").unwrap();
+    let uri = Uri::parse("file:///impl_transitive.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "interface Renderable {\n",                              // 1
@@ -382,7 +381,7 @@ async fn test_implementation_transitive_via_parent() {
 async fn test_implementation_multiple_interfaces() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_multi.php").unwrap();
+    let uri = Uri::parse("file:///impl_multi.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "interface Serializable {\n",                               // 1
@@ -433,7 +432,7 @@ async fn test_implementation_multiple_interfaces() {
 async fn test_implementation_enum_implements_interface() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_enum.php").unwrap();
+    let uri = Uri::parse("file:///impl_enum.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // 0
         "interface HasLabel {\n",                     // 1
@@ -526,16 +525,16 @@ async fn test_implementation_cross_file_psr4() {
     );
 
     // Open all files so they are in the ast_map.
-    let iface_uri = Url::parse("file:///logger_iface.php").unwrap();
+    let iface_uri = Uri::parse("file:///logger_iface.php").unwrap();
     open_php(&backend, &iface_uri, interface_php).await;
 
-    let file_logger_uri = Url::parse("file:///file_logger.php").unwrap();
+    let file_logger_uri = Uri::parse("file:///file_logger.php").unwrap();
     open_php(&backend, &file_logger_uri, file_logger_php).await;
 
-    let db_logger_uri = Url::parse("file:///db_logger.php").unwrap();
+    let db_logger_uri = Uri::parse("file:///db_logger.php").unwrap();
     open_php(&backend, &db_logger_uri, db_logger_php).await;
 
-    let service_uri = Url::parse("file:///service.php").unwrap();
+    let service_uri = Uri::parse("file:///service.php").unwrap();
     open_php(&backend, &service_uri, service_php).await;
 
     // Cursor on "Logger" on line 2 of interface file (interface Logger)
@@ -609,16 +608,16 @@ async fn test_implementation_method_cross_file() {
     );
 
     // Open all files
-    let iface_uri = Url::parse("file:///formatter_iface.php").unwrap();
+    let iface_uri = Uri::parse("file:///formatter_iface.php").unwrap();
     open_php(&backend, &iface_uri, interface_php).await;
 
-    let html_uri = Url::parse("file:///html_formatter.php").unwrap();
+    let html_uri = Uri::parse("file:///html_formatter.php").unwrap();
     open_php(&backend, &html_uri, html_formatter_php).await;
 
-    let json_uri = Url::parse("file:///json_formatter.php").unwrap();
+    let json_uri = Uri::parse("file:///json_formatter.php").unwrap();
     open_php(&backend, &json_uri, json_formatter_php).await;
 
-    let service_uri = Url::parse("file:///render_service.php").unwrap();
+    let service_uri = Uri::parse("file:///render_service.php").unwrap();
     open_php(&backend, &service_uri, service_php).await;
 
     // Cursor on "format" on line 5 of service file (`$f->format('hello')`)
@@ -638,7 +637,7 @@ async fn test_implementation_method_cross_file() {
 async fn test_implementation_no_implementors() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_none.php").unwrap();
+    let uri = Uri::parse("file:///impl_none.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Cacheable {\n",
@@ -663,7 +662,7 @@ async fn test_implementation_no_implementors() {
 async fn test_implementation_on_variable_no_crash() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_var.php").unwrap();
+    let uri = Uri::parse("file:///impl_var.php").unwrap();
     let text = concat!("<?php\n", "$x = 42;\n", "$x;\n",);
 
     open_php(&backend, &uri, text).await;
@@ -680,7 +679,7 @@ async fn test_implementation_on_variable_no_crash() {
 async fn test_implementation_skips_abstract_subclasses() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_skip_abstract.php").unwrap();
+    let uri = Uri::parse("file:///impl_skip_abstract.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "abstract class Animal {\n",                                // 1
@@ -733,7 +732,7 @@ async fn test_implementation_skips_abstract_subclasses() {
 async fn test_implementation_method_only_overriders() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_override.php").unwrap();
+    let uri = Uri::parse("file:///impl_override.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "interface Renderable {\n",                              // 1
@@ -773,7 +772,7 @@ async fn test_implementation_method_only_overriders() {
 async fn test_implementation_method_follows_traits_and_inherited_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_inherited.php").unwrap();
+    let uri = Uri::parse("file:///impl_inherited.php").unwrap();
     let text = concat!(
         "<?php\n",                                                           // 0
         "interface Renderable {\n",                                          // 1
@@ -819,7 +818,6 @@ async fn test_server_advertises_implementation_capability() {
     let backend = create_test_backend();
 
     let init_params = InitializeParams {
-        root_uri: None,
         capabilities: ClientCapabilities::default(),
         ..InitializeParams::default()
     };
@@ -907,12 +905,12 @@ async fn test_implementation_classmap_file_scan() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
     // Only open the interface file — implementors stay on disk only.
-    let iface_uri = Url::from_file_path(src.join("Contracts/Cacheable.php")).unwrap();
+    let iface_uri = Uri::from_file_path(src.join("Contracts/Cacheable.php")).unwrap();
     open_php(&backend, &iface_uri, interface_php).await;
 
     // Go-to-implementation on "Cacheable" (line 2, col 12)
@@ -980,7 +978,7 @@ async fn test_implementation_psr4_directory_scan() {
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
 
     // Only open the interface file.
-    let iface_uri = Url::from_file_path(src.join("Contracts/Notifier.php")).unwrap();
+    let iface_uri = Uri::from_file_path(src.join("Contracts/Notifier.php")).unwrap();
     open_php(&backend, &iface_uri, interface_php).await;
 
     // Go-to-implementation on "Notifier" (line 2, col 12)
@@ -1059,12 +1057,12 @@ async fn test_implementation_psr4_scan_skips_classmap_files() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
     // Only open the interface.
-    let iface_uri = Url::from_file_path(src.join("Contracts/Serializable.php")).unwrap();
+    let iface_uri = Uri::from_file_path(src.join("Contracts/Serializable.php")).unwrap();
     open_php(&backend, &iface_uri, interface_php).await;
 
     let locations = implementation_at(&backend, &iface_uri, 2, 12).await;
@@ -1114,7 +1112,7 @@ async fn test_implementation_psr4_scan_abstract_class() {
     let (mappings, _vendor_dir) = phpantom_lsp::composer::parse_composer_json(dir.path());
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
 
-    let iface_uri = Url::from_file_path(src.join("Base/Handler.php")).unwrap();
+    let iface_uri = Uri::from_file_path(src.join("Base/Handler.php")).unwrap();
     open_php(&backend, &iface_uri, abstract_php).await;
 
     let locations = implementation_at(&backend, &iface_uri, 2, 18).await;
@@ -1177,10 +1175,10 @@ async fn test_implementation_method_via_psr4_scan() {
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
 
     // Open the interface and the service file (but NOT the implementor).
-    let iface_uri = Url::from_file_path(src.join("Contracts/Repository.php")).unwrap();
+    let iface_uri = Uri::from_file_path(src.join("Contracts/Repository.php")).unwrap();
     open_php(&backend, &iface_uri, interface_php).await;
 
-    let svc_uri = Url::from_file_path(src.join("Services/UserService.php")).unwrap();
+    let svc_uri = Uri::from_file_path(src.join("Services/UserService.php")).unwrap();
     open_php(&backend, &svc_uri, service_php).await;
 
     // Cursor on "find" in `$repo->find(1);` — line 5, col 16
@@ -1200,7 +1198,7 @@ async fn test_implementation_method_via_psr4_scan() {
 async fn test_implementation_transitive_interface_extends() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///transitive_iface.php").unwrap();
+    let uri = Uri::parse("file:///transitive_iface.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "interface InterfaceA {\n",                    // 1
@@ -1242,7 +1240,7 @@ async fn test_implementation_transitive_interface_extends() {
 async fn test_implementation_deeply_transitive_interface() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///deep_transitive.php").unwrap();
+    let uri = Uri::parse("file:///deep_transitive.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "interface BaseContract {\n",                        // 1
@@ -1280,7 +1278,7 @@ async fn test_implementation_deeply_transitive_interface() {
 async fn test_implementation_multi_extends_interface() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multi_extends.php").unwrap();
+    let uri = Uri::parse("file:///multi_extends.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "interface Readable {\n",                                // 1
@@ -1331,7 +1329,7 @@ async fn test_implementation_multi_extends_interface() {
 async fn test_implementation_transitive_interface_via_parent_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trans_via_parent.php").unwrap();
+    let uri = Uri::parse("file:///trans_via_parent.php").unwrap();
     let text = concat!(
         "<?php\n",                                        // 0
         "interface InterfaceBase {\n",                    // 1
@@ -1371,7 +1369,7 @@ async fn test_implementation_transitive_interface_via_parent_class() {
 async fn test_implementation_reverse_jump_to_interface_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_reverse.php").unwrap();
+    let uri = Uri::parse("file:///impl_reverse.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "interface Handler {\n",                        // 1
@@ -1409,7 +1407,7 @@ async fn test_implementation_reverse_jump_to_interface_method() {
 async fn test_implementation_forward_jump_from_interface_declaration() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_fwd_decl.php").unwrap();
+    let uri = Uri::parse("file:///impl_fwd_decl.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "interface Processor {\n",                     // 1
@@ -1455,7 +1453,7 @@ async fn test_implementation_forward_jump_from_interface_declaration() {
 async fn test_implementation_forward_jump_from_abstract_declaration() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_abstract_decl.php").unwrap();
+    let uri = Uri::parse("file:///impl_abstract_decl.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "abstract class Shape {\n",                             // 1
@@ -1501,7 +1499,7 @@ async fn test_implementation_forward_jump_from_abstract_declaration() {
 async fn test_implementation_reverse_jump_to_abstract_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_reverse_abstract.php").unwrap();
+    let uri = Uri::parse("file:///impl_reverse_abstract.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "abstract class Logger {\n",                              // 1
@@ -1538,7 +1536,7 @@ async fn test_implementation_reverse_jump_to_abstract_method() {
 async fn test_implementation_reverse_jump_transitive_interface() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_reverse_transitive.php").unwrap();
+    let uri = Uri::parse("file:///impl_reverse_transitive.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "interface Serializable {\n",                               // 1
@@ -1577,7 +1575,7 @@ async fn test_implementation_reverse_jump_transitive_interface() {
 async fn test_implementation_reverse_jump_no_interface_returns_none() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_reverse_none.php").unwrap();
+    let uri = Uri::parse("file:///impl_reverse_none.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class StandaloneClass {\n",                // 1
@@ -1605,7 +1603,7 @@ async fn test_implementation_reverse_jump_no_interface_returns_none() {
 async fn test_implementation_fqn_dedup_different_namespaces() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///impl_fqn_dedup.php").unwrap();
+    let uri = Uri::parse("file:///impl_fqn_dedup.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "namespace App;\n",                       // 1
@@ -1617,7 +1615,7 @@ async fn test_implementation_fqn_dedup_different_namespaces() {
         "}\n",                                    // 7
     );
 
-    let uri2 = Url::parse("file:///impl_fqn_dedup2.php").unwrap();
+    let uri2 = Uri::parse("file:///impl_fqn_dedup2.php").unwrap();
     let text2 = concat!(
         "<?php\n",                                   // 0
         "namespace Vendor;\n",                       // 1
@@ -1698,7 +1696,7 @@ async fn test_implementation_transitive_interface_cross_file() {
         ],
     );
 
-    let loggable_uri = Url::from_file_path(_dir.path().join("src/Contracts/Loggable.php")).unwrap();
+    let loggable_uri = Uri::from_file_path(_dir.path().join("src/Contracts/Loggable.php")).unwrap();
     let loggable_text =
         std::fs::read_to_string(_dir.path().join("src/Contracts/Loggable.php")).unwrap();
     open_php(&backend, &loggable_uri, &loggable_text).await;
@@ -1706,13 +1704,13 @@ async fn test_implementation_transitive_interface_cross_file() {
     // Also open the intermediate interface and concrete class so they
     // are in ast_map.
     let audit_loggable_uri =
-        Url::from_file_path(_dir.path().join("src/Contracts/AuditLoggable.php")).unwrap();
+        Uri::from_file_path(_dir.path().join("src/Contracts/AuditLoggable.php")).unwrap();
     let audit_loggable_text =
         std::fs::read_to_string(_dir.path().join("src/Contracts/AuditLoggable.php")).unwrap();
     open_php(&backend, &audit_loggable_uri, &audit_loggable_text).await;
 
     let service_uri =
-        Url::from_file_path(_dir.path().join("src/Services/AuditService.php")).unwrap();
+        Uri::from_file_path(_dir.path().join("src/Services/AuditService.php")).unwrap();
     let service_text =
         std::fs::read_to_string(_dir.path().join("src/Services/AuditService.php")).unwrap();
     open_php(&backend, &service_uri, &service_text).await;
@@ -1784,14 +1782,14 @@ async fn test_implementation_excludes_loaded_vendor_implementor() {
     // the user hovered or completed something that resolved it). This puts
     // AcmeCache into the reverse-inheritance index under Cacheable and maps
     // its FQN to a `/vendor/` URI in the FQN → URI index.
-    let acme_uri = Url::from_file_path(dir.path().join("vendor/acme/cache/src/AcmeCache.php"))
+    let acme_uri = Uri::from_file_path(dir.path().join("vendor/acme/cache/src/AcmeCache.php"))
         .expect("vendor uri");
     let acme_text =
         std::fs::read_to_string(dir.path().join("vendor/acme/cache/src/AcmeCache.php")).unwrap();
     open_php(&backend, &acme_uri, &acme_text).await;
 
     let iface_uri =
-        Url::from_file_path(dir.path().join("src/Contracts/Cacheable.php")).expect("iface uri");
+        Uri::from_file_path(dir.path().join("src/Contracts/Cacheable.php")).expect("iface uri");
     let iface_text =
         std::fs::read_to_string(dir.path().join("src/Contracts/Cacheable.php")).unwrap();
     open_php(&backend, &iface_uri, &iface_text).await;
@@ -1853,7 +1851,7 @@ fn sites(locations: &[Location]) -> Vec<(String, u32)> {
 
 /// A workspace holding the trait and its user, with only the trait open
 /// unless `open_user` is set.
-async fn sluggable_workspace(open_user: bool) -> (Backend, tempfile::TempDir, Url) {
+async fn sluggable_workspace(open_user: bool) -> (Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(
         r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
         &[
@@ -1862,10 +1860,10 @@ async fn sluggable_workspace(open_user: bool) -> (Backend, tempfile::TempDir, Ur
         ],
     );
     if open_user {
-        let post_uri = Url::from_file_path(dir.path().join("src/Models/Post.php")).unwrap();
+        let post_uri = Uri::from_file_path(dir.path().join("src/Models/Post.php")).unwrap();
         open_php(&backend, &post_uri, POST_PHP).await;
     }
-    let trait_uri = Url::from_file_path(dir.path().join("src/Concerns/Sluggable.php")).unwrap();
+    let trait_uri = Uri::from_file_path(dir.path().join("src/Concerns/Sluggable.php")).unwrap();
     open_php(&backend, &trait_uri, SLUGGABLE_PHP).await;
     (backend, dir, trait_uri)
 }
@@ -1906,9 +1904,9 @@ async fn implementation_forgets_a_class_edited_out_of_the_interface() {
         r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
         &[("src/HasAvatar.php", interface), ("src/User.php", user)],
     );
-    let user_uri = Url::from_file_path(dir.path().join("src/User.php")).unwrap();
+    let user_uri = Uri::from_file_path(dir.path().join("src/User.php")).unwrap();
     open_php(&backend, &user_uri, user).await;
-    let interface_uri = Url::from_file_path(dir.path().join("src/HasAvatar.php")).unwrap();
+    let interface_uri = Uri::from_file_path(dir.path().join("src/HasAvatar.php")).unwrap();
     open_php(&backend, &interface_uri, interface).await;
 
     assert_eq!(
@@ -1921,14 +1919,18 @@ async fn implementation_forgets_a_class_edited_out_of_the_interface() {
     backend
         .did_change(DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
-                uri: user_uri.clone(),
+                text_document_identifier: TextDocumentIdentifier {
+                    uri: user_uri.clone(),
+                },
                 version: 2,
             },
-            content_changes: vec![TextDocumentContentChangeEvent {
-                range: None,
-                range_length: None,
-                text: edited.to_string(),
-            }],
+            content_changes: vec![
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                    TextDocumentContentChangeWholeDocument {
+                        text: edited.to_string(),
+                    },
+                ),
+            ],
         })
         .await;
     backend.update_ast(user_uri.as_str(), edited);

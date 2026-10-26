@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::common::collect_diagnostics_with;
+    use crate::common::message_text;
     use phpantom_lsp::Backend;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     fn collect(php: &str) -> Vec<Diagnostic> {
         collect_diagnostics_with(
@@ -24,10 +25,10 @@ function foo(string $str) {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("int"));
-        assert!(diags[0].message.contains("string"));
-        assert!(diags[0].message.contains("==="));
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert!(message_text(&diags[0].message).contains("int"));
+        assert!(message_text(&diags[0].message).contains("string"));
+        assert!(message_text(&diags[0].message).contains("==="));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
     }
 
     #[test]
@@ -55,8 +56,8 @@ function foo(int $val) {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("string"));
-        assert!(diags[0].message.contains("int"));
+        assert!(message_text(&diags[0].message).contains("string"));
+        assert!(message_text(&diags[0].message).contains("int"));
     }
 
     #[test]
@@ -71,7 +72,7 @@ function foo(string $s) {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("bool"));
+        assert!(message_text(&diags[0].message).contains("bool"));
     }
 
     #[test]
@@ -112,8 +113,8 @@ function foo(int $n) {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("float"));
-        assert!(diags[0].message.contains("int"));
+        assert!(message_text(&diags[0].message).contains("float"));
+        assert!(message_text(&diags[0].message).contains("int"));
     }
 
     #[test]
@@ -129,7 +130,7 @@ function foo(string $s) {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("unreachable_match_arm".to_string()))
+            Some(Code::String("unreachable_match_arm".to_string()))
         );
     }
 

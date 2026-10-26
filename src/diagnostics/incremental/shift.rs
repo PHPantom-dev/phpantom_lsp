@@ -7,7 +7,7 @@
 //! columns), so each one goes through a byte offset in the old text and
 //! comes back out as a position in the new one.
 
-use tower_lsp::lsp_types::{Diagnostic, Position, Range};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, Position, Range};
 
 use crate::text_position::{LineIndex, utf16_col_to_byte_offset};
 
@@ -109,7 +109,7 @@ fn byte_offset(lines: &LineIndex<'_>, position: Position) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use tower_lsp::lsp_types::DiagnosticSeverity;
+    use tower_lsp_server::gen_lsp_types::DiagnosticSeverity;
 
     use super::*;
     use crate::text_position::byte_range_to_lsp_range;
@@ -118,8 +118,8 @@ mod tests {
         let start = content.find(needle).unwrap();
         Diagnostic {
             range: byte_range_to_lsp_range(content, start, start + needle.len()),
-            severity: Some(DiagnosticSeverity::ERROR),
-            message: needle.to_string(),
+            severity: Some(DiagnosticSeverity::Error),
+            message: needle.to_string().into(),
             ..Diagnostic::default()
         }
     }

@@ -136,7 +136,7 @@ fn respell_under_root(root: &Path, skip_dirs: Arc<Vec<PathBuf>>) -> Arc<Vec<Path
 /// reproducible across runs, where indexing both was reproducibly wrong.
 ///
 /// A claim covers the whole walk rather than the root that made it, even
-/// though [`walk_roots`](super::discovery) otherwise keeps each root's
+/// though [`walk_roots`](super::walk) otherwise keeps each root's
 /// files separate so it can namespace-filter them against that root's own
 /// PSR-4 prefix. Two roots whose links converge on one tree therefore see
 /// it once between them, which costs nothing real: a PHP file declares a
@@ -220,7 +220,7 @@ impl LinkClaims {
 ///
 /// - **Watcher registration.** A client watches its workspace folders,
 ///   and a tree behind a link is not in one of them. Each link here
-///   becomes a [`RelativePattern`](tower_lsp::lsp_types::RelativePattern)
+///   becomes a [`RelativePattern`](tower_lsp_server::gen_lsp_types::RelativePattern)
 ///   watcher based at the link, which is what asks the client for those
 ///   events.
 /// - **Event paths.** A client that resolves the base it was handed

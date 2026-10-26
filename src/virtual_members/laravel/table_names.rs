@@ -30,7 +30,7 @@ fn model_connection_and_table(
 ) -> Option<(String, String)> {
     let laravel = class.laravel()?;
     let cache_read = cache?.read();
-    let schema = cache_read.schema_index();
+    let schema = cache_read.laravel().schema_index();
     let connection = if let Some(connection) = laravel.connection_name.clone() {
         connection
     } else if laravel.has_get_connection_name_method {
@@ -55,6 +55,7 @@ pub(super) fn model_schema_table(
     let (connection, table) = model_connection_and_table(class, cache)?;
     cache?
         .read()
+        .laravel()
         .schema_index()
         .table(&connection, &table)
         .cloned()

@@ -14,8 +14,8 @@ use crate::common::{
     complete_labels_at_opened, create_psr4_workspace, create_test_backend, definition_locations,
     goto_definition_at, hover_text_at, open_php,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -41,16 +41,16 @@ async fn open_with_cursor(
     backend: &phpantom_lsp::Backend,
     uri_str: &str,
     src_with_cursor: &str,
-) -> (Url, u32, u32) {
+) -> (Uri, u32, u32) {
     let (content, line, character) = strip_cursor(src_with_cursor);
-    let uri = Url::parse(uri_str).unwrap();
+    let uri = Uri::parse(uri_str).unwrap();
     open_php(backend, &uri, &content).await;
     (uri, line, character)
 }
 
 /// Open a PHP file on the backend (no cursor) and return its URI.
-async fn open_file(backend: &phpantom_lsp::Backend, uri_str: &str, content: &str) -> Url {
-    let uri = Url::parse(uri_str).unwrap();
+async fn open_file(backend: &phpantom_lsp::Backend, uri_str: &str, content: &str) -> Uri {
+    let uri = Uri::parse(uri_str).unwrap();
     open_php(backend, &uri, content).await;
     uri
 }
@@ -58,7 +58,7 @@ async fn open_file(backend: &phpantom_lsp::Backend, uri_str: &str, content: &str
 /// Fire a go-to-definition request and return the locations.
 async fn definition_at(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
 ) -> Vec<Location> {
@@ -68,7 +68,7 @@ async fn definition_at(
 /// Fire a signature help request and return the result.
 async fn signature_at(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
 ) -> Option<SignatureHelp> {
@@ -945,7 +945,7 @@ $f->format('hello', 80, <>)
     let sh = sig.unwrap();
     assert_eq!(
         sh.active_parameter,
-        Some(2),
+        Some(ActiveParameter::Int(2)),
         "Active parameter should be 2 (third param)"
     );
 }
@@ -1076,7 +1076,7 @@ class Service {
     );
 
     let uri =
-        Url::from_file_path(_tmp.path().join("src/Service.php").canonicalize().unwrap()).unwrap();
+        Uri::from_file_path(_tmp.path().join("src/Service.php").canonicalize().unwrap()).unwrap();
 
     let content = std::fs::read_to_string(_tmp.path().join("src/Service.php")).unwrap();
     open_php(&backend, &uri, &content).await;
@@ -1127,7 +1127,7 @@ class Controller {
         ],
     );
 
-    let uri = Url::from_file_path(
+    let uri = Uri::from_file_path(
         _tmp.path()
             .join("src/Controller.php")
             .canonicalize()
@@ -1489,7 +1489,7 @@ $s-><>
 async fn smoke_regression_did_change_updates_completion() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///smoke_change.php").unwrap();
+    let uri = Uri::parse("file:///smoke_change.php").unwrap();
 
     // Open with one method
     open_php(
@@ -1513,13 +1513,13 @@ $e->
     // Change to add a second method
     let change_params = DidChangeTextDocumentParams {
         text_document: VersionedTextDocumentIdentifier {
-            uri: uri.clone(),
+            text_document_identifier: TextDocumentIdentifier { uri: uri.clone() },
             version: 2,
         },
-        content_changes: vec![TextDocumentContentChangeEvent {
-            range: None,
-            range_length: None,
-            text: r#"<?php
+        content_changes: vec![
+            TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                TextDocumentContentChangeWholeDocument {
+                    text: r#"<?php
 class Evolving {
     public function alpha(): void {}
     public function beta(): void {}
@@ -1527,8 +1527,10 @@ class Evolving {
 $e = new Evolving();
 $e->
 "#
-            .to_string(),
-        }],
+                    .to_string(),
+                },
+            ),
+        ],
     };
     backend.did_change(change_params).await;
 

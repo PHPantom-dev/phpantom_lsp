@@ -12,8 +12,8 @@ use super::{ResolutionCtx, is_bare_variable};
 /// something else or the forward walker narrowed it.
 pub(super) fn resolve_this_subject(ctx: &ResolutionCtx<'_>) -> Vec<ResolvedType> {
     let current_class = ctx.current_class;
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     // `$this` is not available inside static methods.
     if current_class.is_some() && ctx.is_in_static_method {
@@ -84,7 +84,7 @@ pub(super) fn resolve_this_subject(ctx: &ResolutionCtx<'_>) -> Vec<ResolvedType>
             cc,
             all_classes,
             class_loader,
-            ctx.backend,
+            ctx.file.backend,
         );
     }
 
@@ -182,15 +182,15 @@ pub(super) fn resolve_variable_fallback(
     ctx: &ResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     let current_class = ctx.current_class;
-    let all_classes = ctx.all_classes;
-    let class_loader = ctx.class_loader;
+    let all_classes = ctx.file.all_classes;
+    let class_loader = ctx.file.class_loader;
 
     let dummy_class;
     let effective_class = match current_class {
         Some(cc) => cc,
         None => {
             dummy_class =
-                crate::class_lookup::class_context_placeholder(ctx.content, ctx.cursor_offset);
+                crate::class_lookup::class_context_placeholder(ctx.file.content, ctx.cursor_offset);
             &dummy_class
         }
     };

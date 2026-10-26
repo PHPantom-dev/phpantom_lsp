@@ -14,7 +14,7 @@ pub(crate) fn process_while<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let depth_guard = LoopDepthGuard::enter();
+    let depth_guard = LoopDepthGuard::enter(ctx.flow);
     let loop_depth = depth_guard.depth();
 
     // Hard limit: skip the body entirely at excessive nesting depth.
@@ -54,14 +54,18 @@ pub(crate) fn process_while<'b>(
         WhileBody::Statement(inner) => vec![*inner],
         WhileBody::ColonDelimited(body) => body.statements.iter().collect(),
     };
-    let assignment_depth =
-        clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+    let assignments = loop_assignments(&body_stmts, std::iter::empty());
+    let assignment_depth = clamp_iterations_for_depth(assignments.depth, loop_depth);
 
-    let exit_frame = ExitFrameGuard::push();
+    let exit_frame = ExitFrameGuard::push(ctx.flow);
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
+        loop_ctxs.walk(
+            &pre_loop_scope,
+            assignment_depth,
+            &assignments.self_dependent,
+        ),
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;
@@ -127,7 +131,7 @@ pub(crate) fn process_for<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let depth_guard = LoopDepthGuard::enter();
+    let depth_guard = LoopDepthGuard::enter(ctx.flow);
     let loop_depth = depth_guard.depth();
 
     // Hard limit: skip the body entirely at excessive nesting depth.
@@ -172,16 +176,18 @@ pub(crate) fn process_for<'b>(
     // hand-walked iterator (`for (…; …; $node = $node->next)`) carries its
     // type from one iteration to the next through the increment alone, so a
     // body with no assignments of its own still needs a re-walk.
-    let assignment_depth = clamp_iterations_for_depth(
-        assignment_map_depth_with_updates(&body_stmts, for_stmt.increments.iter().copied()),
-        loop_depth,
-    );
+    let assignments = loop_assignments(&body_stmts, for_stmt.increments.iter().copied());
+    let assignment_depth = clamp_iterations_for_depth(assignments.depth, loop_depth);
 
-    let exit_frame = ExitFrameGuard::push();
+    let exit_frame = ExitFrameGuard::push(ctx.flow);
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
+        loop_ctxs.walk(
+            &pre_loop_scope,
+            assignment_depth,
+            &assignments.self_dependent,
+        ),
         |next_scope, point| match point {
             // The update clause runs after the body, so its reassignments
             // are what the next iteration starts from.  The initialisers
@@ -331,7 +337,7 @@ pub(crate) fn process_do_while<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let depth_guard = LoopDepthGuard::enter();
+    let depth_guard = LoopDepthGuard::enter(ctx.flow);
     let loop_depth = depth_guard.depth();
 
     // Hard limit: skip the body entirely at excessive nesting depth.
@@ -344,14 +350,18 @@ pub(crate) fn process_do_while<'b>(
 
     // ── Assignment-depth-bounded loop iteration ─────────────────
     let body_stmts: Vec<&Statement<'b>> = vec![dw.statement];
-    let assignment_depth =
-        clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+    let assignments = loop_assignments(&body_stmts, std::iter::empty());
+    let assignment_depth = clamp_iterations_for_depth(assignments.depth, loop_depth);
 
-    let exit_frame = ExitFrameGuard::push();
+    let exit_frame = ExitFrameGuard::push(ctx.flow);
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
-        loop_ctxs.walk(&pre_loop_scope, assignment_depth),
+        loop_ctxs.walk(
+            &pre_loop_scope,
+            assignment_depth,
+            &assignments.self_dependent,
+        ),
         |next_scope, point| match point {
             // The condition is tested after the body and the loop only
             // re-enters when it held, so every iteration past the first

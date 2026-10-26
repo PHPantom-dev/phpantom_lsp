@@ -1,6 +1,5 @@
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{completion_response, create_test_backend, open_php};
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Object Shape Parsing Unit Tests ────────────────────────────────────────
 
@@ -199,7 +198,7 @@ fn test_extract_object_shape_property_type_quoted_key() {
 async fn test_object_shape_basic_property_completion() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_basic.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -215,41 +214,20 @@ async fn test_object_shape_basic_property_completion() {
         "$result->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$result->` (line 11, char 9)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 9,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 9, None).await;
     assert!(
         result.is_some(),
         "Should return completions for object shape properties"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -268,7 +246,7 @@ async fn test_object_shape_basic_property_completion() {
                 prop_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -278,7 +256,7 @@ async fn test_object_shape_basic_property_completion() {
 async fn test_object_shape_optional_property_completion() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_optional.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_optional.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Maker {\n",
@@ -294,37 +272,16 @@ async fn test_object_shape_optional_property_completion() {
         "$obj->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 6,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 6, None).await;
     assert!(result.is_some(), "Should return completions");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -338,7 +295,7 @@ async fn test_object_shape_optional_property_completion() {
                 prop_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -348,7 +305,7 @@ async fn test_object_shape_optional_property_completion() {
 async fn test_object_shape_value_type_chain_resolution() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_chain.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -368,41 +325,20 @@ async fn test_object_shape_value_type_chain_resolution() {
         "$data->user->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$data->user->` (line 15, char 14)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 15,
-                character: 14,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 15, 14, None).await;
     assert!(
         result.is_some(),
         "Should chain-resolve object shape property type to User"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -412,7 +348,7 @@ async fn test_object_shape_value_type_chain_resolution() {
             );
             let prop_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -421,7 +357,7 @@ async fn test_object_shape_value_type_chain_resolution() {
                 prop_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -430,7 +366,7 @@ async fn test_object_shape_value_type_chain_resolution() {
 async fn test_object_shape_var_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_var.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/** @var object{title: string, score: float} $item */\n",
@@ -438,40 +374,19 @@ async fn test_object_shape_var_annotation() {
         "$item->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 7,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 3, 7, None).await;
     assert!(
         result.is_some(),
         "Should return completions from @var object shape"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -485,7 +400,7 @@ async fn test_object_shape_var_annotation() {
                 prop_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -494,7 +409,7 @@ async fn test_object_shape_var_annotation() {
 async fn test_object_shape_param_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_param.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Handler {\n",
@@ -507,41 +422,20 @@ async fn test_object_shape_param_annotation() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$config->` (line 6, char 17)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 6,
-                character: 17,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 6, 17, None).await;
     assert!(
         result.is_some(),
         "Should return completions from @param object shape"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -560,7 +454,7 @@ async fn test_object_shape_param_annotation() {
                 prop_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -571,7 +465,7 @@ async fn test_object_shape_param_annotation() {
 async fn test_object_shape_intersection_with_stdclass() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_intersection.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_intersection.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -587,41 +481,20 @@ async fn test_object_shape_intersection_with_stdclass() {
         "$obj->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 6,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 6, None).await;
     assert!(
         result.is_some(),
         "Should return completions for object shape intersection"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             // At minimum, the object shape properties should be present
             let prop_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -635,7 +508,7 @@ async fn test_object_shape_intersection_with_stdclass() {
                 prop_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -645,7 +518,7 @@ async fn test_object_shape_intersection_with_stdclass() {
 async fn test_object_shape_in_union_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_union.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Provider {\n",
@@ -661,40 +534,19 @@ async fn test_object_shape_in_union_type() {
         "$result->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 9,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 9, None).await;
     assert!(
         result.is_some(),
         "Should return completions for nullable object shape"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -708,7 +560,7 @@ async fn test_object_shape_in_union_type() {
                 prop_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -718,7 +570,7 @@ async fn test_object_shape_in_union_type() {
 async fn test_bare_object_no_completions() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_bare.php").unwrap();
+    let uri = Uri::parse("file:///object_bare.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -731,41 +583,20 @@ async fn test_bare_object_no_completions() {
         "$obj->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 6,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 6, None).await;
     // Bare `object` has no properties — result should be None.
     if let Some(resp) = result {
         let items = match resp {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         let class_members: Vec<&str> = items
             .iter()
             .filter(|i| {
-                i.kind == Some(CompletionItemKind::METHOD)
-                    || i.kind == Some(CompletionItemKind::PROPERTY)
+                i.kind == Some(CompletionItemKind::Method)
+                    || i.kind == Some(CompletionItemKind::Property)
             })
             .map(|i| i.label.as_str())
             .collect();
@@ -782,7 +613,7 @@ async fn test_bare_object_no_completions() {
 async fn test_object_shape_from_this_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_this.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Api {\n",
@@ -800,41 +631,20 @@ async fn test_object_shape_from_this_method() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$item->` (line 11, char 15)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 15,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 15, None).await;
     assert!(
         result.is_some(),
         "Should return completions from $this->getItem() object shape"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -848,7 +658,7 @@ async fn test_object_shape_from_this_method() {
                 prop_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -858,7 +668,7 @@ async fn test_object_shape_from_this_method() {
 async fn test_object_shape_nested_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_nested.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_nested.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Paginator {\n",
@@ -874,38 +684,17 @@ async fn test_object_shape_nested_chain() {
         "$result->meta->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$result->meta->` (line 11, char 16)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 11,
-                character: 16,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 11, 16, None).await;
     assert!(result.is_some(), "Should chain-resolve nested object shape");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -919,7 +708,7 @@ async fn test_object_shape_nested_chain() {
                 prop_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -928,7 +717,7 @@ async fn test_object_shape_nested_chain() {
 async fn test_object_shape_from_function_return() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_func.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -941,41 +730,20 @@ async fn test_object_shape_from_function_return() {
         "$response->\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor right after `$response->` (line 8, char 12)
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 8,
-                character: 12,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 8, 12, None).await;
     assert!(
         result.is_some(),
         "Should return completions from function return object shape"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -989,7 +757,7 @@ async fn test_object_shape_from_function_return() {
                 prop_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -999,7 +767,7 @@ async fn test_object_shape_from_function_return() {
 async fn test_object_shape_does_not_break_array_shape() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///object_shape_no_break.php").unwrap();
+    let uri = Uri::parse("file:///object_shape_no_break.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/** @var array{user: string, count: int} $data */\n",
@@ -1007,37 +775,16 @@ async fn test_object_shape_does_not_break_array_shape() {
         "$data['\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position {
-                line: 3,
-                character: 7,
-            },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    let result = backend.completion(completion_params).await.unwrap();
+    let result = completion_response(&backend, &uri, 3, 7, None).await;
     assert!(
         result.is_some(),
         "Array shape key completion should still work"
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.contains(&"user"),
@@ -1050,6 +797,6 @@ async fn test_object_shape_does_not_break_array_shape() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }

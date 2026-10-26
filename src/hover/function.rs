@@ -1,7 +1,7 @@
 //! Function hover: the signature and docblock of a called function, and
 //! the member an unqualified `@see name()` names on the documented class.
 
-use tower_lsp::lsp_types::Hover;
+use tower_lsp_server::gen_lsp_types::Hover;
 
 use crate::Backend;
 use crate::definition::member::MemberKind;
@@ -70,14 +70,22 @@ impl Backend {
             // must reflect that override, not merely the helper's name (a
             // user-defined `now()` in a non-Laravel project keeps its own
             // return type unannotated).
-            let mut inferred_date_return = false;
+            let mut inferred_return = false;
             if is_configured_date_helper
                 && let Some(date_class) = self
                     .find_or_load_class(crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN)
             {
                 let date_type = crate::php_type::PhpType::named(date_class.fqn());
                 func.return_type = Some(date_type);
-                inferred_date_return = true;
+                inferred_return = true;
+            } else if func.return_type.is_none()
+                && let Some(inferred) =
+                    crate::type_engine::call_resolution::try_infer_function_body_return_type(
+                        self, &func,
+                    )
+            {
+                func.return_type = Some(inferred);
+                inferred_return = true;
             }
             let resolved_see = self.resolve_see_refs(&func.see_refs, uri, content);
             let provenance = self.provenance_line_for_function(name);
@@ -85,7 +93,7 @@ impl Backend {
                 &func,
                 Some(&resolved_see),
                 provenance,
-                inferred_date_return,
+                inferred_return,
             ))
         } else {
             None

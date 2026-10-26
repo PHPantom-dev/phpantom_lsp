@@ -14,9 +14,10 @@
 //! `namespace_completion`).
 use std::collections::{HashMap, HashSet};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::text_position::utf16_col_to_char_index;
 use crate::util::{short_name, strip_fqn_prefix};
 
 mod attributes;
@@ -121,7 +122,7 @@ impl Backend {
 
         let line = lines[position.line as usize];
         let chars: Vec<char> = line.chars().collect();
-        let col = (position.character as usize).min(chars.len());
+        let col = utf16_col_to_char_index(line, position.character);
 
         // Walk backwards through identifier characters (including `\`)
         let mut i = col;
@@ -517,13 +518,13 @@ impl Backend {
 
                     items.push(CompletionItem {
                         label,
-                        kind: Some(CompletionItemKind::MODULE),
+                        kind: Some(CompletionItemKind::Module),
                         detail: Some(format!("namespace {}", segment)),
                         insert_text: Some(insert_ns.clone()),
                         filter_text: Some(filter),
                         sort_text: Some(format!("0!_{}", short.to_lowercase())),
                         text_edit: fqn_replace_range.map(|range| {
-                            CompletionTextEdit::Edit(TextEdit {
+                            CompletionItemTextEdit::TextEdit(TextEdit {
                                 range,
                                 new_text: insert_ns,
                             })
@@ -579,9 +580,9 @@ impl Backend {
 
         // 1. Some open file declares this FQN as its namespace.
         {
-            let nmap = self.file_namespaces.read();
-            for spans in nmap.values() {
-                for span in spans {
+            let files = self.files.read();
+            for state in files.values() {
+                for span in &state.namespaces {
                     if span.namespace.as_deref() == Some(fqn) {
                         return true;
                     }

@@ -1,9 +1,10 @@
-use crate::common::{complete_at, create_test_backend, create_test_backend_with_function_stubs};
+use crate::common::{
+    complete_at, create_test_backend, create_test_backend_with_function_stubs, open_php,
+};
 use phpantom_lsp::Backend;
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Verify that `find_or_load_function` can resolve a basic built-in PHP
 /// function from the embedded stubs and return its `FunctionInfo`.
@@ -148,7 +149,7 @@ async fn test_stub_function_date_create_return_type() {
 async fn test_completion_variable_from_stub_function_date_create() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///stub_func_test.php").unwrap();
+    let uri = Uri::parse("file:///stub_func_test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -178,7 +179,7 @@ async fn test_completion_variable_from_stub_function_date_create() {
 async fn test_completion_chained_stub_function_call() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///stub_chain.php").unwrap();
+    let uri = Uri::parse("file:///stub_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -205,7 +206,7 @@ async fn test_completion_chained_stub_function_call() {
 async fn test_completion_chained_leading_backslash_function_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///leading_backslash_fn.php").unwrap();
+    let uri = Uri::parse("file:///leading_backslash_fn.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Reply {\n",
@@ -259,7 +260,7 @@ async fn test_stub_function_simplexml_load_string() {
 async fn test_completion_stub_function_in_expression_subject() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///stub_expr.php").unwrap();
+    let uri = Uri::parse("file:///stub_expr.php").unwrap();
     // `simplexml_load_string(...)` returns `SimpleXMLElement|false`.
     // SimpleXMLElement has methods like `xpath`, `children`, `attributes`, etc.
     let text = concat!(
@@ -404,7 +405,7 @@ async fn test_stub_constant_index_common_constants() {
 async fn test_definition_resolver_uses_stub_functions() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///def_stub.php").unwrap();
+    let uri = Uri::parse("file:///def_stub.php").unwrap();
     // When cursor is on `format` after `date_create()->`, the definition
     // resolver needs to resolve `date_create()` via the stub function
     // loader to know the return type is DateTime, then find `format` on it.
@@ -418,15 +419,7 @@ async fn test_definition_resolver_uses_stub_functions() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // The `date_create` function should now be loadable via stubs for
     // return type resolution.
@@ -485,7 +478,7 @@ async fn test_stub_function_preg_match() {
 async fn test_completion_stub_constant_php_eol() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///const_test.php").unwrap();
+    let uri = Uri::parse("file:///const_test.php").unwrap();
     let text = concat!("<?php\n", "echo PHP_E\n",);
 
     // Cursor at the end of `PHP_E` on line 1
@@ -493,7 +486,7 @@ async fn test_completion_stub_constant_php_eol() {
 
     let constant_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .filter(|i| i.kind == Some(CompletionItemKind::Constant))
         .collect();
 
     assert!(
@@ -508,14 +501,14 @@ async fn test_completion_stub_constant_php_eol() {
 async fn test_completion_stub_constant_sort() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///sort_test.php").unwrap();
+    let uri = Uri::parse("file:///sort_test.php").unwrap();
     let text = concat!("<?php\n", "$x = SORT\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 9).await;
 
     let labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .filter(|i| i.kind == Some(CompletionItemKind::Constant))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -537,32 +530,23 @@ async fn test_completion_user_defined_constant() {
     let backend = create_test_backend_with_function_stubs();
 
     // First open a file that defines a constant
-    let defs_uri = Url::parse("file:///constants.php").unwrap();
+    let defs_uri = Uri::parse("file:///constants.php").unwrap();
     let defs_text = concat!(
         "<?php\n",
         "define('MY_APP_VERSION', '1.0.0');\n",
         "define('MY_APP_NAME', 'TestApp');\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: defs_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: defs_text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &defs_uri, defs_text).await;
 
     // Now open another file and type the partial constant name
-    let uri = Url::parse("file:///use_const.php").unwrap();
+    let uri = Uri::parse("file:///use_const.php").unwrap();
     let text = concat!("<?php\n", "echo MY_APP\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 11).await;
 
     let labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .filter(|i| i.kind == Some(CompletionItemKind::Constant))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -583,7 +567,7 @@ async fn test_completion_user_defined_constant() {
 async fn test_completion_stub_constant_detail() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///detail_test.php").unwrap();
+    let uri = Uri::parse("file:///detail_test.php").unwrap();
     let text = concat!("<?php\n", "echo PHP_EOL\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 12).await;
@@ -597,7 +581,7 @@ async fn test_completion_stub_constant_detail() {
     );
     assert_eq!(
         php_eol.kind,
-        Some(CompletionItemKind::CONSTANT),
+        Some(CompletionItemKind::Constant),
         "Constants should use CONSTANT kind"
     );
 }
@@ -607,7 +591,7 @@ async fn test_completion_stub_constant_detail() {
 async fn test_completion_user_constant_detail() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///user_detail_test.php").unwrap();
+    let uri = Uri::parse("file:///user_detail_test.php").unwrap();
     let text = concat!("<?php\n", "define('CUSTOM_FLAG', true);\n", "echo CUSTOM\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 11).await;
@@ -627,7 +611,7 @@ async fn test_completion_user_constant_detail() {
 async fn test_completion_constants_not_after_arrow() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///arrow_test.php").unwrap();
+    let uri = Uri::parse("file:///arrow_test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo { public string $PHP_EOL; }\n",
@@ -641,7 +625,7 @@ async fn test_completion_constants_not_after_arrow() {
     let constant_items: Vec<_> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::CONSTANT)
+            i.kind == Some(CompletionItemKind::Constant)
                 && i.detail.as_deref() == Some("PHP constant")
         })
         .collect();
@@ -658,7 +642,7 @@ async fn test_completion_constants_not_after_arrow() {
 async fn test_completion_constants_not_for_variables() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///var_test.php").unwrap();
+    let uri = Uri::parse("file:///var_test.php").unwrap();
     let text = concat!("<?php\n", "$PHP_EOL\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 8).await;
@@ -666,7 +650,7 @@ async fn test_completion_constants_not_for_variables() {
     let constant_items: Vec<_> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::CONSTANT)
+            i.kind == Some(CompletionItemKind::Constant)
                 && i.detail.as_deref() == Some("PHP constant")
         })
         .collect();
@@ -683,7 +667,7 @@ async fn test_completion_constants_not_for_variables() {
 async fn test_completion_constants_alongside_classes() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///mixed_test.php").unwrap();
+    let uri = Uri::parse("file:///mixed_test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "define('SORT_HELPER_FLAG', 1);\n",
@@ -695,10 +679,10 @@ async fn test_completion_constants_alongside_classes() {
 
     let has_class = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::CLASS));
+        .any(|i| i.kind == Some(CompletionItemKind::Class));
     let has_constant = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::CONSTANT));
+        .any(|i| i.kind == Some(CompletionItemKind::Constant));
 
     assert!(
         has_class,
@@ -718,14 +702,14 @@ async fn test_completion_constants_alongside_classes() {
 async fn test_completion_stub_function_array_map() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///fn_test.php").unwrap();
+    let uri = Uri::parse("file:///fn_test.php").unwrap();
     let text = concat!("<?php\n", "array_m\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 7).await;
 
     let function_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .collect();
 
     let labels: Vec<&str> = function_items.iter().map(|i| i.label.as_str()).collect();
@@ -741,14 +725,14 @@ async fn test_completion_stub_function_array_map() {
 async fn test_completion_stub_function_str_contains() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///fn_str.php").unwrap();
+    let uri = Uri::parse("file:///fn_str.php").unwrap();
     let text = concat!("<?php\n", "str_c\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 5).await;
 
     let function_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .collect();
 
     let labels: Vec<&str> = function_items.iter().map(|i| i.label.as_str()).collect();
@@ -764,13 +748,13 @@ async fn test_completion_stub_function_str_contains() {
 async fn test_completion_stub_function_detail() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///fn_detail.php").unwrap();
+    let uri = Uri::parse("file:///fn_detail.php").unwrap();
     let text = concat!("<?php\n", "json_decode\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 11).await;
 
     let json_decode = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION)
+        i.kind == Some(CompletionItemKind::Function)
             && i.filter_text.as_deref() == Some("json_decode")
     });
     assert!(
@@ -785,12 +769,12 @@ async fn test_completion_stub_function_detail() {
     );
 }
 
-/// Stub function completions should use CompletionItemKind::FUNCTION.
+/// Stub function completions should use CompletionItemKind::Function.
 #[tokio::test]
 async fn test_completion_stub_function_kind() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///fn_kind.php").unwrap();
+    let uri = Uri::parse("file:///fn_kind.php").unwrap();
     let text = concat!("<?php\n", "substr\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 6).await;
@@ -801,7 +785,7 @@ async fn test_completion_stub_function_kind() {
     assert!(substr.is_some(), "Should find substr in completions");
     assert_eq!(
         substr.unwrap().kind,
-        Some(CompletionItemKind::FUNCTION),
+        Some(CompletionItemKind::Function),
         "Function completions should use FUNCTION kind"
     );
 }
@@ -812,33 +796,24 @@ async fn test_completion_user_defined_function() {
     let backend = create_test_backend_with_function_stubs();
 
     // Open a file that defines a function
-    let defs_uri = Url::parse("file:///helpers.php").unwrap();
+    let defs_uri = Uri::parse("file:///helpers.php").unwrap();
     let defs_text = concat!(
         "<?php\n",
         "function my_helper_func(string $name, int $count = 0): string {\n",
         "    return str_repeat($name, $count);\n",
         "}\n",
     );
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: defs_uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: defs_text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &defs_uri, defs_text).await;
 
     // Now complete in another file
-    let uri = Url::parse("file:///use_fn.php").unwrap();
+    let uri = Uri::parse("file:///use_fn.php").unwrap();
     let text = concat!("<?php\n", "my_helper\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 9).await;
 
     let function_items: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .collect();
 
     assert!(
@@ -882,7 +857,7 @@ async fn test_completion_user_defined_function() {
 async fn test_completion_user_function_label_signature() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///sig_test.php").unwrap();
+    let uri = Uri::parse("file:///sig_test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function calculate_total(float $price, int $qty, bool $tax = true): float {\n",
@@ -911,7 +886,7 @@ async fn test_completion_user_function_label_signature() {
 async fn test_completion_functions_not_after_arrow() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///arrow_fn_test.php").unwrap();
+    let uri = Uri::parse("file:///arrow_fn_test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo { public function array_map() {} }\n",
@@ -925,7 +900,7 @@ async fn test_completion_functions_not_after_arrow() {
     let standalone_fn_items: Vec<_> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::FUNCTION)
+            i.kind == Some(CompletionItemKind::Function)
                 && i.detail.as_deref() == Some("PHP function")
         })
         .collect();
@@ -945,7 +920,7 @@ async fn test_completion_functions_not_after_arrow() {
 async fn test_completion_functions_not_for_variables() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///var_fn_test.php").unwrap();
+    let uri = Uri::parse("file:///var_fn_test.php").unwrap();
     let text = concat!("<?php\n", "$array_map\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 10).await;
@@ -953,7 +928,7 @@ async fn test_completion_functions_not_for_variables() {
     let function_items: Vec<_> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::FUNCTION)
+            i.kind == Some(CompletionItemKind::Function)
                 && i.detail.as_deref() == Some("PHP function")
         })
         .collect();
@@ -970,7 +945,7 @@ async fn test_completion_functions_not_for_variables() {
 async fn test_completion_functions_alongside_classes_and_constants() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///mixed_fn_test.php").unwrap();
+    let uri = Uri::parse("file:///mixed_fn_test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "define('ARRAY_HELPER_FLAG', 1);\n",
@@ -982,13 +957,13 @@ async fn test_completion_functions_alongside_classes_and_constants() {
 
     let has_class = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::CLASS));
+        .any(|i| i.kind == Some(CompletionItemKind::Class));
     let has_constant = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::CONSTANT));
+        .any(|i| i.kind == Some(CompletionItemKind::Constant));
     let has_function = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::FUNCTION));
+        .any(|i| i.kind == Some(CompletionItemKind::Function));
 
     assert!(
         has_class,
@@ -1010,14 +985,14 @@ async fn test_completion_functions_alongside_classes_and_constants() {
 async fn test_completion_multiple_matching_stub_functions() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///multi_fn.php").unwrap();
+    let uri = Uri::parse("file:///multi_fn.php").unwrap();
     let text = concat!("<?php\n", "array_\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 6).await;
 
     let fn_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .filter_map(|i| i.filter_text.as_deref())
         .collect();
 
@@ -1056,7 +1031,7 @@ async fn test_completion_multiple_matching_stub_functions() {
 async fn test_completion_redeclared_builtin_keeps_the_stub_signature() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///shadow.php").unwrap();
+    let uri = Uri::parse("file:///shadow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function str_contains(string $a, string $b): bool { return true; }\n",
@@ -1068,7 +1043,7 @@ async fn test_completion_redeclared_builtin_keeps_the_stub_signature() {
     let str_contains_items: Vec<_> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::FUNCTION)
+            i.kind == Some(CompletionItemKind::Function)
                 && i.filter_text.as_deref() == Some("str_contains")
         })
         .collect();
@@ -1090,13 +1065,13 @@ async fn test_completion_redeclared_builtin_keeps_the_stub_signature() {
 async fn test_completion_function_insert_text() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///insert_test.php").unwrap();
+    let uri = Uri::parse("file:///insert_test.php").unwrap();
     let text = concat!("<?php\n", "json_d\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 6).await;
 
     let json_decode = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION)
+        i.kind == Some(CompletionItemKind::Function)
             && i.filter_text.as_deref() == Some("json_decode")
     });
     assert!(
@@ -1111,7 +1086,7 @@ async fn test_completion_function_insert_text() {
     );
     assert_eq!(
         json_decode.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "insert_text_format should be Snippet for stub functions"
     );
 }
@@ -1121,14 +1096,14 @@ async fn test_completion_function_insert_text() {
 async fn test_completion_stub_function_preg_match() {
     let backend = create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///preg_test.php").unwrap();
+    let uri = Uri::parse("file:///preg_test.php").unwrap();
     let text = concat!("<?php\n", "preg\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 4).await;
 
     let fn_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .filter_map(|i| i.filter_text.as_deref())
         .collect();
 
@@ -1263,7 +1238,7 @@ async fn test_removed_method_filtered_from_completion() {
         std::collections::HashMap::new(),
     );
 
-    let uri = Url::parse("file:///test_removed_method.php").unwrap();
+    let uri = Uri::parse("file:///test_removed_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function test(SplFileObject $f) {\n",
@@ -1325,7 +1300,7 @@ async fn test_removed_class_filtered_from_completion() {
     );
 
     // OCI_Lob is removed — should yield no member completions.
-    let uri_lob = Url::parse("file:///test_removed_lob.php").unwrap();
+    let uri_lob = Uri::parse("file:///test_removed_lob.php").unwrap();
     let text_lob = concat!(
         "<?php\n",
         "function test(OCI_Lob $l) {\n",
@@ -1340,7 +1315,7 @@ async fn test_removed_class_filtered_from_completion() {
     );
 
     // OCI_Connection is not removed — should yield completions.
-    let uri_conn = Url::parse("file:///test_removed_conn.php").unwrap();
+    let uri_conn = Uri::parse("file:///test_removed_conn.php").unwrap();
     let text_conn = concat!(
         "<?php\n",
         "function test(OCI_Connection $c) {\n",
@@ -1390,13 +1365,13 @@ async fn test_removed_function_excluded_from_completion_list() {
         std::collections::HashMap::new(),
     );
 
-    let uri = Url::parse("file:///test_removed_completion.php").unwrap();
+    let uri = Uri::parse("file:///test_removed_completion.php").unwrap();
     let text = "<?php\nmysql_\n";
 
     let items = complete_at(&backend, &uri, text, 1, 6).await;
     let fn_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .filter_map(|i| i.filter_text.as_deref().or(Some(i.label.as_str())))
         .collect();
 
@@ -1442,7 +1417,7 @@ async fn test_removed_class_excluded_from_class_name_completion() {
         std::collections::HashMap::new(),
     );
 
-    let uri = Url::parse("file:///test_removed_class_completion.php").unwrap();
+    let uri = Uri::parse("file:///test_removed_class_completion.php").unwrap();
     let text = "<?php\nfunction test(OCI\n";
 
     let items = complete_at(&backend, &uri, text, 1, 18).await;

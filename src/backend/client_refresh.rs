@@ -9,14 +9,12 @@
 //! request futures.  The three here are only awaited from spawned tasks and
 //! notification handlers that live until the answer arrives.
 
-use std::sync::atomic::Ordering;
-
 use crate::Backend;
 
 impl Backend {
     /// Ask the editor to re-pull every code lens, if it said it can.
     pub(crate) async fn request_code_lens_refresh(&self) {
-        if self.supports_code_lens_refresh.load(Ordering::Acquire)
+        if self.caps().code_lens_refresh
             && let Some(client) = &self.client
         {
             let _ = client.code_lens_refresh().await;
@@ -25,7 +23,7 @@ impl Backend {
 
     /// Ask the editor to re-pull every inlay hint, if it said it can.
     pub(crate) async fn request_inlay_hint_refresh(&self) {
-        if self.supports_inlay_hint_refresh.load(Ordering::Acquire)
+        if self.caps().inlay_hint_refresh
             && let Some(client) = &self.client
         {
             let _ = client.inlay_hint_refresh().await;
@@ -35,9 +33,7 @@ impl Backend {
     /// Ask the editor to re-pull every file's semantic tokens, if it said
     /// it can.
     pub(crate) async fn request_semantic_tokens_refresh(&self) {
-        if self
-            .supports_semantic_tokens_refresh
-            .load(Ordering::Acquire)
+        if self.caps().semantic_tokens_refresh
             && let Some(client) = &self.client
         {
             let _ = client.semantic_tokens_refresh().await;

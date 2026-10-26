@@ -1,4 +1,5 @@
 use super::*;
+use crate::class_lookup::Fqn;
 
 #[test]
 fn is_self_or_static_matches_three() {
@@ -46,8 +47,9 @@ fn make_class(
 }
 
 /// Build a class loader from a slice of `Arc<ClassInfo>`.
-fn loader_from(classes: &[Arc<ClassInfo>]) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + '_ {
-    move |name: &str| {
+fn loader_from(classes: &[Arc<ClassInfo>]) -> impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + '_ {
+    move |name: Fqn<'_>| {
+        let name = name.as_str();
         let name = name.strip_prefix('\\').unwrap_or(name);
         classes.iter().find(|c| c.fqn() == name).cloned()
     }
@@ -201,26 +203,23 @@ fn subtype_of_global_interface_not_broken_by_shadowing_use_import() {
         iterator,
         recursive_iterator,
         rec_dir_iterator.clone(),
-        app_iterator.clone(),
+        app_iterator,
     ];
 
-    // A loader that mirrors `class_loader_with`: an unqualified name in
-    // the use-map resolves to the imported class, while a leading `\`
-    // skips the use-map and names the global class.
-    let loader = move |name: &str| -> Option<Arc<ClassInfo>> {
-        if name == "Iterator" {
-            // use-map shadow: unqualified `Iterator` → App\Input\Iterator
-            return Some(app_iterator.clone());
-        }
-        let stripped = name.strip_prefix('\\').unwrap_or(name);
-        classes.iter().find(|c| c.fqn() == stripped).cloned()
+    // `is_subtype_of` only takes a resolved-name loader, so the consuming
+    // file's `use App\Input\Iterator;` cannot reach the walk: a bare
+    // `Iterator` is the global interface.
+    let loader = move |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        classes.iter().find(|c| c.fqn() == name.as_str()).cloned()
     };
 
-    // Without the fix, the intermediate global `Iterator` node resolves
-    // to `App\Input\Iterator`, so the walk never reaches `Traversable`
-    // and the ancestor `Iterator` itself mis-resolves.
     assert!(is_subtype_of(&rec_dir_iterator, "Iterator", &loader));
     assert!(is_subtype_of(&rec_dir_iterator, "Traversable", &loader));
+    assert!(!is_subtype_of(
+        &rec_dir_iterator,
+        "App\\Input\\Iterator",
+        &loader
+    ));
     // A genuinely unrelated global class is still rejected.
     assert!(!is_subtype_of(&rec_dir_iterator, "Countable", &loader));
 }

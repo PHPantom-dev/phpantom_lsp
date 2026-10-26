@@ -34,7 +34,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
     let argument_list = &func_call.argument_list;
 
     if let Expression::PartialApplication(pa) = func_call.function
-        && let Some(resolved) = first_class_callable_invocation(pa, argument_list, ctx)
+        && let Some(resolved) = partial_application_invocation(pa, argument_list, ctx)
     {
         return resolved;
     }
@@ -47,6 +47,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
         // block of the same file (the file-level namespace guess would miss).
         let name_offset = func_call.function.span().start.offset;
         if let Some(resolved) = laravel_helper_call(name, argument_list, ctx)
+            .or_else(|| call_user_func_return(name, argument_list, ctx))
             .or_else(|| builtin_function_call(name, argument_list, ctx))
             .or_else(|| named_function_call(name, name_offset, argument_list, ctx))
         {
@@ -80,13 +81,61 @@ pub(super) fn callable_invocation<'b>(
     expression_invocation(callee, ctx)
 }
 
-/// What invoking a first-class callable on the spot returns:
-/// `Foo::method(...)()`, `$obj->method(...)()` and `strlen(...)()` each
-/// return what the call they wrap does.
+/// What invoking a partial application on the spot returns:
+/// `Foo::method(...)()`, `$obj->method(?, 1)($id)` and `strlen(...)()` each
+/// return what the call they wrap does, given the arguments it receives.
 ///
 /// `None` when the wrapped function cannot be found, leaving the caller to
 /// read the callable's own type.
-fn first_class_callable_invocation<'b>(
+fn partial_application_invocation<'b>(
+    pa: &'b PartialApplication<'b>,
+    argument_list: &'b ArgumentList<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if pa.is_first_class_callable() {
+        return wrapped_call(pa, argument_list, ctx);
+    }
+    let bound = crate::call_args::bind_partial_arguments(pa.get_argument_list(), argument_list);
+    let bound_list = ArgumentList {
+        left_parenthesis: argument_list.left_parenthesis,
+        arguments: TokenSeparatedSequence {
+            nodes: &bound,
+            tokens: &[],
+        },
+        right_parenthesis: argument_list.right_parenthesis,
+    };
+    wrapped_call(pa, &bound_list, ctx)
+}
+
+/// What the closure a partial application with bound arguments makes
+/// returns, decided by those arguments alone: `$r->make(Foo::class, ?)`
+/// returns what `$r->make(Foo::class)` does.  The placeholders stay open,
+/// so a bound positional argument after one is dropped (see
+/// [`crate::call_args::bind_partial_arguments`]).
+///
+/// `None` for a first-class callable, which binds nothing, or when the
+/// wrapped function cannot be found.
+pub(super) fn partial_application_return<'b>(
+    pa: &'b PartialApplication<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if pa.is_first_class_callable() {
+        return None;
+    }
+    let written = pa.get_argument_list();
+    let no_call = ArgumentList {
+        left_parenthesis: written.left_parenthesis,
+        arguments: TokenSeparatedSequence {
+            nodes: &[],
+            tokens: &[],
+        },
+        right_parenthesis: written.right_parenthesis,
+    };
+    partial_application_invocation(pa, &no_call, ctx)
+}
+
+/// What the call `pa` wraps returns when it receives `argument_list`.
+fn wrapped_call<'b>(
     pa: &'b PartialApplication<'b>,
     argument_list: &'b ArgumentList<'b>,
     ctx: &VarResolutionCtx<'_>,
@@ -131,19 +180,22 @@ pub(super) fn first_class_function_return_type(
 }
 
 /// What a builtin returns when its arguments decide more than its stub
-/// declares: a string function folded over literal arguments, or an array
-/// function's element or iterable type read from the array it is handed.
+/// declares: a string function folded over literal arguments or refined by
+/// them, or an array function's element or iterable type read from the
+/// array it is handed.
 fn builtin_function_call(
     name: &str,
     argument_list: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    // ── String builtins over literal arguments ───────
+    // ── String builtins ──────────────────────────────
     // The stub declares the widest string the function can return; with
     // literal arguments the call has one answer, and a caller checking
     // it against a literal union needs that answer rather than `string`.
+    // Short of that, the arguments can still decide a refinement
+    // (`lowercase-string`, `non-empty-string`).
     if let Some(folded) =
-        crate::type_engine::variable::raw_type_inference::resolve_string_func_literal_type(
+        crate::type_engine::variable::raw_type_inference::resolve_string_func_return_type(
             name,
             argument_list,
             ctx,
@@ -151,8 +203,8 @@ fn builtin_function_call(
     {
         return Some(vec![resolved_type_with_lookup(
             folded,
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         )]);
     }
 
@@ -206,7 +258,7 @@ fn named_function_call<'b>(
     // argument, or a builtin whose arguments decide its result) is
     // authoritative, so it is tried before the declared type.
     if func_info.conditional_return.is_some()
-        || crate::type_engine::types::call_site_returns::has_call_site_return(name)
+        || crate::type_engine::type_ops::call_site_returns::has_call_site_return(name)
     {
         let var_resolver = build_var_resolver_from_ctx(ctx);
         let rctx = ctx.as_resolution_ctx();
@@ -215,10 +267,10 @@ fn named_function_call<'b>(
         // argument's resolved type, so the branch a call takes matches
         // what it was actually handed.
         let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
-        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.content);
+        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         let text_args = arg_texts.join(", ");
         let resolved_type = func_info.conditional_return.as_ref().and_then(|cond| {
-            let tpl = crate::type_engine::types::conditional::TemplateContext {
+            let tpl = crate::type_engine::type_ops::conditional::TemplateContext {
                 defaults: None,
                 params: &func_info.template_params,
                 bindings: &func_info.template_bindings,
@@ -235,7 +287,7 @@ fn named_function_call<'b>(
                     declaring: None,
                     written_class: Some(&|name: &str| ctx.written_names().resolve_class(name)),
                 },
-                ctx.class_loader,
+                ctx.file.class_loader,
                 &tpl,
             )
         })
@@ -248,7 +300,7 @@ fn named_function_call<'b>(
         .or_else(|| {
             let walker_types = walker_arg_types(argument_list, ctx);
             let arg_ty_resolver = |t: &str| walker_types(t).or_else(|| arg_ty_resolver(t));
-            crate::type_engine::types::call_site_returns::call_site_return_type(
+            crate::type_engine::type_ops::call_site_returns::call_site_return_type(
                 name,
                 &func_info.parameters,
                 &text_args,
@@ -279,7 +331,7 @@ fn named_function_call<'b>(
     if !func_info.template_params.is_empty()
         && let Some(ref ret) = func_info.return_type
     {
-        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.content);
+        let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         let rctx = ctx.as_resolution_ctx();
         let walker_types = walker_arg_types(argument_list, ctx);
         let subs = build_function_template_subs(&func_info, &arg_texts, Some(&walker_types), &rctx);
@@ -288,8 +340,8 @@ fn named_function_call<'b>(
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &substituted,
                 current_class_name,
-                ctx.all_classes,
-                ctx.class_loader,
+                ctx.file.all_classes,
+                ctx.file.class_loader,
             );
             if !resolved.is_empty() {
                 return Some(ResolvedType::from_classes_with_hint(resolved, substituted));
@@ -303,6 +355,22 @@ fn named_function_call<'b>(
         }
     }
 
+    // No return type to go on: read it off the body, as for a method
+    // without one.
+    if func_info.return_type.is_none()
+        && let Some(backend) = ctx.file.backend
+        && let Some(inferred) =
+            crate::type_engine::call_resolution::try_infer_function_body_return_type(
+                backend, &func_info,
+            )
+    {
+        return Some(vec![resolved_type_with_lookup(
+            inferred,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+        )]);
+    }
+
     Some(resolve_return_type(func_info.return_type?, ctx))
 }
 
@@ -310,30 +378,93 @@ fn named_function_call<'b>(
 /// type it holds, an array callable, or its class's `__invoke()`.
 fn variable_invocation(
     var_name: &str,
-    _expr: &Expression<'_>,
+    expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
-    // 1. Resolve the variable's own type.  Closures, arrow functions,
-    //    and first-class callables are all inferred by
-    //    `resolve_rhs_expression` as a `TypeKind::Callable` (see
-    //    `infer_closure_literal_type`), so `$fn`'s embedded return
-    //    type covers `$fn = function(): T {}`, `$fn = fn(): T => …`,
-    //    and `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
-    let var_types = resolve_var_types(var_name, ctx, ctx.cursor_offset);
-    if let Some(resolved) = callable_typed_return(&var_types, ctx) {
+    // Closures, arrow functions, and first-class callables are all
+    // inferred by `resolve_rhs_expression` as a `TypeKind::Callable` (see
+    // `infer_closure_literal_type`), so `$fn`'s embedded return type
+    // covers `$fn = function(): T {}`, `$fn = fn(): T => …`, and
+    // `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
+    let types = resolve_var_types(var_name, ctx, ctx.cursor_offset);
+
+    // That type was read with no arguments, so a template the call's
+    // arguments bind is only bound by making the call the partial
+    // application wraps.
+    if let Expression::Call(Call::Function(call)) = expr
+        && types.iter().any(|rt| rt.type_string.is_closure())
+    {
+        let list = &call.argument_list;
+        let args = ctx
+            .file
+            .content
+            .get(
+                list.left_parenthesis.end.offset as usize
+                    ..list.right_parenthesis.start.offset as usize,
+            )
+            .unwrap_or("");
+        if let Some(wrapped) = Backend::invoked_partial_application_call(
+            var_name,
+            ctx.file.content,
+            expr.span().start.offset,
+            args,
+        ) {
+            let resolved = crate::type_engine::resolver::resolve_target_classes(
+                &wrapped,
+                crate::types::AccessKind::Arrow,
+                &ctx.as_resolution_ctx(),
+            );
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
+    }
+    value_invocation(&types, ctx)
+}
+
+/// What calling a value of one of `types` returns: the callable signature
+/// its type carries, the method an array or `'Class::method'` callable
+/// names, the function a callable string names, or its class's
+/// `__invoke()`.
+pub(super) fn value_invocation(
+    types: &[ResolvedType],
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    if let Some(resolved) = callable_typed_return(types, ctx) {
         return resolved;
     }
-
-    // 2. An array callable, `[$obj, 'method']`, calls the method.
-    for rt in &var_types {
+    for rt in types {
         let resolved = array_callable_return(&rt.type_string, ctx);
         if !resolved.is_empty() {
             return resolved;
         }
+        let resolved = string_callable_return(&rt.type_string, ctx);
+        if !resolved.is_empty() {
+            return resolved;
+        }
     }
+    invoke_method_return(types, ctx)
+}
 
-    // 3. An object with an `__invoke()` method returns what that does.
-    invoke_method_return(&var_types, ctx)
+/// What `call_user_func($callback, …)` and `call_user_func_array($callback,
+/// …)` return: whatever calling `$callback` does.
+fn call_user_func_return(
+    name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let name = name.strip_prefix('\\').unwrap_or(name);
+    if !name.eq_ignore_ascii_case("call_user_func")
+        && !name.eq_ignore_ascii_case("call_user_func_array")
+    {
+        return None;
+    }
+    let callback = crate::call_args::first_param_arg(argument_list, "callback")?;
+    if callback.is_unpacked() {
+        return None;
+    }
+    let resolved = value_invocation(&resolve_rhs_expression(callback.value(), ctx), ctx);
+    (!resolved.is_empty()).then_some(resolved)
 }
 
 /// What `($expr)()` returns when the callee is an arbitrary expression
@@ -352,24 +483,18 @@ fn expression_invocation<'b>(
         let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &parsed_ret_type,
             &ctx.current_class.fqn(),
-            ctx.all_classes,
-            ctx.class_loader,
+            ctx.file.all_classes,
+            ctx.file.class_loader,
         );
         if !resolved.is_empty() {
             return ResolvedType::from_classes_with_hint(resolved, parsed_ret_type);
         }
     }
 
-    let callee_results = resolve_rhs_expression(callee_expr, ctx);
-    // A callable-typed value carries its return type in the type
-    // string itself (`callable(): Scope`, `Closure(): Item`), which is
-    // how a property or a method result annotated that way arrives
-    // here.  Read it the same way the `$fn()` path does before falling
-    // back to `__invoke()`.
-    if let Some(resolved) = callable_typed_return(&callee_results, ctx) {
-        return resolved;
-    }
-    invoke_method_return(&callee_results, ctx)
+    // A callable-typed value carries its return type in the type string
+    // itself (`callable(): Scope`, `Closure(): Item`), which is how a
+    // property or a method result annotated that way arrives here.
+    value_invocation(&resolve_rhs_expression(callee_expr, ctx), ctx)
 }
 
 /// What calling a value of one of `types` returns, read from the callable
@@ -480,43 +605,80 @@ pub(super) fn closure_call_return(
     (!resolved.is_empty()).then_some(resolved)
 }
 
-/// What calling the array callable `callable` (`[$obj, 'method']`) returns.
-///
-/// Only an object in the first slot is read: `['Foo', 'bar']` calls `bar`
-/// statically, which is a different call with rules of its own.
+/// What calling the array callable `callable` (`[$obj, 'method']`,
+/// `[Foo::class, 'method']`) returns.
 fn array_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
-    let Some([receiver, method]) = callable.shape_entries() else {
-        return vec![];
-    };
-    let positional = |entry: &crate::php_type::ShapeEntry, index: &str| {
-        !entry.optional && entry.key.as_deref().is_none_or(|k| k == index)
-    };
-    if !positional(receiver, "0") || !positional(method, "1") {
-        return vec![];
-    }
-    let TypeKind::Literal(literal) = method.value_type.kind() else {
-        return vec![];
-    };
-    let Some(method_name) = literal.string_content() else {
-        return vec![];
-    };
-    if !receiver.value_type.is_object_like() {
-        return vec![];
-    }
-    let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-        &receiver.value_type,
+    crate::type_engine::call_resolution::array_callable_return_type(
+        callable,
+        &ctx.file,
         &ctx.current_class.fqn(),
-        ctx.all_classes,
-        ctx.class_loader,
-    );
-    for owner in &owners {
+        ctx.resolved_class_cache,
+    )
+    .map(|ret| callable_return_resolution(&ret, ctx))
+    .unwrap_or_default()
+}
+
+/// What calling the callable string `callable` returns: the function
+/// `'strlen'` names, or the static method `'Foo::bar'` names.
+///
+/// PHP reads a callable string as a fully qualified name, whatever
+/// namespace the string is written in.
+fn string_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
+    let TypeKind::Literal(literal) = callable.kind() else {
+        return vec![];
+    };
+    let Some(text) = literal.string_content() else {
+        return vec![];
+    };
+    let is_name = |name: &str| {
+        !name.is_empty()
+            && !name.starts_with(|c: char| c.is_ascii_digit())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\' || !c.is_ascii())
+    };
+    let text = text.trim_start_matches('\\');
+    if let Some((class, method)) = text.split_once("::") {
+        if !is_name(class) || !is_name(method) {
+            return vec![];
+        }
+        let owners: Vec<_> = (ctx.file.class_loader)(crate::class_lookup::Fqn::new(class))
+            .into_iter()
+            .collect();
+        return class_method_return(&owners, method, true, ctx);
+    }
+    if !is_name(text) {
+        return vec![];
+    }
+    let Some(function_loader) = ctx.function_loader() else {
+        return vec![];
+    };
+    function_loader(&format!("\\{text}"), 0)
+        .and_then(|f| f.return_type)
+        .map(|ret| callable_return_resolution(&ret, ctx))
+        .unwrap_or_default()
+}
+
+/// What calling `method_name` on the first of `owners` that has it returns.
+///
+/// A callable that names the class rather than an object (`[Foo::class,
+/// 'bar']`, `'Foo::bar'`) calls the method statically, which PHP refuses
+/// for an instance method, so `statically` admits only a `static` one.
+fn class_method_return(
+    owners: &[std::sync::Arc<crate::types::ClassInfo>],
+    method_name: &str,
+    statically: bool,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    for owner in owners {
         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
             owner,
-            ctx.class_loader,
+            ctx.file.class_loader,
             ctx.resolved_class_cache,
         );
         if let Some(ret) = merged
-            .get_method(&method_name)
+            .get_method(method_name)
+            .filter(|m| m.is_static || !statically)
             .and_then(|m| m.return_type.as_ref())
         {
             let ret = ret.replace_self_bound(&owner.fqn(), None);

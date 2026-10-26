@@ -1,5 +1,6 @@
 use super::*;
 use crate::atom::atom;
+use crate::class_lookup::Fqn;
 use crate::php_type::PhpType;
 use crate::test_fixtures::{make_class, make_method, no_loader};
 use crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN;
@@ -262,7 +263,8 @@ fn cast_unknown_type_falls_back_to_mixed() {
 
 #[test]
 fn cast_custom_class_with_get_method() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\MoneyCast" {
             let mut cast_class = make_class("MoneyCast");
             cast_class
@@ -281,7 +283,8 @@ fn cast_custom_class_with_get_method() {
 
 #[test]
 fn cast_custom_class_canonical_fqn() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\MoneyCast" {
             let mut cast_class = make_class("MoneyCast");
             cast_class
@@ -302,7 +305,8 @@ fn cast_custom_class_canonical_fqn() {
 
 #[test]
 fn cast_custom_class_without_get_returns_mixed() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\WeirdCast" {
             Some(Arc::new(make_class("WeirdCast")))
         } else {
@@ -319,7 +323,8 @@ fn cast_custom_class_without_get_returns_mixed() {
 
 #[test]
 fn cast_enum_resolves_to_enum_class() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Enums\\Status" {
             let mut e = make_class("Status");
             e.kind = ClassLikeKind::Enum;
@@ -336,7 +341,8 @@ fn cast_enum_resolves_to_enum_class() {
 
 #[test]
 fn cast_enum_canonical_fqn() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Enums\\Status" {
             let mut e = make_class("Status");
             e.kind = ClassLikeKind::Enum;
@@ -357,7 +363,8 @@ fn cast_enum_canonical_fqn() {
 
 #[test]
 fn cast_castable_resolves_to_class_itself() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\Address" {
             let mut c = make_class("Address");
             c.interfaces = vec![atom(CASTABLE_FQN)];
@@ -374,7 +381,8 @@ fn cast_castable_resolves_to_class_itself() {
 
 #[test]
 fn cast_castable_with_fqn_interface() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\Address" {
             let mut c = make_class("Address");
             c.interfaces = vec![atom(CASTABLE_FQN)];
@@ -391,7 +399,8 @@ fn cast_castable_with_fqn_interface() {
 
 #[test]
 fn cast_castable_short_interface_name() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\Address" {
             let mut c = make_class("Address");
             c.interfaces = vec![atom("Castable")];
@@ -410,7 +419,8 @@ fn cast_castable_short_interface_name() {
 
 #[test]
 fn cast_class_with_colon_argument_suffix() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\Address" {
             let mut c = make_class("Address");
             c.interfaces = vec![atom(CASTABLE_FQN)];
@@ -427,7 +437,8 @@ fn cast_class_with_colon_argument_suffix() {
 
 #[test]
 fn cast_enum_with_colon_argument_suffix() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Enums\\Status" {
             let mut e = make_class("Status");
             e.kind = ClassLikeKind::Enum;
@@ -444,7 +455,8 @@ fn cast_enum_with_colon_argument_suffix() {
 
 #[test]
 fn cast_custom_class_with_colon_argument_and_get() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\MoneyCast" {
             let mut cast_class = make_class("MoneyCast");
             cast_class
@@ -571,7 +583,8 @@ fn tget_skips_empty_string_arg() {
 
 #[test]
 fn cast_custom_class_falls_back_to_implements_generics() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\HtmlCast" {
             let mut cast_class = make_class("HtmlCast");
             // get() has no return type — mimics the real scenario.
@@ -593,7 +606,8 @@ fn cast_custom_class_falls_back_to_implements_generics() {
 
 #[test]
 fn cast_implements_generics_take_priority_over_get_return_type() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\HtmlCast" {
             let mut cast_class = make_class("HtmlCast");
             cast_class
@@ -621,7 +635,8 @@ fn cast_implements_generics_take_priority_over_get_return_type() {
 
 #[test]
 fn cast_get_return_type_used_when_no_implements_generics() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\HtmlCast" {
             let mut cast_class = make_class("HtmlCast");
             cast_class
@@ -763,7 +778,8 @@ fn scalar_framework_casts_map_to_the_value_they_return() {
 
 #[test]
 fn a_user_class_sharing_a_framework_cast_name_is_not_rewritten() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "App\\Casts\\AsCollection" {
             let mut c = make_class("AsCollection");
             c.interfaces = vec![atom(CASTABLE_FQN)];
@@ -780,7 +796,8 @@ fn a_user_class_sharing_a_framework_cast_name_is_not_rewritten() {
 
 #[test]
 fn framework_cast_wins_over_the_castable_rule() {
-    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+    let loader = |name: Fqn<'_>| -> Option<Arc<ClassInfo>> {
+        let name = name.as_str();
         if name == "Illuminate\\Database\\Eloquent\\Casts\\AsEnumCollection" {
             let mut c = make_class("AsEnumCollection");
             c.interfaces = vec![atom(CASTABLE_FQN)];

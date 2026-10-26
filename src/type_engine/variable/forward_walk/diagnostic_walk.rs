@@ -8,10 +8,11 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 
 use crate::atom::bytes_to_str;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::parser::with_parsed_program;
-use crate::type_engine::resolver::Loaders;
+use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::types::ClassInfo;
-use crate::types::{BlockClassLoaders, BlockImports};
+use crate::types::{BlockClassLoaders, BlockImports, BlockResolvedClassLoaders};
 
 #[cfg(test)]
 thread_local! {
@@ -44,7 +45,7 @@ pub(crate) fn test_body_walks() -> usize {
 pub(crate) fn build_diagnostic_scopes(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loaders: &BlockClassLoaders<'_>,
+    class_loaders: &BlockResolvedClassLoaders<'_>,
     source_class_loaders: &BlockClassLoaders<'_>,
     block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
@@ -97,7 +98,7 @@ pub(crate) fn build_diagnostic_scopes(
 pub(crate) fn build_diagnostic_scopes_for_offsets(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loaders: &BlockClassLoaders<'_>,
+    class_loaders: &BlockResolvedClassLoaders<'_>,
     source_class_loaders: &BlockClassLoaders<'_>,
     block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
@@ -150,7 +151,7 @@ fn scopes_populated() -> bool {
 fn walk_file_for_scopes(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loaders: &BlockClassLoaders<'_>,
+    class_loaders: &BlockResolvedClassLoaders<'_>,
     source_class_loaders: &BlockClassLoaders<'_>,
     block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
@@ -165,6 +166,7 @@ fn walk_file_for_scopes(
     let _building_guard = BuildingScopesGuard;
 
     let default_class = crate::class_lookup::placeholder_in_namespace(None);
+    let flow = WalkFlow::collecting_unreachable();
     let diag_ctx = DiagnosticWalkCtx {
         content,
         local_classes,
@@ -179,6 +181,7 @@ fn walk_file_for_scopes(
         resolved_class_cache,
         targets,
         globals: None,
+        flow: &flow,
     };
 
     with_parsed_program(content, "build_diagnostic_scopes", |program, _content| {
@@ -187,6 +190,7 @@ fn walk_file_for_scopes(
         // foreach, etc.) that lives outside any function body.
         walk_top_level_statements(program.statements.iter(), &default_class, &diag_ctx);
     });
+    record_scope_unreachable(flow.into_unreachable());
 }
 
 /// Walk a sequence of top-level (or namespace-level) statements,
@@ -220,19 +224,31 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
         }
         None => diag_ctx,
     };
-    let ctx = diag_ctx.forward_walk_ctx(default_class);
 
     let mut top_level_scope = ScopeState::new();
 
     // Seed superglobals for top-level code.
     seed_superglobals(&mut top_level_scope);
 
+    walk_top_level_block(statements, default_class, diag_ctx, &mut top_level_scope);
+}
+
+/// Walk one run of top-level statements (the file's, or one braced
+/// `namespace` block's) on the file's global scope, which PHP shares
+/// across every `namespace` block in the file.
+fn walk_top_level_block<'b>(
+    statements: Vec<&'b Statement<'b>>,
+    default_class: &ClassInfo,
+    diag_ctx: &DiagnosticWalkCtx<'_>,
+    top_level_scope: &mut ScopeState,
+) {
+    let ctx = diag_ctx.forward_walk_ctx(default_class);
     let last_target = diag_ctx.last_target();
 
     for stmt in statements {
         match stmt {
             Statement::Namespace(ns) => {
-                // Recurse into namespace body with a fresh scope.  The
+                // Recurse into the namespace body on the same scope.  The
                 // stand-in class carries the block's namespace so that
                 // source-level class references inside a plain function
                 // resolve against it, the way they do inside a method.
@@ -246,7 +262,12 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                     source_imports: diag_ctx.block_imports.at(ns.span().start.offset),
                     ..*diag_ctx
                 };
-                walk_top_level_statements(ns.statements().iter(), &ns_class, &block_ctx);
+                walk_top_level_block(
+                    ns.statements().iter().collect(),
+                    &ns_class,
+                    &block_ctx,
+                    top_level_scope,
+                );
             }
             _ if let Some(body) = crate::parser::class_like_body(stmt) => {
                 if !diag_ctx.wants(stmt.span()) {
@@ -281,11 +302,11 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
             Statement::If(_) => {
                 if stmt.span().start.offset <= last_target {
                     diag_ctx.mark_walked(stmt.span());
-                    record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                    record_scope_snapshot(stmt.span().start.offset, top_level_scope);
                     let pre_stmt_scope = top_level_scope.clone();
-                    process_statement(stmt, &mut top_level_scope, &ctx);
-                    walk_closures_in_statement(stmt, &pre_stmt_scope, &top_level_scope, &ctx);
-                    record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
+                    process_statement(stmt, top_level_scope, &ctx);
+                    walk_closures_in_statement(stmt, &pre_stmt_scope, top_level_scope, &ctx);
+                    record_scope_snapshot(stmt.span().end.offset, top_level_scope);
                 }
                 if diag_ctx.wants(stmt.span()) {
                     walk_functions_in_if(stmt, default_class, diag_ctx);
@@ -304,11 +325,11 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                     continue;
                 }
                 diag_ctx.mark_walked(stmt.span());
-                record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                record_scope_snapshot(stmt.span().start.offset, top_level_scope);
                 let pre_stmt_scope = top_level_scope.clone();
-                process_statement(stmt, &mut top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &pre_stmt_scope, &top_level_scope, &ctx);
-                record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
+                process_statement(stmt, top_level_scope, &ctx);
+                walk_closures_in_statement(stmt, &pre_stmt_scope, top_level_scope, &ctx);
+                record_scope_snapshot(stmt.span().end.offset, top_level_scope);
             }
         }
     }
@@ -442,13 +463,13 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     content: &'a str,
     local_classes: &'a [Arc<ClassInfo>],
     /// The loader for the `namespace` block being walked.
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loader: &'a ResolvedClassLoader<'a>,
     /// The block's loader for names as written in source.
     source_class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     /// The block's `use` imports.
     source_imports: &'a std::collections::HashMap<String, String>,
     /// Every block's loader, to switch to at a block boundary.
-    class_loaders: &'a BlockClassLoaders<'a>,
+    class_loaders: &'a BlockResolvedClassLoaders<'a>,
     source_class_loaders: &'a BlockClassLoaders<'a>,
     block_imports: &'a BlockImports<'a>,
     backend: Option<&'a crate::Backend>,
@@ -461,6 +482,9 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     /// body imports.  `None` until the top-level walk has built them, and
     /// in a file that never says `global`.
     globals: Option<&'a Locals>,
+    /// The control-flow state every body in the file is walked on; it
+    /// collects the branches the walk proves cannot run.
+    flow: &'a WalkFlow,
 }
 
 impl<'a> DiagnosticWalkCtx<'a> {
@@ -496,21 +520,22 @@ impl<'a> DiagnosticWalkCtx<'a> {
     /// cursor is past the end of every body it visits.
     fn forward_walk_ctx<'c>(&'c self, current_class: &'c ClassInfo) -> ForwardWalkCtx<'c> {
         ForwardWalkCtx {
-            current_class,
-            all_classes: self.local_classes,
-            content: self.content,
-            cursor_offset: u32::MAX,
-            class_loader: self.class_loader,
-            source_class_loader: self.source_class_loader,
-            source_imports: Some(self.source_imports),
-            backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
-            enclosing_return_type: None,
             top_level_scope: self.globals.cloned(),
-            in_loop: false,
-            template_markers: None,
-            cursor_scope: None,
+            ..ForwardWalkCtx::new(
+                FileCtx::new(
+                    self.content,
+                    self.local_classes,
+                    self.class_loader,
+                    self.source_class_loader,
+                )
+                .with_imports(Some(self.source_imports))
+                .with_backend(self.backend),
+                current_class,
+                u32::MAX,
+                self.flow,
+            )
         }
     }
 }
@@ -579,7 +604,7 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
     // the walk sees the anonymous class's real members instead of the
     // enclosing class.
     let anon_name = format!("__anonymous@{}", anon.left_brace.start.offset);
-    let Some(anon_class) = ctx.all_classes.iter().find(|c| *c.name == anon_name) else {
+    let Some(anon_class) = ctx.file.all_classes.iter().find(|c| *c.name == anon_name) else {
         return;
     };
 

@@ -1,8 +1,8 @@
 use crate::common::{
-    assert_assigned_types_on, create_psr4_workspace, create_test_backend, workspace_uri,
+    assert_assigned_types_on, completion_response, create_psr4_workspace, create_test_backend,
+    open_php, workspace_uri,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ fn labels_by_kind(items: &[CompletionItem], kind: CompletionItemKind) -> Vec<&st
 async fn test_phpstan_type_array_shape_key_completion() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///type_alias_shape.php").unwrap();
+    let uri = Uri::parse("file:///type_alias_shape.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -41,39 +41,16 @@ async fn test_phpstan_type_array_shape_key_completion() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 11,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 11, 15, None).await;
 
     assert!(
         result.is_some(),
         "Should return array key completions for @phpstan-type alias"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let keys: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 keys.contains(&"name"),
@@ -91,7 +68,10 @@ async fn test_phpstan_type_array_shape_key_completion() {
                 keys
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -103,7 +83,7 @@ async fn test_phpstan_type_array_shape_key_completion() {
 async fn test_phpstan_type_class_alias_member_completion() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///type_alias_class.php").unwrap();
+    let uri = Uri::parse("file:///type_alias_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -125,40 +105,17 @@ async fn test_phpstan_type_class_alias_member_completion() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 15,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 15, 12, None).await;
 
     assert!(
         result.is_some(),
         "Should return class member completions for @phpstan-type alias"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let methods = labels_by_kind(&items, CompletionItemKind::METHOD);
+        CompletionResponse::CompletionItemList(items) => {
+            let methods = labels_by_kind(&items, CompletionItemKind::Method);
             assert!(
                 methods.contains(&"getName"),
                 "Should include User::getName(), got: {:?}",
@@ -170,7 +127,10 @@ async fn test_phpstan_type_class_alias_member_completion() {
                 methods
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -181,7 +141,7 @@ async fn test_phpstan_type_class_alias_member_completion() {
 async fn test_psalm_type_alias_works() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///psalm_type.php").unwrap();
+    let uri = Uri::parse("file:///psalm_type.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -202,47 +162,27 @@ async fn test_psalm_type_alias_works() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 14,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 14, 15, None).await;
 
     assert!(
         result.is_some(),
         "Should return completions for @psalm-type alias"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let methods = labels_by_kind(&items, CompletionItemKind::METHOD);
+        CompletionResponse::CompletionItemList(items) => {
+            let methods = labels_by_kind(&items, CompletionItemKind::Method);
             assert!(
                 methods.contains(&"getTotal"),
                 "Should include Order::getTotal(), got: {:?}",
                 methods
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -258,7 +198,7 @@ async fn test_psalm_type_alias_works() {
 async fn test_psalm_type_chained_named_aliases_nested_key_completion() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chained_named_aliases.php").unwrap();
+    let uri = Uri::parse("file:///chained_named_aliases.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -281,48 +221,28 @@ async fn test_psalm_type_chained_named_aliases_nested_key_completion() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // `$val['baz']['qux']['` on line 16
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 16,
-                    character: 28,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 16, 28, None).await;
 
     assert!(
         result.is_some(),
         "Should return array key completions through chained named aliases"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let keys = labels_by_kind(&items, CompletionItemKind::FIELD);
+        CompletionResponse::CompletionItemList(items) => {
+            let keys = labels_by_kind(&items, CompletionItemKind::Field);
             assert!(
                 keys.contains(&"foo"),
                 "Should include 'foo' from the Qux alias at the end of the chain, got: {:?}",
                 keys
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -334,7 +254,7 @@ async fn test_psalm_type_chained_named_aliases_nested_key_completion() {
 async fn test_phpstan_type_with_equals_separator() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///type_alias_eq.php").unwrap();
+    let uri = Uri::parse("file:///type_alias_eq.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -352,39 +272,16 @@ async fn test_phpstan_type_with_equals_separator() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 11,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 11, 14, None).await;
 
     assert!(
         result.is_some(),
         "Should return array key completions for @phpstan-type alias with '=' separator"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let keys: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 keys.contains(&"host"),
@@ -397,7 +294,10 @@ async fn test_phpstan_type_with_equals_separator() {
                 keys
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -409,7 +309,7 @@ async fn test_phpstan_type_with_equals_separator() {
 async fn test_phpstan_type_union_alias() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///type_alias_union.php").unwrap();
+    let uri = Uri::parse("file:///type_alias_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Cat {\n",
@@ -433,40 +333,17 @@ async fn test_phpstan_type_union_alias() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 17,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 17, 14, None).await;
 
     assert!(
         result.is_some(),
         "Should return completions for union @phpstan-type alias"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let methods = labels_by_kind(&items, CompletionItemKind::METHOD);
+        CompletionResponse::CompletionItemList(items) => {
+            let methods = labels_by_kind(&items, CompletionItemKind::Method);
             assert!(
                 methods.contains(&"purr"),
                 "Should include Cat::purr(), got: {:?}",
@@ -478,7 +355,10 @@ async fn test_phpstan_type_union_alias() {
                 methods
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -490,7 +370,7 @@ async fn test_phpstan_type_union_alias() {
 async fn test_phpstan_type_alias_in_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///type_alias_param.php").unwrap();
+    let uri = Uri::parse("file:///type_alias_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Invoice {\n",
@@ -509,47 +389,27 @@ async fn test_phpstan_type_alias_in_param() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 12,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 12, 15, None).await;
 
     assert!(
         result.is_some(),
         "Should return completions for @param with @phpstan-type alias"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let methods = labels_by_kind(&items, CompletionItemKind::METHOD);
+        CompletionResponse::CompletionItemList(items) => {
+            let methods = labels_by_kind(&items, CompletionItemKind::Method);
             assert!(
                 methods.contains(&"getAmount"),
                 "Should include Invoice::getAmount(), got: {:?}",
                 methods
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -561,7 +421,7 @@ async fn test_phpstan_type_alias_in_param() {
 async fn test_phpstan_type_multiple_aliases() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multi_alias.php").unwrap();
+    let uri = Uri::parse("file:///multi_alias.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -578,39 +438,16 @@ async fn test_phpstan_type_multiple_aliases() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 15, None).await;
 
     assert!(
         result.is_some(),
         "Should return keys from ResponseData (not RequestData)"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let keys: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 keys.contains(&"status"),
@@ -629,7 +466,10 @@ async fn test_phpstan_type_multiple_aliases() {
                 keys
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -640,7 +480,7 @@ async fn test_phpstan_type_multiple_aliases() {
 async fn test_phpstan_import_type_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///import_type.php").unwrap();
+    let uri = Uri::parse("file:///import_type.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -664,47 +504,27 @@ async fn test_phpstan_import_type_same_file() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 17,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 17, 14, None).await;
 
     assert!(
         result.is_some(),
         "Should return completions for @phpstan-import-type alias"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let methods = labels_by_kind(&items, CompletionItemKind::METHOD);
+        CompletionResponse::CompletionItemList(items) => {
+            let methods = labels_by_kind(&items, CompletionItemKind::Method);
             assert!(
                 methods.contains(&"getCity"),
                 "Should include Address::getCity() via imported Location alias, got: {:?}",
                 methods
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -722,7 +542,7 @@ async fn test_phpstan_import_type_same_file() {
 async fn test_phpstan_import_type_via_template_implements() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///import_type_template_implements.php").unwrap();
+    let uri = Uri::parse("file:///import_type_template_implements.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -748,41 +568,18 @@ async fn test_phpstan_import_type_via_template_implements() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
     // `$configuration['` on line 19
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 19,
-                    character: 31,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 19, 31, None).await;
 
     assert!(
         result.is_some(),
         "Should return array key completions through template-implements + imported alias"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let keys = labels_by_kind(&items, CompletionItemKind::FIELD);
+        CompletionResponse::CompletionItemList(items) => {
+            let keys = labels_by_kind(&items, CompletionItemKind::Field);
             assert!(
                 keys.contains(&"name"),
                 "Should include 'name' from the imported MyConfiguration shape, got: {:?}",
@@ -794,7 +591,10 @@ async fn test_phpstan_import_type_via_template_implements() {
                 keys
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -806,7 +606,7 @@ async fn test_phpstan_import_type_via_template_implements() {
 async fn test_phpstan_import_type_with_as_rename() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///import_as.php").unwrap();
+    let uri = Uri::parse("file:///import_as.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -830,47 +630,27 @@ async fn test_phpstan_import_type_with_as_rename() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 17,
-                    character: 15,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 17, 15, None).await;
 
     assert!(
         result.is_some(),
         "Should return completions for @phpstan-import-type with 'as' rename"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let methods = labels_by_kind(&items, CompletionItemKind::METHOD);
+        CompletionResponse::CompletionItemList(items) => {
+            let methods = labels_by_kind(&items, CompletionItemKind::Method);
             assert!(
                 methods.contains(&"getPrice"),
                 "Should include Product::getPrice() via CartItem alias, got: {:?}",
                 methods
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -895,7 +675,7 @@ async fn test_phpstan_import_type_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///consumer.php").unwrap();
+    let uri = Uri::parse("file:///consumer.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Config;\n",
@@ -912,39 +692,16 @@ async fn test_phpstan_import_type_cross_file() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 10,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 10, 14, None).await;
 
     assert!(
         result.is_some(),
         "Should return array key completions for cross-file @phpstan-import-type"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let keys: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 keys.contains(&"host"),
@@ -962,7 +719,10 @@ async fn test_phpstan_import_type_cross_file() {
                 keys
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -1302,7 +1062,7 @@ function f(Tree $t) {
 async fn test_phpstan_type_object_shape_alias() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///type_alias_objshape.php").unwrap();
+    let uri = Uri::parse("file:///type_alias_objshape.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1320,40 +1080,17 @@ async fn test_phpstan_type_object_shape_alias() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 11,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 11, 12, None).await;
 
     assert!(
         result.is_some(),
         "Should return property completions for object shape @phpstan-type alias"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let props = labels_by_kind(&items, CompletionItemKind::PROPERTY);
+        CompletionResponse::CompletionItemList(items) => {
+            let props = labels_by_kind(&items, CompletionItemKind::Property);
             assert!(
                 props.contains(&"x"),
                 "Should include 'x' property, got: {:?}",
@@ -1365,7 +1102,10 @@ async fn test_phpstan_type_object_shape_alias() {
                 props
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -1377,7 +1117,7 @@ async fn test_phpstan_type_object_shape_alias() {
 async fn test_phpstan_type_from_different_class_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///alias_other_class.php").unwrap();
+    let uri = Uri::parse("file:///alias_other_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -1398,47 +1138,27 @@ async fn test_phpstan_type_from_different_class_same_file() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 14,
-                    character: 12,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 14, 12, None).await;
 
     assert!(
         result.is_some(),
         "Should return completions from alias on different class in same file"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let methods = labels_by_kind(&items, CompletionItemKind::METHOD);
+        CompletionResponse::CompletionItemList(items) => {
+            let methods = labels_by_kind(&items, CompletionItemKind::Method);
             assert!(
                 methods.contains(&"render"),
                 "Should include Widget::render() via Renderable alias, got: {:?}",
                 methods
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 
@@ -1449,7 +1169,7 @@ async fn test_phpstan_type_from_different_class_same_file() {
 async fn test_phpstan_type_alias_in_var_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///alias_var.php").unwrap();
+    let uri = Uri::parse("file:///alias_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -1467,47 +1187,27 @@ async fn test_phpstan_type_alias_in_var_annotation() {
         "}\n",
     );
 
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, text).await;
 
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position {
-                    line: 11,
-                    character: 14,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
+    let result = completion_response(&backend, &uri, 11, 14, None).await;
 
     assert!(
         result.is_some(),
         "Should return completions for @var with @phpstan-type alias"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
-            let methods = labels_by_kind(&items, CompletionItemKind::METHOD);
+        CompletionResponse::CompletionItemList(items) => {
+            let methods = labels_by_kind(&items, CompletionItemKind::Method);
             assert!(
                 methods.contains(&"info"),
                 "Should include Logger::info() via LoggerInstance alias, got: {:?}",
                 methods
             );
         }
-        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+        other => panic!(
+            "Expected CompletionResponse::CompletionItemList, got: {:?}",
+            other
+        ),
     }
 }
 

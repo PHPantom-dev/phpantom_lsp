@@ -6,13 +6,14 @@
 //! (the same semantics the per-request clone had as individual fields).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::RwLock;
 
 use crate::ci_map::{CiMap, CiSet};
+use crate::classmap_scanner::WorkspaceScanResult;
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo};
 use crate::{ClassCompletionOrigin, UriGlobals};
 
@@ -43,17 +44,20 @@ pub(crate) struct SymbolIndex {
     pub(crate) uri_globals_index: Arc<RwLock<HashMap<String, UriGlobals>>>,
     /// Autoload function index: function FQN → file path on disk.
     pub(crate) autoload_function_index: Arc<RwLock<CiMap<PathBuf>>>,
-    /// Completion provenance for autoloaded function symbols.
+    /// Completion provenance for autoloaded function symbols.  A name with
+    /// no entry is project code.
     pub(crate) autoload_function_origin_index: Arc<RwLock<CiMap<ClassCompletionOrigin>>>,
     /// Autoload constant index: constant name → file path on disk.
     pub(crate) autoload_constant_index: Arc<RwLock<HashMap<String, PathBuf>>>,
-    /// Completion provenance for autoloaded constant symbols.
+    /// Completion provenance for autoloaded constant symbols.  A name with
+    /// no entry is project code.
     pub(crate) autoload_constant_origin_index: Arc<RwLock<HashMap<String, ClassCompletionOrigin>>>,
     /// Paths of all files discovered through Composer's `autoload_files.php`.
     pub(crate) autoload_file_paths: Arc<RwLock<Vec<PathBuf>>>,
     /// Index of fully-qualified class names to file URIs.
     pub(crate) fqn_uri_index: Arc<RwLock<CiMap<String>>>,
-    /// Completion provenance for fully-qualified class names.
+    /// Completion provenance for fully-qualified class names.  A name with
+    /// no entry is project code.
     pub(crate) fqn_origin_index: Arc<RwLock<CiMap<ClassCompletionOrigin>>>,
     /// Secondary index mapping FQNs directly to their parsed `ClassInfo`.
     pub(crate) fqn_class_index: Arc<RwLock<CiMap<Arc<ClassInfo>>>>,
@@ -218,6 +222,296 @@ impl SymbolIndex {
             classes: &mut classes,
             dupes: &mut dupes,
         })
+    }
+}
+
+/// What a merge does with a name the index already holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OnConflict {
+    /// Keep the entry already there, so the scan that ran first wins.
+    Keep,
+    /// Take the scan's entry, for a rescan that supersedes what was indexed
+    /// before.
+    Replace,
+}
+
+impl SymbolIndex {
+    /// Merge what a discovery scan found into the class, function and
+    /// constant indexes, keeping every entry already there.
+    ///
+    /// Each scan only fills the gaps the ones before it left, so the order
+    /// the discovery pipelines run in is their priority.  An origin is
+    /// recorded only beside the location the index keeps, so it always
+    /// describes the file the symbol resolves to: a scan that finds a name
+    /// already indexed at another file leaves that entry's origin alone,
+    /// and one that finds it at the same file refreshes it.  A name the
+    /// scan has no origin for leaves the origin maps untouched.
+    pub(crate) fn merge_scan(&self, scan: WorkspaceScanResult) {
+        self.merge_keeping(scan, crate::util::path_to_uri);
+    }
+
+    /// [`merge_scan`](Self::merge_scan) for the classes of the PHAR
+    /// archive at `phar_path`, whose classmap paths name entries inside
+    /// the archive.
+    pub(crate) fn merge_phar_scan(&self, scan: WorkspaceScanResult, phar_path: &Path) {
+        self.merge_keeping(scan, |entry| crate::util::phar_entry_uri(phar_path, entry));
+    }
+
+    /// Replace what the indexes hold under the directory `tree` (given in
+    /// every spelling it has; a file stands for itself) with what a rescan
+    /// of it found.
+    ///
+    /// Each index is purged and refilled under one hold of its lock, so a
+    /// lookup never sees the tree half gone.  The rescan's entries replace
+    /// any already there, so a name the purge did not reach (one indexed
+    /// under another spelling of the same file) still ends up where the
+    /// rescan found it.
+    pub(crate) fn replace_tree(&self, tree: &[PathBuf], scan: WorkspaceScanResult) {
+        let WorkspaceScanResult {
+            classmap,
+            class_origins,
+            function_index,
+            function_origins,
+            constant_index,
+            constant_origins,
+            package_roots: _,
+        } = scan;
+        // An entry of `tree` may also be a single file, which its own URI
+        // matches exactly.
+        let uri_prefixes: Vec<(String, String)> = tree
+            .iter()
+            .map(|dir| {
+                (
+                    crate::util::path_to_uri(dir),
+                    crate::util::dir_uri_prefix(dir),
+                )
+            })
+            .collect();
+        let in_tree = |path: &PathBuf| tree.iter().any(|dir| path.starts_with(dir));
+        {
+            let mut index = self.fqn_uri_index.write();
+            index.retain(|_, uri| {
+                !uri_prefixes
+                    .iter()
+                    .any(|(exact, prefix)| uri == exact || uri.starts_with(prefix.as_str()))
+            });
+            merge_into(
+                &mut *index,
+                &mut *self.fqn_origin_index.write(),
+                classmap,
+                class_origins,
+                crate::util::path_to_uri,
+                OnConflict::Replace,
+            );
+        }
+        {
+            let mut index = self.autoload_function_index.write();
+            index.retain(|_, path| !in_tree(path));
+            merge_into(
+                &mut *index,
+                &mut *self.autoload_function_origin_index.write(),
+                function_index,
+                function_origins,
+                Path::to_path_buf,
+                OnConflict::Replace,
+            );
+        }
+        {
+            let mut index = self.autoload_constant_index.write();
+            index.retain(|_, path| !in_tree(path));
+            merge_into(
+                &mut *index,
+                &mut *self.autoload_constant_origin_index.write(),
+                constant_index,
+                constant_origins,
+                Path::to_path_buf,
+                OnConflict::Replace,
+            );
+        }
+        self.prune_orphaned_origins();
+    }
+
+    /// The merge behind [`merge_scan`](Self::merge_scan) and
+    /// [`merge_phar_scan`](Self::merge_phar_scan).  `class_uri` names the
+    /// URI a class's file is indexed under.
+    fn merge_keeping(&self, scan: WorkspaceScanResult, class_uri: impl Fn(&Path) -> String) {
+        let WorkspaceScanResult {
+            classmap,
+            class_origins,
+            function_index,
+            function_origins,
+            constant_index,
+            constant_origins,
+            package_roots: _,
+        } = scan;
+        if !classmap.is_empty() {
+            merge_into(
+                &mut *self.fqn_uri_index.write(),
+                &mut *self.fqn_origin_index.write(),
+                classmap,
+                class_origins,
+                class_uri,
+                OnConflict::Keep,
+            );
+        }
+        if !function_index.is_empty() {
+            merge_into(
+                &mut *self.autoload_function_index.write(),
+                &mut *self.autoload_function_origin_index.write(),
+                function_index,
+                function_origins,
+                Path::to_path_buf,
+                OnConflict::Keep,
+            );
+        }
+        if !constant_index.is_empty() {
+            merge_into(
+                &mut *self.autoload_constant_index.write(),
+                &mut *self.autoload_constant_origin_index.write(),
+                constant_index,
+                constant_origins,
+                Path::to_path_buf,
+                OnConflict::Keep,
+            );
+        }
+    }
+}
+
+/// Merge one kind of symbol into its index and origin map.  `location`
+/// turns a scanned path into what the index stores, and is only called
+/// when the index needs it.
+fn merge_into<V: PartialEq>(
+    index: &mut impl NameMap<V>,
+    origins: &mut impl NameMap<ClassCompletionOrigin>,
+    entries: HashMap<String, PathBuf>,
+    mut scan_origins: HashMap<String, ClassCompletionOrigin>,
+    location: impl Fn(&Path) -> V,
+    on_conflict: OnConflict,
+) {
+    for (name, path) in entries {
+        let origin = scan_origins.remove_entry(&name);
+        match on_conflict {
+            OnConflict::Replace => {
+                match origin {
+                    Some((key, origin)) => set_origin(origins, key, origin),
+                    // Whatever origin the replaced entry had described its
+                    // own file.
+                    None => origins.remove(&name),
+                }
+                index.insert(name, location(&path));
+            }
+            OnConflict::Keep => match index.try_insert_with(name, || location(&path)) {
+                // A name new to the index has no origin of its own to clear.
+                Ok(()) => {
+                    if let Some((key, origin)) = origin
+                        && origin != ClassCompletionOrigin::Project
+                    {
+                        origins.insert(key, origin);
+                    }
+                }
+                // Already indexed.  Only a scan that found the same file
+                // may refresh the origin, and its location is only worked
+                // out when the refresh would change something.
+                Err((name, existing)) => {
+                    if let Some((key, origin)) = origin
+                        && recorded_origin(origins, &name) != origin
+                        && *existing == location(&path)
+                    {
+                        set_origin(origins, key, origin);
+                    }
+                }
+            },
+        }
+    }
+}
+
+/// The origin recorded for `name`.
+fn recorded_origin(
+    origins: &impl NameMap<ClassCompletionOrigin>,
+    name: &str,
+) -> ClassCompletionOrigin {
+    origins.get(name).copied().unwrap_or_default()
+}
+
+/// Record `origin` for `name`.  Project code is what every reader falls
+/// back to, so it is recorded by having no entry, which keeps the origin
+/// maps the size of the vendor tree rather than of the whole index.
+fn set_origin(
+    origins: &mut impl NameMap<ClassCompletionOrigin>,
+    name: String,
+    origin: ClassCompletionOrigin,
+) {
+    if origin == ClassCompletionOrigin::Project {
+        origins.remove(&name);
+    } else {
+        origins.insert(name, origin);
+    }
+}
+
+/// The two map shapes the discovery indexes come in: [`CiMap`] for the
+/// class and function names PHP folds, a plain `HashMap` for constant
+/// names, which it does not.
+trait NameMap<V> {
+    fn get(&self, name: &str) -> Option<&V>;
+    /// Insert `make()` under `name` unless an entry already exists, in
+    /// which case `name` is handed back with the value already there.
+    fn try_insert_with(
+        &mut self,
+        name: String,
+        make: impl FnOnce() -> V,
+    ) -> Result<(), (String, &V)>;
+    fn insert(&mut self, name: String, value: V);
+    fn remove(&mut self, name: &str);
+}
+
+impl<V> NameMap<V> for CiMap<V> {
+    fn get(&self, name: &str) -> Option<&V> {
+        CiMap::get(self, name)
+    }
+
+    fn try_insert_with(
+        &mut self,
+        name: String,
+        make: impl FnOnce() -> V,
+    ) -> Result<(), (String, &V)> {
+        CiMap::try_insert_with(self, name, make)
+    }
+
+    fn insert(&mut self, name: String, value: V) {
+        CiMap::insert(self, name, value);
+    }
+
+    fn remove(&mut self, name: &str) {
+        CiMap::remove(self, name);
+    }
+}
+
+impl<V> NameMap<V> for HashMap<String, V> {
+    fn get(&self, name: &str) -> Option<&V> {
+        HashMap::get(self, name)
+    }
+
+    fn try_insert_with(
+        &mut self,
+        name: String,
+        make: impl FnOnce() -> V,
+    ) -> Result<(), (String, &V)> {
+        // Probed before inserting, since the entry API would take the name
+        // it has to hand back.
+        if self.contains_key(&name) {
+            let existing = &self[&name];
+            return Err((name, existing));
+        }
+        self.insert(name, make());
+        Ok(())
+    }
+
+    fn insert(&mut self, name: String, value: V) {
+        HashMap::insert(self, name, value);
+    }
+
+    fn remove(&mut self, name: &str) {
+        HashMap::remove(self, name);
     }
 }
 
@@ -487,4 +781,112 @@ pub(crate) struct WithdrawnClasses {
     pub(crate) dropped: Vec<String>,
     /// Names another file's declaration took over.
     pub(crate) promoted: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ClassCompletionOrigin::{Project, VendorExplicit, VendorTransitive};
+
+    fn class_scan(classes: &[(&str, &str, ClassCompletionOrigin)]) -> WorkspaceScanResult {
+        let mut scan = WorkspaceScanResult::default();
+        for &(fqn, path, origin) in classes {
+            scan.classmap.insert(fqn.to_string(), PathBuf::from(path));
+            scan.class_origins.insert(fqn.to_string(), origin);
+        }
+        scan
+    }
+
+    /// The URI a class is indexed under and the origin recorded for it.
+    fn class_entry(
+        index: &SymbolIndex,
+        fqn: &str,
+    ) -> (Option<String>, Option<ClassCompletionOrigin>) {
+        (
+            index.fqn_uri_index.read().get(fqn).cloned(),
+            index.fqn_origin_index.read().get(fqn).copied(),
+        )
+    }
+
+    fn uri(path: &str) -> Option<String> {
+        Some(crate::util::path_to_uri(Path::new(path)))
+    }
+
+    #[test]
+    fn a_merge_keeps_an_indexed_class_and_the_origin_of_its_file() {
+        let index = SymbolIndex::new();
+        index.merge_scan(class_scan(&[("Foo", "/vendor/a/Foo.php", VendorExplicit)]));
+        index.merge_scan(class_scan(&[(
+            "Foo",
+            "/vendor/b/Foo.php",
+            VendorTransitive,
+        )]));
+
+        assert_eq!(
+            class_entry(&index, "Foo"),
+            (uri("/vendor/a/Foo.php"), Some(VendorExplicit))
+        );
+    }
+
+    #[test]
+    fn a_merge_that_finds_the_indexed_file_refreshes_its_origin() {
+        let index = SymbolIndex::new();
+        index.merge_scan(WorkspaceScanResult::from_classmap(HashMap::from([(
+            "Foo".to_string(),
+            PathBuf::from("/lib/Foo.php"),
+        )])));
+        index.merge_scan(class_scan(&[("Foo", "/lib/Foo.php", VendorExplicit)]));
+
+        assert_eq!(
+            class_entry(&index, "Foo"),
+            (uri("/lib/Foo.php"), Some(VendorExplicit))
+        );
+    }
+
+    #[test]
+    fn project_code_is_recorded_by_having_no_origin() {
+        let index = SymbolIndex::new();
+        index.merge_scan(class_scan(&[("Foo", "/src/Foo.php", Project)]));
+
+        assert_eq!(class_entry(&index, "Foo"), (uri("/src/Foo.php"), None));
+    }
+
+    #[test]
+    fn replacing_a_tree_drops_what_the_rescan_no_longer_finds() {
+        let index = SymbolIndex::new();
+        index.merge_scan(class_scan(&[
+            ("Moved", "/vendor/a/Moved.php", VendorExplicit),
+            ("Removed", "/vendor/a/Removed.php", VendorExplicit),
+            ("Local", "/src/Local.php", Project),
+        ]));
+        index.replace_tree(
+            &[PathBuf::from("/vendor")],
+            class_scan(&[("Moved", "/vendor/b/Moved.php", VendorTransitive)]),
+        );
+
+        assert_eq!(
+            class_entry(&index, "Moved"),
+            (uri("/vendor/b/Moved.php"), Some(VendorTransitive))
+        );
+        assert_eq!(class_entry(&index, "Removed"), (None, None));
+        assert_eq!(class_entry(&index, "Local"), (uri("/src/Local.php"), None));
+    }
+
+    #[test]
+    fn constants_merge_by_their_exact_name() {
+        let constants = |entries: &[(&str, &str)]| WorkspaceScanResult {
+            constant_index: entries
+                .iter()
+                .map(|&(name, path)| (name.to_string(), PathBuf::from(path)))
+                .collect(),
+            ..Default::default()
+        };
+        let index = SymbolIndex::new();
+        index.merge_scan(constants(&[("FOO", "/a.php")]));
+        index.merge_scan(constants(&[("FOO", "/b.php"), ("foo", "/b.php")]));
+
+        let indexed = index.autoload_constant_index.read();
+        assert_eq!(indexed.get("FOO"), Some(&PathBuf::from("/a.php")));
+        assert_eq!(indexed.get("foo"), Some(&PathBuf::from("/b.php")));
+    }
 }

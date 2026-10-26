@@ -62,7 +62,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde::Deserialize;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
+use tower_lsp_server::gen_lsp_types::{Code, Diagnostic, DiagnosticSeverity, Range};
 
 use crate::composer::ComposerPackage;
 use crate::config::MagoConfig;
@@ -651,11 +651,11 @@ fn parse_mago_issue(
         .unwrap_or("Error");
 
     let severity = match level {
-        "Error" => DiagnosticSeverity::ERROR,
-        "Warning" => DiagnosticSeverity::WARNING,
-        "Note" => DiagnosticSeverity::INFORMATION,
-        "Help" => DiagnosticSeverity::HINT,
-        _ => DiagnosticSeverity::ERROR,
+        "Error" => DiagnosticSeverity::Error,
+        "Warning" => DiagnosticSeverity::Warning,
+        "Note" => DiagnosticSeverity::Information,
+        "Help" => DiagnosticSeverity::Hint,
+        _ => DiagnosticSeverity::Error,
     };
 
     // Find the primary annotation that matches our temp file.
@@ -775,10 +775,10 @@ fn parse_mago_issue(
     Some(Diagnostic {
         range: diag_range,
         severity: Some(severity),
-        code: Some(NumberOrString::String(code.to_string())),
+        code: Some(Code::String(code.to_string())),
         code_description: None,
         source: Some(source_name.to_string()),
-        message: full_message,
+        message: full_message.into(),
         related_information: None,
         tags: None,
         data,
@@ -821,7 +821,7 @@ mod tests {
         assert_eq!(map.len(), 1);
         let diags = &map[&file];
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].message, "Msg");
+        assert_eq!(crate::util::message_text(&diags[0].message), "Msg");
         // Offset 6 is the start of line 2 in the on-disk content.
         assert_eq!(diags[0].range.start.line, 1);
         assert_eq!(diags[0].range.start.character, 0);
@@ -869,16 +869,14 @@ mod tests {
 
         let diags = parse_mago_json(json, content, file_path, "mago-lint").unwrap();
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
         assert_eq!(diags[0].source.as_deref(), Some("mago-lint"));
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String(
-                "invalid-return-statement".to_string()
-            ))
+            Some(Code::String("invalid-return-statement".to_string()))
         );
-        assert!(diags[0].message.contains("Invalid return type."));
-        assert!(diags[0].message.contains("This has type int"));
+        assert!(crate::util::message_text(&diags[0].message).contains("Invalid return type."));
+        assert!(crate::util::message_text(&diags[0].message).contains("This has type int"));
         assert_eq!(diags[0].range.start.line, 2);
     }
 
@@ -919,14 +917,15 @@ mod tests {
 
         let diags = parse_mago_json(json, content, file_path, "mago-analyze").unwrap();
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
         assert_eq!(diags[0].source.as_deref(), Some("mago-analyze"));
-        assert!(diags[0].message.contains("Type mismatch in return."));
-        assert!(diags[0].message.contains("returns int here"));
-        assert!(diags[0].message.contains("Note: expected string, got int"));
+        assert!(crate::util::message_text(&diags[0].message).contains("Type mismatch in return."));
+        assert!(crate::util::message_text(&diags[0].message).contains("returns int here"));
         assert!(
-            diags[0]
-                .message
+            crate::util::message_text(&diags[0].message).contains("Note: expected string, got int")
+        );
+        assert!(
+            crate::util::message_text(&diags[0].message)
                 .contains("Help: Change the return type or the value.")
         );
     }
@@ -950,7 +949,7 @@ mod tests {
         let file_path = "/tmp/test.php";
         let json = make_issue_json("Error", "err-code", "Error msg", "/tmp/test.php", 6, 11);
         let diags = parse_mago_json(&json, content, file_path, "mago-lint").unwrap();
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -959,7 +958,7 @@ mod tests {
         let file_path = "/tmp/test.php";
         let json = make_issue_json("Warning", "warn-code", "Warn msg", "/tmp/test.php", 6, 11);
         let diags = parse_mago_json(&json, content, file_path, "mago-lint").unwrap();
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
     }
 
     #[test]
@@ -968,7 +967,7 @@ mod tests {
         let file_path = "/tmp/test.php";
         let json = make_issue_json("Note", "note-code", "Note msg", "/tmp/test.php", 6, 11);
         let diags = parse_mago_json(&json, content, file_path, "mago-lint").unwrap();
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::INFORMATION));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Information));
     }
 
     #[test]
@@ -977,7 +976,7 @@ mod tests {
         let file_path = "/tmp/test.php";
         let json = make_issue_json("Help", "help-code", "Help msg", "/tmp/test.php", 6, 11);
         let diags = parse_mago_json(&json, content, file_path, "mago-lint").unwrap();
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::HINT));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Hint));
     }
 
     // ── parse invalid JSON ──────────────────────────────────────────
@@ -1429,7 +1428,7 @@ request-timeout-ms = 30000
         let diags = parse_mago_json(json, content, file_path, "mago-lint").unwrap();
         assert_eq!(diags.len(), 1);
         // Message should NOT be duplicated.
-        assert_eq!(diags[0].message, "Same message");
+        assert_eq!(crate::util::message_text(&diags[0].message), "Same message");
     }
 
     #[test]

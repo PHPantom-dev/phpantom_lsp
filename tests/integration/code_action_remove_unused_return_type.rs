@@ -11,7 +11,7 @@ use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_on_line,
     inject_phpstan_diag, resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── return.unusedType — remove unused type from union ────────────────────────
 
@@ -38,7 +38,7 @@ function foo(): string|null {
     let action = find_action(&actions, "Remove 'null' from return type")
         .expect("should offer remove unused type fix");
 
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
 
     let resolved = resolve_action(&backend, uri, content, action);
@@ -323,6 +323,51 @@ function foo(): Foo|null {
     assert!(
         result.contains("): null {"),
         "should remove Foo from union:\n{}",
+        result
+    );
+}
+
+#[test]
+fn removes_null_from_an_arrow_function() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {
+    public function run(): array {
+        $f = fn (): ?string => 'x';
+        if ($this->ready()) {
+            return [];
+        }
+        return [$f];
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        3,
+        "Anonymous function never returns null so it can be removed from the return type.",
+        "return.unusedType",
+    );
+
+    let actions = get_code_actions_on_line(&backend, uri, content, 3);
+    let action = find_action(&actions, "Remove 'null' from return type")
+        .expect("should offer remove unused type fix for an arrow function");
+
+    let resolved = resolve_action(&backend, uri, content, action);
+    let edits = extract_edits(&resolved);
+    let result = apply_edits(content, &edits);
+
+    assert!(
+        result.contains("$f = fn (): string => 'x';"),
+        "should remove null from the arrow function's type:\n{}",
+        result
+    );
+    assert!(
+        result.contains("public function run(): array {"),
+        "should leave the method's type alone:\n{}",
         result
     );
 }
