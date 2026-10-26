@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Create missing Laravel routes.** An unknown route name now offers a quick fix that adds a named route stub to the project's routes file, ready for you to finish. Contributed by @shuvroroy.
 - **Plural and singleton resource routes in Laravel.** Routes registered with `Route::resources()`, `Route::singleton()` and their API and plural variants now complete, navigate, and are no longer reported as unknown. Resource names with stray slashes or empty segments get the same route names Laravel gives them. Contributed by @shuvroroy.
 - **Switch diagnostics off.** `enabled = false` under `[diagnostics]` turns off every diagnostic in the editor, external tools included, for projects where you only want completion and navigation. `analyze` still reports everything. `phpantom_lsp init` asks about it first, along with every other diagnostic setting.
 - **Members only some classes of a union declare.** With `partial-union-members = true` under `[diagnostics]`, a method or property that some classes of a union declare and others do not is reported, the way PHPStan reports it at level 7. Off by default.

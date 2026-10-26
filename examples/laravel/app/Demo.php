@@ -793,6 +793,8 @@ class Demo
 
         // Named Routes
         route('home');
+        // Try: change this to 'admin.users.export' and apply "Create missing route".
+        // Review the stub in routes/web.php and implement its controller action.
         route('admin.users.index');
 
         // Route registered from a provider via Route::…->group(base_path(…)),
