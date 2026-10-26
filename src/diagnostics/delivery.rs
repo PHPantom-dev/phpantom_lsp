@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
@@ -37,6 +37,15 @@ impl Backend {
             return;
         }
 
+        // Switched off: compute nothing, and deliver the empty set so
+        // whatever the editor was shown before a reload goes away.
+        if !self.diagnostics_enabled() {
+            self.diag.last_fast.lock().remove(uri_str);
+            self.diag.last_slow.lock().remove(uri_str);
+            self.assemble_and_refresh(uri_str).await;
+            return;
+        }
+
         // The native collectors are expensive (a full-file forward walk and
         // type resolution — hundreds of ms to several seconds on a large
         // file). They are pure CPU work and must never run inline on an async
@@ -46,25 +55,94 @@ impl Backend {
         // stalling delivery of completion and hover responses even though
         // those handlers themselves finished. Run them on the blocking pool.
 
-        // ── Phase 1: collect and cache fast diagnostics ─────────────
-        let fast_diagnostics = {
+        let full_pass_requested = self.diag.full_slow_pass_requested.lock().remove(uri_str);
+        let baseline = if full_pass_requested {
+            None
+        } else {
+            self.diag.slow_baselines.lock().get(uri_str).cloned()
+        };
+
+        // Both phases run in one blocking task so they share one parse of
+        // the file, which is the parse the edit that scheduled this pass
+        // already made when the file was parsed for the index.  Phase 1's
+        // results come back over `fast_tx` as soon as they are ready.
+        let (fast_tx, fast_rx) = tokio::sync::oneshot::channel();
+        let slow_task = {
             let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
             let content = Arc::clone(content);
-            crate::server::run_blocking_cancel_safe("fast diagnostics", move || {
-                let mut out = Vec::new();
-                let effective = backend
-                    .blade_virtual_php_arc(&uri)
-                    .unwrap_or_else(|| Arc::clone(&content));
-                // Hand the parse cache the shared buffer, so the collector's
-                // own guard finds it instead of copying the file.
-                let _parse_guard = crate::parser::with_parse_cache_arc(Arc::clone(&effective));
-                backend.collect_fast_diagnostics(&uri, &effective, &mut out);
-                out
-            })
-            .await
-            .unwrap_or_default()
+            tokio::spawn(crate::server::run_blocking_cancel_safe(
+                "diagnostics",
+                move || {
+                    let blade = backend.blade_virtual_php_arc(&uri);
+                    let effective = blade.clone().unwrap_or_else(|| Arc::clone(&content));
+                    // The kept parse carries its own copy of the text.  The
+                    // passes read that copy, so every lookup the cache
+                    // answers is a pointer comparison.
+                    let (effective, _parse_guard) =
+                        match backend.take_parsed_for_diagnostics(&uri, &effective) {
+                            Some(parsed) => (
+                                Arc::clone(parsed.content()),
+                                crate::parser::with_parsed_file_cache(parsed),
+                            ),
+                            None => (
+                                Arc::clone(&effective),
+                                crate::parser::with_parse_cache_arc(effective),
+                            ),
+                        };
+                    let content = if blade.is_some() {
+                        content
+                    } else {
+                        Arc::clone(&effective)
+                    };
+
+                    // ── Phase 1: fast diagnostics ───────────────────
+                    let fast = crate::util::catch_panic_unwind_safe(
+                        "fast diagnostics",
+                        &uri,
+                        None,
+                        || {
+                            let mut out = Vec::new();
+                            backend.collect_fast_diagnostics(&uri, &effective, &mut out);
+                            out
+                        },
+                    );
+                    let _ = fast_tx.send(fast.unwrap_or_default());
+
+                    if !backend.open_files.read().contains_key(&uri) {
+                        return None;
+                    }
+
+                    // ── Phase 2: slow diagnostics ───────────────────
+                    // The resolved-class cache guard contains a
+                    // thread-local raw pointer; activate it on this
+                    // blocking thread for the duration of the synchronous
+                    // collection only.
+                    let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
+                        &backend.resolved_class_cache,
+                    );
+                    let started = std::time::Instant::now();
+                    let pass = backend.collect_slow_diagnostics_incremental(
+                        &uri,
+                        &content,
+                        baseline.as_deref(),
+                    );
+                    let elapsed = started.elapsed();
+                    if elapsed >= std::time::Duration::from_millis(100) {
+                        tracing::debug!(
+                            target: "performance",
+                            "PHPantom: slow diagnostics took {:?} ({:?})",
+                            elapsed,
+                            pass.kind
+                        );
+                    }
+                    Some(pass)
+                },
+            ))
         };
+
+        // ── Phase 1: cache fast diagnostics ─────────────────────────
+        let fast_diagnostics = fast_rx.await.unwrap_or_default();
 
         // The collector above can take a while; re-check that the file is
         // still open immediately before writing so a close that landed
@@ -83,43 +161,8 @@ impl Backend {
         // can see fast diagnostics before the slower native passes finish.
         self.assemble_and_refresh(uri_str).await;
 
-        // ── Phase 2: compute and cache slow diagnostics ─────────────
-        let full_pass_requested = self.diag.full_slow_pass_requested.lock().remove(uri_str);
-        let baseline = if full_pass_requested {
-            None
-        } else {
-            self.diag.slow_baselines.lock().get(uri_str).cloned()
-        };
-        let slow_pass = {
-            let backend = self.clone_for_blocking();
-            let uri = uri_str.to_string();
-            let content = Arc::clone(content);
-            crate::server::run_blocking_cancel_safe("slow diagnostics", move || {
-                // The resolved-class cache guard contains a thread-local raw
-                // pointer; activate it on this blocking thread for the
-                // duration of the synchronous collection only.
-                let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
-                    &backend.resolved_class_cache,
-                );
-                let started = std::time::Instant::now();
-                let pass = backend.collect_slow_diagnostics_incremental(
-                    &uri,
-                    &content,
-                    baseline.as_deref(),
-                );
-                let elapsed = started.elapsed();
-                if elapsed >= std::time::Duration::from_millis(100) {
-                    tracing::debug!(
-                        target: "performance",
-                        "PHPantom: slow diagnostics took {:?} ({:?})",
-                        elapsed,
-                        pass.kind
-                    );
-                }
-                pass
-            })
-            .await
-        };
+        // ── Phase 2: cache slow diagnostics ─────────────────────────
+        let slow_pass = slow_task.await.ok().flatten().flatten();
         let (slow_diagnostics, new_baseline, bodies_read) = match slow_pass {
             Some(pass) => (
                 pass.diagnostics,
@@ -129,7 +172,7 @@ impl Backend {
             None => {
                 // The full pass a save asked for did not happen; the next
                 // pass still owes it.
-                if full_pass_requested {
+                if full_pass_requested && self.open_files.read().contains_key(uri_str) {
                     self.request_full_slow_pass(&[uri_str]);
                 }
                 (Vec::new(), None, None)
@@ -171,6 +214,35 @@ impl Backend {
         self.assemble_and_refresh(uri_str).await;
     }
 
+    /// Keep `parsed`, the parse of the open file `uri`, for the diagnostic
+    /// pass that follows, in place of whichever file's parse was kept
+    /// before.
+    pub(crate) fn keep_parsed_for_diagnostics(&self, uri: &str, parsed: crate::parser::ParsedFile) {
+        // The replaced parse is freed once the lock is released.
+        let _replaced = self
+            .parsed_for_diagnostics
+            .lock()
+            .replace((uri.to_string(), parsed));
+    }
+
+    /// The parse [`Self::keep_parsed_for_diagnostics`] kept for `uri`, if
+    /// it is a parse of `content`.  The slot is emptied for `uri` either
+    /// way: a parse of other text is one an edit has overtaken.
+    pub(crate) fn take_parsed_for_diagnostics(
+        &self,
+        uri: &str,
+        content: &str,
+    ) -> Option<crate::parser::ParsedFile> {
+        let (_, parsed) = {
+            let mut slot = self.parsed_for_diagnostics.lock();
+            if slot.as_ref().is_none_or(|(kept, _)| kept != uri) {
+                return None;
+            }
+            slot.take()?
+        };
+        (parsed.content().as_str() == content).then_some(parsed)
+    }
+
     /// Assemble diagnostics from all per-source caches for a URI and
     /// deliver them to the editor.
     ///
@@ -178,12 +250,13 @@ impl Backend {
     /// analyze) caches its results independently.  This helper merges
     /// them into one set, deduplicates, and filters suppressions.
     ///
-    /// **Push mode:** The merged set is published via
+    /// Both modes cache the full merged set in `diag_last_full` with a
+    /// bumped `resultId` so the next pull response returns it.
+    ///
+    /// **Push mode:** The merged set is also published via
     /// `textDocument/publishDiagnostics`.
     ///
-    /// **Pull mode:** Nothing is pushed.  The full merged set is cached
-    /// in `diag_last_full` with a bumped `resultId` so the next pull
-    /// response returns it; the caller triggers
+    /// **Pull mode:** Nothing is pushed.  The caller triggers
     /// `workspace/diagnostic/refresh` so the editor re-pulls.  Editors
     /// that support pull diagnostics merge pushed and pulled sets
     /// additively, so pushing anything here would duplicate native
@@ -200,7 +273,7 @@ impl Backend {
     /// value to skip the refresh.  Always `false` in push mode: the set
     /// is delivered inline, so there is nothing to re-pull.
     pub(crate) async fn assemble_and_push(&self, uri_str: &str) -> bool {
-        let uri = match uri_str.parse::<Url>() {
+        let uri = match uri_str.parse::<Uri>() {
             Ok(u) => u,
             Err(_) => return false,
         };
@@ -224,6 +297,7 @@ impl Backend {
 
         // ── Read all per-source caches ──────────────────────────────
         let mut full = Vec::new();
+        let enabled = self.diagnostics_enabled();
 
         {
             let cache = self.diag.last_fast.lock();
@@ -238,9 +312,13 @@ impl Backend {
             }
         }
 
-        let phpstan_before: Vec<Diagnostic> = {
+        // Left out while diagnostics are off, so the pruning below keeps
+        // PHPStan's results for when they are switched back on.
+        let phpstan_before: Vec<Diagnostic> = if enabled {
             let cache = self.phpstan_tool.last_diags.lock();
             cache.get(uri_str).cloned().unwrap_or_default()
+        } else {
+            Vec::new()
         };
 
         // Eagerly prune stale PHPStan diagnostics against current file
@@ -294,6 +372,13 @@ impl Backend {
             }
         }
 
+        // The caches keep what was found before diagnostics were switched
+        // off, and an external run already in flight still lands in its
+        // own; none of it is shown.
+        if !enabled {
+            full.clear();
+        }
+
         // ── Suppress imprecise overlaps and filter ──────────────────
         suppression::suppress_imprecise_overlaps(&mut full);
         let mut full = self.filter_suppressed(full);
@@ -336,45 +421,53 @@ impl Backend {
             cache.insert(uri_str.to_string(), pruned);
         }
 
+        // Cache the merged set in both modes.  Pull-capable clients use
+        // `textDocument/diagnostic` as the single source of truth for
+        // native diagnostics, so in pull mode nothing is pushed and the
+        // caller triggers `workspace/diagnostic/refresh` instead.  Pull
+        // support is advertised to every client, so a push client may
+        // pull too, and it gets what was last published.
+        //
+        // A run that reproduces the cached set leaves both the cache and
+        // the `resultId` alone, so a pull still answers `Unchanged` and
+        // the caller skips the refresh.  A missing cache entry counts as
+        // changed: the client has nothing yet.
+        //
+        // The set and its `resultId` change under one `last_full` guard,
+        // so a racing pull never sees the new set paired with the old id
+        // (which would answer `Unchanged` for a set that just changed).
         let pull_mode = self.caps().pull_diagnostics;
-
-        if pull_mode {
-            // ── Pull mode ───────────────────────────────────────────
-            // Pull-capable clients use `textDocument/diagnostic` as the
-            // single source of truth for native diagnostics.  We only cache
-            // the merged set here; the caller triggers
-            // `workspace/diagnostic/refresh` so the editor re-pulls.  This
-            // avoids duplicate diagnostics in clients that keep pushed and
-            // pulled diagnostics in separate namespaces.
-            //
-            // A run that reproduces the cached set leaves both the cache
-            // and the `resultId` alone, so a pull still answers
-            // `Unchanged` and the caller skips the refresh.  A missing
-            // cache entry counts as changed: the client has nothing yet.
-            //
-            // The set and its `resultId` change under one `last_full`
-            // guard, so a racing pull never sees the new set paired with
-            // the old id (which would answer `Unchanged` for a set that
-            // just changed).
+        let changed = {
             let mut cache = self.diag.last_full.lock();
             if cache.get(uri_str).is_some_and(|prev| *prev == full) {
-                return false;
+                false
+            } else {
+                // Push mode still needs its own copy to publish.
+                let cached = if pull_mode {
+                    std::mem::take(&mut full)
+                } else {
+                    full.clone()
+                };
+                cache.insert(uri_str.to_string(), cached);
+                let id = self.diag.result_id_seq.fetch_add(1, Ordering::Relaxed) + 1;
+                self.diag.result_ids.lock().insert(uri_str.to_string(), id);
+                true
             }
-            cache.insert(uri_str.to_string(), full);
-            let id = self.diag.result_id_seq.fetch_add(1, Ordering::Relaxed) + 1;
-            self.diag.result_ids.lock().insert(uri_str.to_string(), id);
-            true
-        } else {
-            // ── Push mode ───────────────────────────────────────────
-            let Some(client) = &self.client else {
-                return false;
-            };
-            // Nothing left to serialize: push mode caches nothing, it
-            // only publishes the merged set inline.
-            drop(assemble_guard);
-            client.publish_diagnostics(uri, full, None).await;
-            false
+        };
+
+        if pull_mode {
+            return changed;
         }
+
+        // ── Push mode ───────────────────────────────────────────────
+        // Publishing sends exactly one copy; the cache above only serves
+        // a pull the client chooses to make.
+        let Some(client) = &self.client else {
+            return false;
+        };
+        drop(assemble_guard);
+        client.publish_diagnostics(uri, full, None).await;
+        false
     }
 
     /// Ask the editor to re-pull diagnostics.
@@ -477,7 +570,7 @@ impl Backend {
     /// process runs at a time per tool, so triggering them on every
     /// keystroke would block save-triggered runs.
     pub(crate) fn schedule_external_diagnostics(&self, uri: String) {
-        if !self.init_complete.load(Ordering::Acquire) {
+        if !self.init_complete.load(Ordering::Acquire) || !self.diagnostics_enabled() {
             return;
         }
         self.schedule_phpstan(uri.clone());
@@ -509,8 +602,8 @@ impl Backend {
     /// scheduled by the caller).
     ///
     /// Queues those files for the debounced background worker in both
-    /// modes.  In pull mode, the cached full diagnostic set for each
-    /// file is also invalidated up front (its resultId is kept) so a
+    /// modes.  The cached full diagnostic set for each file is also
+    /// invalidated up front (its resultId is kept) so a
     /// pull that lands before the worker finishes triggers a fresh
     /// computation instead of returning diagnostics from before the
     /// save.
@@ -521,14 +614,12 @@ impl Backend {
             return;
         }
 
-        let pull_mode = self.caps().pull_diagnostics;
-
         let uris = self.open_files_affected_by_save(exclude_uri);
         if uris.is_empty() {
             return;
         }
 
-        if pull_mode {
+        {
             // Invalidate cached full diagnostics so the next pull
             // triggers a fresh computation.  Do NOT remove resultIds —
             // see the comment in schedule_diagnostics for why.
@@ -738,6 +829,7 @@ impl Backend {
         }
 
         // Remove all per-source caches so we don't leak memory.
+        drop(self.take_parsed_for_diagnostics(uri_str, ""));
         self.diag.last_fast.lock().remove(uri_str);
         self.diag.last_slow.lock().remove(uri_str);
         self.diag.slow_baselines.lock().remove(uri_str);
@@ -763,7 +855,7 @@ impl Backend {
             None => return,
         };
 
-        let uri = match uri_str.parse::<Url>() {
+        let uri = match uri_str.parse::<Uri>() {
             Ok(u) => u,
             Err(_) => return,
         };

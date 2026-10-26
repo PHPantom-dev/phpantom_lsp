@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{
+use tower_lsp_server::gen_lsp_types::{
     CompletionContext, CompletionItem, CompletionList, CompletionResponse, Position,
 };
 
@@ -193,12 +193,14 @@ impl Backend {
                 }
 
                 if is_filtered {
-                    Some(CompletionResponse::List(CompletionList {
+                    Some(CompletionResponse::CompletionList(CompletionList {
                         is_incomplete: false,
                         items,
+                        apply_kind: None,
+                        item_defaults: None,
                     }))
                 } else {
-                    Some(CompletionResponse::Array(items))
+                    Some(CompletionResponse::CompletionItemList(items))
                 }
             }
             _ => None,

@@ -6,7 +6,7 @@ use crate::atom::atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, FunctionInfo, MethodExtras, MethodInfo};
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 // ── Low-level scanning tests ────────────────────────────────────────
 

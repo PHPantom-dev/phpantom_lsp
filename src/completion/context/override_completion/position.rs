@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp_server::gen_lsp_types::{Position, Range};
 
 use crate::class_lookup::find_class_at_offset;
 use crate::signature_render::detect_class_indent;

@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::common::collect_diagnostics_with;
+    use crate::common::message_text;
     use phpantom_lsp::Backend;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     fn collect(php: &str) -> Vec<Diagnostic> {
         collect_diagnostics_with(
@@ -61,10 +62,10 @@ class Baz implements Foo {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Baz"));
-        assert!(diags[0].message.contains("bar()"));
-        assert!(diags[0].message.contains("interface"));
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(message_text(&diags[0].message).contains("Baz"));
+        assert!(message_text(&diags[0].message).contains("bar()"));
+        assert!(message_text(&diags[0].message).contains("interface"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -78,9 +79,9 @@ class Child extends Base {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Child"));
-        assert!(diags[0].message.contains("doSomething()"));
-        assert!(diags[0].message.contains("class"));
+        assert!(message_text(&diags[0].message).contains("Child"));
+        assert!(message_text(&diags[0].message).contains("doSomething()"));
+        assert!(message_text(&diags[0].message).contains("class"));
     }
 
     #[test]
@@ -96,10 +97,10 @@ class Impl implements Foo {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("3 methods"));
-        assert!(diags[0].message.contains("bar()"));
-        assert!(diags[0].message.contains("baz()"));
-        assert!(diags[0].message.contains("qux()"));
+        assert!(message_text(&diags[0].message).contains("3 methods"));
+        assert!(message_text(&diags[0].message).contains("bar()"));
+        assert!(message_text(&diags[0].message).contains("baz()"));
+        assert!(message_text(&diags[0].message).contains("qux()"));
     }
 
     #[test]
@@ -123,7 +124,7 @@ class Baz implements Foo {}
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("missing_implementation".to_string()))
+            Some(Code::String("missing_implementation".to_string()))
         );
         assert_eq!(diags[0].source, Some("phpantom".to_string()));
     }
@@ -170,11 +171,11 @@ enum Color implements HasLabel {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Enum"));
-        assert!(diags[0].message.contains("Color"));
-        assert!(diags[0].message.contains("label()"));
-        assert!(diags[0].message.contains("interface"));
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(message_text(&diags[0].message).contains("Enum"));
+        assert!(message_text(&diags[0].message).contains("Color"));
+        assert!(message_text(&diags[0].message).contains("label()"));
+        assert!(message_text(&diags[0].message).contains("interface"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -205,10 +206,10 @@ enum Color implements HasLabel {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Enum"));
-        assert!(diags[0].message.contains("2 methods"));
-        assert!(diags[0].message.contains("label()"));
-        assert!(diags[0].message.contains("description()"));
+        assert!(message_text(&diags[0].message).contains("Enum"));
+        assert!(message_text(&diags[0].message).contains("2 methods"));
+        assert!(message_text(&diags[0].message).contains("label()"));
+        assert!(message_text(&diags[0].message).contains("description()"));
     }
 
     #[test]
@@ -365,7 +366,7 @@ class Baz implements Foo {
             1,
             "Abstract trait methods should not satisfy interface requirements"
         );
-        assert!(diags[0].message.contains("bar()"));
+        assert!(message_text(&diags[0].message).contains("bar()"));
     }
 
     #[test]
@@ -485,7 +486,7 @@ enum Color: string implements Labelable {
             "Enum should still flag missing methods from user-defined interfaces, got: {diags:?}"
         );
         assert!(
-            diags[0].message.contains("label"),
+            message_text(&diags[0].message).contains("label"),
             "Diagnostic should mention the missing 'label' method"
         );
     }
@@ -503,9 +504,9 @@ class Bar {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
-        assert!(diags[0].message.contains("foo()"));
-        assert!(diags[0].message.contains("trait"));
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(message_text(&diags[0].message).contains("foo()"));
+        assert!(message_text(&diags[0].message).contains("trait"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -563,8 +564,8 @@ class Person {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
-        assert!(diags[0].message.contains("name()"));
-        assert!(diags[0].message.contains("age()"));
+        assert!(message_text(&diags[0].message).contains("name()"));
+        assert!(message_text(&diags[0].message).contains("age()"));
     }
 
     #[test]
@@ -604,7 +605,7 @@ class Concrete {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
-        assert!(diags[0].message.contains("innerMethod()"));
+        assert!(message_text(&diags[0].message).contains("innerMethod()"));
     }
 
     /// An abstract method a parent picks up from its trait is still abstract
@@ -625,11 +626,11 @@ class Child extends Base {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
-        assert!(diags[0].message.contains("name()"));
+        assert!(message_text(&diags[0].message).contains("name()"));
         assert!(
-            diags[0].message.contains("from class 'Base'"),
+            message_text(&diags[0].message).contains("from class 'Base'"),
             "the requirement should be traced to the parent: {}",
-            diags[0].message
+            message_text(&diags[0].message)
         );
     }
 
@@ -649,11 +650,9 @@ namespace App {
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "Expected 1 diagnostic, got: {diags:?}");
         assert!(
-            diags[0]
-                .message
-                .contains("from interface 'App\\Repository'"),
+            message_text(&diags[0].message).contains("from interface 'App\\Repository'"),
             "got: {}",
-            diags[0].message
+            message_text(&diags[0].message)
         );
     }
 

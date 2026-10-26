@@ -3,9 +3,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::{Mutex, RwLock};
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::atom::{Atom, AtomMap};
+use crate::references::MemberRefKind;
 
 /// Upper bound on cached member names.  Reached only by browsing tens of
 /// thousands of declarations in one session, and the cache is then dropped
@@ -31,7 +32,7 @@ pub(super) struct PendingCount {
     pub(super) offset: u32,
     pub(super) class_fqn: Atom,
     pub(super) member: Atom,
-    pub(super) is_static: bool,
+    pub(super) slot: MemberSlot,
 }
 
 #[derive(Clone)]
@@ -88,7 +89,8 @@ impl PendingCount {
             uri: Arc::clone(&self.uri),
             offset: self.offset,
             member: self.member,
-            is_static: self.is_static,
+            is_static: self.slot.is_static,
+            kind: self.slot.kind(),
         }
     }
 }
@@ -121,7 +123,7 @@ impl RescanPlan {
     }
 }
 
-/// A cached LSP location without a separately allocated `Url` string for
+/// A cached LSP location without a separately allocated `Uri` string for
 /// every occurrence.  URI strings are interned per cache below.
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct CompactLocation {
@@ -144,7 +146,7 @@ impl CompactLocation {
 /// reference index can invalidate at: a file that gains or loses an access
 /// to `save` can only change counts of members named `save`.  The two
 /// slots are the instance and static member of that name.
-type MemberCounts = AtomMap<[Option<CachedReferences>; 2]>;
+type MemberCounts = AtomMap<[Option<CachedReferences>; MemberSlot::COUNT]>;
 
 #[derive(Default)]
 pub(super) struct ReferenceCache {
@@ -176,8 +178,26 @@ pub(crate) struct MemberRefCounts {
     last_invalidation: Mutex<Option<std::time::Instant>>,
 }
 
-fn slot(is_static: bool) -> usize {
-    usize::from(is_static)
+/// Which of a class's members of one name a count belongs to.
+///
+/// A static and an instance member can share a name, and so can a method
+/// and a property (`$email` and `email()`), so each gets a count of its own.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct MemberSlot {
+    pub(crate) is_static: bool,
+    pub(crate) is_method: bool,
+}
+
+impl MemberSlot {
+    const COUNT: usize = 4;
+
+    fn index(self) -> usize {
+        usize::from(self.is_static) | (usize::from(self.is_method) << 1)
+    }
+
+    pub(crate) fn kind(self) -> MemberRefKind {
+        MemberRefKind::of_method(self.is_method)
+    }
 }
 
 impl MemberRefCounts {
@@ -203,17 +223,17 @@ impl MemberRefCounts {
         &self,
         class_fqn: Atom,
         member: Atom,
-        is_static: bool,
+        slot: MemberSlot,
     ) -> Option<CachedReferences> {
-        self.counts.read().by_member.get(&member)?.get(&class_fqn)?[slot(is_static)].clone()
+        self.counts.read().by_member.get(&member)?.get(&class_fqn)?[slot.index()].clone()
     }
 
     /// How a queued declaration can be brought up to date without searching
     /// the workspace again, or `None` when nothing cached survives the edit.
     pub(super) fn rescan_plan(&self, item: &PendingCount) -> Option<RescanPlan> {
         let cache = self.counts.read();
-        let cached = cache.by_member.get(&item.member)?.get(&item.class_fqn)?[slot(item.is_static)]
-            .as_ref()?;
+        let cached =
+            cache.by_member.get(&item.member)?.get(&item.class_fqn)?[item.slot.index()].as_ref()?;
         let Staleness::Files(files) = &cached.locations_stale else {
             return None;
         };
@@ -232,7 +252,7 @@ impl MemberRefCounts {
 
     /// Whether the cached result for a declaration can be served as is.
     pub(super) fn is_fresh(&self, item: &PendingCount) -> bool {
-        self.get(item.class_fqn, item.member, item.is_static)
+        self.get(item.class_fqn, item.member, item.slot)
             .is_some_and(|cached| !cached.count_stale && cached.locations_stale.is_fresh())
     }
 
@@ -248,7 +268,7 @@ impl MemberRefCounts {
         &self,
         class_fqn: Atom,
         member: Atom,
-        is_static: bool,
+        slot: MemberSlot,
         locations: Vec<Location>,
         invalidated_since: bool,
     ) -> bool {
@@ -257,7 +277,7 @@ impl MemberRefCounts {
             .by_member
             .get(&member)
             .and_then(|members| members.get(&class_fqn))
-            .and_then(|slots| slots[slot(is_static)].clone());
+            .and_then(|slots| slots[slot.index()].clone());
         let previous_location_count = previous
             .as_ref()
             .and_then(|cached| cached.locations.as_ref())
@@ -315,7 +335,7 @@ impl MemberRefCounts {
             .entry(member)
             .or_default()
             .entry(class_fqn)
-            .or_default()[slot(is_static)];
+            .or_default()[slot.index()];
         *entry = Some(CachedReferences {
             count,
             locations: cached_locations,
@@ -449,7 +469,9 @@ impl MemberRefCounts {
         let mut entries = 0usize;
         for members in cache.by_member.values() {
             bytes += members.capacity()
-                * (size_of::<Atom>() + size_of::<[Option<CachedReferences>; 2]>() + 1);
+                * (size_of::<Atom>()
+                    + size_of::<[Option<CachedReferences>; MemberSlot::COUNT]>()
+                    + 1);
             allocations += usize::from(members.capacity() > 0);
             for cached in members.values().flat_map(|slots| slots.iter().flatten()) {
                 entries += 1;

@@ -391,6 +391,7 @@ fn describe_blade_strategy(strategy: &BladeFormattingStrategy) -> &'static str {
         BladeFormattingStrategy::Disabled => "formatting disabled",
         BladeFormattingStrategy::BuiltIn(_) => "the built-in reindenter",
         BladeFormattingStrategy::Pint { .. } => Tool::Pint.name(),
+        BladeFormattingStrategy::BladeFormatter { .. } => Tool::BladeFormatter.name(),
     }
 }
 

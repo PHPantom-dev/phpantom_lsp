@@ -1,0 +1,7 @@
+// test: Reading an argument the command does not define
+// feature: diagnostics
+// Ported from PHPStan's Symfony extension, UndefinedArgumentRuleTest::testGetArgument.
+// project: phpstan_symfony
+// file: rules/Symfony/ExampleCommand.php
+// expect_diagnostic: 42: Command "example-rule" does not define argument "undefined". // SKIP: console arguments and options are not read from configure()
+---

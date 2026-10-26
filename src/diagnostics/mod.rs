@@ -120,6 +120,10 @@
 //!   property from outside the class that declares it, and second
 //!   writes from inside it once the constructor has initialized the
 //!   property.
+//! - **Uninitialized property diagnostics** — report a typed property
+//!   with no default that only its own class may write and that nothing
+//!   in the class ever writes, so reading it throws, and a read of a
+//!   fresh object's property before anything writes it.
 //! - **Invalid class kind diagnostics** — report a class-like name used
 //!   in a syntactic position (`new`, `implements`, `instanceof`, …) that
 //!   its kind (class/interface/trait/enum) cannot satisfy.
@@ -199,7 +203,9 @@
 //! `textDocument/publishDiagnostics`.  As each source finishes, its
 //! cache is updated and the full assembled set is pushed.  The user
 //! sees results incrementally: fast diagnostics first, then slow,
-//! then PHPStan/PHPCS/Mago as each completes.
+//! then PHPStan/PHPCS/Mago as each completes.  The pushed set is also
+//! cached with a `resultId` as in pull mode, since pull support is
+//! advertised to every client and a push client may pull anyway.
 //!
 //! **Pull mode:** Nothing is pushed via `publishDiagnostics`.  The
 //! merged set is cached in `diag_last_full` with a bumped `resultId`
@@ -252,7 +258,9 @@ pub(crate) mod cross_file;
 mod delivery;
 mod deprecated;
 mod destructuring_offsets;
+mod discarded_results;
 mod docblock_native_mismatch;
+mod dynamic_member_names;
 mod enum_errors;
 pub(crate) mod existence_guards;
 mod external;
@@ -267,6 +275,7 @@ mod match_type_errors;
 pub(crate) mod member_lookup;
 pub(crate) mod member_visibility;
 pub(crate) mod namespace_mismatch;
+mod override_attribute;
 mod property_type_errors;
 mod pull;
 mod readonly_writes;
@@ -279,6 +288,8 @@ mod syntax_errors;
 mod trait_property_conflicts;
 mod type_errors;
 pub(crate) mod undefined_variables;
+mod uninitialized_properties;
+mod uninitialized_reads;
 pub(crate) mod unknown_classes;
 pub(crate) mod unknown_functions;
 pub(crate) mod unknown_members;
@@ -289,7 +300,7 @@ pub(crate) mod unused_variables;
 pub(crate) mod use_statements;
 pub(crate) mod workspace;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
@@ -490,7 +501,7 @@ mod tests {
             "unknown_member",
             "argument_count_mismatch",
             "invalid_class_kind",
-            "invalid_laravel_string_key",
+            "invalid_string_key",
             "invalid_command_parameter",
         ] {
             assert!(
@@ -529,8 +540,8 @@ mod tests {
 
         let diag = |line: u32| Diagnostic {
             range: Range::new(Position::new(line, 0), Position::new(line, 5)),
-            severity: Some(DiagnosticSeverity::ERROR),
-            message: "boom".to_string(),
+            severity: Some(DiagnosticSeverity::Error),
+            message: "boom".to_string().into(),
             ..Default::default()
         };
         let result_id = || backend.diag.result_ids.lock().get(uri).copied();
@@ -601,8 +612,8 @@ mod tests {
             uri.to_string(),
             vec![Diagnostic {
                 range: Range::new(Position::new(0, 0), Position::new(0, 1)),
-                severity: Some(DiagnosticSeverity::ERROR),
-                message: "boom".to_string(),
+                severity: Some(DiagnosticSeverity::Error),
+                message: "boom".to_string().into(),
                 ..Default::default()
             }],
         );
@@ -624,8 +635,8 @@ mod tests {
                 uri.to_string(),
                 vec![Diagnostic {
                     range: Range::new(Position::new(0, 0), Position::new(0, 1)),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    message: "boom again".to_string(),
+                    severity: Some(DiagnosticSeverity::Error),
+                    message: "boom again".to_string().into(),
                     ..Default::default()
                 }],
             );
@@ -633,6 +644,57 @@ mod tests {
             assert_ne!(result_id(), seen_before_close);
             assert_ne!(result_id(), last_seen_before_close);
         }
+    }
+
+    /// Pull support is advertised to every client, so a push client may
+    /// send `textDocument/diagnostic` too. It must be answered with the
+    /// set last published rather than an empty set, and an unchanged set
+    /// must keep its `resultId` so a repeat pull answers `Unchanged`.
+    #[tokio::test]
+    async fn push_client_pull_returns_last_published_set() {
+        let backend = Backend::new_test();
+        assert!(!backend.caps().pull_diagnostics);
+        let uri = "file:///push.php";
+        backend.diag.last_fast.lock().insert(
+            uri.to_string(),
+            vec![Diagnostic {
+                range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+                severity: Some(DiagnosticSeverity::Error),
+                message: "boom".to_string().into(),
+                ..Default::default()
+            }],
+        );
+
+        // Push mode never asks the client to re-pull.
+        assert!(!backend.assemble_and_push(uri).await);
+
+        let pull = |previous_result_id: Option<String>| {
+            backend
+                .document_pull_diagnostic(DocumentDiagnosticParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: uri.parse().unwrap(),
+                    },
+                    identifier: None,
+                    previous_result_id,
+                    work_done_progress_params: Default::default(),
+                    partial_result_params: Default::default(),
+                })
+                .unwrap()
+        };
+
+        let DocumentDiagnosticReport::RelatedFullDocumentDiagnosticReport(full) = pull(None) else {
+            panic!("first pull must return the full set");
+        };
+        let report = full.full_document_diagnostic_report;
+        assert_eq!(report.items.len(), 1);
+        assert_eq!(report.items[0].message, "boom".to_string().into());
+
+        // Re-publishing the same set leaves the client's result valid.
+        backend.assemble_and_push(uri).await;
+        assert!(matches!(
+            pull(report.result_id),
+            DocumentDiagnosticReport::RelatedUnchangedDocumentDiagnosticReport(_)
+        ));
     }
 
     /// `publish_diagnostics_for_file` must not resurrect a closed file's
@@ -653,5 +715,53 @@ mod tests {
         assert!(backend.diag.last_fast.lock().get(uri).is_none());
         assert!(backend.diag.last_slow.lock().get(uri).is_none());
         assert!(backend.diag.last_full.lock().get(uri).is_none());
+    }
+
+    /// With `[diagnostics] enabled = false` an open file is shown nothing,
+    /// neither what the native passes would find nor what an external tool
+    /// already reported, and switching it back on brings both back.
+    #[tokio::test]
+    async fn switching_diagnostics_off_shows_nothing() {
+        let backend = Backend::new_test();
+        let uri = "file:///broken.php";
+        let content = Arc::new("<?php\n$a = ;\n".to_string());
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), Arc::clone(&content));
+        backend.update_ast(uri, &content);
+        backend.phpstan_tool.last_diags.lock().insert(
+            uri.to_string(),
+            vec![Diagnostic {
+                range: Range::new(Position::new(0, 0), Position::new(0, 1)),
+                message: "from phpstan".to_string().into(),
+                ..Default::default()
+            }],
+        );
+        let shown = || backend.diag.last_full.lock().get(uri).cloned();
+
+        let set_enabled = |enabled: bool| {
+            let mut config = backend.config();
+            config.diagnostics.enabled = Some(enabled);
+            backend.set_config(config);
+        };
+
+        set_enabled(false);
+        backend.publish_diagnostics_for_file(uri, &content).await;
+        assert_eq!(shown(), Some(Vec::new()));
+
+        set_enabled(true);
+        backend.publish_diagnostics_for_file(uri, &content).await;
+        let shown = shown().unwrap();
+        assert!(
+            shown
+                .iter()
+                .any(|d| d.code == Some(Code::String("syntax_error".to_string())))
+        );
+        assert!(
+            shown
+                .iter()
+                .any(|d| d.message == "from phpstan".to_string().into())
+        );
     }
 }

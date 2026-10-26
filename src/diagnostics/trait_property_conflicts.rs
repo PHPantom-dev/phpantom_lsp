@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
@@ -74,7 +74,7 @@ impl Backend {
             for conflict in conflicts {
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     INCOMPATIBLE_TRAIT_PROPERTY_CODE,
                     format!(
                         "{} and {} define the same property (${}) in the composition of {}, but the definitions are incompatible",

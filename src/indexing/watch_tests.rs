@@ -9,8 +9,8 @@ fn non_laravel_projects_ignore_schema_watch_changes() {
 
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
-            uri: Url::from_file_path(&schema).unwrap(),
-            typ: FileChangeType::CREATED,
+            uri: Uri::from_file_path(&schema).unwrap(),
+            kind: FileChangeType::Created,
         }],
     };
 
@@ -53,8 +53,8 @@ fn seed_resolved_class(backend: &Backend) {
 fn created_event(path: &std::path::Path) -> DidChangeWatchedFilesParams {
     DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
-            uri: Url::from_file_path(path).unwrap(),
-            typ: FileChangeType::CREATED,
+            uri: Uri::from_file_path(path).unwrap(),
+            kind: FileChangeType::Created,
         }],
     }
 }
@@ -66,7 +66,7 @@ fn created_event(path: &std::path::Path) -> DidChangeWatchedFilesParams {
 fn deleting_a_template_drops_its_lowered_php_and_source_map() {
     let dir = tempfile::tempdir().unwrap();
     let template = dir.path().join("resources/views/welcome.blade.php");
-    let url = Url::from_file_path(&template).unwrap();
+    let url = Uri::from_file_path(&template).unwrap();
     let uri = url.to_string();
 
     let backend = Backend::new_test();
@@ -77,7 +77,7 @@ fn deleting_a_template_drops_its_lowered_php_and_source_map() {
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
             uri: url,
-            typ: FileChangeType::DELETED,
+            kind: FileChangeType::Deleted,
         }],
     };
     backend.apply_watched_file_changes(&params, dir.path());
@@ -93,7 +93,7 @@ fn deleting_a_template_drops_its_lowered_php_and_source_map() {
 fn deleting_a_provider_drops_its_gate_and_macro_registrations() {
     let dir = tempfile::tempdir().unwrap();
     let provider = dir.path().join("app/Providers/AuthServiceProvider.php");
-    let url = Url::from_file_path(&provider).unwrap();
+    let url = Uri::from_file_path(&provider).unwrap();
     let uri = url.to_string();
 
     let backend = Backend::new_test();
@@ -128,7 +128,7 @@ fn deleting_a_provider_drops_its_gate_and_macro_registrations() {
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
             uri: url,
-            typ: FileChangeType::DELETED,
+            kind: FileChangeType::Deleted,
         }],
     };
     backend.apply_watched_file_changes(&params, dir.path());
@@ -289,7 +289,7 @@ fn deleting_one_of_two_declaring_files_keeps_the_class() {
     backend.reindex_files_batch(&[(
         "file:///a_rich.php".to_string(),
         PathBuf::from("/a_rich.php"),
-        FileChangeType::DELETED,
+        FileChangeType::Deleted,
     )]);
 
     assert_eq!(
@@ -332,12 +332,12 @@ fn deleting_the_last_declaring_file_drops_the_class() {
         (
             "file:///a_rich.php".to_string(),
             PathBuf::from("/a_rich.php"),
-            FileChangeType::DELETED,
+            FileChangeType::Deleted,
         ),
         (
             "file:///b_bare.php".to_string(),
             PathBuf::from("/b_bare.php"),
-            FileChangeType::DELETED,
+            FileChangeType::Deleted,
         ),
     ]);
 
@@ -380,8 +380,8 @@ fn non_laravel_project_reloads_its_own_config_on_change() {
 
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
-            uri: Url::from_file_path(&config_path).unwrap(),
-            typ: FileChangeType::CHANGED,
+            uri: Uri::from_file_path(&config_path).unwrap(),
+            kind: FileChangeType::Changed,
         }],
     };
     assert!(backend.apply_watched_file_changes(&params, dir.path()));
@@ -413,6 +413,45 @@ fn reload_config_is_visible_on_every_clone() {
         backend.config().diagnostics.extra_arguments_enabled(),
         "a reload on a clone must be visible on the original Backend"
     );
+}
+
+/// Switching diagnostics off in the config clears what open files were
+/// shown, and switching them back on fills it in again, both without
+/// waiting for the next edit: the reload queues every open file for the
+/// diagnostic worker, with a full pass owed.
+#[test]
+fn reload_config_rediagnoses_open_files_when_diagnostics_are_toggled() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(crate::config::CONFIG_FILE_NAME);
+    let backend = Backend::new_test();
+    backend.init_complete.store(true, Ordering::Release);
+    let uri = "file:///project/src/Open.php";
+    backend
+        .open_files
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new("<?php\n".to_string()));
+
+    std::fs::write(&config_path, "[diagnostics]\nenabled = false\n").unwrap();
+    backend.reload_config(dir.path());
+    assert!(backend.diag.pending_uris.lock().contains(uri));
+    assert!(backend.diag.full_slow_pass_requested.lock().contains(uri));
+
+    backend.diag.pending_uris.lock().clear();
+    backend.diag.full_slow_pass_requested.lock().clear();
+    std::fs::write(
+        &config_path,
+        "[diagnostics]\nenabled = false\nworkspace = true\n",
+    )
+    .unwrap();
+    backend.reload_config(dir.path());
+    assert!(
+        backend.diag.pending_uris.lock().is_empty(),
+        "a reload that leaves diagnostics off has nothing to redo"
+    );
+
+    std::fs::write(&config_path, "[diagnostics]\n").unwrap();
+    backend.reload_config(dir.path());
+    assert!(backend.diag.pending_uris.lock().contains(uri));
 }
 
 /// A reload merges the configured global config file, not the one
@@ -547,6 +586,8 @@ fn the_startup_watcher_registration_is_recorded_for_a_client_that_opted_in() {
         Some(crate::WatchedFileInputs {
             extra_extensions: Vec::new(),
             is_laravel: true,
+            is_symfony: true,
+            is_twig: true,
             followed_links: Vec::new(),
         })
     );
@@ -590,6 +631,8 @@ fn reload_config_updates_the_registered_watcher_state_for_a_new_extension() {
         Some(crate::WatchedFileInputs {
             extra_extensions: Vec::new(),
             is_laravel: true,
+            is_symfony: true,
+            is_twig: true,
             followed_links: Vec::new(),
         })
     );
@@ -606,6 +649,8 @@ fn reload_config_updates_the_registered_watcher_state_for_a_new_extension() {
         Some(crate::WatchedFileInputs {
             extra_extensions: vec!["module".to_string()],
             is_laravel: true,
+            is_symfony: true,
+            is_twig: true,
             followed_links: Vec::new(),
         }),
         "a reload that adds an extension must update the registered watcher state"
@@ -634,6 +679,8 @@ fn reload_config_leaves_the_registered_watcher_state_untouched_for_an_unrelated_
         Some(crate::WatchedFileInputs {
             extra_extensions: Vec::new(),
             is_laravel: true,
+            is_symfony: true,
+            is_twig: true,
             followed_links: Vec::new(),
         })
     );
@@ -749,8 +796,8 @@ fn a_real_path_event_is_respelled_through_the_link() {
     let params = DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
             // Resolve system temp-directory symlinks as well as the watched link.
-            uri: Url::from_file_path(real.join("src/Help.php").canonicalize().unwrap()).unwrap(),
-            typ: FileChangeType::CREATED,
+            uri: Uri::from_file_path(real.join("src/Help.php").canonicalize().unwrap()).unwrap(),
+            kind: FileChangeType::Created,
         }],
     };
     backend.apply_watched_file_changes(&params, &root);
@@ -789,6 +836,8 @@ fn a_client_extension_update_updates_the_registered_watcher_state() {
         Some(crate::WatchedFileInputs {
             extra_extensions: vec!["module".to_string()],
             is_laravel: true,
+            is_symfony: true,
+            is_twig: true,
             followed_links: Vec::new(),
         }),
         "a client-forwarded extension must be watched"

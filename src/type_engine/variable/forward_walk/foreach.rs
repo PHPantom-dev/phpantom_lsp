@@ -652,62 +652,74 @@ fn carried_key_writes(foreach: &Foreach<'_>, body_stmts: &[&Statement<'_>]) -> V
 ///
 /// Each write lands on one of the keys the loop variable can hold, which
 /// only makes each of them a possible entry (`array{a?: true, b?: true}`).
-/// A loop over a shape whose entries are all there, with a literal key or
-/// value per entry, visits every one of those literals, though. So when the
-/// body writes through the loop variable on every path, never skips ahead
-/// with `continue`, and never reassigns the variable, every entry the
-/// literals name was written by the time the loop ends. The caller has
-/// already checked that the body runs and that nothing broke out of it.
+/// A loop over a shape visits every entry the shape requires, though, so
+/// when the body writes through the loop variable on every path, never
+/// skips ahead with `continue`, and never reassigns the variable, every
+/// entry a required key (or a required entry's literal value) names was
+/// written by the time the loop ends. An entry the iterated shape leaves
+/// optional stays optional.
+///
+/// When the loop visits no entry it can name (a `non-empty-array<K, V>`,
+/// or a shape whose values are not literals), the written array still
+/// gained at least one entry, so it becomes non-empty instead: an
+/// all-optional shape generalizes to `non-empty-array<K, V>`, the way
+/// PHPStan widens it, so reading a key neither adds `null` nor claims an
+/// entry that may be missing. The caller has already checked that the
+/// body runs and that nothing broke out of it.
 fn mark_visited_keys_written(
     foreach: &Foreach<'_>,
     body_stmts: &[&Statement<'_>],
     iter_type: Option<&PhpType>,
     scope: &mut ScopeState,
 ) {
-    let Some(TypeKind::ArrayShape(entries)) = iter_type.map(PhpType::kind) else {
+    let Some(iter_type) = iter_type else {
         return;
-    };
-    let Some(runtime_keys) = crate::php_type::runtime_shape_keys(entries) else {
-        return;
-    };
-    let keys_visited: Option<Vec<String>> = entries
-        .iter()
-        .zip(runtime_keys)
-        .map(|(entry, key)| (!entry.optional && !key.contains("::")).then_some(key))
-        .collect();
-    let values_visited: Option<Vec<String>> = entries
-        .iter()
-        .map(|entry| {
-            if entry.optional {
-                return None;
-            }
-            if let Some(class) = entry.value_type.as_class_name_literal() {
-                return Some(crate::php_type::class_name_shape_key(class));
-            }
-            let literal = entry.value_type.as_literal()?;
-            match literal {
-                LiteralValue::Int(raw) => Some(raw.to_string()),
-                LiteralValue::String(_) => {
-                    literal.string_content().map(std::borrow::Cow::into_owned)
-                }
-                LiteralValue::Float(_) => None,
-            }
-        })
-        .collect();
-    let candidates: Vec<(&Expression<'_>, Option<Vec<String>>)> = match &foreach.target {
-        ForeachTarget::KeyValue(kv) => vec![(kv.key, keys_visited), (kv.value, values_visited)],
-        ForeachTarget::Value(val) => vec![(val.value, values_visited)],
     };
     if body_stmts.iter().any(|stmt| statement_may_continue(stmt)) {
         return;
     }
+    let (keys_visited, values_visited) = match iter_type.kind() {
+        TypeKind::ArrayShape(entries) => {
+            let Some(runtime_keys) = crate::php_type::runtime_shape_keys(entries) else {
+                return;
+            };
+            let keys: Vec<String> = entries
+                .iter()
+                .zip(runtime_keys)
+                .filter(|(entry, key)| !entry.optional && !key.contains("::"))
+                .map(|(_, key)| key)
+                .collect();
+            let values: Vec<String> = entries
+                .iter()
+                .filter(|entry| !entry.optional)
+                .filter_map(|entry| {
+                    if let Some(class) = entry.value_type.as_class_name_literal() {
+                        return Some(crate::php_type::class_name_shape_key(class));
+                    }
+                    let literal = entry.value_type.as_literal()?;
+                    match literal {
+                        LiteralValue::Int(raw) => Some(raw.to_string()),
+                        LiteralValue::String(_) => {
+                            literal.string_content().map(std::borrow::Cow::into_owned)
+                        }
+                        LiteralValue::Float(_) => None,
+                    }
+                })
+                .collect();
+            (keys, values)
+        }
+        _ => (Vec::new(), Vec::new()),
+    };
+    let candidates: Vec<(&Expression<'_>, Vec<String>)> = match &foreach.target {
+        ForeachTarget::KeyValue(kv) => vec![(kv.key, keys_visited), (kv.value, values_visited)],
+        ForeachTarget::Value(val) => vec![(val.value, values_visited)],
+    };
     let mut assigned = HashMap::new();
     for stmt in body_stmts {
         collect_assignment_deps(stmt, &mut assigned);
     }
     for (loop_var, visited) in candidates {
-        let (Expression::Variable(Variable::Direct(dv)), Some(visited)) = (loop_var, visited)
-        else {
+        let Expression::Variable(Variable::Direct(dv)) = loop_var else {
             continue;
         };
         let loop_var = bytes_to_str(dv.name);
@@ -718,7 +730,8 @@ fn mark_visited_keys_written(
 }
 
 /// Make the entries under `visited` required in every array the body
-/// writes through `loop_var` on every path.
+/// writes through `loop_var` on every path, or, with nothing in `visited`,
+/// mark those arrays non-empty.
 fn mark_keys_written(
     body_stmts: &[&Statement<'_>],
     loop_var: &str,
@@ -730,8 +743,22 @@ fn mark_keys_written(
             continue;
         };
         let Some(written) = current.shape_entries() else {
+            if visited.is_empty() && scope.get(&array_var).len() == 1 {
+                let non_empty = current.non_empty_array_form();
+                if &non_empty != current {
+                    scope.set(&array_var, vec![ResolvedType::from_type_string(non_empty)]);
+                }
+            }
             continue;
         };
+        if visited.is_empty() {
+            if written.iter().all(|entry| entry.optional)
+                && let Some(general) = non_empty_generalized_shape(written)
+            {
+                scope.set(&array_var, vec![ResolvedType::from_type_string(general)]);
+            }
+            continue;
+        }
         let Some(written_keys) = crate::php_type::runtime_shape_keys(written) else {
             continue;
         };
@@ -753,6 +780,40 @@ fn mark_keys_written(
             ))],
         );
     }
+}
+
+/// `non-empty-array<K, V>` for a shape known to hold at least one of its
+/// entries, keeping the literal keys it names (`array{dk?: T, en?: T}` →
+/// `non-empty-array<'dk'|'en', T>`).
+///
+/// Returns `None` for an empty shape, or one keyed by a constant known only
+/// by its spelling.
+fn non_empty_generalized_shape(entries: &[crate::php_type::ShapeEntry]) -> Option<PhpType> {
+    let runtime_keys = crate::php_type::runtime_shape_keys(entries)?;
+    if runtime_keys.is_empty() {
+        return None;
+    }
+    let mut keys = Vec::with_capacity(runtime_keys.len());
+    for key in &runtime_keys {
+        if key.contains("::") {
+            return None;
+        }
+        keys.push(if crate::php_type::is_canonical_int_key(key) {
+            PhpType::literal_int(key.as_str())
+        } else {
+            PhpType::literal_string_value(key)
+        });
+    }
+    let mut values: Vec<PhpType> = Vec::new();
+    for entry in entries {
+        if !values.contains(&entry.value_type) {
+            values.push(entry.value_type.clone());
+        }
+    }
+    Some(PhpType::generic_atom(
+        atom("non-empty-array"),
+        vec![PhpType::union(keys), PhpType::union(values)],
+    ))
 }
 
 /// Whether a statement in a loop body may skip ahead to the next iteration,

@@ -10,7 +10,7 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{Location, Position};
+use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
 use crate::atom::bytes_to_str;

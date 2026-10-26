@@ -10,7 +10,7 @@
 //! Consumers: deprecated diagnostics, find-references, code actions.
 
 use crate::atom::atom;
-use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -88,7 +88,16 @@ pub(crate) fn resolve_subject_type(
         }
         _ if is_static && !trimmed.starts_with('$') => {
             let fqn = resolve_to_fqn(trimmed, ctx.use_map, ctx.namespace);
-            Some(PhpType::named(atom(&fqn)))
+            // PHP class names are case-insensitive, so `WIDGET::$x` may be
+            // spelled differently from the `Widget` it names.  The type
+            // carries the declared spelling, which is what every consumer
+            // compares against; the written one only stands in when the
+            // class does not load.
+            let name = match (ctx.class_loader)(Fqn::new(&fqn)) {
+                Some(class) => class.fqn(),
+                None => atom(&fqn),
+            };
+            Some(PhpType::named(name))
         }
         _ => {
             let expr = SubjectExpr::parse(trimmed);

@@ -11,8 +11,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionTextEdit,
+use tower_lsp_server::gen_lsp_types::{
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionItemTextEdit,
     InsertTextFormat, Position, Range, TextEdit,
 };
 
@@ -397,13 +397,13 @@ pub(crate) fn build_override_completions(
 
         items.push(CompletionItem {
             label: label.clone(),
-            kind: Some(CompletionItemKind::METHOD),
+            kind: Some(CompletionItemKind::Method),
             detail: Some(format!("{detail_kind} · {}", short_name(declaring))),
             filter_text: Some(method.name.to_string()),
             sort_text: Some(sort_text),
             insert_text: Some(insert_text.clone()),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
-            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+            insert_text_format: Some(InsertTextFormat::Snippet),
+            text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                 range: opts.replace_range,
                 new_text: insert_text,
             })),
@@ -595,7 +595,7 @@ pub(crate) fn build_property_override_completions(
                 type_str: type_str.as_deref(),
                 default,
                 declaring,
-                kind: CompletionItemKind::PROPERTY,
+                kind: CompletionItemKind::Property,
                 detail_kind: if *skip_override_attr {
                     "trait"
                 } else {
@@ -662,7 +662,7 @@ fn build_name_override_item(item: NameOverrideItem<'_>, replace_range: Range) ->
         filter_text: Some(name.to_string()),
         sort_text: Some(format!("0_{}", name.to_ascii_lowercase())),
         insert_text: Some(insert.clone()),
-        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+        text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
             range: replace_range,
             new_text: insert,
         })),
@@ -736,7 +736,7 @@ pub(crate) fn build_constant_override_completions(
                 type_str: type_str.as_deref(),
                 default,
                 declaring,
-                kind: CompletionItemKind::CONSTANT,
+                kind: CompletionItemKind::Constant,
                 detail_kind: "override",
                 insert,
                 override_edit: override_edit.clone(),

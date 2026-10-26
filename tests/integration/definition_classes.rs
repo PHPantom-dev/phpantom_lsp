@@ -1,7 +1,7 @@
 use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Same-File Goto Definition Tests ────────────────────────────────────────
 
@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::*;
 async fn test_goto_definition_same_file_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -32,7 +32,7 @@ async fn test_goto_definition_same_file_class() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 1, "Logger is defined on line 1");
         }
@@ -44,7 +44,7 @@ async fn test_goto_definition_same_file_class() {
 async fn test_goto_definition_same_file_interface() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Cacheable {\n",
@@ -65,7 +65,7 @@ async fn test_goto_definition_same_file_interface() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -101,7 +101,7 @@ async fn test_goto_definition_cross_file_psr4() {
         )],
     );
 
-    let uri = Url::parse("file:///service.php").unwrap();
+    let uri = Uri::parse("file:///service.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -123,7 +123,7 @@ async fn test_goto_definition_cross_file_psr4() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/Logger.php"),
@@ -158,7 +158,7 @@ async fn test_goto_definition_after_target_did_close() {
     );
     std::fs::write(src_dir.join("ClassB.php"), text_b).unwrap();
 
-    let uri_b = Url::from_file_path(src_dir.join("ClassB.php")).unwrap();
+    let uri_b = Uri::from_file_path(src_dir.join("ClassB.php")).unwrap();
 
     // Open ClassB so it gets indexed.
     open_php(&backend, &uri_b, text_b).await;
@@ -171,7 +171,7 @@ async fn test_goto_definition_after_target_did_close() {
         .await;
 
     // Open ClassA which references ClassB.
-    let uri_a = Url::from_file_path(src_dir.join("ClassA.php")).unwrap();
+    let uri_a = Uri::from_file_path(src_dir.join("ClassA.php")).unwrap();
     let text_a = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -193,7 +193,7 @@ async fn test_goto_definition_after_target_did_close() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri_b, "Should jump to ClassB.php");
         }
         other => panic!("Expected Scalar location, got: {:?}", other),
@@ -207,7 +207,7 @@ async fn test_goto_definition_after_target_did_close() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(
                 location.uri, uri_b,
                 "Member definition should jump to ClassB.php"
@@ -241,7 +241,7 @@ async fn test_goto_definition_cross_file_with_use_statement() {
         )],
     );
 
-    let uri = Url::parse("file:///service.php").unwrap();
+    let uri = Uri::parse("file:///service.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Services;\n",
@@ -263,7 +263,7 @@ async fn test_goto_definition_cross_file_with_use_statement() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/Contracts/Repository.php"),
@@ -302,7 +302,7 @@ async fn test_goto_definition_on_use_statement_name() {
         )],
     );
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Controllers;\n",
@@ -324,7 +324,7 @@ async fn test_goto_definition_on_use_statement_name() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/Models/User.php"),
@@ -367,7 +367,7 @@ async fn test_goto_definition_cross_file_with_grouped_use_statement() {
         ],
     );
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Project\\CatalogIndex\\Controllers;\n\n",
@@ -388,7 +388,7 @@ async fn test_goto_definition_cross_file_with_grouped_use_statement() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with(
@@ -422,7 +422,7 @@ async fn test_goto_definition_on_grouped_use_statement_name() {
         )],
     );
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Project\\CatalogIndex\\Controllers;\n\n",
@@ -463,7 +463,7 @@ async fn test_goto_definition_class_reference_via_namespace() {
         )],
     );
 
-    let uri = Url::parse("file:///model.php").unwrap();
+    let uri = Uri::parse("file:///model.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Enums;\n",
@@ -485,7 +485,7 @@ async fn test_goto_definition_class_reference_via_namespace() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/Enums/Status.php"),
@@ -524,7 +524,7 @@ async fn test_goto_definition_return_type_hint() {
         )],
     );
 
-    let uri = Url::parse("file:///repo.php").unwrap();
+    let uri = Uri::parse("file:///repo.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -543,7 +543,7 @@ async fn test_goto_definition_return_type_hint() {
     assert!(result.is_some(), "Should resolve return type hint");
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/Collection.php"),
@@ -561,7 +561,7 @@ async fn test_goto_definition_return_type_hint() {
 async fn test_goto_definition_unresolvable_returns_none() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\n$x = 42;\n";
 
     open_php(&backend, &uri, text).await;
@@ -576,7 +576,7 @@ async fn test_goto_definition_unresolvable_returns_none() {
 async fn test_goto_definition_whitespace_returns_none() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\n    \n";
 
     open_php(&backend, &uri, text).await;
@@ -623,11 +623,11 @@ async fn test_goto_definition_vendor_cross_file() {
         let mut idx = backend.fqn_uri_index().write();
         idx.insert(
             "Monolog\\Logger".to_string(),
-            Url::from_file_path(&vendor_file).unwrap().to_string(),
+            Uri::from_file_path(&vendor_file).unwrap().to_string(),
         );
     }
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -646,7 +646,7 @@ async fn test_goto_definition_vendor_cross_file() {
     assert!(result.is_some(), "Should resolve vendor class via classmap");
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("vendor/monolog/monolog/src/Monolog/Logger.php"),
@@ -685,7 +685,7 @@ async fn test_goto_definition_trait() {
         )],
     );
 
-    let uri = Url::parse("file:///model.php").unwrap();
+    let uri = Uri::parse("file:///model.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Models;\n",
@@ -704,7 +704,7 @@ async fn test_goto_definition_trait() {
     assert!(result.is_some(), "Should resolve trait via use statement");
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/Traits/Auditable.php"),
@@ -743,7 +743,7 @@ async fn test_goto_definition_extends_class() {
         )],
     );
 
-    let uri = Url::parse("file:///user.php").unwrap();
+    let uri = Uri::parse("file:///user.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -760,7 +760,7 @@ async fn test_goto_definition_extends_class() {
     assert!(result.is_some(), "Should resolve parent class in extends");
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/BaseModel.php"),
@@ -804,7 +804,7 @@ async fn test_goto_definition_aliased_use_does_not_match_same_file_short_name() 
         )],
     );
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Http\\Controllers;\n",
@@ -826,7 +826,7 @@ async fn test_goto_definition_aliased_use_does_not_match_same_file_short_name() 
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("vendor/illuminate/Routing/Controller.php"),
@@ -847,11 +847,11 @@ async fn test_goto_definition_aliased_use_does_not_match_same_file_short_name() 
 /// Open `text` and return the go-to-definition result at `(line, character)`.
 async fn definition_at(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     text: &str,
     line: u32,
     character: u32,
-) -> Option<GotoDefinitionResponse> {
+) -> Option<DefinitionResponse> {
     open_php(backend, uri, text).await;
     goto_definition_at(backend, uri, line, character).await
 }
@@ -859,7 +859,7 @@ async fn definition_at(
 #[tokio::test]
 async fn goto_definition_on_a_class_inside_a_phpstan_type_alias() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // 0
         "namespace App;\n",                              // 1
@@ -875,8 +875,10 @@ async fn goto_definition_on_a_class_inside_a_phpstan_type_alias() {
     // `User` inside the alias definition starts at char 38.
     let result = definition_at(&backend, &uri, text, 6, 38).await;
     let location = match result.expect("`User` in the alias definition should resolve") {
-        GotoDefinitionResponse::Scalar(l) => l,
-        GotoDefinitionResponse::Array(mut v) if !v.is_empty() => v.remove(0),
+        DefinitionResponse::Definition(Definition::Location(l)) => l,
+        DefinitionResponse::Definition(Definition::LocationList(mut v)) if !v.is_empty() => {
+            v.remove(0)
+        }
         other => panic!("expected a location, got {other:?}"),
     };
     assert_eq!(location.range.start.line, 3, "got {location:?}");
@@ -885,7 +887,7 @@ async fn goto_definition_on_a_class_inside_a_phpstan_type_alias() {
 #[tokio::test]
 async fn goto_definition_on_the_class_a_phpstan_import_type_names() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "namespace App;\n",                         // 1
@@ -901,8 +903,10 @@ async fn goto_definition_on_the_class_a_phpstan_import_type_names() {
     // `Other` after `from` starts at char 33.
     let result = definition_at(&backend, &uri, text, 6, 33).await;
     let location = match result.expect("the imported-from class should resolve") {
-        GotoDefinitionResponse::Scalar(l) => l,
-        GotoDefinitionResponse::Array(mut v) if !v.is_empty() => v.remove(0),
+        DefinitionResponse::Definition(Definition::Location(l)) => l,
+        DefinitionResponse::Definition(Definition::LocationList(mut v)) if !v.is_empty() => {
+            v.remove(0)
+        }
         other => panic!("expected a location, got {other:?}"),
     };
     assert_eq!(location.range.start.line, 3, "got {location:?}");
@@ -913,7 +917,7 @@ async fn goto_definition_on_the_class_a_phpstan_import_type_names() {
 #[tokio::test]
 async fn test_goto_definition_follows_the_blocks_own_import() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///blocks.php").unwrap();
+    let uri = Uri::parse("file:///blocks.php").unwrap();
     let text = r#"<?php
 namespace X {
     class Foo {}
@@ -952,7 +956,7 @@ namespace B {
 #[tokio::test]
 async fn test_goto_definition_does_not_fall_back_to_a_global_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///no_global_fallback.php").unwrap();
+    let uri = Uri::parse("file:///no_global_fallback.php").unwrap();
     let text = r#"<?php
 namespace {
     class Foo {}

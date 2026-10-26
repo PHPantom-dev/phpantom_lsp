@@ -1,6 +1,6 @@
 use crate::common::create_test_backend;
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: open a file, trigger document highlight at a position, and return results.
 fn highlight_at(
@@ -66,11 +66,11 @@ function demo() {
 
     assert_eq!(highlights.len(), 3);
     // Line 2: $user = ... (write)
-    assert_highlight(&highlights[0], 2, 4, 9, DocumentHighlightKind::WRITE);
+    assert_highlight(&highlights[0], 2, 4, 9, DocumentHighlightKind::Write);
     // Line 3: echo $user->name (read)
-    assert_highlight(&highlights[1], 3, 9, 14, DocumentHighlightKind::READ);
+    assert_highlight(&highlights[1], 3, 9, 14, DocumentHighlightKind::Read);
     // Line 4: return $user (read)
-    assert_highlight(&highlights[2], 4, 11, 16, DocumentHighlightKind::READ);
+    assert_highlight(&highlights[2], 4, 11, 16, DocumentHighlightKind::Read);
 }
 
 #[test]
@@ -110,10 +110,10 @@ function greet(string $name) {
 
     let has_write = highlights
         .iter()
-        .any(|h| h.kind == Some(DocumentHighlightKind::WRITE));
+        .any(|h| h.kind == Some(DocumentHighlightKind::Write));
     let has_read = highlights
         .iter()
-        .any(|h| h.kind == Some(DocumentHighlightKind::READ));
+        .any(|h| h.kind == Some(DocumentHighlightKind::Read));
     assert!(
         has_write,
         "expected a WRITE highlight for the parameter definition"
@@ -146,7 +146,7 @@ class Foo {
 
     // All should be READ kind (class declarations are still READ for highlighting purposes)
     for h in &highlights {
-        assert_eq!(h.kind, Some(DocumentHighlightKind::READ));
+        assert_eq!(h.kind, Some(DocumentHighlightKind::Read));
     }
 }
 
@@ -218,6 +218,32 @@ class Dog {
     );
 }
 
+#[test]
+fn highlight_property_and_method_of_the_same_name_apart() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class User {
+    public function __construct(private string $email) {}
+    public function email(): string { return $this->email; }
+}
+function show(User $user): string { return $user->email(); }
+"#;
+
+    let lines = |highlights: Vec<DocumentHighlight>| {
+        let mut lines: Vec<u32> = highlights.iter().map(|h| h.range.start.line).collect();
+        lines.sort_unstable();
+        lines
+    };
+
+    // Cursor on the property access `$this->email`.
+    let property = highlight_at(&backend, "file:///test.php", php, 3, 53);
+    assert_eq!(lines(property), vec![2, 3]);
+
+    // Cursor on the method declaration `email()`.
+    let method = highlight_at(&backend, "file:///test.php", php, 3, 22);
+    assert_eq!(lines(method), vec![3, 5]);
+}
+
 // ─── Function highlighting ──────────────────────────────────────────────────
 
 #[test]
@@ -238,7 +264,7 @@ helper();
         highlights.len()
     );
     for h in &highlights {
-        assert_eq!(h.kind, Some(DocumentHighlightKind::READ));
+        assert_eq!(h.kind, Some(DocumentHighlightKind::Read));
     }
 }
 
@@ -292,7 +318,7 @@ class Example {
         highlights.len()
     );
     for h in &highlights {
-        assert_eq!(h.kind, Some(DocumentHighlightKind::READ));
+        assert_eq!(h.kind, Some(DocumentHighlightKind::Read));
     }
 }
 
@@ -373,7 +399,7 @@ function process(array $items) {
 
     let has_write = highlights
         .iter()
-        .any(|h| h.kind == Some(DocumentHighlightKind::WRITE));
+        .any(|h| h.kind == Some(DocumentHighlightKind::Write));
     assert!(has_write, "foreach binding should be a WRITE highlight");
 }
 
@@ -392,9 +418,9 @@ function test() {
 
     assert_eq!(highlights.len(), 3);
     // First two are assignments (WRITE), last is usage (READ)
-    assert_highlight(&highlights[0], 2, 4, 8, DocumentHighlightKind::WRITE);
-    assert_highlight(&highlights[1], 3, 4, 8, DocumentHighlightKind::WRITE);
-    assert_highlight(&highlights[2], 4, 9, 13, DocumentHighlightKind::READ);
+    assert_highlight(&highlights[0], 2, 4, 8, DocumentHighlightKind::Write);
+    assert_highlight(&highlights[1], 3, 4, 8, DocumentHighlightKind::Write);
+    assert_highlight(&highlights[2], 4, 9, 13, DocumentHighlightKind::Read);
 }
 
 #[test]

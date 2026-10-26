@@ -85,6 +85,7 @@ mod property_access;
 mod scalar_fold;
 mod scope_reads;
 mod static_calls;
+mod symfony_calls;
 mod unary_prefix;
 
 pub(crate) use scalar_fold::{fold_concat_types, is_literal_string_type};
@@ -136,6 +137,25 @@ pub(crate) use instantiation::{
 /// the engine rather than at code PHP itself leaves open.
 pub(super) fn runtime_named_member_type() -> Vec<ResolvedType> {
     vec![ResolvedType::from_type_string(PhpType::mixed())]
+}
+
+/// A closure value of type `closure_ty` (`Closure(): T` or bare `Closure`).
+///
+/// It is always resolved against the plain `Closure` class so that methods
+/// like `bindTo()` are available for completion, with the typed callable
+/// kept as the hint so invoking it still reads its signature.
+fn closure_value(closure_ty: PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
+    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        &PhpType::closure(),
+        &ctx.current_class.fqn(),
+        ctx.file.all_classes,
+        ctx.file.class_loader,
+    );
+    if classes.is_empty() {
+        vec![ResolvedType::from_type_string(closure_ty)]
+    } else {
+        ResolvedType::from_classes_with_hint(classes, closure_ty)
+    }
 }
 
 /// Create a `ResolvedType` from a `PhpType`, looking up class info when the type names a class.
@@ -397,22 +417,7 @@ fn resolve_rhs_expression_inner<'b>(
             // yields, or arrow-body expression), preserve it in the
             // `TypeKind::Callable` so callers like template binding can use
             // it through `$closure` variables.
-            let closure_ty = infer_closure_literal_type(expr, ctx);
-            // Always resolve against the plain Closure class so that
-            // methods like bindTo() are available for completion, even
-            // when the inferred type is a typed Callable (Closure(): T).
-            let lookup_ty = PhpType::closure();
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &lookup_ty,
-                &ctx.current_class.fqn(),
-                ctx.file.all_classes,
-                ctx.file.class_loader,
-            );
-            if classes.is_empty() {
-                vec![ResolvedType::from_type_string(closure_ty)]
-            } else {
-                ResolvedType::from_classes_with_hint(classes, closure_ty)
-            }
+            closure_value(infer_closure_literal_type(expr, ctx), ctx)
         }
         // ── Generator yield-assignment: `$var = yield $expr` ──
         // The value of a yield expression is the TSend type from

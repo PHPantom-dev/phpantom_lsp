@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
@@ -28,7 +28,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
         let ctx = self.file_context_at(uri, cursor_offset);
@@ -84,20 +84,21 @@ impl Backend {
             new_text: stub_text,
         };
 
-        let doc_uri: Url = match uri.parse() {
+        let doc_uri: Uri = match uri.parse() {
             Ok(u) => u,
             Err(_) => return,
         };
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title,
-            kind: Some(CodeActionKind::QUICKFIX),
+            kind: Some(CodeActionKind::QuickFix),
             diagnostics: None,
             edit: Some(crate::code_actions::single_file_edit(doc_uri, vec![edit])),
             command: None,
             is_preferred: Some(true),
             disabled: None,
             data: None,
+            tags: None,
         }));
     }
 }

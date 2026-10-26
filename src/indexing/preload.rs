@@ -57,13 +57,13 @@ impl Backend {
         }
 
         crate::parallel::map_indexed("autoload-preload", file_count, |_, i| {
-            if let Some(p) = progress {
-                p.add_done(1);
-            }
             let path = pending[i];
             if let Some(content) = crate::util::read_php_source(path) {
                 let uri = crate::util::path_to_uri(path);
                 self.update_ast(&uri, &content);
+            }
+            if let Some(p) = progress {
+                p.add_done(1);
             }
             None::<()>
         });
@@ -76,7 +76,10 @@ impl Backend {
     /// via the fqn_uri_index.  The vendor directory (read from
     /// `composer.json`'s `config.vendor-dir`, defaulting to `vendor`) is
     /// skipped during the filesystem walk.
-    pub(crate) fn ensure_workspace_indexed(&self) {
+    ///
+    /// Public so the test runners can index a fixture project the way the
+    /// server's background index does.
+    pub fn ensure_workspace_indexed(&self) {
         self.ensure_workspace_indexed_with_progress(None);
     }
 
@@ -252,12 +255,20 @@ impl Backend {
             .cloned()
             .collect();
 
+        // A class inside a phar (`phar:///…/vendor/phpstan/phpstan/phpstan.phar/…`)
+        // is packaged library code whatever directory the archive sits in,
+        // and its URI carries no `file://` prefix for the vendor check to
+        // match.  A file declaring several classes is listed once per
+        // class, and is parsed once.
+        let mut queued: HashSet<&str> = HashSet::new();
         let phase1_uris: Vec<&String> = index_uris
             .iter()
             .filter(|uri| {
                 !existing_uris.contains(*uri)
                     && !vendor_prefixes.iter().any(|p| uri.starts_with(p.as_str()))
+                    && !uri.starts_with("phar://")
                     && !crate::stubs::is_stub_uri(uri)
+                    && queued.insert(uri.as_str())
             })
             .collect();
 
@@ -317,11 +328,15 @@ impl Backend {
                     }
                 })
                 .collect();
+            // A file that can be a Twig template is read for root discovery
+            // even when it is indexed already (an open one), unless discovery
+            // has seen it.
             let resource_work = resource_files
                 .into_iter()
                 .filter_map(|path| {
                     let uri = crate::util::path_to_uri(&path);
-                    (!existing_uris.contains(&uri)).then_some((uri, path))
+                    (!existing_uris.contains(&uri) || !self.twig_has_seen(&path))
+                        .then_some((uri, path))
                 })
                 .collect();
             (php_work, resource_work)

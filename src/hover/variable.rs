@@ -5,7 +5,7 @@
 //! parameters and scalar types.  Union types are shown as separate code
 //! blocks divided by a horizontal rule.
 
-use tower_lsp::lsp_types::Hover;
+use tower_lsp_server::gen_lsp_types::Hover;
 
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
@@ -186,8 +186,14 @@ pub(super) fn build_variable_hover_body(
     // Count how many members are non-trivial class types (not scalars,
     // not `null`, not `void`, etc.).  Only render separate blocks when
     // there are 2+ class-like types; a simple `Foo|null` should stay
-    // in one block.
-    let class_like_count = members.iter().filter(|m| !m.is_scalar()).count();
+    // in one block, and so should the cases of one enum.
+    let mut class_likes: Vec<PhpType> = members
+        .iter()
+        .filter(|m| !m.is_scalar())
+        .map(|m| m.enum_cases_as_enums())
+        .collect();
+    class_likes.dedup();
+    let class_like_count = class_likes.len();
 
     // When there is only one component, or only one class-like type
     // (the rest being scalars / null), render a single code block.

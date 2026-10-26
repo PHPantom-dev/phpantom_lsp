@@ -408,7 +408,7 @@ Go-to-definition is implemented for **route names** (`route()`), **config
 keys**, **env vars**, **translation keys**, and **view names** via the
 declaration scanners in `virtual_members/laravel/{route_names, config_keys,
 env_vars, trans_keys, view_names}.rs`. These walk the relevant source files
-and resolve a string key to its declaration site. `LaravelStringKey` also
+and resolve a string key to its declaration site. `StringKey` also
 flows through find-references (rename, highlight, and semantic tokens
 are L31). **Eloquent
 relation and column name strings** have completion (`completion/eloquent_string.rs`).
@@ -560,6 +560,8 @@ files across every locale plus all usages; renaming a route name
 updates the `->name()` declaration and all usages; highlight and
 semantic tokens reuse the existing spans. Renaming a view name implies
 moving the Blade file — defer that one until the rest is in place.
+Symfony service IDs and container parameters are string-key spans too,
+declarations included, so their rename comes with the same work.
 
 #### L56. Typed Laravel connection names
 
@@ -642,8 +644,8 @@ The receiver's *type* is what settles this, and `can()` is far too ordinary
 a method name to claim on the name alone, so the fix is the mechanism main
 already uses for render sites whose receiver only a type settles: emit a
 candidate site during extraction and confirm it in a later, type-aware
-pass, the way `ViewReceiverSite` /
-`typed_receiver_view_spans_for` (`blade/typed_receiver.rs`) does. A receiver that resolves to the
+pass, the way `TypedReceiverSite` /
+`typed_receiver_spans_for` (`blade/typed_receiver.rs`) does. A receiver that resolves to the
 configured auth model (or to `Illuminate\Contracts\Auth\Access\Authorizable`)
 makes the call an authorization check; anything else leaves it alone. The
 existing name heuristic stays as the cheap path that needs no type
@@ -651,8 +653,8 @@ resolution at all.
 
 **Where to look:** `receiver_is_user_like` in
 `symbol_map/extraction/laravel/gates.rs` and its completion-side twin (a
-local check in `completion/laravel_string_keys/context.rs`); `ViewReceiverSite` in
-`symbol_map/laravel_spans.rs` for the confirm-later shape.
+local check in `completion/laravel_string_keys/context.rs`); `TypedReceiverSite` in
+`symbol_map/string_keys.rs` for the confirm-later shape.
 
 #### L49. Unguarded Eloquent mass assignment diagnostic
 

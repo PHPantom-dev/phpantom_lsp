@@ -107,10 +107,18 @@ pub fn extract_path_repo_psr4_mappings(
     workspace_root: &Path,
     vendor_dir: &str,
 ) -> Vec<Psr4Mapping> {
-    let Some(installed) = read_installed_packages(workspace_root, vendor_dir) else {
-        return Vec::new();
-    };
+    match read_installed_packages(workspace_root, vendor_dir) {
+        Some(installed) => path_repo_psr4_mappings(workspace_root, &installed),
+        None => Vec::new(),
+    }
+}
 
+/// [`extract_path_repo_psr4_mappings`] over an `installed.json` already
+/// read.
+pub(crate) fn path_repo_psr4_mappings(
+    workspace_root: &Path,
+    installed: &InstalledPackages,
+) -> Vec<Psr4Mapping> {
     let canonical_root = workspace_root
         .canonicalize()
         .unwrap_or_else(|_| workspace_root.to_path_buf());
@@ -200,4 +208,43 @@ pub fn extract_path_repo_psr4_mappings(
     mappings.sort_by_key(|m| std::cmp::Reverse(m.prefix.len()));
 
     mappings
+}
+
+/// Packages whose name says stubs but which are not a stub source.
+///
+/// `phpstan/php-8-stubs` holds one signature-only declaration per
+/// built-in function, less precise than the embedded stubs and their
+/// corrections, and would replace every built-in it covers.
+/// `php-stubs/generator` is the tool that writes stub packages.
+const NOT_STUB_PACKAGES: &[&str] = &["phpstan/php-8-stubs", "php-stubs/generator"];
+
+/// Whether an `installed.json` entry is a stub package: declarations
+/// meant to describe code that is not installed (WordPress core, a PHP
+/// extension), which win over any other declaration of the same name.
+///
+/// Recognised by name (`jetbrains/phpstorm-stubs`, `php-stubs/*`,
+/// `*-stubs`) or by the `phpstorm-stubs` and `php-stubs` package types
+/// some stub packages declare.
+fn is_stub_package(package: &serde_json::Value) -> bool {
+    let name = package.get("name").and_then(|n| n.as_str()).unwrap_or("");
+    if NOT_STUB_PACKAGES.contains(&name) {
+        return false;
+    }
+    name.starts_with("php-stubs/")
+        || name.ends_with("-stubs")
+        || matches!(
+            package.get("type").and_then(|t| t.as_str()),
+            Some("phpstorm-stubs" | "php-stubs")
+        )
+}
+
+/// The install roots of the stub packages Composer installed, in
+/// `installed.json` order.
+pub(crate) fn stub_package_roots(installed: &InstalledPackages) -> Vec<PathBuf> {
+    installed
+        .packages
+        .iter()
+        .filter(|package| is_stub_package(package))
+        .filter_map(|package| installed.package_root(package))
+        .collect()
 }

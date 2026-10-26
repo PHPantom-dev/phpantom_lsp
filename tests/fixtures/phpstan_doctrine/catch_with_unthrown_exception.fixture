@@ -1,0 +1,7 @@
+// test: flush() can throw a unique constraint violation
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, CatchWithUnthrownExceptionRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Exceptions/data/unthrown-exception.php
+---

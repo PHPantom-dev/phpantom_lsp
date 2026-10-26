@@ -26,11 +26,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::Backend;
 use crate::blade::contract::{AcceptedNames, TemplateContract};
-use crate::symbol_map::{LaravelStringKind, SymbolKind};
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 
 use super::helpers::make_diagnostic;
 use super::type_errors::is_type_compatible;
@@ -59,15 +59,15 @@ impl Backend {
         // The view name each recorded key sits at, so a call site found by
         // offset can be traced back to the template it names.
         let symbol_map = &ctx.symbol_map;
-        let extra = self.typed_receiver_view_spans_for(uri, symbol_map);
+        let extra = self.typed_receiver_spans_for(uri, symbol_map);
         let keys: HashMap<u32, String> = symbol_map
             .spans
             .iter()
             .chain(extra.iter())
             .filter(|span| super::incremental::reports_site(span.start))
             .filter_map(|span| match &span.kind {
-                SymbolKind::LaravelStringKey {
-                    kind: LaravelStringKind::View,
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::View,
                     key,
                     is_write: false,
                     ..
@@ -138,7 +138,7 @@ impl Backend {
                 };
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     TYPE_MISMATCH_CODE,
                     format!(
                         "View '{}' expects ${} of type {}, got {}",
@@ -202,7 +202,7 @@ impl Backend {
                     };
                     out.push(make_diagnostic(
                         range,
-                        DiagnosticSeverity::ERROR,
+                        DiagnosticSeverity::Error,
                         MISSING_CODE,
                         format!(
                             "View '{}' expects ${} of type {}, which is not passed",
@@ -233,7 +233,7 @@ impl Backend {
                 };
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     UNUSED_CODE,
                     format!("View '{}' has no variable ${}", view_name, var.name),
                 ));
@@ -285,7 +285,7 @@ impl Backend {
         };
         out.push(make_diagnostic(
             range,
-            DiagnosticSeverity::ERROR,
+            DiagnosticSeverity::Error,
             TYPE_MISMATCH_CODE,
             format!(
                 "View '{}' expects ${} of type {}, but {} given by the surrounding scope",

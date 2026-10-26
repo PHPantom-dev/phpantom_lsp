@@ -127,7 +127,7 @@ impl Backend {
         let uri_owned = uri.to_string();
 
         let result = crate::util::catch_panic_unwind_safe("parse", uri, None, || {
-            self.update_ast_inner(&uri_owned, &content_owned, blade)
+            self.update_ast_inner(&uri_owned, content_owned, blade)
         });
 
         // The refreshes below that rebuild from the registered provider list
@@ -181,10 +181,41 @@ impl Backend {
 
     /// Inner implementation of [`update_ast`] that performs the actual parse
     /// and publishes the resulting single-file update.
-    fn update_ast_inner(&self, uri: &str, content: &str, blade: Option<BladeLowering>) -> bool {
-        let mut update = self.build_ast_index_update(uri, content);
+    ///
+    /// An open file's parse is kept for the diagnostic pass this edit
+    /// schedules (see [`Backend::take_parsed_for_diagnostics`]).
+    fn update_ast_inner(
+        &self,
+        uri: &str,
+        content: Arc<String>,
+        blade: Option<BladeLowering>,
+    ) -> bool {
+        let (mut update, parsed) = if self.open_files.read().contains_key(uri) {
+            let mut parse_errors = Vec::new();
+            let parsed = super::ParsedFile::new(content, |arena, text| {
+                let (errors, program) = parse_with_errors(arena, text);
+                parse_errors = errors;
+                program
+            });
+            let update = with_reusable_arena(|arena| {
+                self.ast_index_update_from(
+                    arena,
+                    uri,
+                    parsed.content(),
+                    parse_errors,
+                    parsed.program(),
+                )
+            });
+            (update, Some(parsed))
+        } else {
+            (self.build_ast_index_update(uri, &content), None)
+        };
         update.blade = blade;
-        self.apply_ast_index_updates_batch(vec![update])
+        let changed = self.apply_ast_index_updates_batch(vec![update]);
+        if let Some(parsed) = parsed {
+            self.keep_parsed_for_diagnostics(uri, parsed);
+        }
+        changed
     }
 
     /// Preprocess a Blade template into the virtual PHP everything else
@@ -367,182 +398,222 @@ impl Backend {
 
     fn build_ast_index_update(&self, uri: &str, content: &str) -> AstIndexUpdate {
         with_reusable_arena(|arena| {
-            let file_id = mago_database::file::FileId::new(b"input.php");
-            let program = parse_file_content(arena, file_id, content.as_bytes());
-
-            let parse_errors: Vec<ParseErrorEntry> = program
-                .errors
-                .iter()
-                .map(|e| {
-                    let span = e.span();
-                    (
-                        super::error_format::format_parse_error(e),
-                        span.start.offset,
-                        span.end.offset,
-                    )
-                })
-                .collect();
-
-            // Everything else is read from a parse that keeps the code
-            // this one dropped.  The errors above stay those of the text as
-            // written.
-            let program =
-                super::recovery::reparse_dropped_code(arena, program, content).unwrap_or(program);
-
-            // Run mago-names resolver while the arena is still alive.
-            // This produces a `ResolvedNames` that maps every identifier's
-            // byte offset to its fully-qualified name.  We immediately copy
-            // the data into an owned `OwnedResolvedNames` so it survives
-            // the arena drop.
-            let name_resolver = mago_names::resolver::NameResolver::new(arena);
-            let mago_resolved = name_resolver.resolve(program);
-            let owned_resolved = OwnedResolvedNames::from_resolved(&mago_resolved);
-
-            let doc_ctx = DocblockCtx {
-                trivias: program.trivia.as_slice(),
-                content,
-                php_version: Some(self.php_version()),
-                use_map: HashMap::new(),
-                namespace: None,
-            };
-
-            let mut decls = Self::collect_file_declarations(program, &doc_ctx);
-            let mut functions = Self::extract_file_functions(program, &decls, &doc_ctx);
-
-            // Drop the declarations the Blade lowering wrote itself: the
-            // wrapper holding the template body and the prologue's marker
-            // functions.  Every template lowers to the same ones, so
-            // publishing them makes each template a redeclaration of the
-            // last and puts boilerplate no file wrote into
-            // workspace-symbol results.  They stay in the virtual PHP, so
-            // the calls the lowering emits still resolve against them
-            // within the template.
-            if self.is_blade_file(uri) {
-                functions.retain(|func| !crate::blade::is_synthetic_function(&func.name));
-            }
-
-            // Apply stub patches when parsing embedded stub content
-            // (e.g. a constant lookup routes its stub source through
-            // `update_ast` under a `phpantom-stub://const/…` URI).  The
-            // same stub file often defines functions and classes too;
-            // without patching here, those register with unpatched
-            // signatures and overwrite (or preempt) the patched entries
-            // from the stub-function and stub-class loaders — silently
-            // dropping e.g. `array_map`'s template parameters and
-            // breaking closure parameter inference for the rest of the
-            // session.
-            if crate::stubs::is_embedded_stub_uri(uri) {
-                for func in &mut functions {
-                    crate::stub_patches::apply_function_stub_patches(func);
-                }
-                for (cls, _, _) in &mut decls.classes_with_ns {
-                    crate::stub_patches::apply_class_stub_patches(cls);
-                }
-            }
-
-            Self::qualify_function_names(
-                &mut functions,
-                &decls.namespace_spans,
-                &decls.use_map,
-                &decls.symbol_imports.constants,
-                &decls.namespace,
-            );
-
-            // Extract define() constants from the already-parsed AST and
-            // store them in the global_defines map so they appear in
-            // completions.  This reuses the parse pass above rather than
-            // doing a separate regex scan over the raw content.
-            let mut define_entries = Vec::new();
-            Self::extract_defines_from_statements(
-                program.statements.iter(),
-                &mut define_entries,
-                content,
-                None,
-            );
-            let defines: Vec<(String, DefineInfo)> = define_entries
-                .into_iter()
-                .map(|(name, offset, value)| {
-                    (
-                        name,
-                        DefineInfo {
-                            file_uri: uri.to_string(),
-                            name_offset: offset,
-                            value,
-                        },
-                    )
-                })
-                .collect();
-
-            // Post-process: resolve parent_class short names to fully-qualified
-            // names so that cross-file inheritance resolution can find parent
-            // classes via PSR-4.
-            Self::resolve_parent_class_names_by_block(
-                &mut decls.classes_with_ns,
-                &decls.namespace_spans,
-                &decls.use_map,
-                &decls.symbol_imports.constants,
-                &decls.namespace,
-            );
-
-            // Separate the classes from their namespace tags for storage,
-            // stamping each ClassInfo with its namespace so that
-            // `find_class_in_uri_classes_index` can distinguish classes with the same
-            // short name in different namespace blocks.
-            let classes: Vec<ClassInfo> = decls
-                .classes_with_ns
-                .into_iter()
-                .map(|(mut cls, ns, _)| {
-                    cls.file_namespace = ns.as_deref().map(atom);
-                    cls.cache_fqn_in_uri(uri);
-                    // Keyed by FQN, so this has to wait until the class
-                    // carries one.
-                    crate::stub_patches::apply_third_party_class_patches(&mut cls);
-                    cls
-                })
-                .collect();
-
-            // Build the precomputed symbol map while the AST is still alive.
-            // This must happen before the `Program` (and its arena) are dropped.
-            let mut symbol_map = extract_symbol_map_for_index(program, content, &owned_resolved);
-            // An open file's slow diagnostics are built on the previous
-            // pass's, which is only sound if that pass read an index built
-            // from exactly the text it diagnosed.
-            if self.open_files.read().contains_key(uri) {
-                symbol_map.source_hash = Some(SymbolMap::hash_source(content));
-            }
-            let symbol_map = Arc::new(symbol_map);
-            let pest_uses = crate::pest::file_uses(program.statements.iter(), &owned_resolved);
-
-            // For files without any explicit namespace blocks, synthesize a
-            // single span covering the entire file with the detected namespace
-            // (which will be None for files without namespace declarations).
-            let mut namespace_spans = decls.namespace_spans;
-            if namespace_spans.is_empty() {
-                namespace_spans.push(NamespaceSpan {
-                    namespace: decls.namespace,
-                    start: 0,
-                    end: content.len() as u32,
-                    use_map: HashMap::new(),
-                    symbol_imports: Default::default(),
-                });
-            }
-
-            AstIndexUpdate {
-                uri: uri.to_string(),
-                parse_errors,
-                classes,
-                use_map: decls.use_map,
-                symbol_imports: decls.symbol_imports,
-                resolved_names: Arc::new(owned_resolved),
-                pest_uses,
-                namespace_spans,
-                functions,
-                defines,
-                symbol_map,
-                blade: None,
-            }
+            let (parse_errors, program) = parse_with_errors(arena, content);
+            self.ast_index_update_from(arena, uri, content, parse_errors, program)
         })
     }
+
+    /// The index update for `program`, the parse of `content`, with `arena`
+    /// for scratch space.
+    fn ast_index_update_from(
+        &self,
+        arena: &LocalArena,
+        uri: &str,
+        content: &str,
+        parse_errors: Vec<ParseErrorEntry>,
+        program: &mago_syntax::cst::Program<'_>,
+    ) -> AstIndexUpdate {
+        // Run mago-names resolver while the arena is still alive.
+        // This produces a `ResolvedNames` that maps every identifier's
+        // byte offset to its fully-qualified name.  We immediately copy
+        // the data into an owned `OwnedResolvedNames` so it survives
+        // the arena drop.
+        let name_resolver = mago_names::resolver::NameResolver::new(arena);
+        let mago_resolved = name_resolver.resolve(program);
+        let owned_resolved = OwnedResolvedNames::from_resolved(&mago_resolved);
+
+        let doc_ctx = DocblockCtx {
+            trivias: program.trivia.as_slice(),
+            content,
+            php_version: Some(self.php_version()),
+            use_map: HashMap::new(),
+            namespace: None,
+        };
+
+        let mut decls = Self::collect_file_declarations(program, &doc_ctx);
+        let mut functions = Self::extract_file_functions(program, &decls, &doc_ctx);
+
+        // Drop the declarations the Blade lowering wrote itself: the
+        // wrapper holding the template body and the prologue's marker
+        // functions.  Every template lowers to the same ones, so
+        // publishing them makes each template a redeclaration of the
+        // last and puts boilerplate no file wrote into
+        // workspace-symbol results.  They stay in the virtual PHP, so
+        // the calls the lowering emits still resolve against them
+        // within the template.
+        if self.is_blade_file(uri) {
+            functions.retain(|func| !crate::blade::is_synthetic_function(&func.name));
+        }
+
+        // Apply stub patches when parsing embedded stub content
+        // (e.g. a constant lookup routes its stub source through
+        // `update_ast` under a `phpantom-stub://const/…` URI).  The
+        // same stub file often defines functions and classes too;
+        // without patching here, those register with unpatched
+        // signatures and overwrite (or preempt) the patched entries
+        // from the stub-function and stub-class loaders — silently
+        // dropping e.g. `array_map`'s template parameters and
+        // breaking closure parameter inference for the rest of the
+        // session.  A phpstorm-stubs checkout under a stub path has the
+        // same gaps, so it is corrected the same way.
+        if self.is_phpstorm_stubs_uri(uri) {
+            for func in &mut functions {
+                crate::stub_patches::apply_function_stub_patches(func);
+            }
+            for (cls, _, _) in &mut decls.classes_with_ns {
+                crate::stub_patches::apply_class_stub_patches(cls);
+            }
+        }
+
+        Self::qualify_function_names(
+            &mut functions,
+            &decls.namespace_spans,
+            &decls.use_map,
+            &decls.symbol_imports.constants,
+            &decls.namespace,
+        );
+
+        // Extract define() constants from the already-parsed AST and
+        // store them in the global_defines map so they appear in
+        // completions.  This reuses the parse pass above rather than
+        // doing a separate regex scan over the raw content.
+        let mut define_entries = Vec::new();
+        Self::extract_defines_from_statements(
+            program.statements.iter(),
+            &mut define_entries,
+            content,
+            None,
+            Some(&doc_ctx),
+        );
+        let defines: Vec<(String, DefineInfo)> = define_entries
+            .into_iter()
+            .map(|(name, offset, value)| {
+                (
+                    name,
+                    DefineInfo {
+                        file_uri: uri.to_string(),
+                        name_offset: offset,
+                        value,
+                    },
+                )
+            })
+            .collect();
+
+        // Post-process: resolve parent_class short names to fully-qualified
+        // names so that cross-file inheritance resolution can find parent
+        // classes via PSR-4.
+        Self::resolve_parent_class_names_by_block(
+            &mut decls.classes_with_ns,
+            &decls.namespace_spans,
+            &decls.use_map,
+            &decls.symbol_imports.constants,
+            &decls.namespace,
+        );
+
+        // Separate the classes from their namespace tags for storage,
+        // stamping each ClassInfo with its namespace so that
+        // `find_class_in_uri_classes_index` can distinguish classes with the same
+        // short name in different namespace blocks.
+        let from_stub_path = self.is_external_stub_uri(uri);
+        let classes: Vec<ClassInfo> = decls
+            .classes_with_ns
+            .into_iter()
+            .map(|(mut cls, ns, _)| {
+                cls.file_namespace = ns.as_deref().map(atom);
+                cls.cache_fqn_in_uri(uri);
+                // Keyed by FQN, so this has to wait until the class
+                // carries one.  A stub path says what its classes are,
+                // so it is left as written.
+                if !from_stub_path {
+                    crate::stub_patches::apply_third_party_class_patches(&mut cls);
+                }
+                cls
+            })
+            .collect();
+
+        // Build the precomputed symbol map while the AST is still alive.
+        // This must happen before the `Program` (and its arena) are dropped.
+        // A stub file is never analysed or searched for references, so the
+        // symbol map only matters once it is opened, which parses it again.
+        // Stub packages can run to megabytes, where the map is a third of
+        // the parse.
+        let is_open = self.open_files.read().contains_key(uri);
+        let mut symbol_map = if from_stub_path && !is_open {
+            SymbolMap::default()
+        } else {
+            extract_symbol_map_for_index(
+                program,
+                content,
+                &owned_resolved,
+                self.is_symfony_project(),
+                self.is_twig_project(),
+            )
+        };
+        // An open file's slow diagnostics are built on the previous
+        // pass's, which is only sound if that pass read an index built
+        // from exactly the text it diagnosed.
+        if is_open {
+            symbol_map.source_hash = Some(SymbolMap::hash_source(content));
+        }
+        let symbol_map = Arc::new(symbol_map);
+        let pest_uses = crate::pest::file_uses(program.statements.iter(), &owned_resolved);
+
+        // For files without any explicit namespace blocks, synthesize a
+        // single span covering the entire file with the detected namespace
+        // (which will be None for files without namespace declarations).
+        let mut namespace_spans = decls.namespace_spans;
+        if namespace_spans.is_empty() {
+            namespace_spans.push(NamespaceSpan {
+                namespace: decls.namespace,
+                start: 0,
+                end: content.len() as u32,
+                use_map: HashMap::new(),
+                symbol_imports: Default::default(),
+            });
+        }
+
+        AstIndexUpdate {
+            uri: uri.to_string(),
+            parse_errors,
+            classes,
+            use_map: decls.use_map,
+            symbol_imports: decls.symbol_imports,
+            resolved_names: Arc::new(owned_resolved),
+            pest_uses,
+            namespace_spans,
+            functions,
+            defines,
+            symbol_map,
+            blade: None,
+        }
+    }
+}
+
+/// Parse `content`, returning the syntax errors of the text as written and
+/// the parse everything else reads, which keeps the code the first one
+/// dropped.
+fn parse_with_errors<'a>(
+    arena: &'a LocalArena,
+    content: &'a str,
+) -> (Vec<ParseErrorEntry>, &'a mago_syntax::cst::Program<'a>) {
+    let file_id = mago_database::file::FileId::new(b"input.php");
+    let program = parse_file_content(arena, file_id, content.as_bytes());
+
+    let parse_errors: Vec<ParseErrorEntry> = program
+        .errors
+        .iter()
+        .map(|e| {
+            let span = e.span();
+            (
+                super::error_format::format_parse_error(e),
+                span.start.offset,
+                span.end.offset,
+            )
+        })
+        .collect();
+
+    let program = super::recovery::reparse_dropped_code(arena, program, content).unwrap_or(program);
+    (parse_errors, program)
 }
 
 #[cfg(test)]

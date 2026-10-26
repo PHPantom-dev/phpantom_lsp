@@ -1,0 +1,11 @@
+// test: One-to-many relations that disagree with their properties
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityRelationRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/EntityWithBrokenOneToManyRelations.php
+// expect_diagnostic: 22: Property PHPStan\Rules\Doctrine\ORM\EntityWithBrokenOneToManyRelations::$oneToManyWithIterableAnnotation type mapping mismatch: property can contain iterable<PHPStan\Rules\Doctrine\ORM\AnotherEntity> but database expects Doctrine\Common\Collections\Collection&iterable<PHPStan\Rules\Doctrine\ORM\AnotherEntity>. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 28: Property PHPStan\Rules\Doctrine\ORM\EntityWithBrokenOneToManyRelations::$oneToManyWithCollectionAnnotation type mapping mismatch: property can contain Doctrine\Common\Collections\Collection but database expects Doctrine\Common\Collections\Collection&iterable<PHPStan\Rules\Doctrine\ORM\AnotherEntity>. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 34: Property PHPStan\Rules\Doctrine\ORM\EntityWithBrokenOneToManyRelations::$oneToManyWithArrayAnnotation type mapping mismatch: database can contain Doctrine\Common\Collections\Collection&iterable<PHPStan\Rules\Doctrine\ORM\AnotherEntity> but property expects array<PHPStan\Rules\Doctrine\ORM\AnotherEntity>. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 34: Property PHPStan\Rules\Doctrine\ORM\EntityWithBrokenOneToManyRelations::$oneToManyWithArrayAnnotation type mapping mismatch: property can contain array<PHPStan\Rules\Doctrine\ORM\AnotherEntity> but database expects Doctrine\Common\Collections\Collection&iterable<PHPStan\Rules\Doctrine\ORM\AnotherEntity>. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

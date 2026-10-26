@@ -23,7 +23,15 @@ pub(crate) struct ClassLoadHooks {
     /// The class for a name every ordinary phase missed.
     pub(crate) fallback: fn(&Backend, &str) -> Option<Arc<ClassInfo>>,
     /// A loaded class with what the framework's project facts add to it.
+    ///
+    /// Memoised per class, so it must depend on nothing but the class and
+    /// the facts [`refine_generation`](Self::refine_generation) stamps.
     pub(crate) refine: fn(&Backend, Arc<ClassInfo>) -> Arc<ClassInfo>,
+    /// A stamp that moves whenever `refine` could make something different
+    /// of the same class.  Brings any index `refine` reads that is due a
+    /// rebuild up to date first, so that the stamp describes what it will
+    /// read.
+    pub(crate) refine_generation: fn(&Backend) -> u64,
 }
 
 /// The frameworks whose facts the loader applies, in order.
@@ -69,11 +77,31 @@ impl Backend {
     /// overload performs internally.
     pub(crate) fn find_or_load_class_typed(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
         let loaded = self.link_loaded_class(self.find_indexed_class(ty)?);
-        Some(
-            CLASS_LOAD_HOOKS
-                .iter()
-                .fold(loaded, |loaded, hooks| (hooks.refine)(self, loaded)),
-        )
+        Some(self.refine_loaded_class(loaded))
+    }
+
+    /// `loaded` with every framework hook's refinements applied.
+    ///
+    /// Memoised per thread on the class itself: most lookups refine nothing,
+    /// yet checking is not free, and one that does refine copies the whole
+    /// class.  A repeat hands back the same `Arc`.
+    fn refine_loaded_class(&self, loaded: Arc<ClassInfo>) -> Arc<ClassInfo> {
+        // Read before the hooks run, so that a change landing meanwhile
+        // retires the answer.
+        let generation = CLASS_LOAD_HOOKS.iter().fold(0u64, |sum, hooks| {
+            sum.wrapping_add((hooks.refine_generation)(self))
+        });
+        let owner = self.symbols.id();
+        if let Some(refined) = class_loader_memo::probe_refined(owner, generation, &loaded) {
+            return refined;
+        }
+        let refined = CLASS_LOAD_HOOKS
+            .iter()
+            .fold(Arc::clone(&loaded), |class, hooks| {
+                (hooks.refine)(self, class)
+            });
+        class_loader_memo::store_refined(owner, generation, &loaded, &refined);
+        refined
     }
 
     /// The class `ty` names as indexed, before
@@ -220,6 +248,11 @@ impl Backend {
             .contains(class_name)
         {
             return None;
+        }
+
+        // ── Stub paths: a declaration there wins over every other ──
+        if let Some(cls) = self.load_external_stub_class(class_name) {
+            return Some(cls);
         }
 
         // ── Phase 0: Search all already-parsed files ────────────

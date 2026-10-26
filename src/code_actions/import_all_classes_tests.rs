@@ -98,7 +98,7 @@ fn bulk_import_offered_when_multiple_unresolved() {
 
     assert!(
         actions.iter().any(|a| {
-            if let CodeActionOrCommand::CodeAction(ca) = a {
+            if let CodeActionResponse::CodeAction(ca) = a {
                 ca.title == "Import all missing classes"
             } else {
                 false
@@ -108,8 +108,8 @@ fn bulk_import_offered_when_multiple_unresolved() {
         actions
             .iter()
             .map(|a| match a {
-                CodeActionOrCommand::CodeAction(ca) => ca.title.clone(),
-                CodeActionOrCommand::Command(c) => c.title.clone(),
+                CodeActionResponse::CodeAction(ca) => ca.title.clone(),
+                CodeActionResponse::Command(c) => c.title.clone(),
             })
             .collect::<Vec<_>>()
     );
@@ -238,7 +238,7 @@ fn resolve_import_all_inserts_use_statements() {
 
     let ws_edit = edit.unwrap();
     let changes = ws_edit.changes.unwrap();
-    let edits = changes.get(&uri.parse::<Url>().unwrap()).unwrap();
+    let edits = changes.get(&uri.parse::<Uri>().unwrap()).unwrap();
 
     // Should have two use-statement insertions.
     assert_eq!(edits.len(), 2, "expected 2 edits, got {:?}", edits);
@@ -293,7 +293,7 @@ fn resolve_import_all_adds_blank_line_after_namespace() {
 
     let ws_edit = edit.unwrap();
     let changes = ws_edit.changes.unwrap();
-    let edits = changes.get(&uri.parse::<Url>().unwrap()).unwrap();
+    let edits = changes.get(&uri.parse::<Uri>().unwrap()).unwrap();
 
     // The first edit should have a \n prefix (blank line after namespace).
     // Subsequent edits should NOT have it.
@@ -361,7 +361,7 @@ fn resolve_import_all_writes_inline_when_the_namespace_block_is_on_one_line() {
         .resolve_import_all_classes(&data, content)
         .expect("expected a WorkspaceEdit");
     let changes = ws_edit.changes.unwrap();
-    let edits = changes.get(&uri.parse::<Url>().unwrap()).unwrap();
+    let edits = changes.get(&uri.parse::<Uri>().unwrap()).unwrap();
 
     // Both imports go straight after the `{`, in the order an array of
     // edits at one position is applied, with nothing to set them off.
@@ -434,7 +434,7 @@ final class Foo extends Data
 
     let ws_edit = edit.unwrap();
     let changes = ws_edit.changes.unwrap();
-    let edits = changes.get(&uri.parse::<Url>().unwrap()).unwrap();
+    let edits = changes.get(&uri.parse::<Uri>().unwrap()).unwrap();
 
     // Both new imports should be inserted into the existing use
     // block, not scattered through the class body.  All edits
@@ -502,7 +502,7 @@ fn resolve_import_all_skips_conflicting_short_names() {
 
     let ws_edit = edit.unwrap();
     let changes = ws_edit.changes.unwrap();
-    let edits = changes.get(&uri.parse::<Url>().unwrap()).unwrap();
+    let edits = changes.get(&uri.parse::<Uri>().unwrap()).unwrap();
 
     let combined: String = edits.iter().map(|e| e.new_text.as_str()).collect();
     assert!(
@@ -603,7 +603,7 @@ fn resolve_import_all_imports_unambiguous_skips_ambiguous() {
 
     let ws_edit = edit.unwrap();
     let changes = ws_edit.changes.unwrap();
-    let edits = changes.get(&uri.parse::<Url>().unwrap()).unwrap();
+    let edits = changes.get(&uri.parse::<Uri>().unwrap()).unwrap();
 
     let combined: String = edits.iter().map(|e| e.new_text.as_str()).collect();
     assert!(

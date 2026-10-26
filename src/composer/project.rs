@@ -125,6 +125,81 @@ pub(crate) fn is_laravel_project(package: &ComposerPackage) -> bool {
         })
 }
 
+/// Detect whether the project uses Doctrine's entity repositories, through
+/// the ORM, the MongoDB ODM, or the Symfony bundle or pack that installs
+/// them.
+///
+/// The Doctrine entity and repository lenses are only computed when this
+/// holds, so other projects do not pay for the per-class repository lookups.
+pub(crate) fn is_doctrine_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            [
+                "doctrine/orm",
+                "doctrine/mongodb-odm",
+                "doctrine/persistence",
+                "doctrine/doctrine-bundle",
+                "doctrine/mongodb-odm-bundle",
+                "symfony/orm-pack",
+            ]
+            .iter()
+            .any(|package| name.eq_ignore_ascii_case(package))
+        })
+}
+
+/// Detect whether the project builds a Symfony service container: the full
+/// framework, its bundle, or the dependency-injection component on its own.
+///
+/// Service IDs and container parameters are only read in projects where this
+/// holds.  The other Symfony components (console, HTTP foundation, …) are
+/// shared with Laravel and say nothing about a container.
+pub(crate) fn is_symfony_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            [
+                "symfony/symfony",
+                "symfony/framework-bundle",
+                "symfony/dependency-injection",
+            ]
+            .iter()
+            .any(|package| name.eq_ignore_ascii_case(package))
+        })
+}
+
+/// The packages that bring Twig into a project: Twig itself, its Symfony
+/// bundle and bridge, and the frameworks whose templates are Twig.
+const TWIG_PACKAGES: [&str; 7] = [
+    "twig/twig",
+    "symfony/twig-bundle",
+    "symfony/twig-bridge",
+    "slim/twig-view",
+    "drupal/core",
+    "drupal/core-recommended",
+    "craftcms/cms",
+];
+
+/// Detect whether the project uses Twig, which template names are read in:
+/// it requires Twig or a package whose templates are Twig, or is a Symfony
+/// project.
+pub(crate) fn is_twig_project(package: &ComposerPackage) -> bool {
+    is_symfony_project(package)
+        || package
+            .require
+            .keys()
+            .chain(package.require_dev.keys())
+            .any(|name| {
+                TWIG_PACKAGES
+                    .iter()
+                    .any(|package| name.eq_ignore_ascii_case(package))
+            })
+}
+
 /// Detect whether the project is a Laravel *application* rather than a
 /// library that uses an Illuminate component.
 ///
@@ -281,6 +356,62 @@ mod tests {
     /// Helper: parse a JSON string into a [`ComposerPackage`].
     fn pkg(json: &str) -> ComposerPackage {
         json.parse::<ComposerPackage>().unwrap()
+    }
+
+    // ── is_doctrine_project ─────────────────────────────────────────
+
+    #[test]
+    fn detects_doctrine_through_the_orm_or_the_symfony_bundle() {
+        assert!(is_doctrine_project(&pkg(
+            r#"{"require": {"doctrine/orm": "^3.0"}}"#
+        )));
+        assert!(is_doctrine_project(&pkg(
+            r#"{"require": {"doctrine/doctrine-bundle": "^2.10"}}"#
+        )));
+    }
+
+    #[test]
+    fn dbal_alone_is_not_doctrine_repositories() {
+        assert!(!is_doctrine_project(&pkg(
+            r#"{"require": {"doctrine/dbal": "^4.0", "laravel/framework": "^11.0"}}"#
+        )));
+    }
+
+    // ── is_symfony_project ──────────────────────────────────────────
+
+    #[test]
+    fn detects_symfony_through_the_bundle_or_the_container_component() {
+        assert!(is_symfony_project(&pkg(
+            r#"{"require": {"symfony/framework-bundle": "^7.3"}}"#
+        )));
+        assert!(is_symfony_project(&pkg(
+            r#"{"require": {"symfony/dependency-injection": "^7.3"}}"#
+        )));
+    }
+
+    #[test]
+    fn laravel_and_its_symfony_components_are_not_symfony() {
+        assert!(!is_symfony_project(&pkg(
+            r#"{"require": {"laravel/framework": "^11.0", "symfony/console": "^7.0"}}"#
+        )));
+    }
+
+    // ── is_twig_project ─────────────────────────────────────────────
+
+    #[test]
+    fn detects_twig_on_its_own_and_in_symfony() {
+        assert!(is_twig_project(&pkg(
+            r#"{"require": {"twig/twig": "^3.4"}}"#
+        )));
+        assert!(is_twig_project(&pkg(
+            r#"{"require": {"symfony/framework-bundle": "^7.3"}}"#
+        )));
+        assert!(is_twig_project(&pkg(
+            r#"{"require": {"drupal/core-recommended": "^11.0"}}"#
+        )));
+        assert!(!is_twig_project(&pkg(
+            r#"{"require": {"laravel/framework": "^11.0", "symfony/console": "^7.0"}}"#
+        )));
     }
 
     // ── is_laravel_project ──────────────────────────────────────────

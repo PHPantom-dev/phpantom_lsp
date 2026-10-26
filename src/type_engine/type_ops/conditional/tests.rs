@@ -99,6 +99,44 @@ fn non_literal_argument_leaves_value_condition_undecided() {
     );
 }
 
+/// A nested condition is judged against what the enclosing condition left
+/// of the argument: `?int` reaches the inner `is int` only as `int`, so the
+/// inner else branch is unreachable.
+#[test]
+fn nested_condition_sees_argument_narrowed_by_outer_condition() {
+    let resolve = |conditional: &str| {
+        let cond = PhpType::parse(conditional);
+        let params = [param("$value")];
+        let loader: &ResolvedClassLoader<'_> = &|_| None;
+        let resolver = |_: &str| Some(PhpType::parse("?int"));
+        let tpl = TemplateContext {
+            defaults: None,
+            params: &[],
+            bindings: &[],
+            arg_type_resolver: Some(&resolver),
+            this_type: None,
+        };
+        resolve_conditional_with_text_args_and_defaults(
+            &cond,
+            &params,
+            "$value",
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
+        )
+        .map(|t| t.to_string())
+    };
+    assert_eq!(
+        resolve("($value is null ? Empty : ($value is int ? Number : Other))").as_deref(),
+        Some("Empty|Number")
+    );
+    assert_eq!(
+        resolve("($value is int ? Number : ($value is null ? Empty : Other))").as_deref(),
+        Some("Number|Empty")
+    );
+}
+
 /// Resolve a `pathinfo`-style value conditional with a resolver that
 /// answers for named constants, returning the resolved type's display
 /// string.

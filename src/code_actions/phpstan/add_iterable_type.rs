@@ -24,7 +24,7 @@
 //! (`resolve_add_iterable_type`) infers the element type from the
 //! function body and computes the workspace edit.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::fix_return_type::{Anchor, target_function};
@@ -98,7 +98,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -112,10 +112,11 @@ impl Backend {
             }
 
             // Only handle the "return type" variant.
-            let iterable_type_parsed = match extract_iterable_return_type(&diag.message) {
-                Some(t) => t,
-                None => continue,
-            };
+            let iterable_type_parsed =
+                match extract_iterable_return_type(crate::util::message_text(&diag.message)) {
+                    Some(t) => t,
+                    None => continue,
+                };
             let iterable_type = iterable_type_parsed.to_string();
 
             let diag_line = diag.range.start.line as usize;
@@ -123,9 +124,12 @@ impl Backend {
             // The diagnostic is on the function's declaration: the line
             // of the `function` keyword or of an attribute or modifier
             // before it.
-            let Some(target) =
-                target_function(content, diag_line, Anchor::Declaration, &diag.message)
-            else {
+            let Some(target) = target_function(
+                content,
+                diag_line,
+                Anchor::Declaration,
+                crate::util::message_text(&diag.message),
+            ) else {
                 continue;
             };
 
@@ -185,7 +189,7 @@ impl Backend {
             None => docblock.add_return_tag_edit(content, &return_type),
         };
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 

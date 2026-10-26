@@ -93,7 +93,7 @@ pub type SourceClassLoader<'a> = dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a;
 
 pub(crate) use compatibility::{
     first_rejected_callable_param, is_type_compatible, missing_required_shape_keys,
-    shape_breaks_list_order,
+    shape_breaks_list_order, undeclared_shape_keys,
 };
 pub(crate) use subtyping::{
     evaluate_constant_shape_key, is_subclass_of, is_subtype_of, is_subtype_of_named,

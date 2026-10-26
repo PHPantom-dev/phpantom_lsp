@@ -22,6 +22,7 @@ use super::laravel_calls::{
 };
 use super::owner_method_call::resolve_owner_method_call;
 use super::scope_reads::narrowed_subject_from_scope;
+use super::symfony_calls::{try_resolve_container_lookup_type, try_resolve_handle_trait_type};
 use super::{resolve_rhs_expression, resolve_var_types};
 
 /// A method call's receiver, already resolved: the candidate owner classes
@@ -223,6 +224,16 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
             }
             if let Some(result) =
                 try_resolve_command_accessor_type(owner, &method_name, argument_list, ctx)
+            {
+                return result;
+            }
+            if let Some(result) =
+                try_resolve_container_lookup_type(owner, &method_name, argument_list, ctx)
+            {
+                return result;
+            }
+            if let Some(result) =
+                try_resolve_handle_trait_type(owner, &method_name, argument_list, ctx)
             {
                 return result;
             }

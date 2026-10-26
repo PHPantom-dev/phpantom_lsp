@@ -364,7 +364,11 @@ impl PhpType {
             TypeKind::Nullable(inner) => inner.is_string_subtype(),
             TypeKind::Generic(g) => matches!(
                 g.name.to_ascii_lowercase().as_str(),
-                "class-string" | "interface-string" | "model-property"
+                "class-string"
+                    | "interface-string"
+                    | "enum-string"
+                    | "trait-string"
+                    | "model-property"
             ),
             TypeKind::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_string_subtype())
@@ -874,7 +878,8 @@ impl PhpType {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
             | TypeKind::TemplateParam(_, inner)
-            | TypeKind::ClassNameLiteral(inner) => inner.to_native_hint_typed(),
+            | TypeKind::ClassNameLiteral(inner)
+            | TypeKind::EnumCase(inner, _) => inner.to_native_hint_typed(),
             TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 native_scalar_name(s).map(|n| PhpType::named(atom(n)))
             }
@@ -981,9 +986,12 @@ impl PhpType {
         if self_members.is_empty() {
             return false;
         }
-        self_members
-            .iter()
-            .all(|s| other_members.iter().any(|o| s.equivalent(o)))
+        // An enum case is one of the values its enum holds.
+        self_members.iter().all(|s| {
+            other_members.iter().any(|o| {
+                s.equivalent(o) || (s.as_enum_case().is_some() && s.enum_cases_as_enums() == *o)
+            })
+        })
     }
 
     /// Collect the atomic (leaf) type members of a type.
@@ -1082,7 +1090,8 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
-            | TypeKind::ClassNameLiteral(inner) => inner.is_informative(),
+            | TypeKind::ClassNameLiteral(inner)
+            | TypeKind::EnumCase(inner, _) => inner.is_informative(),
             TypeKind::Generic(..) | TypeKind::UnsealedShape(..) => true,
             TypeKind::ArrayShape(..) | TypeKind::ObjectShape(..) => true,
             TypeKind::Array(..) => true,
@@ -1144,9 +1153,8 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
-            | TypeKind::ClassNameLiteral(inner) => {
-                inner.references_any_template_param(template_params)
-            }
+            | TypeKind::ClassNameLiteral(inner)
+            | TypeKind::EnumCase(inner, _) => inner.references_any_template_param(template_params),
             TypeKind::UnsealedShape(unsealed) => unsealed
                 .widened
                 .references_any_template_param(template_params),

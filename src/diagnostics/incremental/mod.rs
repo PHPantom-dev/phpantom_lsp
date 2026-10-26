@@ -35,6 +35,10 @@
 //!   read a body from outside it (see [`body_is_observable`]), and an edit
 //!   to such a body can change what the rest of the file resolves to.
 //!
+//! A collector whose findings can depend on any body (whether a property
+//! is ever written) is the exception to carrying diagnostics over: a
+//! partial pass drops what it reported and runs it over the whole file.
+//!
 //! # What waits for the next save
 //!
 //! An edit to a body can also change a project-wide registry the file
@@ -53,7 +57,7 @@ mod tests;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Diagnostic;
+use tower_lsp_server::gen_lsp_types::Diagnostic;
 
 use crate::Backend;
 use crate::parser::with_parsed_program;
@@ -308,7 +312,9 @@ impl Backend {
                 self.collect_slow_diagnostics_in_region(uri, content, &spans, &targets, &mut fresh);
                 shift::retain_within(content, &spans, &mut fresh);
                 let mut diagnostics = carried;
+                diagnostics.retain(|diagnostic| !super::collect::reads_every_body(diagnostic));
                 diagnostics.extend(fresh);
+                self.collect_slow_diagnostics_reading_every_body(uri, content, &mut diagnostics);
                 (
                     diagnostics,
                     SlowPassKind::Partial {

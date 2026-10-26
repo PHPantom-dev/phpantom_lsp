@@ -1,0 +1,10 @@
+// test: @readonly properties Doctrine assigns
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, MissingReadOnlyByPhpDocPropertyAssignRuleTest::testRule.
+// project: phpstan_doctrine
+// file: rules/Properties/data/missing-readonly-property-assign-phpdoc.php
+// codes: uninitialized_property, invalid_readonly_write
+// expect_diagnostic: 23: Readonly property MissingReadOnlyPropertyAssignPhpDoc\EntityWithAGeneratedId::$unassigned is never initialized; assign it in the constructor
+// expect_diagnostic: 34: @readonly property MissingReadOnlyPropertyAssignPhpDoc\EntityWithAGeneratedId::$doubleAssigned is already assigned. // SKIP: writes to a `@readonly` property are not checked
+// expect_diagnostic: 61: Readonly property MissingReadOnlyPropertyAssignPhpDoc\ReadOnlyEntityWithConstructor::$id is never initialized; assign it in the constructor
+---

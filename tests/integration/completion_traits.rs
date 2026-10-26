@@ -1,7 +1,7 @@
 use crate::common::{
     completion_response, create_psr4_workspace, create_test_backend, goto_definition_at, open_php,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Basic trait usage (same file) ──────────────────────────────────────────
 
@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::*;
 async fn test_completion_trait_methods_available_on_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_basic.php").unwrap();
+    let uri = Uri::parse("file:///trait_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Greetable {\n",
@@ -31,10 +31,10 @@ async fn test_completion_trait_methods_available_on_class() {
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -54,7 +54,7 @@ async fn test_completion_trait_methods_available_on_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -64,7 +64,7 @@ async fn test_completion_trait_methods_available_on_class() {
 async fn test_completion_trait_properties_available_on_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_props.php").unwrap();
+    let uri = Uri::parse("file:///trait_props.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait HasTimestamps {\n",
@@ -87,10 +87,10 @@ async fn test_completion_trait_properties_available_on_class() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -116,7 +116,7 @@ async fn test_completion_trait_properties_available_on_class() {
                 prop_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -126,7 +126,7 @@ async fn test_completion_trait_properties_available_on_class() {
 async fn test_completion_trait_constants_available_via_double_colon() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_const.php").unwrap();
+    let uri = Uri::parse("file:///trait_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait HasVersion {\n",
@@ -147,10 +147,10 @@ async fn test_completion_trait_constants_available_via_double_colon() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let const_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -165,7 +165,7 @@ async fn test_completion_trait_constants_available_via_double_colon() {
                 const_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -175,7 +175,7 @@ async fn test_completion_trait_constants_available_via_double_colon() {
 async fn test_completion_multiple_traits_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multi_traits.php").unwrap();
+    let uri = Uri::parse("file:///multi_traits.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Loggable {\n",
@@ -199,10 +199,10 @@ async fn test_completion_multiple_traits_same_file() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -222,7 +222,7 @@ async fn test_completion_multiple_traits_same_file() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -232,7 +232,7 @@ async fn test_completion_multiple_traits_same_file() {
 async fn test_completion_nested_trait_composition() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nested_traits.php").unwrap();
+    let uri = Uri::parse("file:///nested_traits.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Hello {\n",
@@ -258,10 +258,10 @@ async fn test_completion_nested_trait_composition() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -276,7 +276,7 @@ async fn test_completion_nested_trait_composition() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -286,7 +286,7 @@ async fn test_completion_nested_trait_composition() {
 async fn test_completion_class_method_overrides_trait_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_override.php").unwrap();
+    let uri = Uri::parse("file:///trait_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Renderable {\n",
@@ -308,10 +308,10 @@ async fn test_completion_class_method_overrides_trait_method() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
 
             let render_items: Vec<&&CompletionItem> = method_items
@@ -338,7 +338,7 @@ async fn test_completion_class_method_overrides_trait_method() {
                 "Should include trait-only method 'format'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -348,7 +348,7 @@ async fn test_completion_class_method_overrides_trait_method() {
 async fn test_completion_trait_overrides_parent_class_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_vs_parent.php").unwrap();
+    let uri = Uri::parse("file:///trait_vs_parent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -373,10 +373,10 @@ async fn test_completion_trait_overrides_parent_class_method() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -405,7 +405,7 @@ async fn test_completion_trait_overrides_parent_class_method() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -451,17 +451,17 @@ async fn test_completion_trait_cross_file_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///test_cross_trait.php").unwrap();
+    let uri = Uri::parse("file:///test_cross_trait.php").unwrap();
     open_php(&backend, &uri, class_php).await;
 
     let result = completion_response(&backend, &uri, 7, 15, None).await;
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -476,7 +476,7 @@ async fn test_completion_trait_cross_file_psr4() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -542,17 +542,17 @@ async fn test_completion_nested_trait_cross_file_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///test_nested_trait.php").unwrap();
+    let uri = Uri::parse("file:///test_nested_trait.php").unwrap();
     open_php(&backend, &uri, model_php).await;
 
     let result = completion_response(&backend, &uri, 7, 15, None).await;
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -572,7 +572,7 @@ async fn test_completion_nested_trait_cross_file_psr4() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -582,7 +582,7 @@ async fn test_completion_nested_trait_cross_file_psr4() {
 async fn test_completion_trait_static_methods_via_double_colon() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_static.php").unwrap();
+    let uri = Uri::parse("file:///trait_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait HasFactory {\n",
@@ -603,10 +603,10 @@ async fn test_completion_trait_static_methods_via_double_colon() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -621,7 +621,7 @@ async fn test_completion_trait_static_methods_via_double_colon() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -631,7 +631,7 @@ async fn test_completion_trait_static_methods_via_double_colon() {
 async fn test_completion_variable_of_class_with_trait() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_var.php").unwrap();
+    let uri = Uri::parse("file:///trait_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Printable {\n",
@@ -655,10 +655,10 @@ async fn test_completion_variable_of_class_with_trait() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -673,7 +673,7 @@ async fn test_completion_variable_of_class_with_trait() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -683,7 +683,7 @@ async fn test_completion_variable_of_class_with_trait() {
 async fn test_completion_child_inherits_parent_trait_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_trait.php").unwrap();
+    let uri = Uri::parse("file:///parent_trait.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Serializable {\n",
@@ -707,10 +707,10 @@ async fn test_completion_child_inherits_parent_trait_members() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -733,7 +733,7 @@ async fn test_completion_child_inherits_parent_trait_members() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -743,7 +743,7 @@ async fn test_completion_child_inherits_parent_trait_members() {
 async fn test_completion_no_duplicate_members_from_trait() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_no_dup.php").unwrap();
+    let uri = Uri::parse("file:///trait_no_dup.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Loggable {\n",
@@ -766,11 +766,11 @@ async fn test_completion_no_duplicate_members_from_trait() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let log_count = items
                 .iter()
                 .filter(|i| {
-                    i.kind == Some(CompletionItemKind::METHOD)
+                    i.kind == Some(CompletionItemKind::Method)
                         && i.filter_text.as_deref() == Some("log")
                 })
                 .count();
@@ -781,7 +781,7 @@ async fn test_completion_no_duplicate_members_from_trait() {
                 log_count
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -791,7 +791,7 @@ async fn test_completion_no_duplicate_members_from_trait() {
 async fn test_completion_trait_method_return_type_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_chain.php").unwrap();
+    let uri = Uri::parse("file:///trait_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -814,10 +814,10 @@ async fn test_completion_trait_method_return_type_chain() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -827,7 +827,7 @@ async fn test_completion_trait_method_return_type_chain() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -907,7 +907,7 @@ async fn test_parser_resolves_trait_names_with_use_statements() {
 async fn test_goto_definition_trait_method_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_goto.php").unwrap();
+    let uri = Uri::parse("file:///trait_goto.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "trait Greetable {\n",                     // 1
@@ -931,7 +931,7 @@ async fn test_goto_definition_trait_method_same_file() {
         result.is_some(),
         "Should resolve definition for trait method"
     );
-    if let Some(GotoDefinitionResponse::Scalar(location)) = result {
+    if let Some(DefinitionResponse::Definition(Definition::Location(location))) = result {
         assert_eq!(location.uri, uri);
         // Should point to the `greet` method definition in the trait (line 2)
         assert_eq!(
@@ -939,7 +939,7 @@ async fn test_goto_definition_trait_method_same_file() {
             "Should jump to trait method definition line"
         );
     } else {
-        panic!("Expected GotoDefinitionResponse::Scalar");
+        panic!("Expected DefinitionResponse::Scalar");
     }
 }
 
@@ -983,7 +983,7 @@ async fn test_goto_definition_trait_method_cross_file_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///test_trait_goto.php").unwrap();
+    let uri = Uri::parse("file:///test_trait_goto.php").unwrap();
     open_php(&backend, &uri, class_php).await;
 
     let result = goto_definition_at(&backend, &uri, 6, 20).await;
@@ -992,9 +992,9 @@ async fn test_goto_definition_trait_method_cross_file_psr4() {
         result.is_some(),
         "Should resolve definition for cross-file trait method"
     );
-    if let Some(GotoDefinitionResponse::Scalar(location)) = result {
+    if let Some(DefinitionResponse::Definition(Definition::Location(location))) = result {
         let trait_path = dir.path().join("src/Traits/Loggable.php");
-        let expected_uri = Url::from_file_path(&trait_path).unwrap();
+        let expected_uri = Uri::from_file_path(&trait_path).unwrap();
         assert_eq!(location.uri, expected_uri, "Should point to the trait file");
         // Method definition should be on line 3
         assert_eq!(
@@ -1002,7 +1002,7 @@ async fn test_goto_definition_trait_method_cross_file_psr4() {
             "Should jump to trait method definition line"
         );
     } else {
-        panic!("Expected GotoDefinitionResponse::Scalar");
+        panic!("Expected DefinitionResponse::Scalar");
     }
 }
 
@@ -1012,7 +1012,7 @@ async fn test_goto_definition_trait_method_cross_file_psr4() {
 async fn test_completion_separate_use_statements_for_traits() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///separate_use.php").unwrap();
+    let uri = Uri::parse("file:///separate_use.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait A {\n",
@@ -1036,10 +1036,10 @@ async fn test_completion_separate_use_statements_for_traits() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1054,7 +1054,7 @@ async fn test_completion_separate_use_statements_for_traits() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1064,7 +1064,7 @@ async fn test_completion_separate_use_statements_for_traits() {
 async fn test_completion_trait_with_interface_and_parent() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///combined.php").unwrap();
+    let uri = Uri::parse("file:///combined.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Printable {\n",
@@ -1091,10 +1091,10 @@ async fn test_completion_trait_with_interface_and_parent() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1114,7 +1114,7 @@ async fn test_completion_trait_with_interface_and_parent() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1124,7 +1124,7 @@ async fn test_completion_trait_with_interface_and_parent() {
 async fn test_completion_param_type_hint_class_with_trait() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///param_trait.php").unwrap();
+    let uri = Uri::parse("file:///param_trait.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Taggable {\n",
@@ -1148,10 +1148,10 @@ async fn test_completion_param_type_hint_class_with_trait() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1171,7 +1171,7 @@ async fn test_completion_param_type_hint_class_with_trait() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1181,7 +1181,7 @@ async fn test_completion_param_type_hint_class_with_trait() {
 async fn test_completion_grandchild_inherits_trait_from_grandparent() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///grandchild_trait.php").unwrap();
+    let uri = Uri::parse("file:///grandchild_trait.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Identifiable {\n",
@@ -1207,10 +1207,10 @@ async fn test_completion_grandchild_inherits_trait_from_grandparent() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1230,7 +1230,7 @@ async fn test_completion_grandchild_inherits_trait_from_grandparent() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1240,7 +1240,7 @@ async fn test_completion_grandchild_inherits_trait_from_grandparent() {
 async fn test_goto_definition_trait_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///goto_trait_name.php").unwrap();
+    let uri = Uri::parse("file:///goto_trait_name.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "trait Fooable {\n",                    // 1
@@ -1260,7 +1260,7 @@ async fn test_goto_definition_trait_name() {
         result.is_some(),
         "Should resolve goto-definition for trait name"
     );
-    if let Some(GotoDefinitionResponse::Scalar(location)) = result {
+    if let Some(DefinitionResponse::Definition(Definition::Location(location))) = result {
         assert_eq!(location.uri, uri);
         // Should point to the trait declaration on line 1
         assert_eq!(
@@ -1268,7 +1268,7 @@ async fn test_goto_definition_trait_name() {
             "Should jump to trait declaration line"
         );
     } else {
-        panic!("Expected GotoDefinitionResponse::Scalar");
+        panic!("Expected DefinitionResponse::Scalar");
     }
 }
 
@@ -1278,7 +1278,7 @@ async fn test_goto_definition_trait_name() {
 async fn test_completion_trait_method_with_docblock_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_docblock.php").unwrap();
+    let uri = Uri::parse("file:///trait_docblock.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Result {\n",
@@ -1302,10 +1302,10 @@ async fn test_completion_trait_method_with_docblock_return_type() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1315,7 +1315,7 @@ async fn test_completion_trait_method_with_docblock_return_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1325,7 +1325,7 @@ async fn test_completion_trait_method_with_docblock_return_type() {
 async fn test_completion_trait_insteadof_basic() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_insteadof.php").unwrap();
+    let uri = Uri::parse("file:///trait_insteadof.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait TraitA {\n",
@@ -1352,10 +1352,10 @@ async fn test_completion_trait_insteadof_basic() {
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1382,7 +1382,7 @@ async fn test_completion_trait_insteadof_basic() {
                 shared_count
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1390,7 +1390,7 @@ async fn test_completion_trait_insteadof_basic() {
 async fn test_completion_trait_insteadof_multiple_excluded() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_insteadof_multi.php").unwrap();
+    let uri = Uri::parse("file:///trait_insteadof_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait TraitA {\n",
@@ -1418,10 +1418,10 @@ async fn test_completion_trait_insteadof_multiple_excluded() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1437,7 +1437,7 @@ async fn test_completion_trait_insteadof_multiple_excluded() {
                 count
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1447,7 +1447,7 @@ async fn test_completion_trait_insteadof_multiple_excluded() {
 async fn test_completion_trait_as_alias_basic() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_as_alias.php").unwrap();
+    let uri = Uri::parse("file:///trait_as_alias.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait TraitA {\n",
@@ -1475,10 +1475,10 @@ async fn test_completion_trait_as_alias_basic() {
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1503,7 +1503,7 @@ async fn test_completion_trait_as_alias_basic() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1511,7 +1511,7 @@ async fn test_completion_trait_as_alias_basic() {
 async fn test_completion_trait_as_visibility_only() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_as_visibility.php").unwrap();
+    let uri = Uri::parse("file:///trait_as_visibility.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Greeter {\n",
@@ -1533,10 +1533,10 @@ async fn test_completion_trait_as_visibility_only() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1547,7 +1547,7 @@ async fn test_completion_trait_as_visibility_only() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1555,7 +1555,7 @@ async fn test_completion_trait_as_visibility_only() {
 async fn test_completion_trait_as_alias_with_visibility() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_as_vis_alias.php").unwrap();
+    let uri = Uri::parse("file:///trait_as_vis_alias.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Logger {\n",
@@ -1577,10 +1577,10 @@ async fn test_completion_trait_as_alias_with_visibility() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1595,7 +1595,7 @@ async fn test_completion_trait_as_alias_with_visibility() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1605,7 +1605,7 @@ async fn test_completion_trait_as_alias_with_visibility() {
 async fn test_completion_trait_insteadof_with_as_alias() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_combined.php").unwrap();
+    let uri = Uri::parse("file:///trait_combined.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Talker {\n",
@@ -1633,10 +1633,10 @@ async fn test_completion_trait_insteadof_with_as_alias() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1667,7 +1667,7 @@ async fn test_completion_trait_insteadof_with_as_alias() {
                 talk_count
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1726,17 +1726,17 @@ async fn test_completion_trait_insteadof_cross_file_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///test_cross_insteadof.php").unwrap();
+    let uri = Uri::parse("file:///test_cross_insteadof.php").unwrap();
     open_php(&backend, &uri, class_php).await;
 
     let result = completion_response(&backend, &uri, 10, 15, None).await;
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1767,7 +1767,7 @@ async fn test_completion_trait_insteadof_cross_file_psr4() {
                 conflict_count
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1777,7 +1777,7 @@ async fn test_completion_trait_insteadof_cross_file_psr4() {
 async fn test_completion_class_own_method_wins_over_insteadof() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_own_wins.php").unwrap();
+    let uri = Uri::parse("file:///trait_own_wins.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait TraitA {\n",
@@ -1803,10 +1803,10 @@ async fn test_completion_class_own_method_wins_over_insteadof() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1822,7 +1822,7 @@ async fn test_completion_class_own_method_wins_over_insteadof() {
                 count
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1832,7 +1832,7 @@ async fn test_completion_class_own_method_wins_over_insteadof() {
 async fn test_completion_trait_alias_preserves_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_alias_return.php").unwrap();
+    let uri = Uri::parse("file:///trait_alias_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -1861,10 +1861,10 @@ async fn test_completion_trait_alias_preserves_return_type() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1874,7 +1874,7 @@ async fn test_completion_trait_alias_preserves_return_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1884,7 +1884,7 @@ async fn test_completion_trait_alias_preserves_return_type() {
 async fn test_completion_variable_of_class_with_trait_insteadof() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_var_insteadof.php").unwrap();
+    let uri = Uri::parse("file:///trait_var_insteadof.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Encoder {\n",
@@ -1913,10 +1913,10 @@ async fn test_completion_variable_of_class_with_trait_insteadof() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1947,7 +1947,7 @@ async fn test_completion_variable_of_class_with_trait_insteadof() {
                 process_count
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2023,7 +2023,7 @@ async fn test_parser_extracts_trait_adaptations() {
 async fn test_completion_trait_as_unqualified_reference() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_unqualified_as.php").unwrap();
+    let uri = Uri::parse("file:///trait_unqualified_as.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Greeter {\n",
@@ -2045,10 +2045,10 @@ async fn test_completion_trait_as_unqualified_reference() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2063,7 +2063,7 @@ async fn test_completion_trait_as_unqualified_reference() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2076,7 +2076,7 @@ async fn test_completion_trait_as_unqualified_reference() {
 async fn test_completion_trait_property_docblock_type_chain_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_prop_docblock.php").unwrap();
+    let uri = Uri::parse("file:///trait_prop_docblock.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class OutputStyle {\n",
@@ -2106,10 +2106,10 @@ async fn test_completion_trait_property_docblock_type_chain_same_file() {
 
     assert!(result.is_some(), "Should return completion results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2119,7 +2119,7 @@ async fn test_completion_trait_property_docblock_type_chain_same_file() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2180,17 +2180,17 @@ async fn test_completion_trait_property_docblock_type_chain_cross_file() {
         ],
     );
 
-    let uri = Url::from_file_path(_dir.path().join("src/ReindexSelectedCommand.php")).unwrap();
+    let uri = Uri::from_file_path(_dir.path().join("src/ReindexSelectedCommand.php")).unwrap();
     open_php(&backend, &uri, child_file).await;
 
     let result = completion_response(&backend, &uri, 4, 24, None).await;
 
     assert!(result.is_some(), "Should return completion results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2200,7 +2200,7 @@ async fn test_completion_trait_property_docblock_type_chain_cross_file() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2271,7 +2271,7 @@ async fn test_completion_trait_property_docblock_type_different_namespace() {
         ],
     );
 
-    let uri = Url::from_file_path(
+    let uri = Uri::from_file_path(
         _dir.path()
             .join("src/Console/Commands/ReindexSelectedCommand.php"),
     )
@@ -2282,10 +2282,10 @@ async fn test_completion_trait_property_docblock_type_different_namespace() {
 
     assert!(result.is_some(), "Should return completion results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2295,7 +2295,7 @@ async fn test_completion_trait_property_docblock_type_different_namespace() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2352,7 +2352,7 @@ async fn test_completion_trait_property_fqn_leading_backslash() {
         ],
     );
 
-    let uri = Url::from_file_path(
+    let uri = Uri::from_file_path(
         _dir.path()
             .join("src/Console/Commands/ReindexSelectedCommand.php"),
     )
@@ -2363,10 +2363,10 @@ async fn test_completion_trait_property_fqn_leading_backslash() {
 
     assert!(result.is_some(), "Should return completion results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2376,7 +2376,7 @@ async fn test_completion_trait_property_fqn_leading_backslash() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2438,7 +2438,7 @@ async fn test_goto_definition_method_on_trait_property_docblock_type() {
         ],
     );
 
-    let uri = Url::from_file_path(dir.path().join("src/ReindexSelectedCommand.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/ReindexSelectedCommand.php")).unwrap();
     open_php(&backend, &uri, child_file).await;
 
     // Go-to-definition on `createProgressBar` (line 4, inside the method name)
@@ -2448,8 +2448,8 @@ async fn test_goto_definition_method_on_trait_property_docblock_type() {
         result.is_some(),
         "Should resolve go-to-definition for method on trait property's @var type"
     );
-    if let Some(GotoDefinitionResponse::Scalar(location)) = result {
-        let expected_uri = Url::from_file_path(dir.path().join("src/OutputStyle.php")).unwrap();
+    if let Some(DefinitionResponse::Definition(Definition::Location(location))) = result {
+        let expected_uri = Uri::from_file_path(dir.path().join("src/OutputStyle.php")).unwrap();
         assert_eq!(
             location.uri, expected_uri,
             "Should jump to OutputStyle file"
@@ -2459,7 +2459,7 @@ async fn test_goto_definition_method_on_trait_property_docblock_type() {
             "Should jump to createProgressBar definition line"
         );
     } else {
-        panic!("Expected GotoDefinitionResponse::Scalar");
+        panic!("Expected DefinitionResponse::Scalar");
     }
 }
 
@@ -2511,17 +2511,17 @@ async fn test_completion_trait_property_fqn_var_type() {
         ],
     );
 
-    let uri = Url::from_file_path(_dir.path().join("src/ReindexSelectedCommand.php")).unwrap();
+    let uri = Uri::from_file_path(_dir.path().join("src/ReindexSelectedCommand.php")).unwrap();
     open_php(&backend, &uri, child_file).await;
 
     let result = completion_response(&backend, &uri, 4, 24, None).await;
 
     assert!(result.is_some(), "Should return completion results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2531,7 +2531,7 @@ async fn test_completion_trait_property_fqn_var_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2544,7 +2544,7 @@ async fn test_this_return_from_trait_method_resolves_to_using_class() {
     // This allows chaining into methods defined on the class or its parents.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_this_return.php").unwrap();
+    let uri = Uri::parse("file:///trait_this_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait MakesHttpRequests {\n",
@@ -2569,10 +2569,10 @@ async fn test_this_return_from_trait_method_resolves_to_using_class() {
 
     assert!(result.is_some(), "Should return completion results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2587,7 +2587,7 @@ async fn test_this_return_from_trait_method_resolves_to_using_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2648,7 +2648,7 @@ class FeatureTest extends TestCase {
         ],
     );
 
-    let uri = Url::from_file_path(dir.path().join("src/Http/FeatureTest.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Http/FeatureTest.php")).unwrap();
     open_php(&backend, &uri, feature_php).await;
 
     // "$this->withHeaders([])->" at line 6, character 33
@@ -2656,10 +2656,10 @@ class FeatureTest extends TestCase {
 
     assert!(result.is_some(), "Should return completion results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2679,7 +2679,7 @@ class FeatureTest extends TestCase {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2693,7 +2693,7 @@ class FeatureTest extends TestCase {
 async fn test_variable_resolution_inside_trait_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_var.php").unwrap();
+    let uri = Uri::parse("file:///trait_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -2714,11 +2714,11 @@ async fn test_variable_resolution_inside_trait_method() {
     let result = completion_response(&backend, &uri, 8, 15, None).await;
 
     match result {
-        Some(CompletionResponse::Array(items))
-        | Some(CompletionResponse::List(CompletionList { items, .. })) => {
+        Some(CompletionResponse::CompletionItemList(items))
+        | Some(CompletionResponse::CompletionList(CompletionList { items, .. })) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2780,18 +2780,18 @@ async fn test_variable_from_method_call_inside_trait() {
         "}\n",
     );
 
-    let uri = Url::from_file_path(dir.path().join("src/AuditTrait.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/AuditTrait.php")).unwrap();
     open_php(&backend, &uri, trait_content).await;
 
     // "$order->" at line 6, character 16
     let result = completion_response(&backend, &uri, 6, 16, None).await;
 
     match result {
-        Some(CompletionResponse::Array(items))
-        | Some(CompletionResponse::List(CompletionList { items, .. })) => {
+        Some(CompletionResponse::CompletionItemList(items))
+        | Some(CompletionResponse::CompletionList(CompletionList { items, .. })) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2810,7 +2810,7 @@ async fn test_variable_from_method_call_inside_trait() {
 async fn test_parameter_type_hint_inside_trait_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_param.php").unwrap();
+    let uri = Uri::parse("file:///trait_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Request {\n",
@@ -2830,11 +2830,11 @@ async fn test_parameter_type_hint_inside_trait_method() {
     let result = completion_response(&backend, &uri, 7, 14, None).await;
 
     match result {
-        Some(CompletionResponse::Array(items))
-        | Some(CompletionResponse::List(CompletionList { items, .. })) => {
+        Some(CompletionResponse::CompletionItemList(items))
+        | Some(CompletionResponse::CompletionList(CompletionList { items, .. })) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2889,18 +2889,18 @@ trait IsAuditableTrait {
         ],
     );
 
-    let uri = Url::from_file_path(dir.path().join("src/Traits/IsAuditableTrait.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Traits/IsAuditableTrait.php")).unwrap();
     open_php(&backend, &uri, trait_php).await;
 
     // "$user->" at line 6, character 15
     let result = completion_response(&backend, &uri, 6, 15, None).await;
 
     match result {
-        Some(CompletionResponse::Array(items))
-        | Some(CompletionResponse::List(CompletionList { items, .. })) => {
+        Some(CompletionResponse::CompletionItemList(items))
+        | Some(CompletionResponse::CompletionList(CompletionList { items, .. })) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -2927,7 +2927,7 @@ async fn test_trait_constant_access_via_static_and_this() {
     // Trait constants accessed via static:: and $this:: inside the using class
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_const_access.php").unwrap();
+    let uri = Uri::parse("file:///trait_const_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait HasSettings {\n",
@@ -2953,10 +2953,10 @@ async fn test_trait_constant_access_via_static_and_this() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let const_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2976,7 +2976,7 @@ async fn test_trait_constant_access_via_static_and_this() {
                 const_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 
     // $this:: at line 12, character 15
@@ -2984,10 +2984,10 @@ async fn test_trait_constant_access_via_static_and_this() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let const_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3002,7 +3002,7 @@ async fn test_trait_constant_access_via_static_and_this() {
                 const_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3013,7 +3013,7 @@ async fn test_trait_alias_with_self_return_resolves_to_using_class() {
     // resolve self to the using class, enabling chaining.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_alias_self.php").unwrap();
+    let uri = Uri::parse("file:///trait_alias_self.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait SomeTrait {\n",
@@ -3038,10 +3038,10 @@ async fn test_trait_alias_with_self_return_resolves_to_using_class() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3056,7 +3056,7 @@ async fn test_trait_alias_with_self_return_resolves_to_using_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3067,7 +3067,7 @@ async fn test_self_in_closure_param_within_trait_resolves_to_using_class() {
     // should resolve to the class that uses the trait.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_closure_self.php").unwrap();
+    let uri = Uri::parse("file:///trait_closure_self.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait FooTrait {\n",
@@ -3094,10 +3094,10 @@ async fn test_self_in_closure_param_within_trait_resolves_to_using_class() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3107,7 +3107,7 @@ async fn test_self_in_closure_param_within_trait_resolves_to_using_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3118,7 +3118,7 @@ async fn test_require_extends_self_return_resolves_to_using_class() {
     // to the concrete class that uses the trait.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_require_extends.php").unwrap();
+    let uri = Uri::parse("file:///trait_require_extends.php").unwrap();
     let text = concat!(
         "<?php\n",
         "abstract class BaseElement {\n",
@@ -3144,10 +3144,10 @@ async fn test_require_extends_self_return_resolves_to_using_class() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3162,7 +3162,7 @@ async fn test_require_extends_self_return_resolves_to_using_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3173,7 +3173,7 @@ async fn test_require_implements_self_return_resolves_to_using_class() {
     // to the concrete class that uses the trait.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_require_implements.php").unwrap();
+    let uri = Uri::parse("file:///trait_require_implements.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Element {\n",
@@ -3200,10 +3200,10 @@ async fn test_require_implements_self_return_resolves_to_using_class() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3218,7 +3218,7 @@ async fn test_require_implements_self_return_resolves_to_using_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3229,7 +3229,7 @@ async fn test_require_extends_and_implements_combined_self_return() {
     // returning self should resolve to the concrete class.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_require_combined.php").unwrap();
+    let uri = Uri::parse("file:///trait_require_combined.php").unwrap();
     let text = concat!(
         "<?php\n",
         "abstract class Base {\n",
@@ -3262,10 +3262,10 @@ async fn test_require_extends_and_implements_combined_self_return() {
 
     assert!(result.is_some());
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3285,7 +3285,7 @@ async fn test_require_extends_and_implements_combined_self_return() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3295,7 +3295,7 @@ async fn test_require_extends_and_implements_combined_self_return() {
 async fn test_completion_require_extends_this_members_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///require_extends_same.php").unwrap();
+    let uri = Uri::parse("file:///require_extends_same.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class TestBase {\n",
@@ -3315,10 +3315,10 @@ async fn test_completion_require_extends_this_members_same_file() {
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3333,7 +3333,7 @@ async fn test_completion_require_extends_this_members_same_file() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3377,17 +3377,17 @@ async fn test_completion_require_extends_this_members_cross_file_psr4() {
 
     // Open the trait file itself: it is analyzed standalone, exactly as
     // PHPStan never does (PHPStan only sees traits through using classes).
-    let uri = Url::parse("file:///MocksStorageService.php").unwrap();
+    let uri = Uri::parse("file:///MocksStorageService.php").unwrap();
     open_php(&backend, &uri, trait_php).await;
 
     let result = completion_response(&backend, &uri, 6, 15, None).await;
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3397,7 +3397,7 @@ async fn test_completion_require_extends_this_members_cross_file_psr4() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3405,7 +3405,7 @@ async fn test_completion_require_extends_this_members_cross_file_psr4() {
 async fn test_completion_require_implements_this_members_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///require_implements_same.php").unwrap();
+    let uri = Uri::parse("file:///require_implements_same.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface HasLogger {\n",
@@ -3425,10 +3425,10 @@ async fn test_completion_require_implements_this_members_same_file() {
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3443,7 +3443,7 @@ async fn test_completion_require_implements_this_members_same_file() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3454,7 +3454,7 @@ async fn test_completion_require_implements_this_members_same_file() {
 async fn test_completion_require_implements_property_hook_member() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///require_implements_property_hook.php").unwrap();
+    let uri = Uri::parse("file:///require_implements_property_hook.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface HasQux {\n",
@@ -3478,10 +3478,10 @@ async fn test_completion_require_implements_property_hook_member() {
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let property_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3492,7 +3492,7 @@ async fn test_completion_require_implements_property_hook_member() {
                 property_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3504,7 +3504,7 @@ async fn test_completion_require_implements_property_hook_member() {
 #[tokio::test]
 async fn test_return_this_trait_method_resolves_to_using_class_same_file() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///trait_return_this_sf.php").unwrap();
+    let uri = Uri::parse("file:///trait_return_this_sf.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait MakesAssertions {\n",
@@ -3528,7 +3528,7 @@ async fn test_return_this_trait_method_resolves_to_using_class_same_file() {
     let result = completion_response(&backend, &uri, 13, 28, None).await;
 
     match result.expect("Completion should return results") {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(""))
@@ -3543,7 +3543,7 @@ async fn test_return_this_trait_method_resolves_to_using_class_same_file() {
                 "The trait method should still be available on the chain, got: {names:?}"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3584,7 +3584,7 @@ async fn test_return_this_trait_method_resolves_to_using_class_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///consumer.php").unwrap();
+    let uri = Uri::parse("file:///consumer.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Testable;\n",
@@ -3597,7 +3597,7 @@ async fn test_return_this_trait_method_resolves_to_using_class_cross_file() {
     let result = completion_response(&backend, &uri, 3, 24, None).await;
 
     match result.expect("Completion should return results") {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(""))
@@ -3612,7 +3612,7 @@ async fn test_return_this_trait_method_resolves_to_using_class_cross_file() {
                 "The trait method should still be available on the chain, got: {names:?}"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3626,7 +3626,7 @@ async fn test_return_this_trait_method_resolves_to_using_class_cross_file() {
 async fn test_parent_trait_docblock_tags_reach_a_subclass() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_trait_tags.php").unwrap();
+    let uri = Uri::parse("file:///parent_trait_tags.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -3647,7 +3647,7 @@ async fn test_parent_trait_docblock_tags_reach_a_subclass() {
     let result = completion_response(&backend, &uri, 9, 15, None).await;
 
     match result.expect("Completion should return results") {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(""))
@@ -3661,7 +3661,7 @@ async fn test_parent_trait_docblock_tags_reach_a_subclass() {
                 "`@method` on the parent's trait should be visible, got: {names:?}"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3671,7 +3671,7 @@ async fn test_parent_trait_docblock_tags_reach_a_subclass() {
 async fn test_parent_trait_docblock_tags_substitute_generics() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_trait_generics.php").unwrap();
+    let uri = Uri::parse("file:///parent_trait_generics.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Badge { public function label(): string { return ''; } }\n",
@@ -3702,7 +3702,7 @@ async fn test_parent_trait_docblock_tags_substitute_generics() {
     let result = completion_response(&backend, &uri, 19, 23, None).await;
 
     match result.expect("Completion should return results") {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(""))
@@ -3712,6 +3712,6 @@ async fn test_parent_trait_docblock_tags_substitute_generics() {
                 "`TItem` should resolve to `Badge` through `@use` and `@extends`, got: {names:?}"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }

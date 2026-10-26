@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Hover;
+use tower_lsp_server::gen_lsp_types::Hover;
 
 use crate::Backend;
 use crate::class_lookup::Fqn;

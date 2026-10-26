@@ -18,7 +18,7 @@
 //! Phase 2 (`resolve_remove_override`) computes the workspace edit on
 //! demand when the user picks the action.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::attributes::attributed_member_at;
 use crate::Backend;
@@ -44,7 +44,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -85,7 +85,9 @@ impl Backend {
             // Try to extract a readable member name from any of the
             // grouped diagnostics (some identifiers like
             // `property.overrideAttribute` don't include the name).
-            let member_name = diags.iter().find_map(|d| phpstan_member_name(&d.message));
+            let member_name = diags
+                .iter()
+                .find_map(|d| phpstan_member_name(crate::util::message_text(&d.message)));
 
             let title = match member_name {
                 Some(name) => format!("Remove #[Override] from {}", name),
@@ -121,7 +123,7 @@ impl Backend {
         let edit =
             attributed_member_at(content, diag_line)?.remove_attribute_edit(content, "Override")?;
 
-        let doc_uri: Url = uri.parse().ok()?;
+        let doc_uri: Uri = uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 }

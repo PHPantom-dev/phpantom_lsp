@@ -24,6 +24,7 @@ pub(super) fn extract_instantiation_expr<'a>(
         {
             try_emit_mailable_content_view_spans(args, ctx.content, &mut ctx.spans);
         }
+        emit_symfony_instantiation_spans(inst.class, args, ctx);
         if !class_text.is_empty() {
             emit_call_site(
                 format!("new {}", class_text),
@@ -260,6 +261,44 @@ fn extract_call<'a>(
     }
 }
 
+/// `clone($object, ['prop' => …])` writes each listed property on the
+/// copy just as `$copy->prop = …` would, so each literal key gets the
+/// property-access span that assignment would: navigation, references
+/// and rename reach it, and the member diagnostics check it.
+fn emit_clone_with_spans(func_call: &FunctionCall<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let Some((object, writes)) = crate::parser::clone_with_writes(func_call, ctx.content) else {
+        return;
+    };
+    if writes.is_empty() {
+        return;
+    }
+    let subject_text = expr_to_subject_text(object);
+    if subject_text.is_empty() {
+        return;
+    }
+    let object_span = object.span();
+    for write in writes {
+        ctx.spans.push(SymbolSpan {
+            start: write.start,
+            end: write.end,
+            kind: SymbolKind::MemberAccess {
+                subject_text: SubjectText::new(
+                    subject_text.clone(),
+                    object_span.start.offset,
+                    object_span.end.offset,
+                    ctx.content,
+                ),
+                member_name: crate::atom::atom(write.name),
+                is_static: false,
+                is_method_call: false,
+                docblock_ref: DocblockMemberRef::No,
+                is_array_callable: false,
+                is_nullsafe: false,
+            },
+        });
+    }
+}
+
 fn extract_function_call<'a>(
     func_call: &'a FunctionCall<'a>,
     ctx: &mut ExtractionCtx<'a>,
@@ -293,6 +332,7 @@ fn extract_function_call<'a>(
                     &mut ctx.spans,
                 );
             }
+            emit_clone_with_spans(func_call, ctx);
             ctx.spans.push(SymbolSpan {
                 start: ident.span().start.offset,
                 end: ident.span().end.offset,
@@ -313,7 +353,7 @@ fn extract_function_call<'a>(
             );
             match helper_function_first_arg_kind(name_clean) {
                 // The `config()` helper both reads and writes.
-                Some(crate::symbol_map::LaravelStringKind::Config) => {
+                Some(crate::symbol_map::StringKeyKind::Config) => {
                     try_emit_laravel_config_helper_spans(
                         &func_call.argument_list,
                         ctx.content,
@@ -322,7 +362,7 @@ fn extract_function_call<'a>(
                 }
                 // `@can`, `@cannot` and `@canany` check the ability
                 // against the arguments that follow it.
-                Some(crate::symbol_map::LaravelStringKind::GateAbility) => {
+                Some(crate::symbol_map::StringKeyKind::GateAbility) => {
                     try_emit_gate_ability_spans(
                         &func_call.argument_list,
                         0,
@@ -337,7 +377,7 @@ fn extract_function_call<'a>(
                 // `@extendsFirst` siblings put their candidates in an
                 // array literal, so the compiled directive names several
                 // templates at once.
-                Some(crate::symbol_map::LaravelStringKind::View)
+                Some(crate::symbol_map::StringKeyKind::View)
                     if helper_function_accepts_name_list(name_clean) =>
                 {
                     try_emit_laravel_view_span_at(
@@ -357,6 +397,11 @@ fn extract_function_call<'a>(
                 }
                 None => {}
             }
+            emit_symfony_function_call_span(
+                ident.span().start.offset,
+                &func_call.argument_list,
+                ctx,
+            );
             if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
                 ctx.content,
                 name_clean,
@@ -376,9 +421,9 @@ fn extract_function_call<'a>(
                 );
                 if let Some(dependency) = ctx
                     .resolved_name_at(ident.span().start.offset)
-                    .and_then(crate::symbol_map::LaravelStringDependency::namespaced_auth)
+                    .and_then(crate::symbol_map::StringKeyDependency::namespaced_auth)
                 {
-                    ctx.defer_laravel_spans_since(span_start, dependency);
+                    ctx.defer_string_key_spans_since(span_start, dependency);
                 }
             }
         }
@@ -421,6 +466,7 @@ fn extract_method_call<'a>(
     if let ClassLikeMemberSelector::Identifier(ident) = method {
         let member_name = crate::atom::atom_bytes(ident.value);
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
+        record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
         emit_call_site(
@@ -602,7 +648,7 @@ pub(super) fn extract_partial_application_expr<'a>(
 #[cfg(test)]
 mod tests {
     use crate::names::OwnedResolvedNames;
-    use crate::symbol_map::LaravelStringDependency;
+    use crate::symbol_map::StringKeyDependency;
 
     #[test]
     fn route_can_span_waits_for_the_root_alias_shadow_check() {
@@ -613,12 +659,14 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
 
-        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(program, php, &names);
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program, php, &names, true, true,
+        );
 
-        assert_eq!(map.conditional_laravel_spans.len(), 1);
+        assert_eq!(map.conditional_string_key_spans.len(), 1);
         assert_eq!(
-            Some(map.conditional_laravel_spans[0].dependency),
-            LaravelStringDependency::root_facade("Route")
+            Some(map.conditional_string_key_spans[0].dependency),
+            StringKeyDependency::root_facade("Route")
         );
     }
 }

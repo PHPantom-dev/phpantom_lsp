@@ -10,7 +10,7 @@
 //! This collector simply reads the cache and converts each entry to an
 //! LSP `Diagnostic` with Error severity.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::helpers::make_diagnostic;
 
@@ -75,7 +75,7 @@ impl Backend {
 
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 "syntax_error",
                 message.clone(),
             ));
@@ -102,7 +102,7 @@ mod tests {
         let mut out = Vec::new();
         backend.collect_syntax_error_diagnostics(uri, content, &mut out);
         assert_eq!(out.len(), 1);
-        assert!(out[0].message.contains("Parse failed"));
+        assert!(crate::util::message_text(&out[0].message).contains("Parse failed"));
         assert_eq!(out[0].range.start.line, 0);
         assert_eq!(out[0].range.start.character, 0);
     }

@@ -1,6 +1,6 @@
 use super::*;
 use crate::test_fixtures::make_backend;
-use tower_lsp::lsp_types::{DidChangeWatchedFilesParams, FileChangeType, FileEvent};
+use tower_lsp_server::gen_lsp_types::{DidChangeWatchedFilesParams, FileChangeType, FileEvent};
 
 #[test]
 fn translation_catalog_merges_roots_locales_groups_and_providers() {
@@ -77,7 +77,7 @@ fn translation_catalog_merges_roots_locales_groups_and_providers() {
     assert!(Arc::ptr_eq(&catalog, &backend.cached_translations()));
     assert!(
         catalog.contains_uri(
-            Url::from_file_path(dir.path().join("package/de/mail.php"))
+            Uri::from_file_path(dir.path().join("package/de/mail.php"))
                 .unwrap()
                 .as_str()
         )
@@ -124,7 +124,7 @@ fn translation_catalog_resolves_relative_workspace_roots_and_absolute_providers(
             "Registered",
         ),
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         let found = backend.translation_definitions(key);
         assert_eq!(found.len(), 1, "{key}: got {found:?}");
         assert_eq!(found[0].uri, uri, "{key}");
@@ -145,7 +145,7 @@ fn translation_catalog_refreshes_buffers_close_and_watched_files() {
     *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
     std::fs::create_dir_all(dir.path().join("resources/lang/en")).unwrap();
     let path = dir.path().join("resources/lang/en/messages.php");
-    let uri = Url::from_file_path(&path).unwrap();
+    let uri = Uri::from_file_path(&path).unwrap();
     std::fs::write(&path, "<?php return ['key'=>'disk'];").unwrap();
     let catalog = backend.cached_translations();
     backend
@@ -182,7 +182,7 @@ fn translation_catalog_refreshes_buffers_close_and_watched_files() {
         &DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
                 uri,
-                typ: FileChangeType::CHANGED
+                kind: FileChangeType::Changed
             }],
         },
         dir.path()
@@ -198,8 +198,8 @@ fn translation_catalog_refreshes_buffers_close_and_watched_files() {
     assert!(backend.apply_watched_file_changes(
         &DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
-                uri: Url::from_file_path(json).unwrap(),
-                typ: FileChangeType::CREATED
+                uri: Uri::from_file_path(json).unwrap(),
+                kind: FileChangeType::Created
             }],
         },
         dir.path()
@@ -257,7 +257,7 @@ fn translation_catalog_handles_invalid_and_removed_paths() {
     let invalid_file = dir.path().join(std::ffi::OsString::from_vec(vec![
         0xff, b'.', b'p', b'h', b'p',
     ]));
-    let uri = Url::from_file_path(&invalid_file).unwrap();
+    let uri = Uri::from_file_path(&invalid_file).unwrap();
     backend
         .open_files
         .write()

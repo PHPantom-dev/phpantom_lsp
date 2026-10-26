@@ -234,14 +234,29 @@ fn evaluate_enum_value_of(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpType {
 /// The backing value of the enum case `operand` names (`Suit::Hearts`), or
 /// the union of every case's for a backed enum named by itself.
 fn enum_backing_values(operand: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
-    let name: &str = match operand.kind() {
-        TypeKind::Named(name) => name,
-        TypeKind::Raw(raw) => raw,
-        _ => return None,
-    };
-    let (class_part, case) = match name.rsplit_once("::") {
-        Some((class_part, case)) => (class_part, Some(case)),
-        None => (name, None),
+    // A template bound to a union of cases reads each one's value.
+    if let TypeKind::Union(members) = operand.kind()
+        && members.iter().all(|member| member.as_enum_case().is_some())
+    {
+        let values = members
+            .iter()
+            .map(|member| enum_backing_values(member, ctx))
+            .collect::<Option<Vec<_>>>()?;
+        return Some(PhpType::union(values));
+    }
+    let (class_part, case) = match operand.as_enum_case() {
+        Some((enum_name, case)) => (enum_name, Some(case)),
+        None => {
+            let name: &str = match operand.kind() {
+                TypeKind::Named(name) => name,
+                TypeKind::Raw(raw) => raw,
+                _ => return None,
+            };
+            match name.rsplit_once("::") {
+                Some((class_part, case)) => (class_part, Some(case)),
+                None => (name, None),
+            }
+        }
     };
     let class = load_operand_class(class_part, ctx)?;
     if class.kind != crate::types::ClassLikeKind::Enum {

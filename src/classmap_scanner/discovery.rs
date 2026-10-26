@@ -348,6 +348,39 @@ pub fn scan_workspace_fallback_full(
     progress: Option<&ScanProgress>,
     followed: Option<&FollowedLinks>,
 ) -> WorkspaceScanResult {
+    scan_roots_full(
+        &[workspace_root.to_path_buf()],
+        &[],
+        skip_dirs,
+        filters,
+        progress,
+        followed,
+    )
+}
+
+/// Full-scan `project_roots` and `library_roots` in one gitignore-aware
+/// walk, tagging what each library root declares as library code.
+///
+/// The library roots are the editor's other workspace folders. They go
+/// into the same [`walk_roots`] call as the project's own root rather
+/// than a walk of their own, so the shared ancestor `.gitignore` files are
+/// compiled once, and every root is claimed up front: a symlink in one
+/// root pointing into another loses to that root's own walk instead of
+/// indexing the tree a second time under the link's spelling. Each is
+/// walked with every filter in force, the way the project's root is.
+///
+/// Without a project root (a Composer pipeline whose classmap comes from
+/// its autoload mappings), list the workspace root in `skip_dirs` so a
+/// link pointing back into it is still left to the pipeline that covers
+/// it.
+pub(crate) fn scan_roots_full(
+    project_roots: &[PathBuf],
+    library_roots: &[PathBuf],
+    skip_dirs: &HashSet<PathBuf>,
+    filters: &std::sync::Arc<IndexFilters>,
+    progress: Option<&ScanProgress>,
+    followed: Option<&FollowedLinks>,
+) -> WorkspaceScanResult {
     // Phase 1: collect file paths
     let skip_paths = HashSet::new();
     let opts = WalkOptions::new(
@@ -356,12 +389,19 @@ pub fn scan_workspace_fallback_full(
         std::sync::Arc::clone(filters),
         followed,
     );
-    let php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
-        walk_roots(&[workspace_root.to_path_buf()], &opts)
-            .into_iter()
-            .flatten()
-            .map(|path| (path, crate::ClassCompletionOrigin::Project))
-            .collect();
+    let roots: Vec<PathBuf> = project_roots.iter().chain(library_roots).cloned().collect();
+    let php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = walk_roots(&roots, &opts)
+        .into_iter()
+        .enumerate()
+        .flat_map(|(index, files)| {
+            let origin = if index < project_roots.len() {
+                crate::ClassCompletionOrigin::Project
+            } else {
+                crate::ClassCompletionOrigin::VendorExplicit
+            };
+            files.into_iter().map(move |path| (path, origin))
+        })
+        .collect();
 
     // Phase 2: scan files in parallel
     progress_add_total(progress, php_files.len());
@@ -436,6 +476,134 @@ pub fn scan_include_paths(
             .collect();
     progress_add_total(progress, php_files.len());
     scan_files_parallel_full(&php_files, progress)
+}
+
+/// Scan the stub paths for symbols, in priority order.
+///
+/// A name two paths declare is kept from the earlier one, and within one
+/// path from the first file in path order, so the result does not depend
+/// on how the walk or the scan workers were scheduled. Files are listed
+/// the way [`collect_include_files`] lists them. A directory holding
+/// phpstorm-stubs' `PhpStormStubsMap.php` is read from the map instead of
+/// being scanned.
+///
+/// A declaration its docblock marks `@removed` at or before `php_version`
+/// is left out, as it is from the embedded stubs, so a later path's
+/// declaration of the name is the one kept.
+pub(crate) fn scan_stub_paths(
+    paths: &[PathBuf],
+    filters: &std::sync::Arc<IndexFilters>,
+    php_version: crate::types::PhpVersion,
+) -> WorkspaceScanResult {
+    let origin = crate::ClassCompletionOrigin::VendorExplicit;
+    let mut result = WorkspaceScanResult::default();
+    for path in paths {
+        let mut scan = match read_phpstorm_stubs_map(path, origin) {
+            Some(scan) => scan,
+            None => {
+                let mut files = collect_include_files(std::slice::from_ref(path), filters);
+                files.sort();
+                let files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
+                    files.into_iter().map(|file| (file, origin)).collect();
+                scan_files_parallel_full(&files, None)
+            }
+        };
+        drop_removed_declarations(&mut scan, php_version);
+        result.absorb_missing(scan);
+    }
+    result
+}
+
+/// Remove from `scan` every declaration whose file marks it `@removed` at
+/// or before `php_version`.
+fn drop_removed_declarations(
+    scan: &mut WorkspaceScanResult,
+    php_version: crate::types::PhpVersion,
+) {
+    use crate::stubs::StubSymbolKind;
+
+    let mut by_file: HashMap<&Path, Vec<(StubSymbolKind, &str)>> = HashMap::new();
+    let indexes = [
+        (StubSymbolKind::Class, &scan.classmap),
+        (StubSymbolKind::Function, &scan.function_index),
+        (StubSymbolKind::Constant, &scan.constant_index),
+    ];
+    for (kind, index) in indexes {
+        for (name, path) in index {
+            by_file
+                .entry(path.as_path())
+                .or_default()
+                .push((kind, name.as_str()));
+        }
+    }
+    let files: Vec<_> = by_file.into_iter().collect();
+    let removed: Vec<(StubSymbolKind, String)> = crate::parallel::map_in_blocks(
+        "drop_removed_declarations",
+        &files,
+        SCAN_BLOCK_FILES,
+        |(path, names)| {
+            let content = crate::util::read_php_source(path)?;
+            let removed = crate::stubs::removed_stub_names(&content, php_version)?;
+            Some(
+                names
+                    .iter()
+                    .filter(|&&(kind, name)| removed.contains(kind, name))
+                    .map(|&(kind, name)| (kind, name.to_owned()))
+                    .collect::<Vec<_>>(),
+            )
+        },
+    )
+    .into_iter()
+    .flatten()
+    .collect();
+
+    for (kind, name) in removed {
+        let (index, origins) = match kind {
+            StubSymbolKind::Class => (&mut scan.classmap, &mut scan.class_origins),
+            StubSymbolKind::Function => (&mut scan.function_index, &mut scan.function_origins),
+            StubSymbolKind::Constant => (&mut scan.constant_index, &mut scan.constant_origins),
+        };
+        index.remove(&name);
+        origins.remove(&name);
+    }
+}
+
+/// Whether `dir` is a phpstorm-stubs checkout, which the stub-path scan
+/// reads from its `PhpStormStubsMap.php`.
+pub(crate) fn is_phpstorm_stubs_checkout(dir: &Path) -> bool {
+    dir.join(PHPSTORM_STUBS_MAP).is_file()
+}
+
+const PHPSTORM_STUBS_MAP: &str = "PhpStormStubsMap.php";
+
+/// The symbols of the phpstorm-stubs checkout at `dir`, read from its
+/// `PhpStormStubsMap.php`, or `None` when `dir` holds no such map.
+fn read_phpstorm_stubs_map(
+    dir: &Path,
+    origin: crate::ClassCompletionOrigin,
+) -> Option<WorkspaceScanResult> {
+    let content = std::fs::read_to_string(dir.join(PHPSTORM_STUBS_MAP)).ok()?;
+    let section = |name: &str| -> (
+        HashMap<String, PathBuf>,
+        HashMap<String, crate::ClassCompletionOrigin>,
+    ) {
+        crate::stub_map::parse_section(&content, name)
+            .into_iter()
+            .map(|(symbol, file)| ((symbol.clone(), dir.join(file)), (symbol, origin)))
+            .unzip()
+    };
+    let (classmap, class_origins) = section("CLASSES");
+    let (function_index, function_origins) = section("FUNCTIONS");
+    let (constant_index, constant_origins) = section("CONSTANTS");
+    Some(WorkspaceScanResult {
+        classmap,
+        class_origins,
+        function_index,
+        function_origins,
+        constant_index,
+        constant_origins,
+        package_roots: Vec::new(),
+    })
 }
 
 /// Scan Drupal-specific directories for PHP symbols, bypassing `.gitignore`.

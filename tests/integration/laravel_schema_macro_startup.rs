@@ -13,7 +13,7 @@
 use crate::common::{
     LARAVEL_SRC_COMPOSER, completion_response, create_psr4_workspace, open_initialized_php,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const PROVIDERS_PHP: &str = "\
 <?php
@@ -111,8 +111,8 @@ async fn blueprint_macro_column_is_present_from_the_first_startup_load() {
     let result = completion_response(&backend, &uri, position.line, position.character, None).await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()

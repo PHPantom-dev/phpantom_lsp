@@ -35,7 +35,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 use serde::Serialize;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::analyse::{
@@ -206,7 +206,7 @@ pub fn fix_unused_imports(
         .map(|d| AppliedFix {
             rule: "unused_import".to_string(),
             line: d.range.start.line + 1,
-            description: d.message.clone(),
+            description: crate::util::message_text(&d.message).to_string(),
         })
         .collect();
 

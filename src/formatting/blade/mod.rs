@@ -2,8 +2,8 @@
 //!
 //! A Blade template is markup with PHP inside it, so the PHP formatting
 //! strategy does not apply: the built-in PHP formatter cannot parse it,
-//! and of the external tools only Laravel Pint knows what to do with one.
-//! Two strategies remain:
+//! and of the PHP formatters only Laravel Pint knows what to do with one.
+//! Three strategies remain:
 //!
 //! - **Pint**, when the project has opted into its `Pint/laravel_blade`
 //!   rule. Pint formats Blade through prettier and its Blade and Tailwind
@@ -13,6 +13,10 @@
 //!   from "already formatted"; the decision has to be read from
 //!   `pint.json` (or from `pint-blade = true` in `.phpantom.toml`, which
 //!   also passes `--blade`).
+//! - **blade-formatter** ([`blade_formatter`]), when the project installs
+//!   it and carries its config file, so that saving a template in the
+//!   editor formats it the way the project's own `blade-formatter` run
+//!   does.
 //! - **The built-in reindenter** ([`reindent`]) otherwise. It changes
 //!   leading whitespace only, so it never reflows a line, wraps an
 //!   attribute, or touches the CSS, JavaScript, and PHP embedded in the
@@ -21,13 +25,13 @@
 //!   template carries through the built-in PHP formatter.
 //!
 //! Some templates are output where indentation means something, and are
-//! left alone by both: Envoy task files, Markdown mail templates, and
+//! left alone by Pint and the reindenter: Envoy task files, Markdown mail templates, and
 //! Laravel Boost guidelines.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use tower_lsp::lsp_types::FormattingOptions;
+use tower_lsp_server::gen_lsp_types::FormattingOptions;
 
 use crate::Backend;
 use crate::composer;
@@ -35,11 +39,13 @@ use crate::config::FormattingConfig;
 
 use super::{FormattingStrategy, ResolvedTool, Tool, external, mago, pint, resolve_strategy};
 
+mod blade_formatter;
 mod php;
 pub mod reindent;
 #[cfg(test)]
 mod tests;
 
+pub(super) use blade_formatter::uses_blade_formatter;
 pub use reindent::Options as BladeFormatOptions;
 
 /// How a Blade template is formatted.
@@ -48,6 +54,12 @@ pub enum BladeFormattingStrategy {
     /// Laravel Pint with its Blade rule. `flag` passes `--blade`, which
     /// turns the rule on for the run when `pint.json` does not.
     Pint { tool: ResolvedTool, flag: bool },
+    /// shufo/blade-formatter, skipping the templates the workspace
+    /// `.bladeignore` lists.
+    BladeFormatter {
+        tool: ResolvedTool,
+        ignore: Option<ignore::gitignore::Gitignore>,
+    },
     /// The built-in reindenter, carrying the settings for the
     /// embedded-PHP pass when the project opted into it.
     BuiltIn(Option<BladePhpFormatting>),
@@ -84,12 +96,19 @@ impl BladePhpFormatting {
 /// Resolve how a Blade template is formatted, from the same inputs as
 /// [`resolve_strategy`].
 ///
-/// Pint is chosen when the PHP strategy resolved it (explicit path or
-/// `require-dev`) and the project has turned its Blade rule on: through
-/// `pint-blade = true` in `.phpantom.toml`, or through
-/// `rules["Pint/laravel_blade"]` in the workspace `pint.json` when
-/// `pint-blade` is unset. `pint-blade = false` keeps Blade files on the
-/// built-in reindenter whatever `pint.json` says.
+/// In order:
+///
+/// 1. A `blade-formatter` command set in `.phpantom.toml` wins.
+/// 2. Formatting disabled for PHP is disabled for Blade too.
+/// 3. Pint, when the PHP strategy resolved it (explicit path or
+///    `require-dev`) and the project has turned its Blade rule on: through
+///    `pint-blade = true` in `.phpantom.toml`, or through
+///    `rules["Pint/laravel_blade"]` in the workspace `pint.json` when
+///    `pint-blade` is unset.
+/// 4. blade-formatter, when the project uses it (see
+///    [`uses_blade_formatter`]), has it installed in `node_modules/.bin`,
+///    and `blade-formatter` is not set to `""`.
+/// 5. The built-in reindenter.
 ///
 /// A project on the built-in reindenter that also sets `blade-php = true`
 /// gets the settings for the embedded-PHP pass resolved with it, so a run
@@ -102,33 +121,54 @@ pub fn resolve_blade_strategy(
     bin_dir: Option<&str>,
     php_version: crate::types::PhpVersion,
 ) -> BladeFormattingStrategy {
-    let built_in = || {
-        BladeFormattingStrategy::BuiltIn(config.blade_php.unwrap_or(false).then(|| {
-            BladePhpFormatting {
-                version: php_version,
-                mago_config: workspace_root
-                    .filter(|root| crate::mago::has_mago_config(root))
-                    .map(|root| root.join("mago.toml")),
-            }
-        }))
+    let blade_formatter = |path: PathBuf| BladeFormattingStrategy::BladeFormatter {
+        tool: ResolvedTool {
+            tool: Tool::BladeFormatter,
+            path,
+            standard: None,
+        },
+        ignore: workspace_root.and_then(blade_formatter::load_ignore),
     };
-    // Only Pint formats Blade, so the PHPCS standard is not needed here.
-    let tools = match resolve_strategy(workspace_root, config, None, composer_json, bin_dir) {
-        FormattingStrategy::Disabled => return BladeFormattingStrategy::Disabled,
-        FormattingStrategy::BuiltIn(_) => return built_in(),
-        FormattingStrategy::External(tools) => tools,
-    };
-    let Some(tool) = tools.into_iter().find(|tool| tool.tool == Tool::Pint) else {
-        return built_in();
-    };
-    match config.pint_blade {
-        Some(true) => BladeFormattingStrategy::Pint { tool, flag: true },
-        Some(false) => built_in(),
-        None if workspace_root.is_some_and(pint::blade_rule_enabled) => {
-            BladeFormattingStrategy::Pint { tool, flag: false }
-        }
-        None => built_in(),
+    let configured = Tool::BladeFormatter.configured(config);
+    if let Some(command) = configured.filter(|command| !command.is_empty()) {
+        return blade_formatter(PathBuf::from(command));
     }
+
+    // Of the PHP formatters only Pint formats Blade, so the PHPCS
+    // standard is not needed here.
+    let pint = match resolve_strategy(workspace_root, config, None, composer_json, bin_dir) {
+        FormattingStrategy::Disabled => return BladeFormattingStrategy::Disabled,
+        FormattingStrategy::BuiltIn(_) => None,
+        FormattingStrategy::External(tools) => {
+            tools.into_iter().find(|tool| tool.tool == Tool::Pint)
+        }
+    };
+    if let Some(tool) = pint {
+        match config.pint_blade {
+            Some(true) => return BladeFormattingStrategy::Pint { tool, flag: true },
+            None if workspace_root.is_some_and(pint::blade_rule_enabled) => {
+                return BladeFormattingStrategy::Pint { tool, flag: false };
+            }
+            _ => {}
+        }
+    }
+
+    if configured.is_none()
+        && let Some(root) = workspace_root
+        && Tool::BladeFormatter.detected(Some(root), None, composer_json)
+        && let Some(path) = blade_formatter::binary(root)
+    {
+        return blade_formatter(path);
+    }
+
+    BladeFormattingStrategy::BuiltIn(config.blade_php.unwrap_or(false).then(|| {
+        BladePhpFormatting {
+            version: php_version,
+            mago_config: workspace_root
+                .filter(|root| crate::mago::has_mago_config(root))
+                .map(|root| root.join("mago.toml")),
+        }
+    }))
 }
 
 /// Whether a template's indentation is output rather than layout, so
@@ -149,8 +189,8 @@ pub fn is_whitespace_sensitive(file_path: &Path, content: &str) -> bool {
 }
 
 /// Run `strategy` on a Blade template and return the formatted text, or
-/// `None` when formatting is disabled, the template is one whose
-/// whitespace is output, or nothing changed.
+/// `None` when formatting is disabled, the template is one the strategy
+/// leaves alone, or nothing changed.
 pub fn format_blade_content(
     strategy: &BladeFormattingStrategy,
     content: &str,
@@ -171,6 +211,22 @@ pub fn format_blade_content(
             config,
             cancelled,
         )?,
+        BladeFormattingStrategy::BladeFormatter { tool, ignore } => {
+            if ignore
+                .as_ref()
+                .is_some_and(|ignore| blade_formatter::is_ignored(ignore, file_path))
+            {
+                return Ok(None);
+            }
+            external::run_external_pipeline(
+                std::slice::from_ref(tool),
+                content,
+                file_path,
+                workspace_root,
+                config,
+                cancelled,
+            )?
+        }
         BladeFormattingStrategy::BuiltIn(php) => {
             if is_whitespace_sensitive(file_path, content) {
                 return Ok(None);
@@ -215,7 +271,8 @@ pub fn options_from_lsp(options: &FormattingOptions) -> BladeFormatOptions {
 
 impl Backend {
     /// Resolve how the workspace formats Blade templates, from
-    /// `.phpantom.toml`, the root `composer.json`, and `pint.json`.
+    /// `.phpantom.toml`, the root `composer.json`, `pint.json`, and
+    /// `package.json`.
     pub(crate) fn resolve_blade_formatting_strategy(&self) -> BladeFormattingStrategy {
         let inputs = self.formatting_inputs();
         let (composer_json, bin_dir) = inputs.composer();

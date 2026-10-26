@@ -1,0 +1,7 @@
+// test: andWhere() and orWhere()'s argument forms
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testAndOrVariants.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/query-builder-dql-and-or-variants.php
+---

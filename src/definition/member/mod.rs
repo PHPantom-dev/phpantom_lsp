@@ -32,7 +32,7 @@ mod file_lookup;
 mod laravel;
 mod shape_keys;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::point_location;
 use crate::Backend;
@@ -111,18 +111,25 @@ impl Backend {
 
     /// Resolve a member named by external project metadata, where the class
     /// is already a fully-qualified name and there is no PHP source context
-    /// to extract a subject expression from.
+    /// to extract a subject expression from.  `is_property` prefers a
+    /// property over a method of the same name, as a validation mapping or
+    /// a form field means one.
     pub(crate) fn class_member_declaration_location(
         &self,
         class_fqn: &str,
         member_name: &str,
+        is_property: bool,
     ) -> Option<Location> {
         let target_class = self.find_or_load_class(class_fqn)?;
         let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let (declaring_class, declaring_fqn) =
             Self::find_declaring_class(&target_class, member_name, &class_loader)?;
-        let member_kind =
-            Self::classify_member(&declaring_class, member_name, MemberAccessHint::Unknown)?;
+        let hint = if is_property {
+            MemberAccessHint::PropertyAccess
+        } else {
+            MemberAccessHint::Unknown
+        };
+        let member_kind = Self::classify_member(&declaring_class, member_name, hint)?;
         self.member_position_location(
             &declaring_fqn,
             "",
@@ -451,6 +458,9 @@ impl Backend {
     ) -> Option<Location> {
         let (class_uri, class_content) =
             self.find_class_file_content(declaring_fqn, uri, content)?;
+        if crate::stubs::is_embedded_stub_uri(&class_uri) {
+            return None;
+        }
         let member_position =
             Self::find_member_position(&class_content, search_name, member_kind, declaring_class)?;
         let parsed_uri = crate::util::parse_url(&class_uri)?;

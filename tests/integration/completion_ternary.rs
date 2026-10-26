@@ -1,7 +1,7 @@
 use crate::common::{
     block_on, completion_response, create_test_backend, open_php, with_parse_worker_stack,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Ternary expression with `new` instantiations: both branches contribute
 /// a possible type, so the variable should show completions from both.
@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::*;
 async fn test_completion_ternary_new_instantiations() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_new.php").unwrap();
+    let uri = Uri::parse("file:///ternary_new.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Mailer {\n",
@@ -39,7 +39,7 @@ async fn test_completion_ternary_new_instantiations() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("send")),
@@ -57,7 +57,7 @@ async fn test_completion_ternary_new_instantiations() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -67,7 +67,7 @@ async fn test_completion_ternary_new_instantiations() {
 async fn test_completion_null_coalescing_new_instantiation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///coalesce_new.php").unwrap();
+    let uri = Uri::parse("file:///coalesce_new.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class PrimaryCache {\n",
@@ -100,7 +100,7 @@ async fn test_completion_null_coalescing_new_instantiation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // FallbackCache is the RHS of `??`
             assert!(
@@ -114,7 +114,7 @@ async fn test_completion_null_coalescing_new_instantiation() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -124,7 +124,7 @@ async fn test_completion_null_coalescing_new_instantiation() {
 async fn test_completion_short_ternary() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///short_ternary.php").unwrap();
+    let uri = Uri::parse("file:///short_ternary.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ConfigA {\n",
@@ -153,7 +153,7 @@ async fn test_completion_short_ternary() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("save")),
@@ -161,7 +161,7 @@ async fn test_completion_short_ternary() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -171,7 +171,7 @@ async fn test_completion_short_ternary() {
 async fn test_completion_ternary_method_calls() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_method.php").unwrap();
+    let uri = Uri::parse("file:///ternary_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Redis {\n",
@@ -204,7 +204,7 @@ async fn test_completion_ternary_method_calls() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("redisGet")),
@@ -217,7 +217,7 @@ async fn test_completion_ternary_method_calls() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -226,7 +226,7 @@ async fn test_completion_ternary_method_calls() {
 async fn test_completion_ternary_static_calls() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_static.php").unwrap();
+    let uri = Uri::parse("file:///ternary_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class FileLogger {\n",
@@ -258,7 +258,7 @@ async fn test_completion_ternary_static_calls() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("rotate")),
@@ -271,7 +271,7 @@ async fn test_completion_ternary_static_calls() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -280,7 +280,7 @@ async fn test_completion_ternary_static_calls() {
 async fn test_completion_ternary_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_top.php").unwrap();
+    let uri = Uri::parse("file:///ternary_top.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Alpha {\n",
@@ -304,7 +304,7 @@ async fn test_completion_ternary_top_level() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("alphaMethod")),
@@ -317,7 +317,7 @@ async fn test_completion_ternary_top_level() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -326,7 +326,7 @@ async fn test_completion_ternary_top_level() {
 async fn test_completion_null_coalescing_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///coalesce_top.php").unwrap();
+    let uri = Uri::parse("file:///coalesce_top.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -351,7 +351,7 @@ async fn test_completion_null_coalescing_top_level() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // RHS new Bar() should contribute
             assert!(
@@ -360,7 +360,7 @@ async fn test_completion_null_coalescing_top_level() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -370,7 +370,7 @@ async fn test_completion_null_coalescing_top_level() {
 async fn test_completion_ternary_overridden_by_reassignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_override.php").unwrap();
+    let uri = Uri::parse("file:///ternary_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -403,7 +403,7 @@ async fn test_completion_ternary_overridden_by_reassignment() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("bazMethod")),
@@ -421,7 +421,7 @@ async fn test_completion_ternary_overridden_by_reassignment() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -430,7 +430,7 @@ async fn test_completion_ternary_overridden_by_reassignment() {
 async fn test_completion_ternary_mixed_property_and_new() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_mixed.php").unwrap();
+    let uri = Uri::parse("file:///ternary_mixed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Connection {\n",
@@ -461,7 +461,7 @@ async fn test_completion_ternary_mixed_property_and_new() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fake")),
@@ -474,7 +474,7 @@ async fn test_completion_ternary_mixed_property_and_new() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -483,7 +483,7 @@ async fn test_completion_ternary_mixed_property_and_new() {
 async fn test_completion_null_coalescing_method_calls() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///coalesce_method.php").unwrap();
+    let uri = Uri::parse("file:///coalesce_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Printer {\n",
@@ -516,7 +516,7 @@ async fn test_completion_null_coalescing_method_calls() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("print")),
@@ -529,7 +529,7 @@ async fn test_completion_null_coalescing_method_calls() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -539,7 +539,7 @@ async fn test_completion_null_coalescing_method_calls() {
 async fn test_completion_ternary_inside_if_block() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_in_if.php").unwrap();
+    let uri = Uri::parse("file:///ternary_in_if.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class DefaultService {\n",
@@ -574,7 +574,7 @@ async fn test_completion_ternary_inside_if_block() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("defaultOp")),
@@ -592,7 +592,7 @@ async fn test_completion_ternary_inside_if_block() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -652,7 +652,7 @@ async fn test_completion_ternary_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///src/Handler.php").unwrap();
+    let uri = Uri::parse("file:///src/Handler.php").unwrap();
     open_php(&backend, &uri, handler_php).await;
 
     let result = completion_response(&backend, &uri, 9, 17, None).await;
@@ -662,7 +662,7 @@ async fn test_completion_ternary_cross_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("readFile")),
@@ -675,7 +675,7 @@ async fn test_completion_ternary_cross_file() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -684,7 +684,7 @@ async fn test_completion_ternary_cross_file() {
 async fn test_completion_null_coalescing_both_new() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///coalesce_both_new.php").unwrap();
+    let uri = Uri::parse("file:///coalesce_both_new.php").unwrap();
     // `new ErrorHandler()` is non-nullable, so the RHS is dead code.
     // The result should resolve to ErrorHandler only.
     let text = concat!(
@@ -714,7 +714,7 @@ async fn test_completion_null_coalescing_both_new() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("handleError")),
@@ -729,7 +729,7 @@ async fn test_completion_null_coalescing_both_new() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -739,7 +739,7 @@ async fn test_completion_null_coalescing_both_new() {
 async fn test_completion_ternary_with_match_in_branch() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_match.php").unwrap();
+    let uri = Uri::parse("file:///ternary_match.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SimpleHandler {\n",
@@ -776,7 +776,7 @@ async fn test_completion_ternary_with_match_in_branch() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("handle")),
@@ -794,7 +794,7 @@ async fn test_completion_ternary_with_match_in_branch() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -804,7 +804,7 @@ async fn test_completion_ternary_with_match_in_branch() {
 async fn test_completion_match_with_ternary_in_arm() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_ternary.php").unwrap();
+    let uri = Uri::parse("file:///match_ternary.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ExporterA {\n",
@@ -839,7 +839,7 @@ async fn test_completion_match_with_ternary_in_arm() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("exportA")),
@@ -857,7 +857,7 @@ async fn test_completion_match_with_ternary_in_arm() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -867,7 +867,7 @@ async fn test_completion_match_with_ternary_in_arm() {
 async fn test_completion_null_coalescing_inside_if_block() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///coalesce_in_if.php").unwrap();
+    let uri = Uri::parse("file:///coalesce_in_if.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class BaseService {\n",
@@ -901,7 +901,7 @@ async fn test_completion_null_coalescing_inside_if_block() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("baseOp")),
@@ -914,7 +914,7 @@ async fn test_completion_null_coalescing_inside_if_block() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -924,7 +924,7 @@ async fn test_completion_null_coalescing_inside_if_block() {
 async fn test_completion_chained_null_coalescing() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///coalesce_chain.php").unwrap();
+    let uri = Uri::parse("file:///coalesce_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class First {\n",
@@ -958,7 +958,7 @@ async fn test_completion_chained_null_coalescing() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // The RHS of `??` is `new Third()` which resolves directly.
             assert!(
@@ -967,7 +967,7 @@ async fn test_completion_chained_null_coalescing() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -976,8 +976,12 @@ async fn test_completion_chained_null_coalescing() {
 /// Extract labels from a completion response (handles both Array and List).
 fn extract_labels(response: CompletionResponse) -> Vec<String> {
     match response {
-        CompletionResponse::Array(items) => items.into_iter().map(|i| i.label).collect(),
-        CompletionResponse::List(list) => list.items.into_iter().map(|i| i.label).collect(),
+        CompletionResponse::CompletionItemList(items) => {
+            items.into_iter().map(|i| i.label).collect()
+        }
+        CompletionResponse::CompletionList(list) => {
+            list.items.into_iter().map(|i| i.label).collect()
+        }
     }
 }
 
@@ -987,7 +991,7 @@ fn extract_labels(response: CompletionResponse) -> Vec<String> {
 async fn test_completion_ternary_instanceof_then_branch() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_instanceof_then.php").unwrap();
+    let uri = Uri::parse("file:///ternary_instanceof_then.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -1041,7 +1045,7 @@ async fn test_completion_ternary_instanceof_then_branch() {
 async fn test_completion_ternary_instanceof_else_branch() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_instanceof_else.php").unwrap();
+    let uri = Uri::parse("file:///ternary_instanceof_else.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Vehicle {\n",
@@ -1091,7 +1095,7 @@ async fn test_completion_ternary_instanceof_else_branch() {
 async fn test_completion_ternary_negated_instanceof_then_branch() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_neg_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///ternary_neg_instanceof.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Shape {\n",
@@ -1141,7 +1145,7 @@ async fn test_completion_ternary_negated_instanceof_then_branch() {
 async fn test_completion_ternary_instanceof_in_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_instanceof_assign.php").unwrap();
+    let uri = Uri::parse("file:///ternary_instanceof_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -1187,7 +1191,7 @@ async fn test_completion_ternary_instanceof_in_assignment() {
 async fn test_completion_ternary_instanceof_subclass() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ternary_instanceof_subclass.php").unwrap();
+    let uri = Uri::parse("file:///ternary_instanceof_subclass.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Loggable {\n",
@@ -1272,7 +1276,7 @@ fn test_completion_long_null_coalescing_chain() {
     let labels = with_parse_worker_stack(move || {
         block_on(async move {
             let backend = create_test_backend();
-            let uri = Url::parse("file:///coalesce_long_chain.php").unwrap();
+            let uri = Uri::parse("file:///coalesce_long_chain.php").unwrap();
             open_php(&backend, &uri, &text).await;
 
             completion_response(&backend, &uri, trigger_line, 17, None)
@@ -1312,7 +1316,7 @@ fn test_completion_long_nested_ternary_chain() {
     let labels = with_parse_worker_stack(move || {
         block_on(async move {
             let backend = create_test_backend();
-            let uri = Url::parse("file:///ternary_long_chain.php").unwrap();
+            let uri = Uri::parse("file:///ternary_long_chain.php").unwrap();
             open_php(&backend, &uri, &text).await;
 
             completion_response(&backend, &uri, 8, 17, None)

@@ -348,13 +348,15 @@ pub(super) fn seed_by_ref_parameters<'b>(
         let is_spread = param.is_variadic && arg_is_unpacked(arg_list, arg_expr);
 
         let already_in_scope = !scope.get(&var_name).is_empty();
+        // An explicit `@param-out` states what the callee writes, so the
+        // argument's type from before the call has no say in the result. A
+        // plain hint only bounds what the callee may write, and precision
+        // it does not contradict survives the call.
+        let keep_existing = param.param_out_type.is_none();
         let mut seeded = false;
         if let Some(out_hint) =
             effective_out_type(param, param_index, template_owner, ctx.file.backend)
         {
-            if out_hint.references_any_name(callee_templates) {
-                continue;
-            }
             // A PHPStan conditional out type (`@param-out ($arg is null ?
             // A&I : A) $arg`) is call-site-agnostic up to this point; only
             // this call's own arguments say which branch it actually takes.
@@ -379,6 +381,11 @@ pub(super) fn seed_by_ref_parameters<'b>(
                     Some(&call_var_resolver),
                 )
             };
+            // Checked once the call has picked a branch, since the branch it
+            // takes (`array` in `$x is array ? array : T`) may name none.
+            if out_hint.references_any_name(callee_templates) {
+                continue;
+            }
             // A variadic parameter's stored PHPDoc type may describe the
             // collected argument array (`string[] &$values`), while each
             // call-site variable is one element of that collection. Native
@@ -422,6 +429,7 @@ pub(super) fn seed_by_ref_parameters<'b>(
                     .unwrap_or_else(PhpType::int);
                 let value_type = existing_joined
                     .as_ref()
+                    .filter(|_| keep_existing)
                     .and_then(PhpType::iterable_element_type)
                     .filter(|value| !value.is_null())
                     .filter(|value| value.is_subtype_of(&effective_hint))
@@ -451,7 +459,7 @@ pub(super) fn seed_by_ref_parameters<'b>(
                 // hint already covers, minus its literal precision, and fall
                 // back to the hint only when the two genuinely disagree.
                 let existing = scope.get(&var_name);
-                let refined = (!existing.is_empty())
+                let refined = (keep_existing && !existing.is_empty())
                     .then(|| ResolvedType::types_joined(existing))
                     // An empty array shape (`$matches = [];` before
                     // `preg_match_all(…, $matches)`) records no element

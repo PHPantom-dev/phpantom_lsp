@@ -1,11 +1,11 @@
 use crate::common::{class_items, complete_at, create_test_backend, items_of_kind, labels};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
 /// Filter to only KEYWORD-kind items (native types).
 fn keyword_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items_of_kind(items, CompletionItemKind::KEYWORD)
+    items_of_kind(items, CompletionItemKind::Keyword)
 }
 
 // ─── Function parameter type hints ──────────────────────────────────────────
@@ -13,7 +13,7 @@ fn keyword_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
 #[tokio::test]
 async fn param_type_offers_scalar_types() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/param_scalar.php").unwrap();
+    let uri = Uri::parse("file:///test/param_scalar.php").unwrap();
 
     // Cursor after `(str` — should offer `string`
     let src = "<?php\nfunction foo(str) {}";
@@ -34,7 +34,7 @@ async fn param_type_offers_scalar_types() {
 #[tokio::test]
 async fn param_type_offers_all_native_types_on_empty() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/param_all.php").unwrap();
+    let uri = Uri::parse("file:///test/param_all.php").unwrap();
 
     // Cursor right after `(` with nothing typed
     let src = "<?php\nfunction foo() {}";
@@ -59,7 +59,7 @@ async fn param_type_offers_all_native_types_on_empty() {
 #[tokio::test]
 async fn param_type_offers_class_names() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/param_class.php").unwrap();
+    let uri = Uri::parse("file:///test/param_class.php").unwrap();
 
     let src = r#"<?php
 class UserService {}
@@ -89,7 +89,7 @@ function handleUser(User) {}
 #[tokio::test]
 async fn param_type_does_not_offer_constants_or_functions() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/param_no_const.php").unwrap();
+    let uri = Uri::parse("file:///test/param_no_const.php").unwrap();
 
     let src = r#"<?php
 function myHelper() {}
@@ -102,7 +102,7 @@ function foo(my) {}
     let items = complete_at(&backend, &uri, src, 3, 15).await;
     let func_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .collect();
 
     // No function completions should appear in a type-hint position
@@ -116,7 +116,7 @@ function foo(my) {}
 #[tokio::test]
 async fn param_type_after_comma() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/param_comma.php").unwrap();
+    let uri = Uri::parse("file:///test/param_comma.php").unwrap();
 
     let src = "<?php\nfunction foo(string $a, int) {}";
     // Line 1: function foo(string $a, int) {}
@@ -137,7 +137,7 @@ async fn param_type_after_comma() {
 #[tokio::test]
 async fn return_type_offers_scalar_types() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/return_scalar.php").unwrap();
+    let uri = Uri::parse("file:///test/return_scalar.php").unwrap();
 
     let src = "<?php\nfunction foo(): voi {}";
     // Line 1: function foo(): voi {}
@@ -156,7 +156,7 @@ async fn return_type_offers_scalar_types() {
 #[tokio::test]
 async fn return_type_offers_class_names() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/return_class.php").unwrap();
+    let uri = Uri::parse("file:///test/return_class.php").unwrap();
 
     let src = r#"<?php
 class Response {}
@@ -182,7 +182,7 @@ function handle(): Resp {}
 #[tokio::test]
 async fn nullable_param_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/nullable.php").unwrap();
+    let uri = Uri::parse("file:///test/nullable.php").unwrap();
 
     let src = "<?php\nfunction foo(?str) {}";
     // (=12 ?=13 s=14 t=15 r=16 )=17
@@ -200,7 +200,7 @@ async fn nullable_param_type() {
 #[tokio::test]
 async fn union_param_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/union.php").unwrap();
+    let uri = Uri::parse("file:///test/union.php").unwrap();
 
     let src = "<?php\nfunction foo(string|int) {}";
     // (=12 s=13...g=18 |=19 i=20 n=21 t=22 )=23
@@ -218,7 +218,7 @@ async fn union_param_type() {
 #[tokio::test]
 async fn intersection_param_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/intersection.php").unwrap();
+    let uri = Uri::parse("file:///test/intersection.php").unwrap();
 
     let src = r#"<?php
 interface Countable {}
@@ -243,7 +243,7 @@ function foo(Countable&Trav) {}
 #[tokio::test]
 async fn union_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/union_return.php").unwrap();
+    let uri = Uri::parse("file:///test/union_return.php").unwrap();
 
     let src = "<?php\nfunction foo(): string|int {}";
     // )=13 :=14 ' '=15 s=16...g=21 |=22 i=23 n=24 t=25 ' '=26
@@ -263,7 +263,7 @@ async fn union_return_type() {
 #[tokio::test]
 async fn method_param_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/method_param.php").unwrap();
+    let uri = Uri::parse("file:///test/method_param.php").unwrap();
 
     let src = r#"<?php
 class Foo {
@@ -286,7 +286,7 @@ class Foo {
 #[tokio::test]
 async fn method_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/method_return.php").unwrap();
+    let uri = Uri::parse("file:///test/method_return.php").unwrap();
 
     let src = r#"<?php
 class Foo {
@@ -311,7 +311,7 @@ class Foo {
 #[tokio::test]
 async fn property_type_after_public() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/prop_public.php").unwrap();
+    let uri = Uri::parse("file:///test/prop_public.php").unwrap();
 
     let src = "<?php\nclass Foo {\n    public str\n}";
     // Line 2: `    public str`
@@ -330,7 +330,7 @@ async fn property_type_after_public() {
 #[tokio::test]
 async fn property_type_after_private_readonly() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/prop_readonly.php").unwrap();
+    let uri = Uri::parse("file:///test/prop_readonly.php").unwrap();
 
     let src = "<?php\nclass Foo {\n    private readonly str\n}";
     // Line 2: `    private readonly str`
@@ -351,7 +351,7 @@ async fn property_type_after_private_readonly() {
 #[tokio::test]
 async fn promoted_param_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/promoted.php").unwrap();
+    let uri = Uri::parse("file:///test/promoted.php").unwrap();
 
     let src = r#"<?php
 class Foo {
@@ -374,7 +374,7 @@ class Foo {
 #[tokio::test]
 async fn promoted_param_with_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/promoted_class.php").unwrap();
+    let uri = Uri::parse("file:///test/promoted_class.php").unwrap();
 
     let src = r#"<?php
 class UserService {}
@@ -402,7 +402,7 @@ class Controller {
 #[tokio::test]
 async fn closure_param_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure.php").unwrap();
+    let uri = Uri::parse("file:///test/closure.php").unwrap();
 
     let src = "<?php\n$f = function(str) {};";
     // Line 1: `$f = function(str) {};`
@@ -421,7 +421,7 @@ async fn closure_param_type() {
 #[tokio::test]
 async fn arrow_fn_param_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/arrow.php").unwrap();
+    let uri = Uri::parse("file:///test/arrow.php").unwrap();
 
     let src = "<?php\n$f = fn(str) => null;";
     // Line 1: `$f = fn(str) => null;`
@@ -440,7 +440,7 @@ async fn arrow_fn_param_type() {
 #[tokio::test]
 async fn closure_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_ret.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_ret.php").unwrap();
 
     let src = "<?php\n$f = function(): voi {};";
     // Line 1: `$f = function(): voi {};`
@@ -461,7 +461,7 @@ async fn closure_return_type() {
 #[tokio::test]
 async fn multiline_param_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/multiline.php").unwrap();
+    let uri = Uri::parse("file:///test/multiline.php").unwrap();
 
     let src = "<?php\nfunction foo(\n    string $a,\n    int\n) {}";
     // Line 3: `    int`
@@ -482,7 +482,7 @@ async fn multiline_param_type() {
 #[tokio::test]
 async fn not_in_function_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/not_call.php").unwrap();
+    let uri = Uri::parse("file:///test/not_call.php").unwrap();
 
     // `str` inside a function CALL — should NOT get type-hint suggestions.
     // The class name completion might still fire, but the native-type keywords
@@ -495,7 +495,7 @@ async fn not_in_function_call() {
     let type_kws: Vec<&CompletionItem> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::KEYWORD)
+            i.kind == Some(CompletionItemKind::Keyword)
                 && i.detail.as_deref() == Some("PHP built-in type")
         })
         .collect();
@@ -510,7 +510,7 @@ async fn not_in_function_call() {
 #[tokio::test]
 async fn not_in_variable_position() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/not_var.php").unwrap();
+    let uri = Uri::parse("file:///test/not_var.php").unwrap();
 
     // `$str` — variable, not a type hint
     let src = "<?php\nfunction foo($str) {}";
@@ -520,7 +520,7 @@ async fn not_in_variable_position() {
     let type_kws: Vec<&CompletionItem> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::KEYWORD)
+            i.kind == Some(CompletionItemKind::Keyword)
                 && i.detail.as_deref() == Some("PHP built-in type")
         })
         .collect();
@@ -537,21 +537,21 @@ async fn not_in_variable_position() {
 #[tokio::test]
 async fn type_hint_items_have_correct_kind_and_detail() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/metadata.php").unwrap();
+    let uri = Uri::parse("file:///test/metadata.php").unwrap();
 
     let src = "<?php\nfunction foo(str) {}";
     // cursor after "str" = col 16
     let items = complete_at(&backend, &uri, src, 1, 16).await;
 
     let string_item = items.iter().find(|i| i.label == "string").unwrap();
-    assert_eq!(string_item.kind, Some(CompletionItemKind::KEYWORD));
+    assert_eq!(string_item.kind, Some(CompletionItemKind::Keyword));
     assert_eq!(string_item.detail.as_deref(), Some("PHP built-in type"));
 }
 
 #[tokio::test]
 async fn type_hint_filters_by_partial() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/filter.php").unwrap();
+    let uri = Uri::parse("file:///test/filter.php").unwrap();
 
     // Typing `fl` — should match `float` but not `string`, `int`, etc.
     let src = "<?php\nfunction foo(fl) {}";
@@ -591,7 +591,7 @@ async fn type_hint_with_cross_file_class() {
         ],
     );
 
-    let uri = Url::parse("file:///test/cross_file.php").unwrap();
+    let uri = Uri::parse("file:///test/cross_file.php").unwrap();
     let src = r#"<?php
 namespace App\Services;
 use App\Models\User;
@@ -618,7 +618,7 @@ class UserService {
 #[tokio::test]
 async fn method_param_type_with_self() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/self.php").unwrap();
+    let uri = Uri::parse("file:///test/self.php").unwrap();
 
     // Typing `sel` in a param type position should offer `self`
     let src = r#"<?php
@@ -642,7 +642,7 @@ class Foo {
 #[tokio::test]
 async fn return_type_offers_static() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/static_ret.php").unwrap();
+    let uri = Uri::parse("file:///test/static_ret.php").unwrap();
 
     let src = r#"<?php
 class Foo {
@@ -667,7 +667,7 @@ class Foo {
 #[tokio::test]
 async fn return_type_no_space_after_colon_inserts_space() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/return_space.php").unwrap();
+    let uri = Uri::parse("file:///test/return_space.php").unwrap();
 
     // The colon is present but there is NO space between `:` and the
     // partial type the user has started typing.
@@ -695,7 +695,7 @@ async fn return_type_no_space_after_colon_inserts_space() {
 #[tokio::test]
 async fn return_type_with_space_after_colon_no_extra_space() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/return_no_extra_space.php").unwrap();
+    let uri = Uri::parse("file:///test/return_no_extra_space.php").unwrap();
 
     let src = "<?php\nfunction foo(): s {}";
     // )=13 :=14 ' '=15 s=16
@@ -714,7 +714,7 @@ async fn return_type_with_space_after_colon_no_extra_space() {
 #[tokio::test]
 async fn scalars_sort_before_classes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/sort_order.php").unwrap();
+    let uri = Uri::parse("file:///test/sort_order.php").unwrap();
 
     // Both `string` (scalar) and `StringHelper` (class) match the prefix "str".
     let src = r#"<?php
@@ -753,7 +753,7 @@ function demo(str) {}
 #[tokio::test]
 async fn param_type_excludes_traits() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/type_hint_trait.php").unwrap();
+    let uri = Uri::parse("file:///test/type_hint_trait.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -796,7 +796,7 @@ async fn param_type_excludes_traits() {
 #[tokio::test]
 async fn return_type_excludes_traits() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/type_hint_return_trait.php").unwrap();
+    let uri = Uri::parse("file:///test/type_hint_return_trait.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -827,7 +827,7 @@ async fn return_type_excludes_traits() {
 #[tokio::test]
 async fn property_type_excludes_traits() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/type_hint_prop_trait.php").unwrap();
+    let uri = Uri::parse("file:///test/type_hint_prop_trait.php").unwrap();
 
     let src = concat!(
         "<?php\n",
@@ -860,7 +860,7 @@ async fn property_type_excludes_traits() {
 #[tokio::test]
 async fn union_type_excludes_traits() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/type_hint_union_trait.php").unwrap();
+    let uri = Uri::parse("file:///test/type_hint_union_trait.php").unwrap();
 
     let src = concat!(
         "<?php\n",

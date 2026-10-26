@@ -1,7 +1,7 @@
 //! Regression tests for gating Laravel string-key hover, go-to-definition,
 //! find-references, and rename on `is_laravel`.
 //!
-//! `SymbolKind::LaravelStringKey` spans are extracted by pure name match
+//! `SymbolKind::StringKey` spans are extracted by pure name match
 //! (`config()`, `route()`, `view()`, `__()`, `trans()`, …) with no project
 //! context, so a non-Laravel project that happens to declare its own
 //! `config()` function (common in home-grown micro-frameworks) must not get
@@ -12,8 +12,8 @@ use crate::common::{
     completion_response, create_psr4_workspace, goto_definition_at, hover_response, open_php,
     position_after, references_response,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON_NON_LARAVEL: &str = r#"{
     "autoload": { "psr-4": { "App\\": "src/" } }
@@ -63,7 +63,7 @@ final class Storage {
 Storage::disk('archive');
 ";
 
-async fn setup(composer_json: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+async fn setup(composer_json: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(
         composer_json,
         &[
@@ -73,13 +73,13 @@ async fn setup(composer_json: &str) -> (phpantom_lsp::Backend, tempfile::TempDir
     );
     backend.initialized(InitializedParams {}).await;
 
-    let uri = Url::from_file_path(dir.path().join("src/Settings.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Settings.php")).unwrap();
     open_php(&backend, &uri, CONSUMER).await;
 
     (backend, dir, uri)
 }
 
-async fn setup_storage_homonym() -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+async fn setup_storage_homonym() -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(
         COMPOSER_JSON_NON_LARAVEL,
         &[
@@ -89,7 +89,7 @@ async fn setup_storage_homonym() -> (phpantom_lsp::Backend, tempfile::TempDir, U
     );
     backend.initialized(InitializedParams {}).await;
 
-    let uri = Url::from_file_path(dir.path().join("src/StorageConsumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/StorageConsumer.php")).unwrap();
     open_php(&backend, &uri, STORAGE_HOMONYM_CONSUMER).await;
 
     (backend, dir, uri)
@@ -110,8 +110,8 @@ async fn non_laravel_direct_resource_homonym_has_no_laravel_editor_features() {
     let completion =
         completion_response(&backend, &uri, position.line, position.character, None).await;
     let completion_items = match completion {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
@@ -231,7 +231,7 @@ async fn non_laravel_project_rename_does_not_rewrite_config_key() {
 
     let result = backend
         .rename(RenameParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
                 position: KEY_POSITION,
             },

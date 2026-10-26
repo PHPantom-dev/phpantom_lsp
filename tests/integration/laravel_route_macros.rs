@@ -4,9 +4,10 @@
 //! registers `login`, `register`, and the `password.*` routes on `$this`, and
 //! calls a second macro for the password group.  A route file that calls the
 //! macro has all of those names, so none of them may be reported as unknown.
+use crate::common::message_text;
 
 use crate::common::{create_psr4_workspace, goto_definition_at, open_initialized_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0", "laravel/ui": "^4.0" },
@@ -108,12 +109,10 @@ async fn routes_registered_by_a_router_macro_are_not_reported_as_unknown() {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER, &mut diags);
 
-    let messages: Vec<&String> = diags
+    let messages: Vec<&str> = diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_route"),
-        )
-        .map(|d| &d.message)
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_route"))
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert_eq!(
@@ -137,8 +136,8 @@ async fn goto_definition_reaches_a_route_declared_in_a_macro_body() {
     let result = goto_definition_at(&backend, &uri, 6, 22).await;
 
     let target = match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => location.uri,
-        Some(GotoDefinitionResponse::Array(locations)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => location.uri,
+        Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => {
             locations.first().expect("no location returned").uri.clone()
         }
         other => panic!("expected a definition location, got: {other:?}"),

@@ -4,10 +4,11 @@
 //! Rebinding `translator` or `translation.loader` moves the strings out of
 //! reach: `vendor/`'s own `lang/` files are still on disk, so the enumerated
 //! set is non-empty while covering none of the application's keys.
+use crate::common::message_text;
 
 use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const PROVIDERS_PHP: &str = "<?php\nreturn [\n    App\\TranslationServiceProvider::class,\n];\n";
 
@@ -64,7 +65,7 @@ async fn trans_diagnostics(provider: &str) -> Vec<String> {
             ("src/Greeting.php", CONSUMER),
         ],
     );
-    let uri = Url::from_file_path(dir.path().join("src/Greeting.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Greeting.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
     open_php(&backend, &uri, CONSUMER).await;
@@ -74,10 +75,8 @@ async fn trans_diagnostics(provider: &str) -> Vec<String> {
 
     diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_trans"),
-        )
-        .map(|d| d.message.clone())
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_trans"))
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 

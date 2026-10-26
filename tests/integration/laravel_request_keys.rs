@@ -6,7 +6,7 @@ use crate::common::{
     FORM_REQUEST_STUB, complete_at_opened, create_psr4_workspace, definition_locations,
     goto_definition_at, item_labels, open_php_at, split_cursor,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Shared stubs ───────────────────────────────────────────────────────────
 
@@ -190,7 +190,7 @@ async fn definition_line(open_path: &str, content: &str) -> Option<(String, Stri
 async fn open_at_cursor(
     open_path: &str,
     content: &str,
-) -> (phpantom_lsp::Backend, tempfile::TempDir, Url, Position) {
+) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri, Position) {
     let (stripped, position) = split_cursor(content);
 
     // The opened file is also written to disk so that go-to-definition can

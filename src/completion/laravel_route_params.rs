@@ -5,7 +5,7 @@
 //! name (`/users/{user}`) drives array-key completion.  The same applies to
 //! `to_route()`, `URL::signedRoute()`, and `URL::temporarySignedRoute()`.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::completion::source::code_context::CodeContext;
@@ -101,11 +101,11 @@ impl Backend {
             .enumerate()
             .map(|(i, name)| CompletionItem {
                 label: name.to_string(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some(route.uri.clone()),
                 sort_text: Some(format!("{:05}", i)),
                 filter_text: Some(name.to_string()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range: edit_range,
                     new_text: name.to_string(),
                 })),
@@ -116,7 +116,7 @@ impl Backend {
         if items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::Array(items))
+            Some(CompletionResponse::CompletionItemList(items))
         }
     }
 }

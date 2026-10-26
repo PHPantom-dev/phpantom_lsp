@@ -997,7 +997,15 @@ fn merge_keyed_type_inner(
     // Normalizing rebuilds a key through `kind()`, which sees straight
     // through the benevolence marker, so the leniency decision below reads
     // the types as they arrived rather than as they normalize.
-    let existing_key = base.iterable_key_type();
+    // `T[]` and `array<T>` leave their key domain open; the `int` that
+    // iterating them answers is a guess a write must not refine.
+    let existing_key = base.iterable_key_type().map(|key| {
+        if base.has_open_key_domain() {
+            PhpType::named(atom("array-key"))
+        } else {
+            key
+        }
+    });
     // A key domain spelled out as literals (`array<'a'|'b', V>`) is kept
     // as literals, so a write under one of them leaves it as it was and one
     // under a new literal adds just that key. Any other domain is already
@@ -1023,12 +1031,17 @@ fn merge_keyed_type_inner(
             }
         }
     }
+    let existing_key_count = key_types.len();
     // Add new key type members.
     for member in normalized_key.union_members() {
         if !member.is_empty() && !key_types.iter().any(|e| e.equivalent(member)) {
             key_types.push(member.clone());
         }
     }
+    // A write under a key the domain already covers leaves the domain as it
+    // was, `array-key` and benevolence included: writing `$a['x']` into a
+    // `string[]` says nothing new about which keys the array holds.
+    let key_unchanged = existing_key_count > 0 && key_types.len() == existing_key_count;
 
     // Collect existing value types from the base.
     let mut elem_types: Vec<PhpType> = Vec::new();
@@ -1056,6 +1069,12 @@ fn merge_keyed_type_inner(
     if key_types.is_empty() {
         // No key type information — use a single-param generic.
         PhpType::generic_array_val(val_type)
+    } else if key_unchanged
+        && let Some(existing_key) = existing_key
+            .as_ref()
+            .filter(|k| k.is_array_key() || k.is_benevolent())
+    {
+        PhpType::generic_array(existing_key.clone(), val_type)
     } else {
         let k_type = join_element_types(key_types, key_type, existing_key.as_ref());
         PhpType::generic_array(k_type, val_type)

@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::backend::file_access::ImportBlock;
@@ -35,7 +35,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         // Only show when the cursor overlaps an unresolved class name —
         // the same position where the single "Import class" action
@@ -90,7 +90,7 @@ impl Backend {
         let mut all_unknown_diags: Vec<Diagnostic> = Vec::new();
         self.collect_unknown_class_diagnostics(uri, content, &mut all_unknown_diags);
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title: "Import all missing classes".to_string(),
             kind: Some(CodeActionKind::new("source.addMissingImports")),
             diagnostics: if all_unknown_diags.is_empty() {
@@ -108,6 +108,7 @@ impl Backend {
                 &params.range,
                 serde_json::json!({}),
             )),
+            tags: None,
         }));
     }
 
@@ -161,7 +162,7 @@ impl Backend {
         data: &super::CodeActionData,
         content: &str,
     ) -> Option<WorkspaceEdit> {
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
 
         let unresolved = self.find_all_unresolved_class_names(&data.uri, content);
 

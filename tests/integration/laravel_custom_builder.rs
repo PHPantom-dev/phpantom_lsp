@@ -1,6 +1,6 @@
 use crate::common::create_psr4_workspace;
 use crate::common::{completion_response, goto_definition_at, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 #[tokio::test]
 async fn test_custom_eloquent_builder_attribute() {
@@ -53,7 +53,7 @@ class User extends Model {}
         "src/Models/UserBuilder.php",
         "src/Models/User.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -62,7 +62,7 @@ class User extends Model {}
         .await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::act";
     open_php(&backend, &uri, content).await;
 
@@ -71,7 +71,7 @@ class User extends Model {}
         .await
         .unwrap();
     let labels: Vec<_> = match items {
-        CompletionResponse::Array(arr) => arr.into_iter().map(|i| i.label).collect(),
+        CompletionResponse::CompletionItemList(arr) => arr.into_iter().map(|i| i.label).collect(),
         _ => panic!("Expected array"),
     };
     assert!(
@@ -81,7 +81,7 @@ class User extends Model {}
     );
 
     // Test query() return type
-    let uri2 = Url::from_file_path(dir.path().join("test2.php")).unwrap();
+    let uri2 = Uri::from_file_path(dir.path().join("test2.php")).unwrap();
     let content2 = "<?php\nuse App\\Models\\User;\nUser::query()->act";
     open_php(&backend, &uri2, content2).await;
 
@@ -89,7 +89,7 @@ class User extends Model {}
         .await
         .unwrap();
     let custom_items = match items {
-        CompletionResponse::Array(arr) => arr,
+        CompletionResponse::CompletionItemList(arr) => arr,
         _ => panic!("Expected array"),
     };
     let labels: Vec<_> = custom_items.iter().map(|i| i.label.clone()).collect();
@@ -125,7 +125,7 @@ class User extends Model {}
     );
 
     // Test orWhereBetween on model (forwarded from base Builder via custom builder)
-    let uri3 = Url::from_file_path(dir.path().join("test3.php")).unwrap();
+    let uri3 = Uri::from_file_path(dir.path().join("test3.php")).unwrap();
     let content3 = "<?php\nuse App\\Models\\User;\nUser::orWhereBet";
     open_php(&backend, &uri3, content3).await;
 
@@ -133,7 +133,7 @@ class User extends Model {}
         .await
         .unwrap();
     let labels: Vec<_> = match items {
-        CompletionResponse::Array(arr) => arr.into_iter().map(|i| i.label).collect(),
+        CompletionResponse::CompletionItemList(arr) => arr.into_iter().map(|i| i.label).collect(),
         _ => panic!("Expected array"),
     };
     assert!(
@@ -177,7 +177,7 @@ class User extends Model {}
         "vendor/illuminate/Model.php",
         "src/Models/User.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -186,7 +186,7 @@ class User extends Model {}
         .await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::query()->whe";
     open_php(&backend, &uri, content).await;
 
@@ -194,7 +194,7 @@ class User extends Model {}
         .await
         .unwrap();
     let items = match items {
-        CompletionResponse::Array(arr) => arr,
+        CompletionResponse::CompletionItemList(arr) => arr,
         _ => panic!("Expected array"),
     };
     let where_item = items
@@ -245,7 +245,7 @@ class User extends Model {}
         "vendor/illuminate/Model.php",
         "src/Models/User.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -254,7 +254,7 @@ class User extends Model {}
         .await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::orWhereBetween('id', [1, 2]);";
     open_php(&backend, &uri, content).await;
 
@@ -262,8 +262,8 @@ class User extends Model {}
     // On 'orWhereBetween'
     let resp = goto_definition_at(&backend, &uri, 2, 10).await;
     let locs = match resp {
-        Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
-        Some(GotoDefinitionResponse::Array(a)) => a,
+        Some(DefinitionResponse::Definition(Definition::Location(l))) => vec![l],
+        Some(DefinitionResponse::Definition(Definition::LocationList(a))) => a,
         None => panic!("Should have found a location for 'orWhereBetween'"),
         _ => panic!("Expected locations"),
     };
@@ -330,7 +330,7 @@ class User extends Model {}
         "src/Models/UserBuilder.php",
         "src/Models/User.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -339,15 +339,15 @@ class User extends Model {}
         .await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::active();";
     open_php(&backend, &uri, content).await;
 
     // On 'active'
     let resp = goto_definition_at(&backend, &uri, 2, 8).await;
     let locs = match resp {
-        Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
-        Some(GotoDefinitionResponse::Array(a)) => a,
+        Some(DefinitionResponse::Definition(Definition::Location(l))) => vec![l],
+        Some(DefinitionResponse::Definition(Definition::LocationList(a))) => a,
         None => panic!("Should have found a location for 'active'"),
         _ => panic!("Expected locations"),
     };
@@ -426,7 +426,7 @@ class Controller {
         "src/Models/Member.php",
         "src/Models/Controller.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -435,12 +435,12 @@ class Controller {
         .await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("src/Models/Controller.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/Controller.php")).unwrap();
     // On 'active' in Member::active();
     let resp = goto_definition_at(&backend, &uri, 4, 18).await;
     let locs = match resp {
-        Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
-        Some(GotoDefinitionResponse::Array(a)) => a,
+        Some(DefinitionResponse::Definition(Definition::Location(l))) => vec![l],
+        Some(DefinitionResponse::Definition(Definition::LocationList(a))) => a,
         None => panic!("Should have found a location for 'active'"),
         _ => panic!("Expected locations"),
     };
@@ -514,7 +514,7 @@ class User extends Model {}
         "src/Models/UserBuilder.php",
         "src/Models/User.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -523,7 +523,7 @@ class User extends Model {}
         .await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::query()->whe";
     open_php(&backend, &uri, content).await;
 
@@ -531,7 +531,7 @@ class User extends Model {}
         .await
         .unwrap();
     let items = match items {
-        CompletionResponse::Array(arr) => arr,
+        CompletionResponse::CompletionItemList(arr) => arr,
         _ => panic!("Expected array"),
     };
     let where_item = items
@@ -547,14 +547,14 @@ class User extends Model {}
         "inherited custom builder override should keep its declaring builder"
     );
 
-    let uri2 = Url::from_file_path(dir.path().join("test2.php")).unwrap();
+    let uri2 = Uri::from_file_path(dir.path().join("test2.php")).unwrap();
     let content2 = "<?php\nuse App\\Models\\User;\nUser::query()->where('id', 1);";
     open_php(&backend, &uri2, content2).await;
 
     let resp = goto_definition_at(&backend, &uri2, 2, 17).await;
     let locs = match resp {
-        Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
-        Some(GotoDefinitionResponse::Array(a)) => a,
+        Some(DefinitionResponse::Definition(Definition::Location(l))) => vec![l],
+        Some(DefinitionResponse::Definition(Definition::LocationList(a))) => a,
         None => panic!("Should have found a location for custom where"),
         _ => panic!("Expected locations"),
     };
@@ -622,7 +622,7 @@ class User extends Model {
         "src/Models/UserBuilder.php",
         "src/Models/User.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -631,7 +631,7 @@ class User extends Model {
         .await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::query()->first()->full";
     open_php(&backend, &uri, content).await;
 
@@ -639,7 +639,7 @@ class User extends Model {
         .await
         .unwrap();
     let labels: Vec<_> = match items {
-        CompletionResponse::Array(arr) => arr.into_iter().map(|i| i.label).collect(),
+        CompletionResponse::CompletionItemList(arr) => arr.into_iter().map(|i| i.label).collect(),
         _ => panic!("Expected array"),
     };
     assert!(
@@ -686,7 +686,7 @@ class User extends Model {}
         "vendor/illuminate/Model.php",
         "src/Models/User.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -695,7 +695,7 @@ class User extends Model {}
         .await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\User;\nUser::query()->whe";
     open_php(&backend, &uri, content).await;
 
@@ -703,7 +703,7 @@ class User extends Model {}
         .await
         .unwrap();
     let labels: Vec<_> = match items {
-        CompletionResponse::Array(arr) => arr.into_iter().map(|i| i.label).collect(),
+        CompletionResponse::CompletionItemList(arr) => arr.into_iter().map(|i| i.label).collect(),
         _ => panic!("Expected array"),
     };
     assert!(
@@ -769,7 +769,7 @@ class Member extends BaseModel {}
         "src/Models/BaseModel.php",
         "src/Models/Member.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -778,15 +778,15 @@ class Member extends BaseModel {}
         .await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\Member;\nMember::active();";
     open_php(&backend, &uri, content).await;
 
     // On 'active'
     let resp = goto_definition_at(&backend, &uri, 2, 8).await;
     let locs = match resp {
-        Some(GotoDefinitionResponse::Scalar(l)) => vec![l],
-        Some(GotoDefinitionResponse::Array(a)) => a,
+        Some(DefinitionResponse::Definition(Definition::Location(l))) => vec![l],
+        Some(DefinitionResponse::Definition(Definition::LocationList(a))) => a,
         None => panic!("Should have found a location for 'active'"),
         _ => panic!("Expected locations"),
     };
@@ -859,7 +859,7 @@ class Member extends BaseModel {}
         "src/Models/BaseModel.php",
         "src/Models/Member.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -868,14 +868,14 @@ class Member extends BaseModel {}
         .await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("test.php")).unwrap();
     let content = "<?php\nuse App\\Models\\Member;\nMember::";
     open_php(&backend, &uri, content).await;
 
     let resp = completion_response(&backend, &uri, 2, 8, None).await;
     let items = match resp {
-        Some(CompletionResponse::List(l)) => l.items,
-        Some(CompletionResponse::Array(a)) => a,
+        Some(CompletionResponse::CompletionList(l)) => l.items,
+        Some(CompletionResponse::CompletionItemList(a)) => a,
         None => Vec::new(),
     };
     let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();

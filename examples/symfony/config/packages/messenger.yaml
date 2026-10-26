@@ -1,0 +1,6 @@
+framework:
+  messenger:
+    default_bus: command.bus
+    buses:
+      command.bus: ~
+      query.bus: ~

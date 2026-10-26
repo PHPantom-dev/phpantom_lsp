@@ -7,12 +7,12 @@ use crate::common::{
     complete_at_opened_with_trigger, completion_response, create_psr4_workspace,
     create_test_backend, labels, open_document, workspace_uri,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 #[tokio::test]
 async fn at_sign_in_html_position_offers_all_known_directives() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     open_document(&backend, &uri, "blade", "<div>@</div>").await;
 
     let items = complete_at_opened_with_trigger(&backend, &uri, 0, 6, "@").await;
@@ -28,7 +28,7 @@ async fn at_sign_in_html_position_offers_all_known_directives() {
 #[tokio::test]
 async fn the_if_completion_inserts_the_documented_snippet() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     open_document(&backend, &uri, "blade", "<div>@</div>").await;
 
     let items = complete_at_opened_with_trigger(&backend, &uri, 0, 6, "@").await;
@@ -41,13 +41,13 @@ async fn the_if_completion_inserts_the_documented_snippet() {
         if_item.insert_text.as_deref(),
         Some("if ($1)\n\t$0\n@endif")
     );
-    assert_eq!(if_item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(if_item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 #[tokio::test]
 async fn a_partial_directive_name_filters_the_list() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     open_document(&backend, &uri, "blade", "<div>@for</div>").await;
 
     // Cursor right after "@for".
@@ -67,7 +67,7 @@ async fn a_partial_directive_name_filters_the_list() {
 #[tokio::test]
 async fn an_unknown_directive_name_still_short_circuits_with_an_empty_list() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     // `zzz` matches no directive, but the position is still an HTML/
     // directive-name position, so the strategy must not fall through to
     // (e.g.) class-name completion.
@@ -84,7 +84,7 @@ async fn an_unknown_directive_name_still_short_circuits_with_an_empty_list() {
 #[tokio::test]
 async fn no_directive_completion_inside_echo_braces() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     open_document(&backend, &uri, "blade", "{{ @ }}").await;
 
     // Cursor right after "@" inside `{{ ... }}`.
@@ -99,7 +99,7 @@ async fn no_directive_completion_inside_echo_braces() {
 #[tokio::test]
 async fn no_directive_completion_inside_a_php_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     open_document(&backend, &uri, "blade", "@php $x = 1; @\n@endphp").await;
 
     // Cursor right after the trailing "@" on the first line, still inside
@@ -115,7 +115,7 @@ async fn no_directive_completion_inside_a_php_block() {
 #[tokio::test]
 async fn directive_completion_still_fires_inside_an_open_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     // The body between `@if` and `@endif` is ordinary template markup, so
     // a nested directive must still complete.
     open_document(&backend, &uri, "blade", "@if ($x)\n    @\n@endif").await;
@@ -134,7 +134,7 @@ async fn directive_completion_still_fires_inside_an_open_block() {
 /// A project with one component of every shape the index answers for: a
 /// class-based one, a nested class-based one, an anonymous template, and a
 /// Livewire class.
-fn component_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+fn component_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(
         BLADE_COMPONENT_COMPOSER,
         &[
@@ -202,7 +202,7 @@ fn component_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::Temp
 /// a component tag is typed one ordinary letter at a time.
 async fn complete_typed(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
 ) -> Vec<CompletionItem> {
@@ -212,14 +212,14 @@ async fn complete_typed(
         line,
         character,
         Some(CompletionContext {
-            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_kind: CompletionTriggerKind::Invoked,
             trigger_character: None,
         }),
     )
     .await
     {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     }
 }
@@ -290,7 +290,7 @@ async fn a_class_backed_component_is_offered_as_the_class_it_names() {
 
     let items = complete_typed(&backend, &uri, 0, 3).await;
     let alert = items.iter().find(|i| i.label == "alert").expect("no alert");
-    assert_eq!(alert.kind, Some(CompletionItemKind::CLASS));
+    assert_eq!(alert.kind, Some(CompletionItemKind::Class));
     assert_eq!(
         alert.detail.as_deref(),
         Some("\\App\\View\\Components\\Alert")
@@ -300,7 +300,7 @@ async fn a_class_backed_component_is_offered_as_the_class_it_names() {
         .iter()
         .find(|i| i.label == "banner")
         .expect("no banner");
-    assert_eq!(banner.kind, Some(CompletionItemKind::MODULE));
+    assert_eq!(banner.kind, Some(CompletionItemKind::Module));
 }
 
 #[tokio::test]
@@ -315,7 +315,7 @@ async fn a_partly_typed_component_name_filters_the_list() {
     // an editor would not treat `for` as part of the same word as the
     // dotted name that replaces it.
     let edit = match items[0].text_edit.as_ref().expect("no text edit") {
-        CompletionTextEdit::Edit(edit) => edit,
+        CompletionItemTextEdit::TextEdit(edit) => edit,
         other => panic!("expected a plain edit, got {other:?}"),
     };
     assert_eq!(edit.new_text, "forms.input");
@@ -358,7 +358,7 @@ async fn a_constructor_parameter_is_offered_as_an_attribute() {
     );
     let bound = items.iter().find(|i| i.label == ":type").expect("no :type");
     let edit = match bound.text_edit.as_ref().expect("no text edit") {
-        CompletionTextEdit::Edit(edit) => edit,
+        CompletionItemTextEdit::TextEdit(edit) => edit,
         other => panic!("expected a plain edit, got {other:?}"),
     };
     assert_eq!(edit.new_text, ":type=\"$1\"");
@@ -524,7 +524,7 @@ async fn an_include_view_name_edit_lands_on_the_directive_not_the_prologue() {
         .find(|i| i.label == "partials.header")
         .unwrap_or_else(|| panic!("expected the partial view name, got: {:?}", labels(&items)));
     let edit = match item.text_edit.as_ref().expect("no text edit") {
-        CompletionTextEdit::Edit(edit) => edit,
+        CompletionItemTextEdit::TextEdit(edit) => edit,
         other => panic!("expected a plain edit, got {other:?}"),
     };
     assert_eq!(
@@ -558,7 +558,7 @@ async fn a_closed_tag_leaves_completion_to_the_rest_of_the_pipeline() {
 async fn a_namespaced_class_completion_imports_with_a_use_directive() {
     let backend = create_test_backend();
     index_models(&backend, &["App\\Models\\Widget"]);
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     let template = "<div>{{ new Widg }}</div>\n";
     open_document(&backend, &uri, "blade", template).await;
 
@@ -618,7 +618,7 @@ async fn a_new_import_sorts_among_the_templates_existing_use_directives() {
             "App\\Models\\Zone",
         ],
     );
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     let template = "@use(\'App\\Models\\Account\')\n@use(\'App\\Models\\Zone\')\n{{ new Widg }}\n";
     open_document(&backend, &uri, "blade", template).await;
 
@@ -658,7 +658,7 @@ async fn a_new_import_sorts_among_the_templates_existing_use_directives() {
 async fn an_import_that_precedes_them_all_follows_a_leading_directive() {
     let backend = create_test_backend();
     index_models(&backend, &["App\\Models\\Account", "App\\Models\\Zone"]);
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     let template = "@use('App\\Models\\Zone')\n{{ new Acco }}\n";
     open_document(&backend, &uri, "blade", template).await;
 
@@ -682,7 +682,7 @@ async fn an_import_that_precedes_them_all_follows_a_leading_directive() {
 /// the template.
 async fn complete_with_import(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     template: &str,
     line: u32,
     character: u32,
@@ -708,7 +708,7 @@ async fn complete_with_import(
 async fn a_first_import_goes_above_the_block_the_first_line_opens() {
     let backend = create_test_backend();
     index_models(&backend, &["App\\Models\\Widget"]);
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     let template = "@if ($user)\n    {{ new Widg }}\n@endif\n";
 
     let imported =
@@ -745,7 +745,7 @@ async fn a_first_import_goes_above_a_component_tag_the_template_opens_with() {
 async fn a_template_opening_with_a_php_block_takes_the_import_inside_it() {
     let backend = create_test_backend();
     index_models(&backend, &["App\\Models\\Widget"]);
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     let template = "@php\n    $widget = new Widg\n@endphp\n";
 
     let imported =

@@ -11,10 +11,10 @@ use crate::common::{
     position_of, property_names,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
-fn document_position(uri: &Url, line: u32, character: u32) -> TextDocumentPositionParams {
+fn document_position(uri: &Uri, line: u32, character: u32) -> TextDocumentPositionParams {
     TextDocumentPositionParams {
         text_document: TextDocumentIdentifier { uri: uri.clone() },
         position: Position { line, character },
@@ -23,7 +23,7 @@ fn document_position(uri: &Url, line: u32, character: u32) -> TextDocumentPositi
 
 /// Send hover, completion, go-to-definition and find-references at one
 /// position, discarding the answers. Returning at all is the assertion.
-async fn every_request(backend: &Backend, uri: &Url, line: u32, character: u32) {
+async fn every_request(backend: &Backend, uri: &Uri, line: u32, character: u32) {
     let _ = backend
         .hover(HoverParams {
             text_document_position_params: document_position(uri, line, character),
@@ -32,14 +32,14 @@ async fn every_request(backend: &Backend, uri: &Url, line: u32, character: u32) 
         .await;
     let _ = backend
         .completion(CompletionParams {
-            text_document_position: document_position(uri, line, character),
+            text_document_position_params: document_position(uri, line, character),
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
             context: None,
         })
         .await;
     let _ = backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: document_position(uri, line, character),
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
@@ -47,7 +47,7 @@ async fn every_request(backend: &Backend, uri: &Url, line: u32, character: u32) 
         .await;
     let _ = backend
         .references(ReferenceParams {
-            text_document_position: document_position(uri, line, character),
+            text_document_position_params: document_position(uri, line, character),
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
@@ -60,7 +60,7 @@ async fn every_request(backend: &Backend, uri: &Url, line: u32, character: u32) 
 /// [`every_request`] at every UTF-16 column of every line of `text` (the
 /// ones that split a surrogate pair included), a couple of columns past the
 /// end of each line, and on lines past the end of the file.
-async fn sweep(backend: &Backend, uri: &Url, text: &str) {
+async fn sweep(backend: &Backend, uri: &Uri, text: &str) {
     let lines: Vec<&str> = text.split('\n').collect();
     for (line, content) in lines.iter().enumerate() {
         let width = content.encode_utf16().count() as u32;
@@ -108,7 +108,7 @@ $🎉->save
 #[tokio::test]
 async fn every_column_of_a_multibyte_php_file_answers_without_panicking() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multibyte.php").unwrap();
+    let uri = Uri::parse("file:///multibyte.php").unwrap();
     open_php(&backend, &uri, MULTIBYTE_PHP).await;
 
     sweep(&backend, &uri, MULTIBYTE_PHP).await;
@@ -117,7 +117,7 @@ async fn every_column_of_a_multibyte_php_file_answers_without_panicking() {
 #[tokio::test]
 async fn every_column_of_a_crlf_php_file_answers_without_panicking() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///crlf_multibyte.php").unwrap();
+    let uri = Uri::parse("file:///crlf_multibyte.php").unwrap();
     let text = MULTIBYTE_PHP.replace('\n', "\r\n");
     open_php(&backend, &uri, &text).await;
 
@@ -142,11 +142,11 @@ async fn every_column_of_a_multibyte_blade_template_answers_without_panicking() 
     let backend = create_test_backend();
     open_php(
         &backend,
-        &Url::parse("file:///Logger.php").unwrap(),
+        &Uri::parse("file:///Logger.php").unwrap(),
         "<?php\nclass Logger { public function info(): void {} public function warn(): void {} }\n",
     )
     .await;
-    let uri = Url::parse("file:///multibyte.blade.php").unwrap();
+    let uri = Uri::parse("file:///multibyte.blade.php").unwrap();
     open_document(&backend, &uri, "blade", MULTIBYTE_BLADE).await;
 
     sweep(&backend, &uri, MULTIBYTE_BLADE).await;
@@ -155,7 +155,7 @@ async fn every_column_of_a_multibyte_blade_template_answers_without_panicking() 
 #[tokio::test]
 async fn every_column_of_a_crlf_blade_template_answers_without_panicking() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///crlf.blade.php").unwrap();
+    let uri = Uri::parse("file:///crlf.blade.php").unwrap();
     let text = MULTIBYTE_BLADE.replace('\n', "\r\n");
     open_document(&backend, &uri, "blade", &text).await;
 
@@ -208,7 +208,7 @@ class Probe {
 #[tokio::test]
 async fn requests_on_an_empty_document_answer_without_panicking() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///empty.php").unwrap();
+    let uri = Uri::parse("file:///empty.php").unwrap();
     open_php(&backend, &uri, "").await;
 
     sweep(&backend, &uri, "").await;
@@ -217,7 +217,7 @@ async fn requests_on_an_empty_document_answer_without_panicking() {
 #[tokio::test]
 async fn requests_on_a_document_of_only_multibyte_text_answer_without_panicking() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///emoji.php").unwrap();
+    let uri = Uri::parse("file:///emoji.php").unwrap();
     let text = "<?php // 🎉🎉🎉\n🎉";
     open_php(&backend, &uri, text).await;
 
@@ -227,7 +227,7 @@ async fn requests_on_a_document_of_only_multibyte_text_answer_without_panicking(
 #[tokio::test]
 async fn the_largest_possible_column_answers_without_panicking() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///huge_column.php").unwrap();
+    let uri = Uri::parse("file:///huge_column.php").unwrap();
     let text = "<?php\n$s = '🎉';\n$s;\n";
     open_php(&backend, &uri, text).await;
 
@@ -249,7 +249,7 @@ $g = new Greeter(); $s = '🎉 café'; $g->wave(); /* é */ $g->wave();
 #[tokio::test]
 async fn hover_after_an_emoji_on_the_same_line_reads_the_member() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///greeter_hover.php").unwrap();
+    let uri = Uri::parse("file:///greeter_hover.php").unwrap();
     open_php(&backend, &uri, GREETER).await;
 
     let at = position_of(GREETER, "wave();");
@@ -262,7 +262,7 @@ async fn hover_after_an_emoji_on_the_same_line_reads_the_member() {
 #[tokio::test]
 async fn definition_after_an_emoji_on_the_same_line_lands_on_the_member() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///greeter_definition.php").unwrap();
+    let uri = Uri::parse("file:///greeter_definition.php").unwrap();
     open_php(&backend, &uri, GREETER).await;
 
     let at = position_of(GREETER, "wave();");
@@ -278,7 +278,7 @@ async fn definition_after_an_emoji_on_the_same_line_lands_on_the_member() {
 #[tokio::test]
 async fn completion_after_multibyte_text_on_the_same_line_offers_members() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///greeter_completion.php").unwrap();
+    let uri = Uri::parse("file:///greeter_completion.php").unwrap();
     let text = "<?php
 class Greeter {
     public function wave(): string { return ''; }
@@ -297,13 +297,13 @@ $g = new Greeter(); $s = '🎉 café'; $g->";
 #[tokio::test]
 async fn reference_ranges_after_multibyte_text_are_utf16_columns() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///greeter_references.php").unwrap();
+    let uri = Uri::parse("file:///greeter_references.php").unwrap();
     open_php(&backend, &uri, GREETER).await;
 
     let at = position_of(GREETER, "wave();");
     let locations = backend
         .references(ReferenceParams {
-            text_document_position: document_position(&uri, at.line, at.character + 1),
+            text_document_position_params: document_position(&uri, at.line, at.character + 1),
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
@@ -330,7 +330,7 @@ async fn reference_ranges_after_multibyte_text_are_utf16_columns() {
 #[tokio::test]
 async fn a_multibyte_variable_name_resolves_its_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multibyte_variable.php").unwrap();
+    let uri = Uri::parse("file:///multibyte_variable.php").unwrap();
     let text = "<?php
 class Greeter {
     public function wave(): string { return ''; }
@@ -355,7 +355,7 @@ $café->";
 #[tokio::test]
 async fn a_multibyte_class_name_resolves_its_static_members() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multibyte_class.php").unwrap();
+    let uri = Uri::parse("file:///multibyte_class.php").unwrap();
     let text = "<?php
 class Modèl {
     public static function where(): static { return new static(); }
@@ -389,7 +389,7 @@ $g->wave(); $g->wave();\r
 #[tokio::test]
 async fn hover_on_a_crlf_line_reads_the_member() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///crlf_hover.php").unwrap();
+    let uri = Uri::parse("file:///crlf_hover.php").unwrap();
     open_php(&backend, &uri, GREETER_CRLF).await;
 
     let hover = hover_text_at(&backend, &uri, 5, 5)
@@ -401,7 +401,7 @@ async fn hover_on_a_crlf_line_reads_the_member() {
 #[tokio::test]
 async fn definition_on_a_crlf_line_lands_on_the_declaring_line() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///crlf_definition.php").unwrap();
+    let uri = Uri::parse("file:///crlf_definition.php").unwrap();
     open_php(&backend, &uri, GREETER_CRLF).await;
 
     let locations = definition_locations(goto_definition_at(&backend, &uri, 5, 5).await);
@@ -415,7 +415,7 @@ async fn definition_on_a_crlf_line_lands_on_the_declaring_line() {
 #[tokio::test]
 async fn completion_on_a_crlf_line_offers_members() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///crlf_completion.php").unwrap();
+    let uri = Uri::parse("file:///crlf_completion.php").unwrap();
     let text = "<?php\r\nclass Greeter {\r\n    public function wave(): string { return ''; }\r\n}\r\n$g = new Greeter();\r\n$g->\r\n";
 
     let items = complete_at(&backend, &uri, text, 5, 4).await;
@@ -429,12 +429,12 @@ async fn completion_on_a_crlf_line_offers_members() {
 #[tokio::test]
 async fn reference_ranges_on_crlf_lines_are_not_shifted_by_the_carriage_return() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///crlf_references.php").unwrap();
+    let uri = Uri::parse("file:///crlf_references.php").unwrap();
     open_php(&backend, &uri, GREETER_CRLF).await;
 
     let locations = backend
         .references(ReferenceParams {
-            text_document_position: document_position(&uri, 5, 5),
+            text_document_position_params: document_position(&uri, 5, 5),
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
             context: ReferenceContext {
@@ -464,11 +464,11 @@ async fn a_member_in_a_crlf_blade_template_leads_to_its_declaration() {
     let backend = create_test_backend();
     open_php(
         &backend,
-        &Url::parse("file:///Logger.php").unwrap(),
+        &Uri::parse("file:///Logger.php").unwrap(),
         "<?php\nclass Logger {\n    public function info(): void {}\n}\n",
     )
     .await;
-    let uri = Url::parse("file:///crlf_view.blade.php").unwrap();
+    let uri = Uri::parse("file:///crlf_view.blade.php").unwrap();
     let text = "@php\r\n/** @var \\Logger $logger */\r\n@endphp\r\n<p>🎉</p>\r\n<p>{{ $logger->info() }}</p>\r\n";
     open_document(&backend, &uri, "blade", text).await;
 
@@ -489,7 +489,7 @@ async fn a_member_in_a_crlf_blade_template_leads_to_its_declaration() {
 #[tokio::test]
 async fn hover_on_a_property_joins_a_multi_line_summary() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///summary.php").unwrap();
+    let uri = Uri::parse("file:///summary.php").unwrap();
     let text = "<?php
 class Account {
     /**
@@ -516,7 +516,7 @@ class Account {
 #[tokio::test]
 async fn hover_on_a_property_does_not_borrow_an_earlier_propertys_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///borrowed_doc.php").unwrap();
+    let uri = Uri::parse("file:///borrowed_doc.php").unwrap();
     let text = "<?php
 class Account {
     /**
@@ -544,7 +544,7 @@ class Account {
 #[tokio::test]
 async fn definition_does_not_match_a_property_by_name_prefix() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///prefix.php").unwrap();
+    let uri = Uri::parse("file:///prefix.php").unwrap();
     let text = "<?php
 class Account {
     public $name_with_extra;
@@ -565,7 +565,7 @@ function probe(Account $a): void { echo $a->name; }
 #[tokio::test]
 async fn hover_on_a_class_ignores_the_class_keyword_inside_a_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///string_class.php").unwrap();
+    let uri = Uri::parse("file:///string_class.php").unwrap();
     let text = "<?php
 class Bar {}
 $x = 'class FakeClass';
@@ -589,7 +589,7 @@ new Real();
 #[tokio::test]
 async fn a_property_declared_twice_is_offered_once() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///twin.php").unwrap();
+    let uri = Uri::parse("file:///twin.php").unwrap();
     let text = "<?php
 class Twin {
     public string $foo = '';
@@ -618,15 +618,15 @@ const FORM_VIEW: &str = "@php
 <p>{{ $ }}</p>
 ";
 
-async fn form_view() -> (Backend, Url) {
+async fn form_view() -> (Backend, Uri) {
     let backend = create_test_backend();
     open_php(
         &backend,
-        &Url::parse("file:///Form.php").unwrap(),
+        &Uri::parse("file:///Form.php").unwrap(),
         "<?php\nclass Form {\n    public string $name = '';\n}\n",
     )
     .await;
-    let uri = Url::parse("file:///form.blade.php").unwrap();
+    let uri = Uri::parse("file:///form.blade.php").unwrap();
     open_document(&backend, &uri, "blade", FORM_VIEW).await;
     (backend, uri)
 }

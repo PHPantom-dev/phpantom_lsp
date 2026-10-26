@@ -1,5 +1,8 @@
 use super::*;
 
+use super::enum_cases::{narrow_to_enum_cases, subtract_enum_cases};
+use crate::class_lookup::Fqn;
+
 /// Apply `array_key_exists('k', $arr)` narrowing to an array shape's
 /// optional key.
 ///
@@ -124,7 +127,17 @@ pub(crate) fn apply_in_array_narrowing<'b>(
             let mut results = scope.get(var_name).to_vec();
 
             if should_exclude {
-                let held = values_held_by(&haystack);
+                let (cases, held): (Vec<PhpType>, Vec<PhpType>) = values_held_by(&haystack)
+                    .into_iter()
+                    .partition(|value| value.as_enum_case().is_some());
+                // An enum case is ruled out the way `!==` rules it out, which
+                // also breaks a whole-enum needle into the cases left.
+                if !cases.is_empty()
+                    && let Some(cases) = enum_case_values(&cases, ctx)
+                {
+                    subtract_enum_cases(var_name, &cases, scope, ctx);
+                    results = scope.get(var_name).to_vec();
+                }
                 if held.is_empty() {
                     continue;
                 }
@@ -148,6 +161,12 @@ pub(crate) fn apply_in_array_narrowing<'b>(
                 let Some(element_type) = haystack.iterable_element_type() else {
                     continue;
                 };
+                // A haystack of enum cases narrows the needle to those cases,
+                // the way `===` against each of them would.
+                if let Some(cases) = enum_case_values(element_type.union_members(), ctx) {
+                    narrow_to_enum_cases(var_name, cases, scope, ctx);
+                    continue;
+                }
                 // An element that could be anything could be an object of
                 // any class, so it proves nothing about the class layer
                 // either: `narrow_value_by_element` draws the same line for
@@ -233,6 +252,22 @@ pub(crate) fn apply_in_array_narrowing<'b>(
             }
         }
     }
+}
+
+/// Each of `values` as an enum case with its enum's class, or `None` when
+/// one of them is not a case of an enum that loads.
+fn enum_case_values<'t>(
+    values: impl IntoIterator<Item = &'t PhpType>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    values
+        .into_iter()
+        .map(|member| {
+            let (enum_name, _) = member.as_enum_case()?;
+            let enum_class = (ctx.file.class_loader)(Fqn::new(enum_name))?;
+            Some(ResolvedType::from_both_arc(member.clone(), enum_class))
+        })
+        .collect()
 }
 
 /// The needle's type once a strict `in_array` has proved it equals one of

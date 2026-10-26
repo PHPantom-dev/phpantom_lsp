@@ -1,10 +1,11 @@
 #[cfg(test)]
 mod tests {
     use crate::common::collect_diagnostics_with;
+    use crate::common::message_text;
     use std::collections::HashMap;
 
     use phpantom_lsp::Backend;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     /// Helper: create a test backend, open a file, and collect
     /// unknown-function diagnostics.
@@ -43,11 +44,13 @@ function test(): void {
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("doesntExist")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("doesntExist")),
             "Expected unknown function diagnostic for doesntExist(), got: {:?}",
             diags,
         );
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -59,7 +62,9 @@ function test(): void {
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("alsoFake")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("alsoFake")),
             "Expected unknown function diagnostic for alsoFake(), got: {:?}",
             diags,
         );
@@ -74,7 +79,9 @@ function test(): void {
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("noSuchFn")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("noSuchFn")),
             "Expected unknown function diagnostic for noSuchFn(), got: {:?}",
             diags,
         );
@@ -180,7 +187,7 @@ function test(): void {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("unknown_function".to_string())),
+            Some(Code::String("unknown_function".to_string())),
         );
         assert_eq!(diags[0].source, Some("phpantom".to_string()));
     }
@@ -217,7 +224,9 @@ function test(): void {
         // will be flagged — filter it out.
         let diags = collect(php);
         assert!(
-            !diags.iter().any(|d| d.message.contains("myFunc")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("myFunc")),
             "No diagnostic expected for function name on use-statement line, got: {:?}",
             diags,
         );
@@ -438,7 +447,9 @@ function test(): void {
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("maybe")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("maybe")),
             "Expected unknown function diagnostic for maybe() without early exit guard, got: {:?}",
             diags,
         );
@@ -605,7 +616,9 @@ final class QodanaCheckerTest
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("covers")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("covers")),
             "@covers names a global function, not a method of the test class, got: {:?}",
             diags,
         );
@@ -636,7 +649,7 @@ function run(): void {
         backend.update_ast("file:///test.php", php);
         let mut diags = Vec::new();
         backend.collect_unknown_function_diagnostics("file:///test.php", php, &mut diags);
-        let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+        let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
         assert_eq!(messages, vec!["Function 'missingFn' not found"]);
     }
 
@@ -690,7 +703,9 @@ Lib\helper();
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("helper")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("helper")),
             "`Lib\\helper()` resolves to `App\\Lib\\helper`, which is undeclared, got: {:?}",
             diags,
         );
@@ -712,11 +727,15 @@ function test(bool $flag): void {
 "#;
         let diags = collect(php);
         assert!(
-            diags.iter().any(|d| d.message.contains("maybe")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("maybe")),
             "the string is not a guard, got: {diags:?}",
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("later")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("later")),
             "the `elseif` check guards its branch, got: {diags:?}",
         );
     }

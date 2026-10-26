@@ -351,7 +351,7 @@ fn confirmed_alias_spans_preserve_literal_ranges_and_reference_semantics() {
     assert_eq!(sites.len(), 1);
     let span = sites[0].to_span();
     assert_eq!(&content[span.start as usize..span.end as usize], "póst");
-    let super::super::SymbolKind::LaravelStringKey {
+    let super::super::SymbolKind::StringKey {
         key,
         kind,
         is_write,
@@ -361,7 +361,7 @@ fn confirmed_alias_spans_preserve_literal_ranges_and_reference_semantics() {
         panic!("expected a Laravel alias reference");
     };
     assert_eq!(key, "póst");
-    assert_eq!(kind, super::super::LaravelStringKind::MorphAlias);
+    assert_eq!(kind, super::super::StringKeyKind::MorphAlias);
     assert!(!is_write);
     assert!(!is_optional);
 }

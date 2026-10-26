@@ -117,9 +117,12 @@ fn classifies_env_with_class_default() {
     let value = tree.value_at(&["model"]).unwrap();
     assert_eq!(
         value,
-        &ConfigValue::EnvDefault(Box::new(ConfigValue::ClassString(
-            "App\\Models\\User".to_string()
-        )))
+        &ConfigValue::Env {
+            name: Some("AUTH_MODEL".to_string()),
+            default: Some(Box::new(ConfigValue::ClassString(
+                "App\\Models\\User".to_string()
+            ))),
+        }
     );
     // Anchors on the default, but records the possible override.
     let (classes, dynamic) = value.as_classes();
@@ -130,7 +133,13 @@ fn classifies_env_with_class_default() {
 #[test]
 fn bare_env_is_dynamic() {
     let tree = parse_config_tree("<?php return ['model' => env('AUTH_MODEL')];").unwrap();
-    assert_eq!(tree.value_at(&["model"]), Some(&ConfigValue::Dynamic));
+    assert_eq!(
+        tree.value_at(&["model"]),
+        Some(&ConfigValue::Env {
+            name: Some("AUTH_MODEL".to_string()),
+            default: None,
+        })
+    );
     let (classes, dynamic) = tree.value_at(&["model"]).unwrap().as_classes();
     assert!(classes.is_empty());
     assert!(dynamic);
@@ -159,7 +168,10 @@ fn short_ternary_uses_condition_as_then() {
 
 #[test]
 fn as_strings_flattens_and_flags_env_override() {
-    let value = ConfigValue::EnvDefault(Box::new(ConfigValue::Str("web".to_string())));
+    let value = ConfigValue::Env {
+        name: Some("AUTH_GUARD".to_string()),
+        default: Some(Box::new(ConfigValue::Str("web".to_string()))),
+    };
     let (strings, dynamic) = value.as_strings();
     assert_eq!(strings, vec!["web".to_string()]);
     assert!(dynamic);

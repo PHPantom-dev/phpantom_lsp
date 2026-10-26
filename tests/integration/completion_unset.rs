@@ -1,7 +1,7 @@
 use crate::common::{
     complete_at, completion_response, create_psr4_workspace, create_test_backend, open_php,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Type resolution: $var-> after unset($var) should not resolve
@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::*;
 async fn test_unset_clears_variable_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_basic.php").unwrap();
+    let uri = Uri::parse("file:///unset_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -35,7 +35,7 @@ async fn test_unset_clears_variable_type() {
     let result = completion_response(&backend, &uri, 9, 12, None).await;
     // After unset, the variable should have no resolved type, so either
     // no results or only generic fallback (no Foo methods).
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -51,7 +51,7 @@ async fn test_unset_clears_variable_type() {
 async fn test_unset_then_reassign_resolves_new_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_reassign.php").unwrap();
+    let uri = Uri::parse("file:///unset_reassign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -78,7 +78,7 @@ async fn test_unset_then_reassign_resolves_new_type() {
     assert!(result.is_some(), "Should return results after reassignment");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("barMethod")),
@@ -91,7 +91,7 @@ async fn test_unset_then_reassign_resolves_new_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -100,7 +100,7 @@ async fn test_unset_then_reassign_resolves_new_type() {
 async fn test_unset_multiple_variables() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_multi.php").unwrap();
+    let uri = Uri::parse("file:///unset_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -124,7 +124,7 @@ async fn test_unset_multiple_variables() {
 
     // Cursor after `$x->` on line 13
     let result = completion_response(&backend, &uri, 13, 12, None).await;
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -139,7 +139,7 @@ async fn test_unset_multiple_variables() {
 async fn test_unset_different_variable_no_effect() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_different.php").unwrap();
+    let uri = Uri::parse("file:///unset_different.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -169,7 +169,7 @@ async fn test_unset_different_variable_no_effect() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -177,7 +177,7 @@ async fn test_unset_different_variable_no_effect() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -187,7 +187,7 @@ async fn test_unset_different_variable_no_effect() {
 async fn test_unset_inside_conditional_does_not_clear() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_conditional.php").unwrap();
+    let uri = Uri::parse("file:///unset_conditional.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -215,7 +215,7 @@ async fn test_unset_inside_conditional_does_not_clear() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -223,7 +223,7 @@ async fn test_unset_inside_conditional_does_not_clear() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -232,7 +232,7 @@ async fn test_unset_inside_conditional_does_not_clear() {
 async fn test_unset_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///unset_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -248,7 +248,7 @@ async fn test_unset_top_level() {
 
     // Cursor after `$x->` on line 7
     let result = completion_response(&backend, &uri, 7, 4, None).await;
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -286,12 +286,12 @@ async fn test_unset_cross_file() {
         &[("src/Foo.php", foo_php), ("src/Main.php", main_php)],
     );
 
-    let uri = Url::from_file_path(_dir.path().join("src/Main.php")).unwrap();
+    let uri = Uri::from_file_path(_dir.path().join("src/Main.php")).unwrap();
     open_php(&backend, &uri, main_php).await;
 
     // Cursor after `$x->` on line 6
     let result = completion_response(&backend, &uri, 6, 12, None).await;
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -306,7 +306,7 @@ async fn test_unset_cross_file() {
 async fn test_unset_does_not_affect_this() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_this.php").unwrap();
+    let uri = Uri::parse("file:///unset_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -329,7 +329,7 @@ async fn test_unset_does_not_affect_this() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -337,7 +337,7 @@ async fn test_unset_does_not_affect_this() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -350,7 +350,7 @@ async fn test_unset_does_not_affect_this() {
 async fn test_unset_removes_variable_from_name_suggestions() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_varname.php").unwrap();
+    let uri = Uri::parse("file:///unset_varname.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -383,7 +383,7 @@ async fn test_unset_removes_variable_from_name_suggestions() {
 async fn test_unset_removes_multiple_variables_from_name_suggestions() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_varname_multi.php").unwrap();
+    let uri = Uri::parse("file:///unset_varname_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -422,7 +422,7 @@ async fn test_unset_removes_multiple_variables_from_name_suggestions() {
 async fn test_unset_then_reassign_variable_reappears() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_varname_reassign.php").unwrap();
+    let uri = Uri::parse("file:///unset_varname_reassign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -450,7 +450,7 @@ async fn test_unset_then_reassign_variable_reappears() {
 async fn test_unset_removes_variable_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_varname_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///unset_varname_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$user = 'test';\n",
@@ -481,7 +481,7 @@ async fn test_unset_removes_variable_top_level() {
 async fn test_unset_array_element_does_not_remove_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_array_elem.php").unwrap();
+    let uri = Uri::parse("file:///unset_array_elem.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -508,7 +508,7 @@ async fn test_unset_array_element_does_not_remove_variable() {
 async fn test_unset_inside_function() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_function.php").unwrap();
+    let uri = Uri::parse("file:///unset_function.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -526,7 +526,7 @@ async fn test_unset_inside_function() {
 
     // Cursor after `$x->` on line 8
     let result = completion_response(&backend, &uri, 8, 8, None).await;
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -541,7 +541,7 @@ async fn test_unset_inside_function() {
 async fn test_completion_before_unset_still_works() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///before_unset.php").unwrap();
+    let uri = Uri::parse("file:///before_unset.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -567,7 +567,7 @@ async fn test_completion_before_unset_still_works() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -575,7 +575,7 @@ async fn test_completion_before_unset_still_works() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -585,7 +585,7 @@ async fn test_completion_before_unset_still_works() {
 async fn test_unset_non_variable_expression_no_crash() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_non_var.php").unwrap();
+    let uri = Uri::parse("file:///unset_non_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -612,7 +612,7 @@ async fn test_unset_non_variable_expression_no_crash() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("fooMethod")),
@@ -620,7 +620,7 @@ async fn test_unset_non_variable_expression_no_crash() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -632,7 +632,7 @@ async fn test_unset_non_variable_expression_no_crash() {
 async fn test_unset_does_not_leak_to_top_level_same_name_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unset_toplevel_leak.php").unwrap();
+    let uri = Uri::parse("file:///unset_toplevel_leak.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -658,7 +658,7 @@ async fn test_unset_does_not_leak_to_top_level_same_name_variable() {
 
     // Cursor after `$x->` on line 15
     let result = completion_response(&backend, &uri, 15, 12, None).await;
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(
             !labels.iter().any(|l| l.starts_with("fooMethod")),

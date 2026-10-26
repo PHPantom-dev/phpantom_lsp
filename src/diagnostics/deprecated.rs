@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
@@ -361,10 +361,10 @@ fn deprecated_diagnostic(
 
     make_tagged_diagnostic(
         range,
-        DiagnosticSeverity::HINT,
+        DiagnosticSeverity::Hint,
         "deprecated_usage",
         message,
-        Some(DiagnosticTag::DEPRECATED),
+        Some(DiagnosticTag::Deprecated),
     )
 }
 
@@ -476,7 +476,7 @@ fn resolve_variable_subject(
     rctx: &ResolutionCtx<'_>,
 ) -> Option<Arc<ClassInfo>> {
     match resolve_subject_outcome(subject_text.trim(), access_kind, rctx) {
-        SubjectOutcome::Resolved(classes) => classes.into_iter().next(),
+        SubjectOutcome::Resolved { classes, .. } => classes.into_iter().next(),
         _ => None,
     }
 }

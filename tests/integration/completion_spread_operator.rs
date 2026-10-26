@@ -2,7 +2,7 @@ use crate::common::{
     complete_at_opened, create_psr4_workspace, create_test_backend, method_names, open_php,
     property_names,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Basic Spread: single spread variable ───────────────────────────────────
 
@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::*;
 async fn test_spread_single_list_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_single.php").unwrap();
+    let uri = Uri::parse("file:///spread_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -53,7 +53,7 @@ async fn test_spread_single_list_variable() {
 async fn test_spread_multiple_variables_union() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_union.php").unwrap();
+    let uri = Uri::parse("file:///spread_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -101,7 +101,7 @@ async fn test_spread_multiple_variables_union() {
 async fn test_spread_array_generic_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_array_generic.php").unwrap();
+    let uri = Uri::parse("file:///spread_array_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -143,7 +143,7 @@ async fn test_spread_array_generic_annotation() {
 async fn test_spread_type_array_shorthand() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_shorthand.php").unwrap();
+    let uri = Uri::parse("file:///spread_shorthand.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -180,7 +180,7 @@ async fn test_spread_type_array_shorthand() {
 async fn test_spread_with_keyed_entries() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_keyed.php").unwrap();
+    let uri = Uri::parse("file:///spread_keyed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -217,7 +217,7 @@ async fn test_spread_with_keyed_entries() {
 async fn test_spread_inside_class_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_method.php").unwrap();
+    let uri = Uri::parse("file:///spread_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -271,7 +271,7 @@ async fn test_spread_inside_class_method() {
 async fn test_spread_with_foreach_annotated() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_foreach.php").unwrap();
+    let uri = Uri::parse("file:///spread_foreach.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -320,7 +320,7 @@ async fn test_spread_with_foreach_annotated() {
 async fn test_spread_combined_with_push() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_push.php").unwrap();
+    let uri = Uri::parse("file:///spread_push.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -366,7 +366,7 @@ async fn test_spread_combined_with_push() {
 async fn test_spread_array_function_syntax() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_array_syntax.php").unwrap();
+    let uri = Uri::parse("file:///spread_array_syntax.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -452,7 +452,7 @@ async fn test_spread_cross_file_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///service.php").unwrap();
+    let uri = Uri::parse("file:///service.php").unwrap();
     open_php(&backend, &uri, service_php).await;
 
     let items = complete_at_opened(&backend, &uri, 11, 18).await;
@@ -481,7 +481,7 @@ async fn test_spread_cross_file_psr4() {
 async fn test_spread_param_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_param.php").unwrap();
+    let uri = Uri::parse("file:///spread_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -522,7 +522,7 @@ async fn test_spread_param_annotation() {
 async fn test_spread_empty_array() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_empty.php").unwrap();
+    let uri = Uri::parse("file:///spread_empty.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -547,7 +547,7 @@ async fn test_spread_empty_array() {
 async fn test_spread_deduplicates_same_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_dedup.php").unwrap();
+    let uri = Uri::parse("file:///spread_dedup.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -592,7 +592,7 @@ async fn test_spread_deduplicates_same_type() {
 async fn test_spread_three_variables() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_three.php").unwrap();
+    let uri = Uri::parse("file:///spread_three.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -648,7 +648,7 @@ async fn test_spread_three_variables() {
 async fn test_spread_source_from_push_assignments() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///spread_from_push.php").unwrap();
+    let uri = Uri::parse("file:///spread_from_push.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",

@@ -1,5 +1,5 @@
 use crate::common::{completion_response, create_test_backend, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Variable assigned inside switch cases should resolve its type
 /// from all branches (union of types across cases).
@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::*;
 async fn test_completion_switch_basic_new_instantiation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_basic.php").unwrap();
+    let uri = Uri::parse("file:///switch_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -41,7 +41,7 @@ async fn test_completion_switch_basic_new_instantiation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("bark")),
@@ -54,7 +54,7 @@ async fn test_completion_switch_basic_new_instantiation() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -64,7 +64,7 @@ async fn test_completion_switch_basic_new_instantiation() {
 async fn test_completion_switch_with_default_case() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_default.php").unwrap();
+    let uri = Uri::parse("file:///switch_default.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Success {\n",
@@ -97,7 +97,7 @@ async fn test_completion_switch_with_default_case() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getMessage")),
@@ -110,7 +110,7 @@ async fn test_completion_switch_with_default_case() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -120,7 +120,7 @@ async fn test_completion_switch_with_default_case() {
 async fn test_completion_switch_single_case_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_single.php").unwrap();
+    let uri = Uri::parse("file:///switch_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Renderer {\n",
@@ -147,7 +147,7 @@ async fn test_completion_switch_single_case_assignment() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("render")),
@@ -160,7 +160,7 @@ async fn test_completion_switch_single_case_assignment() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -170,7 +170,7 @@ async fn test_completion_switch_single_case_assignment() {
 async fn test_completion_switch_cursor_inside_case() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_inside.php").unwrap();
+    let uri = Uri::parse("file:///switch_inside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -198,7 +198,7 @@ async fn test_completion_switch_cursor_inside_case() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("log")),
@@ -211,7 +211,7 @@ async fn test_completion_switch_cursor_inside_case() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -220,7 +220,7 @@ async fn test_completion_switch_cursor_inside_case() {
 async fn test_completion_switch_in_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_method.php").unwrap();
+    let uri = Uri::parse("file:///switch_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class FileReader {\n",
@@ -256,7 +256,7 @@ async fn test_completion_switch_in_method() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("read")),
@@ -269,7 +269,7 @@ async fn test_completion_switch_in_method() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -280,7 +280,7 @@ async fn test_completion_switch_in_method() {
 async fn test_completion_switch_overrides_earlier_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_override.php").unwrap();
+    let uri = Uri::parse("file:///switch_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Alpha {\n",
@@ -319,7 +319,7 @@ async fn test_completion_switch_overrides_earlier_assignment() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Original Alpha assignment is still reachable (switch might not match)
             assert!(
@@ -338,7 +338,7 @@ async fn test_completion_switch_overrides_earlier_assignment() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -348,7 +348,7 @@ async fn test_completion_switch_overrides_earlier_assignment() {
 async fn test_completion_switch_colon_delimited() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_colon.php").unwrap();
+    let uri = Uri::parse("file:///switch_colon.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pdf {\n",
@@ -382,7 +382,7 @@ async fn test_completion_switch_colon_delimited() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("generate")),
@@ -395,7 +395,7 @@ async fn test_completion_switch_colon_delimited() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -404,7 +404,7 @@ async fn test_completion_switch_colon_delimited() {
 async fn test_completion_switch_three_cases_plus_default() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_three.php").unwrap();
+    let uri = Uri::parse("file:///switch_three.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Circle {\n",
@@ -452,7 +452,7 @@ async fn test_completion_switch_three_cases_plus_default() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("radius")),
@@ -475,7 +475,7 @@ async fn test_completion_switch_three_cases_plus_default() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -484,7 +484,7 @@ async fn test_completion_switch_three_cases_plus_default() {
 async fn test_completion_switch_method_call_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_method_return.php").unwrap();
+    let uri = Uri::parse("file:///switch_method_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Connection {\n",
@@ -516,7 +516,7 @@ async fn test_completion_switch_method_call_return_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("execute")),
@@ -529,7 +529,7 @@ async fn test_completion_switch_method_call_return_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -538,7 +538,7 @@ async fn test_completion_switch_method_call_return_type() {
 async fn test_completion_switch_nested_in_if() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_nested.php").unwrap();
+    let uri = Uri::parse("file:///switch_nested.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Mailer {\n",
@@ -574,7 +574,7 @@ async fn test_completion_switch_nested_in_if() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("send")),
@@ -587,6 +587,6 @@ async fn test_completion_switch_nested_in_if() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }

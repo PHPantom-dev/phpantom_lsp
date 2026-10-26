@@ -1,5 +1,5 @@
 use crate::common::{completion_response, create_test_backend, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Match expression with `new` instantiations: each arm contributes a
 /// possible type, so the variable should show completions from all arms.
@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::*;
 async fn test_completion_match_expression_multiple_new_instantiations() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_new.php").unwrap();
+    let uri = Uri::parse("file:///match_new.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ElasticProductReviewIndexService {\n",
@@ -42,7 +42,7 @@ async fn test_completion_match_expression_multiple_new_instantiations() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // `index` is on both classes
             assert!(
@@ -63,7 +63,7 @@ async fn test_completion_match_expression_multiple_new_instantiations() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -73,7 +73,7 @@ async fn test_completion_match_expression_multiple_new_instantiations() {
 async fn test_completion_match_expression_static_method_calls() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_static.php").unwrap();
+    let uri = Uri::parse("file:///match_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -111,7 +111,7 @@ async fn test_completion_match_expression_static_method_calls() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Both are Logger subclasses, so `log` should appear
             assert!(
@@ -130,7 +130,7 @@ async fn test_completion_match_expression_static_method_calls() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -140,7 +140,7 @@ async fn test_completion_match_expression_static_method_calls() {
 async fn test_completion_match_expression_single_arm() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_single.php").unwrap();
+    let uri = Uri::parse("file:///match_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Processor {\n",
@@ -169,7 +169,7 @@ async fn test_completion_match_expression_single_arm() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("process")),
@@ -182,7 +182,7 @@ async fn test_completion_match_expression_single_arm() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -192,7 +192,7 @@ async fn test_completion_match_expression_single_arm() {
 async fn test_completion_match_expression_this_method_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_method.php").unwrap();
+    let uri = Uri::parse("file:///match_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class CacheDriver {\n",
@@ -231,7 +231,7 @@ async fn test_completion_match_expression_this_method_call() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // CacheDriver methods
             assert!(
@@ -256,7 +256,7 @@ async fn test_completion_match_expression_this_method_call() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -266,7 +266,7 @@ async fn test_completion_match_expression_this_method_call() {
 async fn test_completion_match_expression_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_top_level.php").unwrap();
+    let uri = Uri::parse("file:///match_top_level.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Alpha {\n",
@@ -294,7 +294,7 @@ async fn test_completion_match_expression_top_level() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("alphaMethod")),
@@ -307,7 +307,7 @@ async fn test_completion_match_expression_top_level() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -317,7 +317,7 @@ async fn test_completion_match_expression_top_level() {
 async fn test_completion_match_expression_property_access() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_prop.php").unwrap();
+    let uri = Uri::parse("file:///match_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Connection {\n",
@@ -354,7 +354,7 @@ async fn test_completion_match_expression_property_access() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("query")),
@@ -367,7 +367,7 @@ async fn test_completion_match_expression_property_access() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -432,7 +432,7 @@ async fn test_completion_match_expression_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///src/Handler.php").unwrap();
+    let uri = Uri::parse("file:///src/Handler.php").unwrap();
     open_php(&backend, &uri, handler_php).await;
 
     // Cursor after `$svc->` on line 12
@@ -443,7 +443,7 @@ async fn test_completion_match_expression_cross_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("search")),
@@ -466,7 +466,7 @@ async fn test_completion_match_expression_cross_file() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -476,7 +476,7 @@ async fn test_completion_match_expression_cross_file() {
 async fn test_completion_match_expression_overridden_by_reassignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_override.php").unwrap();
+    let uri = Uri::parse("file:///match_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -513,7 +513,7 @@ async fn test_completion_match_expression_overridden_by_reassignment() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // The unconditional reassignment `$obj = new Baz()` should
             // override the match expression types.
@@ -533,7 +533,7 @@ async fn test_completion_match_expression_overridden_by_reassignment() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -542,7 +542,7 @@ async fn test_completion_match_expression_overridden_by_reassignment() {
 async fn test_completion_match_expression_three_arms() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_three.php").unwrap();
+    let uri = Uri::parse("file:///match_three.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Redis {\n",
@@ -579,7 +579,7 @@ async fn test_completion_match_expression_three_arms() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("redisGet")),
@@ -597,7 +597,7 @@ async fn test_completion_match_expression_three_arms() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -607,7 +607,7 @@ async fn test_completion_match_expression_three_arms() {
 async fn test_completion_match_expression_method_call_on_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_method_var.php").unwrap();
+    let uri = Uri::parse("file:///match_method_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Printer {\n",
@@ -647,7 +647,7 @@ async fn test_completion_match_expression_method_call_on_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("print")),
@@ -660,7 +660,7 @@ async fn test_completion_match_expression_method_call_on_variable() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -670,7 +670,7 @@ async fn test_completion_match_expression_method_call_on_variable() {
 async fn test_completion_match_expression_inside_if_block() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_in_if.php").unwrap();
+    let uri = Uri::parse("file:///match_in_if.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class DefaultService {\n",
@@ -709,7 +709,7 @@ async fn test_completion_match_expression_inside_if_block() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // DefaultService from before the if, plus SpecialA and SpecialB
             // from the conditional match arms
@@ -729,7 +729,7 @@ async fn test_completion_match_expression_inside_if_block() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -740,7 +740,7 @@ async fn test_completion_match_expression_inside_if_block() {
 async fn test_completion_match_expression_detail_shows_merged_classes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_detail_merge.php").unwrap();
+    let uri = Uri::parse("file:///match_detail_merge.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ElasticProductReviewIndexService {\n",
@@ -774,7 +774,7 @@ async fn test_completion_match_expression_detail_shows_merged_classes() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             // `index` is on both classes — intersection member should
             // show both class names in label_details.
             let index_item = items
@@ -828,6 +828,6 @@ async fn test_completion_match_expression_detail_shows_merged_classes() {
                 bulk_desc
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }

@@ -8,17 +8,17 @@ use crate::common::{
     assert_location, create_psr4_workspace, create_test_backend, goto_definition_at, line_char_of,
     open_php,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Go to definition on the first occurrence of `needle` in `source`,
 /// `offset` characters into it.
 async fn definition_of(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     source: &str,
     needle: &str,
     offset: u32,
-) -> Option<GotoDefinitionResponse> {
+) -> Option<DefinitionResponse> {
     let (line, character) = line_char_of(source, needle);
     goto_definition_at(backend, uri, line, character + offset).await
 }
@@ -26,7 +26,7 @@ async fn definition_of(
 #[tokio::test]
 async fn data_provider_attribute_jumps_to_provider() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///PlaceholdersTest.php").unwrap();
+    let uri = Uri::parse("file:///PlaceholdersTest.php").unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -52,7 +52,7 @@ final class PlaceholdersTest
 #[tokio::test]
 async fn fully_qualified_data_provider_attribute_jumps_to_provider() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///FqnTest.php").unwrap();
+    let uri = Uri::parse("file:///FqnTest.php").unwrap();
     let source = r#"<?php
 final class FqnTest
 {
@@ -72,7 +72,7 @@ final class FqnTest
 #[tokio::test]
 async fn unrelated_data_provider_attribute_is_left_alone() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///OwnAttributeTest.php").unwrap();
+    let uri = Uri::parse("file:///OwnAttributeTest.php").unwrap();
     let source = r#"<?php
 use App\Attributes\DataProvider;
 
@@ -108,8 +108,8 @@ abstract class TestCase
 }
 "#;
     let (backend, dir) = create_psr4_workspace(composer, &[("tests/TestCase.php", base)]);
-    let base_uri = Url::from_file_path(dir.path().join("tests/TestCase.php")).unwrap();
-    let uri = Url::from_file_path(dir.path().join("tests/ChildTest.php")).unwrap();
+    let base_uri = Uri::from_file_path(dir.path().join("tests/TestCase.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("tests/ChildTest.php")).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -143,8 +143,8 @@ final class Amounts
 "#;
     let (backend, dir) =
         create_psr4_workspace(composer, &[("tests/Providers/Amounts.php", provider)]);
-    let provider_uri = Url::from_file_path(dir.path().join("tests/Providers/Amounts.php")).unwrap();
-    let uri = Url::from_file_path(dir.path().join("tests/AmountTest.php")).unwrap();
+    let provider_uri = Uri::from_file_path(dir.path().join("tests/Providers/Amounts.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("tests/AmountTest.php")).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -181,7 +181,7 @@ final class AmountTest
 #[tokio::test]
 async fn depends_attributes_jump_to_the_test_depended_on() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///StackTest.php").unwrap();
+    let uri = Uri::parse("file:///StackTest.php").unwrap();
     let source = r#"<?php
 use PHPUnit\Framework\Attributes\Depends;
 use PHPUnit\Framework\Attributes\DependsUsingShallowClone;
@@ -209,7 +209,7 @@ final class StackTest
 #[tokio::test]
 async fn data_provider_annotation_jumps_to_provider() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///AnnotatedTest.php").unwrap();
+    let uri = Uri::parse("file:///AnnotatedTest.php").unwrap();
     let source = r#"<?php
 final class Amounts
 {
@@ -243,7 +243,7 @@ final class AnnotatedTest
 #[tokio::test]
 async fn depends_annotation_with_a_clone_modifier_jumps_to_test() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///DependsTest.php").unwrap();
+    let uri = Uri::parse("file:///DependsTest.php").unwrap();
     let source = r#"<?php
 final class DependsTest
 {

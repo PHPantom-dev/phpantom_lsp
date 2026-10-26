@@ -1,7 +1,7 @@
 use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Union Return Type Resolution ───────────────────────────────────────────
 
@@ -17,7 +17,7 @@ use tower_lsp::lsp_types::*;
 async fn test_goto_definition_union_return_type_function() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class B {\n",                                            // 1
@@ -49,7 +49,7 @@ async fn test_goto_definition_union_return_type_function() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -67,7 +67,7 @@ async fn test_goto_definition_union_return_type_function() {
     );
 
     match result2.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 6,
@@ -84,7 +84,7 @@ async fn test_goto_definition_union_return_type_function() {
 async fn test_goto_definition_union_return_type_standalone_function() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                               // 0
         "class Dog {\n",                         // 1
@@ -135,7 +135,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -153,7 +153,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
     );
 
     match result2.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 6,
@@ -170,7 +170,7 @@ async fn test_goto_definition_union_return_type_standalone_function() {
 async fn test_goto_definition_nullable_union_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "class Formatter {\n",                                            // 1
@@ -199,7 +199,7 @@ async fn test_goto_definition_nullable_union_return_type() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -215,7 +215,7 @@ async fn test_goto_definition_nullable_union_return_type() {
 async fn test_goto_definition_union_property_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "class Engine {\n",                       // 1
@@ -246,7 +246,7 @@ async fn test_goto_definition_union_property_type() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -264,7 +264,7 @@ async fn test_goto_definition_union_property_type() {
     );
 
     match result2.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 6,
@@ -280,7 +280,7 @@ async fn test_goto_definition_union_property_type() {
 async fn test_goto_definition_union_parameter_type_hint() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                     // 0
         "class Reader {\n",                                            // 1
@@ -309,7 +309,7 @@ async fn test_goto_definition_union_parameter_type_hint() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -327,7 +327,7 @@ async fn test_goto_definition_union_parameter_type_hint() {
     );
 
     match result2.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 6,
@@ -344,7 +344,7 @@ async fn test_goto_definition_union_parameter_type_hint() {
 async fn test_goto_definition_union_with_scalar_parts() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class Result {\n",                                       // 1
@@ -373,7 +373,7 @@ async fn test_goto_definition_union_with_scalar_parts() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -413,7 +413,7 @@ async fn test_goto_definition_union_return_type_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///test_main.php").unwrap();
+    let uri = Uri::parse("file:///test_main.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Encoder;\n",
@@ -442,7 +442,7 @@ async fn test_goto_definition_union_return_type_cross_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(
                 location.range.start.line, 3,
                 "encode is on line 3 of Encoder.php"
@@ -465,7 +465,7 @@ async fn test_goto_definition_union_return_type_cross_file() {
     );
 
     match result2.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(
                 location.range.start.line, 3,
                 "decode is on line 3 of Decoder.php"
@@ -489,7 +489,7 @@ async fn test_goto_definition_union_return_type_cross_file() {
 async fn test_goto_definition_union_of_same_short_name_classes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///short_name_union.php").unwrap();
+    let uri = Uri::parse("file:///short_name_union.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "namespace NsA {\n",                                    // 1
@@ -529,7 +529,7 @@ async fn test_goto_definition_union_of_same_short_name_classes() {
     for (call_line, decl_line) in [(24u32, 3u32), (25, 10)] {
         let result = goto_definition_at(&backend, &uri, call_line, 30).await;
         match result {
-            Some(GotoDefinitionResponse::Scalar(location)) => {
+            Some(DefinitionResponse::Definition(Definition::Location(location))) => {
                 assert_eq!(
                     location.range.start.line, decl_line,
                     "call on line {} should resolve to the declaration on line {}",

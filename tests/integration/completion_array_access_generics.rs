@@ -1,7 +1,7 @@
 use crate::common::{
     complete_response_at, create_test_backend, create_test_backend_with_full_stubs,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 fn assert_has_member(items: &[CompletionItem], member: &str) {
     let names: Vec<&str> = items
@@ -18,8 +18,8 @@ fn assert_has_member(items: &[CompletionItem], member: &str) {
 
 fn unwrap_items(response: Option<CompletionResponse>) -> Vec<CompletionItem> {
     match response.expect("Should return completion results") {
-        CompletionResponse::Array(items) => items,
-        _ => panic!("Expected CompletionResponse::Array"),
+        CompletionResponse::CompletionItemList(items) => items,
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -28,7 +28,7 @@ fn unwrap_items(response: Option<CompletionResponse>) -> Vec<CompletionItem> {
 #[tokio::test]
 async fn test_var_array_int_customer_named_annotation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_arr_named.php").unwrap();
+    let uri = Uri::parse("file:///test_arr_named.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -52,7 +52,7 @@ async fn test_var_array_int_customer_named_annotation() {
 #[tokio::test]
 async fn test_var_array_int_customer_no_varname_annotation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_arr_no_varname.php").unwrap();
+    let uri = Uri::parse("file:///test_arr_no_varname.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -75,7 +75,7 @@ async fn test_var_array_int_customer_no_varname_annotation() {
 #[tokio::test]
 async fn test_var_array_int_customer_empty_array_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_arr_int_cust.php").unwrap();
+    let uri = Uri::parse("file:///test_arr_int_cust.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -98,7 +98,7 @@ async fn test_var_array_int_customer_empty_array_access() {
 #[tokio::test]
 async fn test_var_array_single_param_customer_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_arr_single_cust.php").unwrap();
+    let uri = Uri::parse("file:///test_arr_single_cust.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -121,7 +121,7 @@ async fn test_var_array_single_param_customer_access() {
 #[tokio::test]
 async fn test_var_list_customer_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_list_cust.php").unwrap();
+    let uri = Uri::parse("file:///test_list_cust.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -145,7 +145,7 @@ async fn test_var_list_customer_access() {
 #[tokio::test]
 async fn test_var_list_customer_no_varname_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_list_cust_novar.php").unwrap();
+    let uri = Uri::parse("file:///test_list_cust_novar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -168,7 +168,7 @@ async fn test_var_list_customer_no_varname_access() {
 #[tokio::test]
 async fn test_inferred_array_new_object_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_inferred_arr.php").unwrap();
+    let uri = Uri::parse("file:///test_inferred_arr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -190,7 +190,7 @@ async fn test_inferred_array_new_object_access() {
 #[tokio::test]
 async fn test_inline_array_literal_static_call_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_inline_arr.php").unwrap();
+    let uri = Uri::parse("file:///test_inline_arr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -213,7 +213,7 @@ async fn test_inline_array_literal_static_call_access() {
 #[tokio::test]
 async fn test_end_of_method_chain_returning_array() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_end_chain.php").unwrap();
+    let uri = Uri::parse("file:///test_end_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -240,7 +240,7 @@ async fn test_end_of_method_chain_returning_array() {
 #[tokio::test]
 async fn test_variable_assigned_from_end_array_generic() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_end_assign.php").unwrap();
+    let uri = Uri::parse("file:///test_end_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -265,7 +265,7 @@ async fn test_variable_assigned_from_end_array_generic() {
 #[tokio::test]
 async fn test_var_array_generic_with_unknown_value_rhs() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_arr_unknown_rhs.php").unwrap();
+    let uri = Uri::parse("file:///test_arr_unknown_rhs.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -291,7 +291,7 @@ async fn test_var_array_generic_with_unknown_value_rhs() {
 #[tokio::test]
 async fn test_method_return_array_access_bracket_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_method_arr.php").unwrap();
+    let uri = Uri::parse("file:///test_method_arr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -317,7 +317,7 @@ async fn test_method_return_array_access_bracket_type() {
 #[tokio::test]
 async fn test_method_return_array_access_generic_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_method_arr_generic.php").unwrap();
+    let uri = Uri::parse("file:///test_method_arr_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -343,7 +343,7 @@ async fn test_method_return_array_access_generic_type() {
 #[tokio::test]
 async fn test_static_method_return_array_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_static_method_arr.php").unwrap();
+    let uri = Uri::parse("file:///test_static_method_arr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -372,7 +372,7 @@ async fn test_method_return_template_class_string_array_access() {
     // call-site argument when the result is indexed inline:
     // `$a->findChildrenOfType(Foo::class)[0]->`.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_tmpl_arr.php").unwrap();
+    let uri = Uri::parse("file:///test_tmpl_arr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Node {\n",
@@ -404,7 +404,7 @@ async fn test_method_return_template_class_string_array_access() {
 #[tokio::test]
 async fn test_method_return_list_array_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_method_list_arr.php").unwrap();
+    let uri = Uri::parse("file:///test_method_list_arr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -438,7 +438,7 @@ async fn test_property_generic_array_bracket_access() {
     // $this->cache[$key]-> should resolve to IntCollection members
     // when cache is typed as array<string, IntCollection>.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_prop_generic_arr.php").unwrap();
+    let uri = Uri::parse("file:///test_prop_generic_arr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class IntCollection {\n",
@@ -468,7 +468,7 @@ async fn test_property_collection_generic_bracket_access() {
     // $model->translations[0]-> should resolve to Translation members
     // when translations is typed as Collection<int, Translation>.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_prop_collection_arr.php").unwrap();
+    let uri = Uri::parse("file:///test_prop_collection_arr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Translation {\n",
@@ -506,7 +506,7 @@ async fn test_variable_generic_array_bracket_access_var_annotation() {
     // /** @var array<string, Order> $orders */ $orders[$key]->
     // should resolve to Order members.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_var_generic_arr_key.php").unwrap();
+    let uri = Uri::parse("file:///test_var_generic_arr_key.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -530,7 +530,7 @@ async fn test_variable_generic_array_bracket_access_var_annotation() {
 async fn test_object_property_generic_array_bracket_access() {
     // $service->items[$i]-> where $service->items is array<int, Widget>
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_obj_prop_generic_arr.php").unwrap();
+    let uri = Uri::parse("file:///test_obj_prop_generic_arr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -558,7 +558,7 @@ async fn test_object_property_generic_array_bracket_access() {
 async fn test_property_generic_array_bracket_access_then_method_chain() {
     // $this->cache[$key]->first()-> should chain through the element type.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_prop_arr_chain.php").unwrap();
+    let uri = Uri::parse("file:///test_prop_arr_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Result {\n",
@@ -589,7 +589,7 @@ async fn test_property_generic_array_string_literal_key_access() {
     // $this->cache['myKey']-> should resolve to IntCollection members
     // even when the bracket index is a string literal (not a variable).
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_prop_generic_arr_strkey.php").unwrap();
+    let uri = Uri::parse("file:///test_prop_generic_arr_strkey.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class IntCollection {\n",
@@ -624,7 +624,7 @@ async fn test_array_access_object_offset_get_no_generics() {
     // @implements ArrayAccess<K, V> docblock) should resolve through
     // offsetGet()'s declared return type.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_array_access_no_generics.php").unwrap();
+    let uri = Uri::parse("file:///test_array_access_no_generics.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Node {\n",
@@ -656,7 +656,7 @@ async fn test_array_access_own_template_self_reference_resolves_to_bound() {
     // declared bound (`Node`) rather than leaking through as a literal
     // type named "T".
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_array_access_own_template.php").unwrap();
+    let uri = Uri::parse("file:///test_array_access_own_template.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Node {\n",
@@ -691,7 +691,7 @@ async fn test_array_access_own_template_self_reference_resolves_to_bound() {
 #[tokio::test]
 async fn test_iterator_to_array_inline_array_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_inline_iterator_to_array.php").unwrap();
+    let uri = Uri::parse("file:///test_inline_iterator_to_array.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -712,7 +712,7 @@ async fn test_iterator_to_array_inline_array_access() {
 async fn test_iterator_to_array_inline_nested_array_access() {
     // The bug report's shape: a tuple-shaped element indexed twice.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_inline_iterator_nested.php").unwrap();
+    let uri = Uri::parse("file:///test_inline_iterator_nested.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class DiscountType {\n",
@@ -730,7 +730,7 @@ async fn test_iterator_to_array_inline_nested_array_access() {
 #[tokio::test]
 async fn test_array_filter_inline_array_access() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_inline_array_filter.php").unwrap();
+    let uri = Uri::parse("file:///test_inline_array_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -748,7 +748,7 @@ async fn test_array_filter_inline_array_access() {
 #[tokio::test]
 async fn test_array_map_inline_array_access_uses_callback_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_inline_array_map.php").unwrap();
+    let uri = Uri::parse("file:///test_inline_array_map.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -772,7 +772,7 @@ async fn test_array_func_call_as_argument_keeps_element_type() {
     // the same text-driven path; its element type must survive so the
     // outer call's own rules can read it.
     let backend = create_test_backend_with_full_stubs();
-    let uri = Url::parse("file:///test_nested_array_func_arg.php").unwrap();
+    let uri = Uri::parse("file:///test_nested_array_func_arg.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",

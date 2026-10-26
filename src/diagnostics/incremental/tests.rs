@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Diagnostic, NumberOrString};
+use tower_lsp_server::gen_lsp_types::{Code, Diagnostic};
 
 use super::*;
 
@@ -42,7 +42,16 @@ fn full_pass(backend: &Backend, uri: &str, content: &str) -> Vec<Diagnostic> {
 
 fn canonical(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
     diagnostics.sort_by(|a, b| {
-        (a.range.start, a.range.end, &a.message).cmp(&(b.range.start, b.range.end, &b.message))
+        (
+            a.range.start,
+            a.range.end,
+            crate::util::message_text(&a.message),
+        )
+            .cmp(&(
+                b.range.start,
+                b.range.end,
+                crate::util::message_text(&b.message),
+            ))
     });
     diagnostics
 }
@@ -52,7 +61,7 @@ fn codes_and_lines(diagnostics: &[Diagnostic]) -> Vec<(String, u32)> {
         .iter()
         .map(|d| {
             let code = match &d.code {
-                Some(NumberOrString::String(code)) => code.clone(),
+                Some(Code::String(code)) => code.clone(),
                 _ => String::new(),
             };
             (code, d.range.start.line)
@@ -527,7 +536,7 @@ fn a_file_that_was_not_open_when_parsed_is_never_kept() {
 
 #[tokio::test]
 async fn a_save_makes_the_next_pass_diagnose_the_whole_file() {
-    use tower_lsp::lsp_types::{DidSaveTextDocumentParams, TextDocumentIdentifier, Url};
+    use tower_lsp_server::gen_lsp_types::{DidSaveTextDocumentParams, TextDocumentIdentifier, Uri};
 
     let backend = backend_with(&[(URI, SERVICE)]);
     let content = backend.open_files.read().get(URI).cloned().unwrap();
@@ -537,7 +546,7 @@ async fn a_save_makes_the_next_pass_diagnose_the_whole_file() {
     backend
         .on_did_save(DidSaveTextDocumentParams {
             text_document: TextDocumentIdentifier {
-                uri: Url::parse(URI).unwrap(),
+                uri: Uri::parse(URI).unwrap(),
             },
             text: None,
         })

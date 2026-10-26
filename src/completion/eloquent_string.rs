@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
@@ -305,7 +305,7 @@ impl Backend {
         if items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::Array(items))
+            Some(CompletionResponse::CompletionItemList(items))
         }
     }
 
@@ -424,7 +424,7 @@ impl Backend {
 
             items.push(CompletionItem {
                 label: format!("{}{}", prefix, method_name),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some(detail),
                 insert_text: Some(insert_text),
                 filter_text: Some(method_name),
@@ -452,7 +452,7 @@ impl Backend {
 
             items.push(CompletionItem {
                 label: col.clone(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some("column".to_string()),
                 insert_text: Some(col.clone()),
                 ..Default::default()
@@ -542,7 +542,7 @@ impl Backend {
             }
             items.push(CompletionItem {
                 label: col.clone(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some("model property".to_string()),
                 insert_text: Some(col.clone()),
                 ..Default::default()
@@ -552,7 +552,7 @@ impl Backend {
         if items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::Array(items))
+            Some(CompletionResponse::CompletionItemList(items))
         }
     }
 }

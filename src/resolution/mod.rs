@@ -6,6 +6,10 @@
 //!
 //! # Resolution pipeline
 //!
+//! Each of the three lookups first asks the stub paths (`[stubs]` in
+//! `.phpantom.toml` and the editor's stub directory): a name one of them
+//! declares means that declaration, whatever else declares it.
+//!
 //! ## Class resolution ([`Backend::find_or_load_class`](crate::Backend::find_or_load_class))
 //!
 //! - **Phase 0, already-parsed files** — O(1) FQN lookup in the parsed
@@ -61,9 +65,11 @@
 //! - [`constants`]: the constant counterpart,
 //!   [`Backend::lookup_global_constant`](crate::Backend::lookup_global_constant).
 //! - [`loaders`]: the loader closures handed to the type engine.
+//! - [`external_stubs`]: loading what the stub paths declare.
 
 mod classes;
 mod constants;
+mod external_stubs;
 mod functions;
 mod inflight;
 mod lazy_parse;

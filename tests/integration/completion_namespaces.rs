@@ -1,13 +1,13 @@
 use crate::common::{
     completion_response, create_psr4_workspace, create_test_backend, goto_definition_at, open_php,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 #[tokio::test]
 async fn test_completion_inside_namespaced_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///namespaced.php").unwrap();
+    let uri = Uri::parse("file:///namespaced.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Models;\n",
@@ -32,10 +32,10 @@ async fn test_completion_inside_namespaced_class() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
             assert_eq!(method_items.len(), 3, "Should return 3 method completions");
 
@@ -47,10 +47,10 @@ async fn test_completion_inside_namespaced_class() {
             assert!(filter_texts.contains(&"logout"), "Should contain 'logout'");
 
             for item in &method_items {
-                assert_eq!(item.kind, Some(CompletionItemKind::METHOD));
+                assert_eq!(item.kind, Some(CompletionItemKind::Method));
             }
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -58,7 +58,7 @@ async fn test_completion_inside_namespaced_class() {
 async fn test_completion_namespaced_class_with_properties_and_methods() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ns_full.php").unwrap();
+    let uri = Uri::parse("file:///ns_full.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Entity;\n",
@@ -80,14 +80,14 @@ async fn test_completion_namespaced_class_with_properties_and_methods() {
     // Cursor right after `$this->` on line 9
     let result = completion_response(&backend, &uri, 9, 15, None).await;
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
             let property_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .collect();
 
             assert_eq!(method_items.len(), 3, "Should have 3 methods");
@@ -99,7 +99,7 @@ async fn test_completion_namespaced_class_with_properties_and_methods() {
                 .find(|i| i.filter_text.as_deref() == Some("getName"))
                 .unwrap();
             assert_eq!(get_name.insert_text.as_deref(), Some("getName()$0"));
-            assert_eq!(get_name.insert_text_format, Some(InsertTextFormat::SNIPPET));
+            assert_eq!(get_name.insert_text_format, Some(InsertTextFormat::Snippet));
             assert_eq!(get_name.label, "getName()");
 
             let set_price = method_items
@@ -112,7 +112,7 @@ async fn test_completion_namespaced_class_with_properties_and_methods() {
             );
             assert_eq!(
                 set_price.insert_text_format,
-                Some(InsertTextFormat::SNIPPET)
+                Some(InsertTextFormat::Snippet)
             );
             assert_eq!(set_price.label, "setPrice($price)");
 
@@ -121,7 +121,7 @@ async fn test_completion_namespaced_class_with_properties_and_methods() {
             assert!(prop_labels.contains(&"name"));
             assert!(prop_labels.contains(&"price"));
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -134,7 +134,7 @@ async fn test_completion_namespaced_class_with_properties_and_methods() {
 async fn test_completion_use_as_alias_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///use_alias.php").unwrap();
+    let uri = Uri::parse("file:///use_alias.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "namespace Swagger\\OpenAPI;\n",                            // 1
@@ -145,7 +145,7 @@ async fn test_completion_use_as_alias_same_file() {
         "}\n",                                                      // 6
     );
 
-    let consumer_uri = Url::parse("file:///consumer.php").unwrap();
+    let consumer_uri = Uri::parse("file:///consumer.php").unwrap();
     let consumer_text = concat!(
         "<?php\n",                                   // 0
         "use Swagger\\OpenAPI as OA;\n",             // 1
@@ -172,7 +172,7 @@ async fn test_completion_use_as_alias_same_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getPath")),
@@ -185,7 +185,7 @@ async fn test_completion_use_as_alias_same_file() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -224,7 +224,7 @@ async fn test_completion_use_as_alias_cross_file_psr4() {
         &[("src/Services/PaymentGateway.php", service_content)],
     );
 
-    let uri = Url::parse("file:///consumer_psr4.php").unwrap();
+    let uri = Uri::parse("file:///consumer_psr4.php").unwrap();
     open_php(&backend, &uri, consumer_content).await;
 
     // Cursor after `$gw->` on line 4
@@ -236,7 +236,7 @@ async fn test_completion_use_as_alias_cross_file_psr4() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("charge")),
@@ -249,7 +249,7 @@ async fn test_completion_use_as_alias_cross_file_psr4() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -259,7 +259,7 @@ async fn test_completion_use_as_alias_cross_file_psr4() {
 async fn test_completion_use_as_class_alias() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///class_alias_def.php").unwrap();
+    let uri = Uri::parse("file:///class_alias_def.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "namespace Foo;\n",                                         // 1
@@ -270,7 +270,7 @@ async fn test_completion_use_as_class_alias() {
         "}\n",                                                      // 6
     );
 
-    let consumer_uri = Url::parse("file:///class_alias_use.php").unwrap();
+    let consumer_uri = Uri::parse("file:///class_alias_use.php").unwrap();
     let consumer_text = concat!(
         "<?php\n",               // 0
         "use Foo\\Bar as FB;\n", // 1
@@ -292,7 +292,7 @@ async fn test_completion_use_as_class_alias() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("doWork")),
@@ -305,7 +305,7 @@ async fn test_completion_use_as_class_alias() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -315,7 +315,7 @@ async fn test_completion_use_as_class_alias() {
 async fn test_goto_definition_use_as_alias() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///alias_goto_def.php").unwrap();
+    let uri = Uri::parse("file:///alias_goto_def.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "namespace Vendor\\Lib;\n",                 // 1
@@ -325,7 +325,7 @@ async fn test_goto_definition_use_as_alias() {
         "}\n",                                      // 5
     );
 
-    let consumer_uri = Url::parse("file:///alias_goto_consumer.php").unwrap();
+    let consumer_uri = Uri::parse("file:///alias_goto_consumer.php").unwrap();
     let consumer_text = concat!(
         "<?php\n",                  // 0
         "use Vendor\\Lib as VL;\n", // 1
@@ -346,7 +346,7 @@ async fn test_goto_definition_use_as_alias() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 4,
@@ -365,7 +365,7 @@ async fn test_goto_definition_use_as_alias() {
 async fn test_completion_multi_namespace_blocks() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multi_ns.php").unwrap();
+    let uri = Uri::parse("file:///multi_ns.php").unwrap();
     let text = r#"<?php
 namespace A {
     class Foo {
@@ -399,8 +399,8 @@ namespace B {
     // after `$b->`
     let result = completion_response(&backend, &uri, trigger_line, 17, None).await;
     let items = match result {
-        Some(CompletionResponse::List(list)) => list.items,
-        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
         None => panic!("Expected completions, got None"),
     };
 
@@ -430,7 +430,7 @@ namespace B {
 async fn test_completion_union_of_same_short_name_classes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///short_name_union.php").unwrap();
+    let uri = Uri::parse("file:///short_name_union.php").unwrap();
     let text = r#"<?php
 namespace NsA {
     class Thing {
@@ -466,8 +466,8 @@ namespace App {
 
     let result = completion_response(&backend, &uri, trigger_line, character, None).await;
     let items = match result {
-        Some(CompletionResponse::List(list)) => list.items,
-        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
         None => panic!("Expected completions, got None"),
     };
 
@@ -509,7 +509,7 @@ namespace B {
 "#;
     for (line, own, other) in [(10, "fromX", "fromY"), (16, "fromY", "fromX")] {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///blocks.php").unwrap();
+        let uri = Uri::parse("file:///blocks.php").unwrap();
         let labels = crate::common::complete_labels_at(&backend, &uri, text, line, 12).await;
         assert!(
             labels.iter().any(|l| l.starts_with(own))

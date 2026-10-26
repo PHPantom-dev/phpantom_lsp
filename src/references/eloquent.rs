@@ -60,6 +60,23 @@ impl Backend {
         })
     }
 
+    /// Whether a model in `scope` declares `member_name` as a relationship
+    /// method, which the model also exposes as a property of that name.
+    pub(super) fn is_eloquent_relationship_in(
+        &self,
+        scope: &MemberScope,
+        member_name: &str,
+    ) -> bool {
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
+        scope.indexed().iter().any(|fqn| {
+            self.find_or_load_class(fqn).is_some_and(|class| {
+                class.get_method(member_name).and_then(MagicMemberKind::of)
+                    == Some(MagicMemberKind::Relationship)
+                    && extends_eloquent_model(&class, &class_loader)
+            })
+        })
+    }
+
     /// The accesses to each member's magic name, in one pass over the union
     /// of their candidate files, optionally narrowed to `restrict_to`.
     pub(crate) fn eloquent_magic_references_batch(

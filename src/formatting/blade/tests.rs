@@ -1178,7 +1178,7 @@ fn builtin_strategy_skips_whitespace_sensitive_templates() {
 
 #[test]
 fn lsp_options_choose_the_indent_unit() {
-    use tower_lsp::lsp_types::FormattingOptions;
+    use tower_lsp_server::gen_lsp_types::FormattingOptions;
     let spaces = options_from_lsp(&FormattingOptions {
         tab_size: 2,
         insert_spaces: true,
@@ -1439,6 +1439,220 @@ fn pint_failure_is_an_error_not_an_edit() {
         &AtomicBool::new(false),
     );
     assert!(result.is_err(), "{result:?}");
+}
+
+/// A workspace whose `package.json` lists blade-formatter, whose root has
+/// its config file, and whose `node_modules/.bin` holds a runnable
+/// `blade-formatter` script with `body` as its shell commands.
+fn blade_formatter_workspace(body: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("node_modules/.bin")).unwrap();
+    let binary = dir.path().join("node_modules/.bin/blade-formatter");
+    std::fs::write(&binary, format!("#!/bin/sh\n{body}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies": {"blade-formatter": "^1.42.4"}}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join(".bladeformatterrc.json"), "{}").unwrap();
+    dir
+}
+
+fn is_blade_formatter(strategy: &BladeFormattingStrategy) -> bool {
+    matches!(strategy, BladeFormattingStrategy::BladeFormatter { .. })
+}
+
+fn resolve_in(dir: &Path, config: &FormattingConfig) -> BladeFormattingStrategy {
+    let composer = crate::composer::read_composer_package(dir);
+    resolve_blade_strategy(
+        Some(dir),
+        config,
+        composer.as_ref(),
+        None,
+        PhpVersion::default(),
+    )
+}
+
+#[test]
+fn blade_strategy_detects_blade_formatter() {
+    let dir = blade_formatter_workspace("cat");
+    let config = FormattingConfig::default();
+    assert!(is_blade_formatter(&resolve_in(dir.path(), &config)));
+
+    // Each of the dependency, the config file, and the installed binary
+    // is needed: without the config file the project may be handing the
+    // CLI its settings with `--config`, which a run on stdin would miss.
+    let without = |path: &str| {
+        let dir = blade_formatter_workspace("cat");
+        std::fs::remove_file(dir.path().join(path)).unwrap();
+        resolve_in(dir.path(), &config)
+    };
+    for path in [
+        "package.json",
+        ".bladeformatterrc.json",
+        "node_modules/.bin/blade-formatter",
+    ] {
+        assert!(
+            matches!(without(path), BladeFormattingStrategy::BuiltIn(_)),
+            "without {path}"
+        );
+    }
+
+    // `.bladeformatterrc` is the other name blade-formatter reads.
+    std::fs::rename(
+        dir.path().join(".bladeformatterrc.json"),
+        dir.path().join(".bladeformatterrc"),
+    )
+    .unwrap();
+    assert!(is_blade_formatter(&resolve_in(dir.path(), &config)));
+
+    // An empty command turns detection off.
+    let off = FormattingConfig {
+        blade_formatter: Some(String::new()),
+        ..FormattingConfig::default()
+    };
+    assert!(matches!(
+        resolve_in(dir.path(), &off),
+        BladeFormattingStrategy::BuiltIn(_)
+    ));
+}
+
+#[test]
+fn blade_strategy_prefers_pint_when_its_blade_rule_is_on() {
+    let (dir, composer) = pint_workspace("cat");
+    std::fs::create_dir_all(dir.path().join("node_modules/.bin")).unwrap();
+    std::fs::write(dir.path().join("node_modules/.bin/blade-formatter"), "").unwrap();
+    std::fs::write(dir.path().join(".bladeformatterrc"), "{}").unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies": {"blade-formatter": "^1.42.4"}}"#,
+    )
+    .unwrap();
+    let resolve = |config: &FormattingConfig| {
+        resolve_blade_strategy(
+            Some(dir.path()),
+            config,
+            Some(&composer),
+            None,
+            PhpVersion::default(),
+        )
+    };
+
+    // Pint formats the PHP, but with its Blade rule off the templates go
+    // to the project's Blade formatter.
+    assert!(is_blade_formatter(&resolve(&FormattingConfig::default())));
+    let pint_off = FormattingConfig {
+        pint_blade: Some(false),
+        ..FormattingConfig::default()
+    };
+    assert!(is_blade_formatter(&resolve(&pint_off)));
+
+    std::fs::write(
+        dir.path().join("pint.json"),
+        r#"{"rules": {"Pint/laravel_blade": true}}"#,
+    )
+    .unwrap();
+    assert!(is_pint(&resolve(&FormattingConfig::default()), false));
+
+    // An explicit command outranks Pint's rule.
+    let explicit = FormattingConfig {
+        blade_formatter: Some("blade-formatter".to_string()),
+        ..FormattingConfig::default()
+    };
+    assert!(is_blade_formatter(&resolve(&explicit)));
+}
+
+#[test]
+fn explicit_blade_formatter_survives_disabled_php_formatting() {
+    let config = FormattingConfig {
+        pint: Some(String::new()),
+        php_cs_fixer: Some(String::new()),
+        phpcbf: Some(String::new()),
+        blade_formatter: Some("blade-formatter".to_string()),
+        ..FormattingConfig::default()
+    };
+    let strategy = resolve_blade_strategy(None, &config, None, None, PhpVersion::default());
+    assert!(is_blade_formatter(&strategy), "{strategy:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn blade_formatter_runs_on_stdin_in_the_workspace_root() {
+    // A stand-in blade-formatter that reports where it ran, what it was
+    // asked, and what it read.
+    let dir = blade_formatter_workspace("echo \"cwd=$(pwd)\"; echo \"args=$*\"; cat");
+    let config = FormattingConfig::default();
+    let strategy = resolve_in(dir.path(), &config);
+    let output = format_blade_content(
+        &strategy,
+        "<div>\n<p>x</p>\n</div>\n",
+        &dir.path().join("resources/views/welcome.blade.php"),
+        Some(dir.path()),
+        &config,
+        &Options::default(),
+        &AtomicBool::new(false),
+    )
+    .unwrap()
+    .unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    assert_eq!(
+        output,
+        format!(
+            "cwd={}\nargs=--stdin\n<div>\n<p>x</p>\n</div>\n",
+            root.display()
+        )
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn blade_formatter_skips_templates_in_bladeignore() {
+    let dir = blade_formatter_workspace("echo formatted");
+    std::fs::write(dir.path().join(".bladeignore"), "resources/views/vendor/\n").unwrap();
+    let config = FormattingConfig::default();
+    let strategy = resolve_in(dir.path(), &config);
+    let format = |relative: &str| {
+        format_blade_content(
+            &strategy,
+            "<div></div>\n",
+            &dir.path().join(relative),
+            Some(dir.path()),
+            &config,
+            &Options::default(),
+            &AtomicBool::new(false),
+        )
+        .unwrap()
+    };
+    assert_eq!(format("resources/views/vendor/pagination.blade.php"), None);
+    assert_eq!(
+        format("resources/views/welcome.blade.php").as_deref(),
+        Some("formatted\n")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn blade_formatter_failure_reports_its_message() {
+    // blade-formatter reports a template it cannot parse on stdout.
+    let dir = blade_formatter_workspace("cat >/dev/null; echo 'SyntaxError: Parse Error'; exit 1");
+    let config = FormattingConfig::default();
+    let strategy = resolve_in(dir.path(), &config);
+    let error = format_blade_content(
+        &strategy,
+        "<div>{{ $x->( }}</div>\n",
+        &dir.path().join("a.blade.php"),
+        Some(dir.path()),
+        &config,
+        &Options::default(),
+        &AtomicBool::new(false),
+    )
+    .unwrap_err();
+    assert!(error.contains("SyntaxError: Parse Error"), "{error}");
 }
 
 // ── Embedded PHP ────────────────────────────────────────────────

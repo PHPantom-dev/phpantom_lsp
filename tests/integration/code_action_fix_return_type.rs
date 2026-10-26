@@ -16,7 +16,7 @@ use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_on_line,
     inject_phpstan_diag, resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── return.void — strip expression ──────────────────────────────────────────
 
@@ -45,7 +45,7 @@ class Foo {
     let action = find_action(&actions, "Remove return statement")
         .expect("should offer 'Remove return statement'");
 
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(false));
 
     let resolved = resolve_action(&backend, uri, content, action);
@@ -215,7 +215,7 @@ class Foo {
     let action = find_action(&actions, "Change return type to void")
         .expect("should offer 'Change return type to void'");
 
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
 
     let resolved = resolve_action(&backend, uri, content, action);
@@ -301,7 +301,7 @@ class Foo {
     let action =
         find_action(&actions, "Update return type").expect("should offer 'Update return type'");
 
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     // return.type is not preferred — the right fix might be to change the code
     assert_eq!(action.is_preferred, Some(false));
 
@@ -381,7 +381,7 @@ class Foo {
     let actions = get_code_actions_on_line(&backend, uri, content, 2);
     let action = find_action(&actions, "Add return type").expect("should offer 'Add return type'");
 
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
 
     let resolved = resolve_action(&backend, uri, content, action);

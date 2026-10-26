@@ -231,6 +231,7 @@ fn variant_name(t: &PhpType) -> &'static str {
         TypeKind::TemplateParam(..) => "TemplateParam",
         TypeKind::UnsealedShape(_) => "UnsealedShape",
         TypeKind::ClassNameLiteral(_) => "ClassNameLiteral",
+        TypeKind::EnumCase(..) => "EnumCase",
     }
 }
 
@@ -269,7 +270,8 @@ fn ty(t: &PhpType) -> Sz {
         | TypeKind::Benevolent(b)
         | TypeKind::ListShape(b)
         | TypeKind::TemplateParam(_, b)
-        | TypeKind::ClassNameLiteral(b) => {
+        | TypeKind::ClassNameLiteral(b)
+        | TypeKind::EnumCase(b, _) => {
             z.slot(1);
             z += ty(b);
         }
@@ -1335,10 +1337,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 sym.add(sp.kind.audit_heap());
             }
             sym.add(
-                sm.conditional_laravel_spans.capacity()
-                    * size_of::<crate::symbol_map::ConditionalLaravelStringSpan>(),
+                sm.conditional_string_key_spans.capacity()
+                    * size_of::<crate::symbol_map::ConditionalStringKeySpan>(),
             );
-            for candidate in &sm.conditional_laravel_spans {
+            for candidate in &sm.conditional_string_key_spans {
                 sym.add(candidate.audit_heap());
             }
             sym += map_buckets::<Atom, Vec<usize>>(sm.member_access_indices.capacity());
@@ -1359,6 +1361,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             sym.add(sm.assert_narrowing_offsets.capacity() * 4);
             sym.add(sm.template_defs.capacity() * size_of::<crate::symbol_map::TemplateParamDef>());
             sym.add(sm.call_sites.heap_bytes());
+            sym.add(sm.discarded_calls.capacity() * 8);
             sym.add(sm.breakable_scopes.capacity() * 8);
             sym.add(sm.loop_scopes.capacity() * 8);
             sym.add(sm.switch_scopes.capacity() * 8);
@@ -1369,12 +1372,19 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                     * size_of::<crate::symbol_map::UntypedClosureSite>(),
             );
             sym.add(
-                sm.view_receiver_sites.capacity()
-                    * size_of::<crate::symbol_map::ViewReceiverSite>(),
+                sm.typed_receiver_sites.capacity()
+                    * size_of::<crate::symbol_map::TypedReceiverSite>(),
             );
-            for site in &sm.view_receiver_sites {
+            for site in &sm.typed_receiver_sites {
                 sym.add(site.key.capacity());
             }
+            sym.add(
+                sm.messenger_handlers.capacity()
+                    * size_of::<crate::symbol_map::MessengerHandlerSite>(),
+            );
+            sym.add(
+                sm.container_values.capacity() * size_of::<crate::symbol_map::ContainerValueSite>(),
+            );
         }
     }
     eprintln!(
@@ -1834,6 +1844,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     });
     probe("did_change_parse_locks", &mut || {
         *backend.did_change_parse_locks.lock() = Default::default()
+    });
+    probe("parsed_for_diagnostics", &mut || {
+        *backend.parsed_for_diagnostics.lock() = None
     });
     probe("workspace psr4 + vendor paths", &mut || {
         *backend.workspace.psr4_mappings.write() = Default::default();

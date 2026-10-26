@@ -8,11 +8,11 @@ mod tests {
         create_psr4_workspace, goto_definition_at, open_document, open_php, workspace_uri,
     };
 
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     /// A project holding one component of every shape a tag can name, with
     /// `page.blade.php` carrying the template under test.
-    fn workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
+    fn workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri) {
         let (backend, dir) = create_psr4_workspace(
             BLADE_COMPONENT_COMPOSER,
             &[
@@ -61,15 +61,17 @@ mod tests {
     async fn definition(
         backend: &phpantom_lsp::Backend,
         dir: &tempfile::TempDir,
-        uri: &Url,
+        uri: &Uri,
         line: u32,
         character: u32,
     ) -> Option<String> {
         let response = goto_definition_at(backend, uri, line, character).await;
         let location = match response? {
-            GotoDefinitionResponse::Scalar(location) => location,
-            GotoDefinitionResponse::Array(locations) => locations.into_iter().next()?,
-            GotoDefinitionResponse::Link(links) => {
+            DefinitionResponse::Definition(Definition::Location(location)) => location,
+            DefinitionResponse::Definition(Definition::LocationList(locations)) => {
+                locations.into_iter().next()?
+            }
+            DefinitionResponse::DefinitionLinkList(links) => {
                 let link = links.into_iter().next()?;
                 Location {
                     uri: link.target_uri,

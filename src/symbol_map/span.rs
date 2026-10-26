@@ -127,6 +127,13 @@ pub(crate) enum DocblockMemberRef {
     /// PHPUnit errors out on metadata that names nothing — so it is still
     /// checked.
     PhpUnit,
+    /// A Symfony form field, naming the property path of the form's data
+    /// class it reads and writes.
+    ///
+    /// The property accessor reaches a path through a getter, an isser, or
+    /// a hasser as readily as through a property, so a field with no
+    /// property of its name is not an error.
+    PropertyPath,
 }
 
 impl DocblockMemberRef {
@@ -141,7 +148,7 @@ impl DocblockMemberRef {
     /// Whether a target that resolves to nothing is acceptable rather than
     /// a diagnostic.
     pub(crate) fn tolerates_missing_target(self) -> bool {
-        matches!(self, Self::See)
+        matches!(self, Self::See | Self::PropertyPath)
     }
 }
 
@@ -350,6 +357,10 @@ pub(crate) enum SymbolKind {
         /// Whether this is a static member (`static function`, `static $prop`,
         /// or class constant — constants are always accessed statically).
         is_static: bool,
+        /// Whether this declares a method (a real one or an `@method` tag)
+        /// rather than a property, constant, or enum case.  A method and a
+        /// property can share a name, and references must not mix them up.
+        is_method: bool,
     },
 
     /// A namespace name at its declaration site (`namespace App\Models;`).
@@ -374,16 +385,16 @@ pub(crate) enum SymbolKind {
     /// split into one span per source line at extraction time.
     Comment,
 
-    /// A Laravel string-key literal (config key, route name, view name, etc.)
+    /// A framework string-key literal (config key, route name, view name, etc.)
     /// inside a framework helper call such as `config()`, `route()`, `view()`,
     /// `Config::get()`, or `Config::set()`.
     ///
     /// The span covers the string content *inside* the quotes so that
     /// go-to-definition and find-references can work without re-parsing
     /// the file at request time.
-    LaravelStringKey {
+    StringKey {
         /// The category of the key (e.g. `Config`, `Route`, `View`).
-        kind: LaravelStringKind,
+        kind: StringKeyKind,
         /// The key value, e.g. `"app.name"` or `"users.index"`.
         key: String,
         /// Whether the call *defines* the key rather than reading it, as
@@ -441,7 +452,7 @@ impl SymbolKind {
                 name.capacity()
             }
             Self::MemberAccess { subject_text, .. } => subject_text.heap_bytes(),
-            Self::LaravelStringKey { key, .. } => key.capacity(),
+            Self::StringKey { key, .. } => key.capacity(),
             Self::SelfStaticParent(_) | Self::Keyword | Self::CastType | Self::Comment => 0,
         }
     }

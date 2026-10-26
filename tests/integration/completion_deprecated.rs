@@ -1,11 +1,11 @@
 use crate::common::{complete_at, create_test_backend};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Returns `true` when the item carries the `DEPRECATED` tag.
 fn is_tagged_deprecated(item: &CompletionItem) -> bool {
     item.tags
         .as_ref()
-        .is_some_and(|t| t.contains(&CompletionItemTag::DEPRECATED))
+        .is_some_and(|t| t.contains(&CompletionItemTag::Deprecated))
 }
 
 // ─── Deprecated method ──────────────────────────────────────────────────────
@@ -15,7 +15,7 @@ fn is_tagged_deprecated(item: &CompletionItem) -> bool {
 #[tokio::test]
 async fn test_deprecated_method_is_marked() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///deprecated_method.php").unwrap();
+    let uri = Uri::parse("file:///deprecated_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Mailer {\n",
@@ -63,7 +63,7 @@ async fn test_deprecated_method_is_marked() {
 #[tokio::test]
 async fn test_non_deprecated_method_is_not_marked() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///non_deprecated_method.php").unwrap();
+    let uri = Uri::parse("file:///non_deprecated_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -97,7 +97,7 @@ async fn test_non_deprecated_method_is_not_marked() {
 #[tokio::test]
 async fn test_deprecated_property_is_marked() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///deprecated_property.php").unwrap();
+    let uri = Uri::parse("file:///deprecated_property.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -142,7 +142,7 @@ async fn test_deprecated_property_is_marked() {
 #[tokio::test]
 async fn test_deprecated_constant_is_marked() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///deprecated_constant.php").unwrap();
+    let uri = Uri::parse("file:///deprecated_constant.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class HttpStatus {\n",
@@ -185,7 +185,7 @@ async fn test_deprecated_constant_is_marked() {
 #[tokio::test]
 async fn test_deprecated_function_is_marked() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///deprecated_function.php").unwrap();
+    let uri = Uri::parse("file:///deprecated_function.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -235,7 +235,7 @@ async fn test_deprecated_function_is_marked() {
 #[tokio::test]
 async fn test_deprecated_method_bare_tag() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///deprecated_bare.php").unwrap();
+    let uri = Uri::parse("file:///deprecated_bare.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -269,7 +269,7 @@ async fn test_deprecated_method_bare_tag() {
 #[tokio::test]
 async fn test_multiple_deprecated_and_non_deprecated_members() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///multi_deprecated.php").unwrap();
+    let uri = Uri::parse("file:///multi_deprecated.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Api {\n",
@@ -346,7 +346,7 @@ async fn test_multiple_deprecated_and_non_deprecated_members() {
 #[tokio::test]
 async fn test_deprecated_constant_via_double_colon() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///deprecated_const_dc.php").unwrap();
+    let uri = Uri::parse("file:///deprecated_const_dc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Api {\n",
@@ -387,7 +387,7 @@ async fn test_deprecated_constant_via_double_colon() {
 #[tokio::test]
 async fn test_deprecated_mixed_with_other_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///deprecated_mixed.php").unwrap();
+    let uri = Uri::parse("file:///deprecated_mixed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Processor {\n",
@@ -424,7 +424,7 @@ async fn test_deprecated_mixed_with_other_tags() {
 #[tokio::test]
 async fn test_deprecated_static_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///deprecated_static.php").unwrap();
+    let uri = Uri::parse("file:///deprecated_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -465,7 +465,7 @@ async fn test_deprecated_static_method() {
 #[tokio::test]
 async fn test_deprecated_static_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///deprecated_static_prop.php").unwrap();
+    let uri = Uri::parse("file:///deprecated_static_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Settings {\n",
@@ -514,7 +514,7 @@ async fn test_deprecated_static_property() {
 #[tokio::test]
 async fn test_deprecated_word_in_prose_not_flagged() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///deprecated_prose.php").unwrap();
+    let uri = Uri::parse("file:///deprecated_prose.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Docs {\n",

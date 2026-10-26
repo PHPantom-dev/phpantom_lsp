@@ -30,7 +30,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::ModifierSequenceExt;
 use mago_syntax::cst::Node;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -65,7 +65,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -177,7 +177,7 @@ impl Backend {
 
         let edits = edits?;
 
-        let doc_uri: Url = uri.parse().ok()?;
+        let doc_uri: Uri = uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }

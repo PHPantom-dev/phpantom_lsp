@@ -41,7 +41,7 @@ impl Backend {
             Ok(d) => d,
             Err(e) => {
                 self.log_detached(
-                    tower_lsp::lsp_types::MessageType::WARNING,
+                    tower_lsp_server::gen_lsp_types::MessageType::Warning,
                     format!("Failed to read phar archive {}: {e}", phar_path.display()),
                 );
                 return;
@@ -51,7 +51,7 @@ impl Backend {
             Some(a) => a,
             None => {
                 self.log_detached(
-                    tower_lsp::lsp_types::MessageType::WARNING,
+                    tower_lsp_server::gen_lsp_types::MessageType::Warning,
                     format!("Failed to parse phar archive {}", phar_path.display()),
                 );
                 return;

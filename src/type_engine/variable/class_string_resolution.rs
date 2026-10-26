@@ -50,6 +50,42 @@ pub(in crate::type_engine) fn classes_named_by(
     classes
 }
 
+/// What `new $x` builds when `$x` resolved to `operand`: an instance of each
+/// class the value names.
+///
+/// A `class-string<T>` of a bounded template builds a `T`, whatever classes
+/// its bound resolves to, so the result keeps `T` as its hint.
+pub(crate) fn instances_built_by_new(
+    operand: &[ResolvedType],
+    owning_class: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Vec<ResolvedType> {
+    if let [only] = operand
+        && let TypeKind::ClassString(Some(inner)) = only.type_string.kind()
+        && inner.as_template_param().is_some()
+    {
+        let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            inner,
+            owning_class,
+            all_classes,
+            class_loader,
+        );
+        if !classes.is_empty() {
+            return ResolvedType::from_classes_with_hint(classes, inner.clone());
+        }
+    }
+
+    let mut classes: Vec<Arc<ClassInfo>> = Vec::new();
+    for rt in operand {
+        ClassInfo::extend_unique_arc(
+            &mut classes,
+            classes_named_by_type(&rt.type_string, owning_class, all_classes, class_loader),
+        );
+    }
+    ResolvedType::from_classes(classes)
+}
+
 /// The classes a value of type `ty` names where PHP reads a value as a
 /// class name (`new $x`, `$x::method()`, `$x::CONST`): the `T` of a
 /// `class-string<T>`, also when it is nullable or one member of a union,
@@ -99,20 +135,49 @@ fn collect_named_classes(
                 collect_named_classes(member, owning_class, all_classes, class_loader, results);
             }
         }
-        TypeKind::Literal(literal) => {
-            let Some(content) = literal.string_content() else {
-                return;
-            };
-            // PHP reads a class name held in a string as fully qualified.
-            let name = content.strip_prefix('\\').unwrap_or(&content);
-            let is_class_name = !name.is_empty()
-                && name
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b >= 0x80);
-            if is_class_name && let Some(cls) = class_loader(Fqn::new(name)) {
+        TypeKind::Literal(_) => {
+            if let Some(cls) = class_spelled_by(ty, class_loader) {
                 ClassInfo::extend_unique_arc(results, vec![cls]);
             }
         }
         _ => {}
     }
+}
+
+/// The classes a value of type `ty` names exactly, when every value it can
+/// hold is a string literal spelling a loaded class (`'Foo'`, `'\\Foo'`).
+///
+/// `None` for anything else, `class-string<T>` included: that holds some
+/// class extending `T`, so a fact about `T` itself (that it is abstract, or
+/// what its constructor takes) says nothing about the class `new` builds.
+pub(crate) fn classes_spelled_exactly_by(
+    ty: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<Vec<Arc<ClassInfo>>> {
+    let mut results = Vec::new();
+    for member in ty.union_members() {
+        ClassInfo::extend_unique_arc(&mut results, vec![class_spelled_by(member, class_loader)?]);
+    }
+    Some(results)
+}
+
+/// The class a string literal type spells, if it spells a loaded one.
+fn class_spelled_by(
+    ty: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<Arc<ClassInfo>> {
+    let TypeKind::Literal(literal) = ty.kind() else {
+        return None;
+    };
+    let content = literal.string_content()?;
+    // PHP reads a class name held in a string as fully qualified.
+    let name = content.strip_prefix('\\').unwrap_or(&content);
+    let is_class_name = !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b >= 0x80);
+    if !is_class_name {
+        return None;
+    }
+    class_loader(Fqn::new(name))
 }

@@ -11,8 +11,8 @@ mod tests {
         completion_response, create_psr4_workspace, open_document, template_diagnostics,
     };
     use phpantom_lsp::Backend;
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     /// A Laravel application whose framework classes autoload from the
     /// vendor copy the test writes.
@@ -56,7 +56,7 @@ trait CompilesConditionals
                            </script>\n\
                            @if (true)\n<p>shown</p>\n@endif\n";
 
-    async fn start(template: &str) -> (Backend, tempfile::TempDir, Url) {
+    async fn start(template: &str) -> (Backend, tempfile::TempDir, Uri) {
         let (backend, dir) = create_psr4_workspace(
             COMPOSER,
             &[
@@ -74,7 +74,7 @@ trait CompilesConditionals
         );
         backend.initialized(InitializedParams {}).await;
 
-        let uri = Url::from_file_path(dir.path().join(TEMPLATE)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(TEMPLATE)).unwrap();
         open_document(&backend, &uri, "blade", template).await;
         (backend, dir, uri)
     }
@@ -105,8 +105,8 @@ trait CompilesConditionals
             .await
             .expect("directive completion should answer");
         let items = match response {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
         assert!(labels.contains(&"@if"), "{labels:?}");

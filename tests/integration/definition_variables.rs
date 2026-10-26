@@ -1,5 +1,5 @@
 use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Ambiguous Variable Types ───────────────────────────────────────────────
 
@@ -18,7 +18,7 @@ use tower_lsp::lsp_types::*;
 async fn test_goto_definition_ambiguous_variable_if_block() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                             // 0
         "class SessionManager {\n",                            // 1
@@ -53,7 +53,7 @@ async fn test_goto_definition_ambiguous_variable_if_block() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -70,7 +70,7 @@ async fn test_goto_definition_ambiguous_variable_if_block() {
 async fn test_goto_definition_ambiguous_variable_both_have_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "class Alpha {\n",                        // 1
@@ -102,7 +102,7 @@ async fn test_goto_definition_ambiguous_variable_both_have_method() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             // The merged union lists the branches in source order, so the
             // pre-`if` assignment `$obj = new Alpha()` is the first candidate.
@@ -121,7 +121,7 @@ async fn test_goto_definition_ambiguous_variable_both_have_method() {
 async fn test_goto_definition_unconditional_reassignment_replaces_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class Foo {\n",                            // 1
@@ -151,7 +151,7 @@ async fn test_goto_definition_unconditional_reassignment_replaces_type() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 6,
@@ -166,7 +166,7 @@ async fn test_goto_definition_unconditional_reassignment_replaces_type() {
     // The result should resolve to Bar, not Foo — we already checked above
     assert!(result2.is_some());
     match result2.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_ne!(
                 location.range.start.line, 2,
                 "fooOnly on line 2 (Foo) should NOT be reachable after unconditional reassignment"
@@ -182,7 +182,7 @@ async fn test_goto_definition_unconditional_reassignment_replaces_type() {
 async fn test_goto_definition_ambiguous_variable_try_catch() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                         // 0
         "class Logger {\n",                                // 1
@@ -216,7 +216,7 @@ async fn test_goto_definition_ambiguous_variable_try_catch() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -233,7 +233,7 @@ async fn test_goto_definition_ambiguous_variable_try_catch() {
 async fn test_goto_definition_ambiguous_variable_if_else_branches() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "class Writer {\n",                       // 1
@@ -282,7 +282,7 @@ async fn test_goto_definition_ambiguous_variable_if_else_branches() {
 async fn test_goto_definition_ambiguous_variable_loop() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                   // 0
         "class Handler {\n",                         // 1
@@ -314,7 +314,7 @@ async fn test_goto_definition_ambiguous_variable_loop() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -354,7 +354,7 @@ async fn test_goto_definition_ambiguous_variable_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///test_main.php").unwrap();
+    let uri = Uri::parse("file:///test_main.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Cache;\n",
@@ -382,7 +382,7 @@ async fn test_goto_definition_ambiguous_variable_cross_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             // Cache::get is declared on line 3 (0-indexed) of Cache.php
             assert_eq!(
                 location.range.start.line, 3,
@@ -408,7 +408,7 @@ async fn test_goto_definition_ambiguous_variable_cross_file() {
 async fn test_goto_definition_inline_var_docblock_simple() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///varoverride.php").unwrap();
+    let uri = Uri::parse("file:///varoverride.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class Session {\n",                        // 1
@@ -434,7 +434,7 @@ async fn test_goto_definition_inline_var_docblock_simple() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -452,7 +452,7 @@ async fn test_goto_definition_inline_var_docblock_simple() {
 async fn test_goto_definition_inline_var_docblock_no_variable_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///varoverride_noname.php").unwrap();
+    let uri = Uri::parse("file:///varoverride_noname.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class Session {\n",                        // 1
@@ -478,7 +478,7 @@ async fn test_goto_definition_inline_var_docblock_no_variable_name() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -495,7 +495,7 @@ async fn test_goto_definition_inline_var_docblock_no_variable_name() {
 async fn test_goto_definition_inline_var_docblock_with_variable_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///varoverride_named.php").unwrap();
+    let uri = Uri::parse("file:///varoverride_named.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "class Logger {\n",                       // 1
@@ -521,7 +521,7 @@ async fn test_goto_definition_inline_var_docblock_with_variable_name() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -538,7 +538,7 @@ async fn test_goto_definition_inline_var_docblock_with_variable_name() {
 async fn test_goto_definition_inline_var_docblock_wrong_variable_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///varoverride_wrong.php").unwrap();
+    let uri = Uri::parse("file:///varoverride_wrong.php").unwrap();
     let text = concat!(
         "<?php\n",                               // 0
         "class Logger {\n",                      // 1
@@ -571,7 +571,7 @@ async fn test_goto_definition_inline_var_docblock_wrong_variable_name() {
 async fn test_goto_definition_inline_var_docblock_blocked_by_scalar() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///varoverride_scalar.php").unwrap();
+    let uri = Uri::parse("file:///varoverride_scalar.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // 0
         "class Session {\n",                          // 1
@@ -604,7 +604,7 @@ async fn test_goto_definition_inline_var_docblock_blocked_by_scalar() {
 async fn test_goto_definition_inline_var_docblock_override_allowed_for_object() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///varoverride_obj.php").unwrap();
+    let uri = Uri::parse("file:///varoverride_obj.php").unwrap();
     let text = concat!(
         "<?php\n",                                            // 0
         "class BaseService {\n",                              // 1
@@ -635,7 +635,7 @@ async fn test_goto_definition_inline_var_docblock_override_allowed_for_object() 
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 6,
@@ -654,7 +654,7 @@ async fn test_goto_definition_inline_var_docblock_override_allowed_for_object() 
 async fn test_goto_definition_variable_jumps_to_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_goto_assign.php").unwrap();
+    let uri = Uri::parse("file:///var_goto_assign.php").unwrap();
     let text = concat!(
         "<?php\n",                           // 0
         "function demo(): mixed {\n",        // 1
@@ -673,7 +673,7 @@ async fn test_goto_definition_variable_jumps_to_assignment() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "$typed is assigned on line 2");
             assert_eq!(
@@ -689,7 +689,7 @@ async fn test_goto_definition_variable_jumps_to_assignment() {
 async fn test_goto_definition_compact_string_jumps_to_variable_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_goto_compact.php").unwrap();
+    let uri = Uri::parse("file:///var_goto_compact.php").unwrap();
     let text = concat!(
         "<?php\n",                       // 0
         "function demo(): array {\n",    // 1
@@ -707,7 +707,7 @@ async fn test_goto_definition_compact_string_jumps_to_variable_assignment() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "$user is assigned on line 2");
             assert_eq!(
@@ -725,7 +725,7 @@ async fn test_goto_definition_compact_string_jumps_to_variable_assignment() {
 async fn test_goto_definition_dollar_brace_interpolation_jumps_to_variable_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_goto_dollar_brace.php").unwrap();
+    let uri = Uri::parse("file:///var_goto_dollar_brace.php").unwrap();
     let text = concat!(
         "<?php\n",                      // 0
         "function demo(): string {\n",  // 1
@@ -743,7 +743,7 @@ async fn test_goto_definition_dollar_brace_interpolation_jumps_to_variable_assig
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "$user is assigned on line 2");
             assert_eq!(
@@ -761,7 +761,7 @@ async fn test_goto_definition_dollar_brace_interpolation_jumps_to_variable_assig
 async fn test_goto_definition_variable_on_definition_returns_self_location() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_goto_on_def.php").unwrap();
+    let uri = Uri::parse("file:///var_goto_on_def.php").unwrap();
     let text = concat!(
         "<?php\n",                           // 0
         "function demo(): void {\n",         // 1
@@ -774,7 +774,7 @@ async fn test_goto_definition_variable_on_definition_returns_self_location() {
     // Cursor on `$typed` on line 2 (the assignment itself)
     let result = goto_definition_at(&backend, &uri, 2, 5).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "should point back to line 2");
         }
@@ -788,7 +788,7 @@ async fn test_goto_definition_variable_on_definition_returns_self_location() {
 async fn test_goto_definition_variable_jumps_to_parameter() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_goto_param.php").unwrap();
+    let uri = Uri::parse("file:///var_goto_param.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // 0
         "class App {\n",                                 // 1
@@ -808,7 +808,7 @@ async fn test_goto_definition_variable_jumps_to_parameter() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -825,7 +825,7 @@ async fn test_goto_definition_variable_jumps_to_parameter() {
 async fn test_goto_definition_variable_jumps_to_foreach() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_goto_foreach.php").unwrap();
+    let uri = Uri::parse("file:///var_goto_foreach.php").unwrap();
     let text = concat!(
         "<?php\n",                           // 0
         "function demo(): void {\n",         // 1
@@ -846,7 +846,7 @@ async fn test_goto_definition_variable_jumps_to_foreach() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -863,7 +863,7 @@ async fn test_goto_definition_variable_jumps_to_foreach() {
 async fn test_goto_definition_variable_jumps_to_most_recent_reassignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_goto_reassign.php").unwrap();
+    let uri = Uri::parse("file:///var_goto_reassign.php").unwrap();
     let text = concat!(
         "<?php\n",                   // 0
         "function demo(): void {\n", // 1
@@ -884,7 +884,7 @@ async fn test_goto_definition_variable_jumps_to_most_recent_reassignment() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 4,
@@ -901,7 +901,7 @@ async fn test_goto_definition_variable_jumps_to_most_recent_reassignment() {
 async fn test_goto_definition_variable_jumps_to_catch() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_goto_catch.php").unwrap();
+    let uri = Uri::parse("file:///var_goto_catch.php").unwrap();
     let text = concat!(
         "<?php\n",                          // 0
         "function demo(): void {\n",        // 1
@@ -923,7 +923,7 @@ async fn test_goto_definition_variable_jumps_to_catch() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 4,
@@ -940,7 +940,7 @@ async fn test_goto_definition_variable_jumps_to_catch() {
 async fn test_goto_definition_variable_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_goto_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///var_goto_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",                       // 0
         "$typed = getUnknownValue();\n", // 1
@@ -957,7 +957,7 @@ async fn test_goto_definition_variable_top_level() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 1, "$typed is assigned on line 1");
             assert_eq!(
@@ -975,7 +975,7 @@ async fn test_goto_definition_variable_top_level() {
 async fn test_goto_definition_variable_foreach_key_value() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_goto_foreach_kv.php").unwrap();
+    let uri = Uri::parse("file:///var_goto_foreach_kv.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "function demo(): void {\n",              // 1
@@ -996,7 +996,7 @@ async fn test_goto_definition_variable_foreach_key_value() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -1016,7 +1016,7 @@ async fn test_goto_definition_variable_foreach_key_value() {
 async fn test_goto_definition_variable_at_definition_returns_self_location() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///accordion.php").unwrap();
+    let uri = Uri::parse("file:///accordion.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class HtmlString {}\n",                                 // 1
@@ -1032,7 +1032,7 @@ async fn test_goto_definition_variable_at_definition_returns_self_location() {
     // Cursor on `$content` on line 4 (the definition itself)
     let result = goto_definition_at(&backend, &uri, 4, 45).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 4, "should point back to line 4");
         }
@@ -1046,7 +1046,7 @@ async fn test_goto_definition_variable_at_definition_returns_self_location() {
 async fn test_goto_definition_parameter_at_definition_returns_self_location() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///param_type.php").unwrap();
+    let uri = Uri::parse("file:///param_type.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "class Request {\n",                            // 1
@@ -1063,7 +1063,7 @@ async fn test_goto_definition_parameter_at_definition_returns_self_location() {
     // Cursor on `$req` on line 5 (the parameter definition)
     let result = goto_definition_at(&backend, &uri, 5, 39).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 5, "should point back to line 5");
         }
@@ -1077,7 +1077,7 @@ async fn test_goto_definition_parameter_at_definition_returns_self_location() {
 async fn test_goto_definition_variable_at_definition_nullable_type_hint_returns_self_location() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nullable_type.php").unwrap();
+    let uri = Uri::parse("file:///nullable_type.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "class Logger {\n",                             // 1
@@ -1094,7 +1094,7 @@ async fn test_goto_definition_variable_at_definition_nullable_type_hint_returns_
     // Cursor on `$log` on line 5
     let result = goto_definition_at(&backend, &uri, 5, 37).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 5, "should point back to line 5");
         }
@@ -1108,7 +1108,7 @@ async fn test_goto_definition_variable_at_definition_nullable_type_hint_returns_
 async fn test_goto_definition_variable_at_definition_scalar_type_returns_self_location() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///scalar_type.php").unwrap();
+    let uri = Uri::parse("file:///scalar_type.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "class App {\n",                                // 1
@@ -1122,7 +1122,7 @@ async fn test_goto_definition_variable_at_definition_scalar_type_returns_self_lo
     // Cursor on `$name` on line 2
     let result = goto_definition_at(&backend, &uri, 2, 37).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "should point back to line 2");
         }
@@ -1136,7 +1136,7 @@ async fn test_goto_definition_variable_at_definition_scalar_type_returns_self_lo
 async fn test_goto_definition_variable_at_definition_union_class_second_returns_self_location() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///union_second.php").unwrap();
+    let uri = Uri::parse("file:///union_second.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class HtmlString {\n",                                   // 1
@@ -1153,7 +1153,7 @@ async fn test_goto_definition_variable_at_definition_union_class_second_returns_
     // Cursor on `$out` on line 5
     let result = goto_definition_at(&backend, &uri, 5, 47).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 5, "should point back to line 5");
         }
@@ -1167,7 +1167,7 @@ async fn test_goto_definition_variable_at_definition_union_class_second_returns_
 async fn test_goto_definition_property_at_definition_returns_self_location() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///prop_type.php").unwrap();
+    let uri = Uri::parse("file:///prop_type.php").unwrap();
     let text = concat!(
         "<?php\n",                         // 0
         "class Logger {\n",                // 1
@@ -1183,7 +1183,7 @@ async fn test_goto_definition_property_at_definition_returns_self_location() {
     // Cursor on `$logger` on line 5
     let result = goto_definition_at(&backend, &uri, 5, 21).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 5, "should point back to line 5");
         }
@@ -1201,7 +1201,7 @@ async fn test_goto_definition_foreach_consecutive_loops_same_var() {
     // first loop's.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_consecutive.php").unwrap();
+    let uri = Uri::parse("file:///foreach_consecutive.php").unwrap();
     let text = concat!(
         "<?php\n",                    // 0
         "function demo(): void {\n",  // 1
@@ -1225,7 +1225,7 @@ async fn test_goto_definition_foreach_consecutive_loops_same_var() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 5,
@@ -1244,7 +1244,7 @@ async fn test_goto_definition_foreach_on_as_variable_returns_none() {
     // with the same variable and jumped there.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_on_as.php").unwrap();
+    let uri = Uri::parse("file:///foreach_on_as.php").unwrap();
     let text = concat!(
         "<?php\n",                    // 0
         "function demo(): void {\n",  // 1
@@ -1274,7 +1274,7 @@ async fn test_goto_definition_foreach_reassignment_inside_loop() {
     // the assignment should jump to the assignment, not the foreach.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_reassign.php").unwrap();
+    let uri = Uri::parse("file:///foreach_reassign.php").unwrap();
     let text = concat!(
         "<?php\n",                       // 0
         "function demo(): void {\n",     // 1
@@ -1296,7 +1296,7 @@ async fn test_goto_definition_foreach_reassignment_inside_loop() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -1316,7 +1316,7 @@ async fn test_goto_definition_foreach_reassignment_inside_loop() {
 async fn test_goto_definition_rhs_variable_same_line_as_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///rhs_same_line.php").unwrap();
+    let uri = Uri::parse("file:///rhs_same_line.php").unwrap();
     let text = concat!(
         "<?php\n",                                                 // 0
         "class Converter {\n",                                     // 1
@@ -1343,7 +1343,7 @@ async fn test_goto_definition_rhs_variable_same_line_as_assignment() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -1360,7 +1360,7 @@ async fn test_goto_definition_rhs_variable_same_line_as_assignment() {
 async fn test_goto_definition_lhs_variable_same_line_returns_self_location() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///lhs_same_line.php").unwrap();
+    let uri = Uri::parse("file:///lhs_same_line.php").unwrap();
     let text = concat!(
         "<?php\n",                                                 // 0
         "class Converter {\n",                                     // 1
@@ -1381,7 +1381,7 @@ async fn test_goto_definition_lhs_variable_same_line_returns_self_location() {
     // inside the LHS `$value`
     let result = goto_definition_at(&backend, &uri, 4, 13).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 4, "should point back to line 4");
         }
@@ -1399,7 +1399,7 @@ async fn test_goto_definition_lhs_variable_same_line_returns_self_location() {
 async fn test_goto_definition_arrow_fn_rhs_param_jumps_to_same_line_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///arrow_fn_rhs.php").unwrap();
+    let uri = Uri::parse("file:///arrow_fn_rhs.php").unwrap();
     let text = concat!(
         "<?php\n",                                                          // 0
         "class Order {\n",                                                  // 1
@@ -1444,7 +1444,7 @@ async fn test_goto_definition_arrow_fn_rhs_param_jumps_to_same_line_param() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 7,
@@ -1465,7 +1465,7 @@ async fn test_goto_definition_arrow_fn_rhs_param_jumps_to_same_line_param() {
 async fn test_goto_definition_arrow_fn_lhs_param_returns_self_location() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///arrow_fn_lhs.php").unwrap();
+    let uri = Uri::parse("file:///arrow_fn_lhs.php").unwrap();
     let text = concat!(
         "<?php\n",                                                          // 0
         "class Order {\n",                                                  // 1
@@ -1483,7 +1483,7 @@ async fn test_goto_definition_arrow_fn_lhs_param_returns_self_location() {
     // Cursor on the defining `$o` parameter on line 6
     let result = goto_definition_at(&backend, &uri, 6, 36).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 6, "should point back to line 6");
         }
@@ -1498,7 +1498,7 @@ async fn test_goto_definition_arrow_fn_lhs_param_returns_self_location() {
 async fn test_goto_definition_arrow_fn_untyped_param_rhs_jumps_to_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///arrow_fn_untyped.php").unwrap();
+    let uri = Uri::parse("file:///arrow_fn_untyped.php").unwrap();
     let text = concat!(
         "<?php\n",                                            // 0
         "class Demo {\n",                                     // 1
@@ -1522,7 +1522,7 @@ async fn test_goto_definition_arrow_fn_untyped_param_rhs_jumps_to_param() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -1544,7 +1544,7 @@ async fn test_goto_definition_arrow_fn_untyped_param_rhs_jumps_to_param() {
 #[tokio::test]
 async fn test_goto_definition_closure_use_clause_body_to_use() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_closure_use.php").unwrap();
+    let uri = Uri::parse("file:///var_closure_use.php").unwrap();
 
     // Line 0: <?php
     // Line 1: function demo(): void {
@@ -1573,7 +1573,7 @@ async fn test_goto_definition_closure_use_clause_body_to_use() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -1589,7 +1589,7 @@ async fn test_goto_definition_closure_use_clause_body_to_use() {
 #[tokio::test]
 async fn test_goto_definition_closure_use_clause_to_outer_assignment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_closure_use_outer.php").unwrap();
+    let uri = Uri::parse("file:///var_closure_use_outer.php").unwrap();
 
     // Line 0: <?php
     // Line 1: function demo(): void {
@@ -1618,7 +1618,7 @@ async fn test_goto_definition_closure_use_clause_to_outer_assignment() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -1637,7 +1637,7 @@ async fn test_goto_definition_closure_use_clause_to_outer_assignment() {
 #[tokio::test]
 async fn test_goto_definition_closure_use_clause_multiple_captures() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_closure_use_multi.php").unwrap();
+    let uri = Uri::parse("file:///var_closure_use_multi.php").unwrap();
 
     // Line 0: <?php
     // Line 1: function demo(): void {
@@ -1671,7 +1671,7 @@ async fn test_goto_definition_closure_use_clause_multiple_captures() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 4,
@@ -1687,7 +1687,7 @@ async fn test_goto_definition_closure_use_clause_multiple_captures() {
 #[tokio::test]
 async fn test_goto_definition_closure_use_clause_reassigned_inside() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_closure_use_reassign.php").unwrap();
+    let uri = Uri::parse("file:///var_closure_use_reassign.php").unwrap();
 
     // Line 0: <?php
     // Line 1: function demo(): void {
@@ -1718,7 +1718,7 @@ async fn test_goto_definition_closure_use_clause_reassigned_inside() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 4,
@@ -1735,7 +1735,7 @@ async fn test_goto_definition_closure_use_clause_reassigned_inside() {
 #[tokio::test]
 async fn test_goto_definition_switch_variable_after_switch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_switch_after.php").unwrap();
+    let uri = Uri::parse("file:///var_switch_after.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -1768,7 +1768,7 @@ async fn test_goto_definition_switch_variable_after_switch() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 4,
@@ -1784,7 +1784,7 @@ async fn test_goto_definition_switch_variable_after_switch() {
 #[tokio::test]
 async fn test_goto_definition_switch_cursor_inside_case() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_switch_inside_case.php").unwrap();
+    let uri = Uri::parse("file:///var_switch_inside_case.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -1819,7 +1819,7 @@ async fn test_goto_definition_switch_cursor_inside_case() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 5,
@@ -1835,7 +1835,7 @@ async fn test_goto_definition_switch_cursor_inside_case() {
 #[tokio::test]
 async fn test_goto_definition_do_while_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_do_while.php").unwrap();
+    let uri = Uri::parse("file:///var_do_while.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -1864,7 +1864,7 @@ async fn test_goto_definition_do_while_variable() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -1880,7 +1880,7 @@ async fn test_goto_definition_do_while_variable() {
 #[tokio::test]
 async fn test_goto_definition_for_loop_initializer() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_for_init.php").unwrap();
+    let uri = Uri::parse("file:///var_for_init.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -1907,7 +1907,7 @@ async fn test_goto_definition_for_loop_initializer() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -1923,7 +1923,7 @@ async fn test_goto_definition_for_loop_initializer() {
 #[tokio::test]
 async fn test_goto_definition_for_loop_initializer_at_definition_returns_self_location() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_for_init_atdef.php").unwrap();
+    let uri = Uri::parse("file:///var_for_init_atdef.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -1945,7 +1945,7 @@ async fn test_goto_definition_for_loop_initializer_at_definition_returns_self_lo
     // Cursor on `$i` in `for ($i = 0;` (line 2, char 9)
     let result = goto_definition_at(&backend, &uri, 2, 9).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "should point back to line 2");
         }
@@ -1957,7 +1957,7 @@ async fn test_goto_definition_for_loop_initializer_at_definition_returns_self_lo
 #[tokio::test]
 async fn test_goto_definition_while_loop_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_while.php").unwrap();
+    let uri = Uri::parse("file:///var_while.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -1986,7 +1986,7 @@ async fn test_goto_definition_while_loop_variable() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -2002,7 +2002,7 @@ async fn test_goto_definition_while_loop_variable() {
 #[tokio::test]
 async fn test_goto_definition_global_statement() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_global.php").unwrap();
+    let uri = Uri::parse("file:///var_global.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2027,7 +2027,7 @@ async fn test_goto_definition_global_statement() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -2043,7 +2043,7 @@ async fn test_goto_definition_global_statement() {
 #[tokio::test]
 async fn test_goto_definition_global_statement_at_definition_returns_self_location() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_global_atdef.php").unwrap();
+    let uri = Uri::parse("file:///var_global_atdef.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2063,7 +2063,7 @@ async fn test_goto_definition_global_statement_at_definition_returns_self_locati
     // Cursor on `$gvar` in `global $gvar;` (line 2, char 11)
     let result = goto_definition_at(&backend, &uri, 2, 11).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "should point back to line 2");
         }
@@ -2075,7 +2075,7 @@ async fn test_goto_definition_global_statement_at_definition_returns_self_locati
 #[tokio::test]
 async fn test_goto_definition_static_statement() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_static.php").unwrap();
+    let uri = Uri::parse("file:///var_static.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2100,7 +2100,7 @@ async fn test_goto_definition_static_statement() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -2116,7 +2116,7 @@ async fn test_goto_definition_static_statement() {
 #[tokio::test]
 async fn test_goto_definition_static_statement_at_definition_returns_self_location() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_static_atdef.php").unwrap();
+    let uri = Uri::parse("file:///var_static_atdef.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2136,7 +2136,7 @@ async fn test_goto_definition_static_statement_at_definition_returns_self_locati
     // Cursor on `$count` in `static $count = 0;` (line 2, char 11)
     let result = goto_definition_at(&backend, &uri, 2, 11).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "should point back to line 2");
         }
@@ -2148,7 +2148,7 @@ async fn test_goto_definition_static_statement_at_definition_returns_self_locati
 #[tokio::test]
 async fn test_goto_definition_array_destructuring() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_array_destruct.php").unwrap();
+    let uri = Uri::parse("file:///var_array_destruct.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2173,7 +2173,7 @@ async fn test_goto_definition_array_destructuring() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "$a is destructured on line 2");
             assert_eq!(location.range.start.character, 5);
@@ -2186,7 +2186,7 @@ async fn test_goto_definition_array_destructuring() {
 #[tokio::test]
 async fn test_goto_definition_array_destructuring_at_definition_returns_self_location() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_array_destruct_atdef.php").unwrap();
+    let uri = Uri::parse("file:///var_array_destruct_atdef.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2206,7 +2206,7 @@ async fn test_goto_definition_array_destructuring_at_definition_returns_self_loc
     // Cursor on `$a` in `[$a, $b] = ...` (line 2, char 5)
     let result = goto_definition_at(&backend, &uri, 2, 5).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "should point back to line 2");
         }
@@ -2218,7 +2218,7 @@ async fn test_goto_definition_array_destructuring_at_definition_returns_self_loc
 #[tokio::test]
 async fn test_goto_definition_list_destructuring() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_list_destruct.php").unwrap();
+    let uri = Uri::parse("file:///var_list_destruct.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2243,7 +2243,7 @@ async fn test_goto_definition_list_destructuring() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "$x is destructured on line 2");
             // "    list($x" → $x starts at char 9
@@ -2257,7 +2257,7 @@ async fn test_goto_definition_list_destructuring() {
 #[tokio::test]
 async fn test_goto_definition_nested_destructuring() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_nested_destruct.php").unwrap();
+    let uri = Uri::parse("file:///var_nested_destruct.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2282,7 +2282,7 @@ async fn test_goto_definition_nested_destructuring() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "$b is destructured on line 2");
             // "    [[$a, $b]" → $b starts at char 10
@@ -2296,7 +2296,7 @@ async fn test_goto_definition_nested_destructuring() {
 #[tokio::test]
 async fn test_goto_definition_foreach_destructuring() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_foreach_destruct.php").unwrap();
+    let uri = Uri::parse("file:///var_foreach_destruct.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2325,7 +2325,7 @@ async fn test_goto_definition_foreach_destructuring() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -2342,7 +2342,7 @@ async fn test_goto_definition_foreach_destructuring() {
 #[tokio::test]
 async fn test_goto_definition_foreach_key_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_foreach_key.php").unwrap();
+    let uri = Uri::parse("file:///var_foreach_key.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2371,7 +2371,7 @@ async fn test_goto_definition_foreach_key_variable() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -2388,7 +2388,7 @@ async fn test_goto_definition_foreach_key_variable() {
 #[tokio::test]
 async fn test_goto_definition_block_statement() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_block.php").unwrap();
+    let uri = Uri::parse("file:///var_block.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2417,7 +2417,7 @@ async fn test_goto_definition_block_statement() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -2434,7 +2434,7 @@ async fn test_goto_definition_block_statement() {
 #[tokio::test]
 async fn test_goto_definition_return_with_assignment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_return_assign.php").unwrap();
+    let uri = Uri::parse("file:///var_return_assign.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): mixed {
@@ -2459,7 +2459,7 @@ async fn test_goto_definition_return_with_assignment() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -2477,7 +2477,7 @@ async fn test_goto_definition_return_with_assignment() {
 #[tokio::test]
 async fn test_goto_definition_closure_inner_definition_wins() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_closure_inner.php").unwrap();
+    let uri = Uri::parse("file:///var_closure_inner.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2508,7 +2508,7 @@ async fn test_goto_definition_closure_inner_definition_wins() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 4,
@@ -2524,7 +2524,7 @@ async fn test_goto_definition_closure_inner_definition_wins() {
 #[tokio::test]
 async fn test_goto_definition_arrow_function_body_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_arrow_fn_body.php").unwrap();
+    let uri = Uri::parse("file:///var_arrow_fn_body.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2552,7 +2552,7 @@ async fn test_goto_definition_arrow_function_body_variable() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -2571,7 +2571,7 @@ async fn test_goto_definition_arrow_function_body_variable() {
 #[tokio::test]
 async fn test_goto_definition_rhs_same_assignment_jumps_to_original() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_rhs_same_assign.php").unwrap();
+    let uri = Uri::parse("file:///var_rhs_same_assign.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(mixed $value): mixed {
@@ -2599,7 +2599,7 @@ async fn test_goto_definition_rhs_same_assignment_jumps_to_original() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -2617,7 +2617,7 @@ async fn test_goto_definition_rhs_same_assignment_jumps_to_original() {
 #[tokio::test]
 async fn test_goto_definition_conditional_does_not_override_outer() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///var_cond_override.php").unwrap();
+    let uri = Uri::parse("file:///var_cond_override.php").unwrap();
 
     // line 0: <?php
     // line 1: function demo(): void {
@@ -2648,7 +2648,7 @@ async fn test_goto_definition_conditional_does_not_override_outer() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,

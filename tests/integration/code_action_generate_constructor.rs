@@ -9,7 +9,7 @@
 use crate::common::{
     apply_workspace_edit, create_test_backend, find_action_titled, get_code_actions_at,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── Basic generation ────────────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ class Foo {
         .expect("should offer generate constructor action");
     assert_eq!(
         action.kind,
-        Some(CodeActionKind::REFACTOR_REWRITE),
+        Some(CodeActionKind::RefactorRewrite),
         "should be refactor.rewrite"
     );
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());

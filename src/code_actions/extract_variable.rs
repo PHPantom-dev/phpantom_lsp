@@ -5,7 +5,7 @@
 //! immediately before the enclosing statement, and replaces the selection
 //! with the new variable reference.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::CodeActionData;
@@ -466,7 +466,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let Some((start_offset, end_offset)) =
             crate::code_actions::selected_byte_range(content, params.range)
@@ -595,7 +595,7 @@ impl Backend {
         let rhs = strip_outer_parens(trimmed);
         let replacement_text = format!("${}", var_name);
 
-        let doc_uri: Url = match data.uri.parse() {
+        let doc_uri: Uri = match data.uri.parse() {
             Ok(u) => u,
             Err(_) => return None,
         };

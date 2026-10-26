@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Hover, HoverContents};
+use tower_lsp_server::gen_lsp_types::{Contents, Hover};
 
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
@@ -511,7 +511,7 @@ impl Backend {
                     continue;
                 }
                 seen_declaring_classes.push(declaring_name);
-                if let HoverContents::Markup(mc) = h.contents {
+                if let Contents::MarkupContent(mc) = h.contents {
                     hover_markdowns.push(mc.value);
                 }
             }

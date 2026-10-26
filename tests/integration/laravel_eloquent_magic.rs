@@ -7,7 +7,7 @@ use crate::common::{
     create_psr4_workspace, definition_locations, goto_definition_at, method_names, open_php,
     property_names, split_cursor,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Framework stubs ────────────────────────────────────────────────────────
 
@@ -333,7 +333,7 @@ async fn complete(
     content: &str,
     position: Position,
 ) -> Vec<CompletionItem> {
-    let uri = Url::from_file_path(dir.path().join(relative_path)).unwrap();
+    let uri = Uri::from_file_path(dir.path().join(relative_path)).unwrap();
     crate::common::complete_at(backend, &uri, content, position.line, position.character).await
 }
 
@@ -342,7 +342,7 @@ fn single_property_detail(items: &[CompletionItem], name: &str) -> String {
     let matching: Vec<&CompletionItem> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::PROPERTY)
+            i.kind == Some(CompletionItemKind::Property)
                 && i.filter_text.as_deref().unwrap_or(&i.label) == name
         })
         .collect();
@@ -432,7 +432,7 @@ class Controller {
         ("src/Models/User.php", user_php),
     ]);
 
-    let uri = Url::from_file_path(dir.path().join("src/Http/Controller.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Http/Controller.php")).unwrap();
     open_php(&backend, &uri, &caller).await;
     let locations =
         definition_locations(goto_definition_at(&backend, &uri, pos.line, pos.character).await);
@@ -1339,7 +1339,7 @@ async fn magic_hover(needle: &str) -> String {
         ),
         ("src/Models/Consumer.php", HOVER_CONSUMER_PHP),
     ]);
-    let uri = Url::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
     open_php(&backend, &uri, HOVER_CONSUMER_PHP).await;
     let (line, character) = crate::common::line_char_of(HOVER_CONSUMER_PHP, needle);
     crate::common::markup_hover_at(&backend, &uri, line, character + 1).await
@@ -1449,7 +1449,7 @@ async fn open_with(
 ) -> (
     phpantom_lsp::Backend,
     tempfile::TempDir,
-    Url,
+    Uri,
     String,
     Position,
 ) {
@@ -1464,7 +1464,7 @@ async fn open_with(
     files.extend_from_slice(extra);
     files.push(("src/Models/Consumer.php", text.as_str()));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    let uri = Url::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
     open_php(&backend, &uri, &text).await;
     (backend, dir, uri, text, position)
 }
@@ -1474,7 +1474,7 @@ fn method_detail(items: &[CompletionItem], name: &str) -> String {
     items
         .iter()
         .find(|i| {
-            i.kind == Some(CompletionItemKind::METHOD)
+            i.kind == Some(CompletionItemKind::Method)
                 && i.filter_text.as_deref().unwrap_or(&i.label) == name
         })
         .unwrap_or_else(|| panic!("no `{name}` method among {:?}", method_names(items)))
@@ -1559,7 +1559,7 @@ async fn signature_label_in(
     extra: &[(&str, &str)],
     consumer: &str,
 ) -> String {
-    use tower_lsp::LanguageServer;
+    use tower_lsp_server::LanguageServer;
     let (backend, _dir, uri, _text, position) = open_with(replaced, extra, consumer).await;
     let help = backend
         .signature_help(SignatureHelpParams {

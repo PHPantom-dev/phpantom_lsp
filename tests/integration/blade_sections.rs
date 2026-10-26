@@ -5,12 +5,13 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::common::message_text;
     use crate::common::{
         LARAVEL_APP_COMPOSER, completion_response, create_psr4_workspace, goto_definition_at,
         hover_response, open_document,
     };
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     const LAYOUT: &str = "<html>\n\
         <head>@stack('styles')</head>\n\
@@ -38,11 +39,11 @@ mod tests {
         (backend, dir)
     }
 
-    fn uri_of(dir: &tempfile::TempDir, relative: &str) -> Url {
-        Url::from_file_path(dir.path().join(relative)).unwrap()
+    fn uri_of(dir: &tempfile::TempDir, relative: &str) -> Uri {
+        Uri::from_file_path(dir.path().join(relative)).unwrap()
     }
 
-    async fn open(backend: &phpantom_lsp::Backend, dir: &tempfile::TempDir, relative: &str) -> Url {
+    async fn open(backend: &phpantom_lsp::Backend, dir: &tempfile::TempDir, relative: &str) -> Uri {
         let uri = uri_of(dir, relative);
         let text = std::fs::read_to_string(dir.path().join(relative)).unwrap();
         open_document(backend, &uri, "blade", &text).await;
@@ -54,15 +55,15 @@ mod tests {
     async fn definitions(
         backend: &phpantom_lsp::Backend,
         dir: &tempfile::TempDir,
-        uri: &Url,
+        uri: &Uri,
         line: u32,
         character: u32,
     ) -> Vec<(String, u32, u32)> {
         let response = goto_definition_at(backend, uri, line, character).await;
         let locations = match response {
-            Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
-            Some(GotoDefinitionResponse::Array(locations)) => locations,
-            Some(GotoDefinitionResponse::Link(links)) => links
+            Some(DefinitionResponse::Definition(Definition::Location(location))) => vec![location],
+            Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => locations,
+            Some(DefinitionResponse::DefinitionLinkList(links)) => links
                 .into_iter()
                 .map(|link| Location {
                     uri: link.target_uri,
@@ -92,28 +93,28 @@ mod tests {
 
     async fn completions(
         backend: &phpantom_lsp::Backend,
-        uri: &Url,
+        uri: &Uri,
         line: u32,
         character: u32,
     ) -> Vec<CompletionItem> {
         let response = completion_response(backend, uri, line, character, None).await;
         match response {
-            Some(CompletionResponse::Array(items)) => items,
-            Some(CompletionResponse::List(list)) => list.items,
+            Some(CompletionResponse::CompletionItemList(items)) => items,
+            Some(CompletionResponse::CompletionList(list)) => list.items,
             None => Vec::new(),
         }
     }
 
     /// The unrendered-section reports for `uri`, as `(code, message)`.
-    fn section_diagnostics(backend: &phpantom_lsp::Backend, uri: &Url) -> Vec<(String, String)> {
+    fn section_diagnostics(backend: &phpantom_lsp::Backend, uri: &Uri) -> Vec<(String, String)> {
         let effective = backend.blade_virtual_php(uri.as_str()).unwrap();
         let mut diags = Vec::new();
         backend.collect_slow_diagnostics(uri.as_str(), &effective, &mut diags);
         diags
             .into_iter()
             .filter_map(|diagnostic| match &diagnostic.code {
-                Some(NumberOrString::String(code)) if code.starts_with("unrendered_blade") => {
-                    Some((code.clone(), diagnostic.message))
+                Some(Code::String(code)) if code.starts_with("unrendered_blade") => {
+                    Some((code.clone(), message_text(&diagnostic.message).to_string()))
                 }
                 _ => None,
             })
@@ -234,7 +235,7 @@ mod tests {
             "only the names the layout yields, not the stacks it renders"
         );
 
-        let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+        let Some(CompletionItemTextEdit::TextEdit(edit)) = &items[0].text_edit else {
             panic!("expected a text edit, got {:?}", items[0].text_edit);
         };
         assert_eq!(
@@ -454,7 +455,7 @@ mod tests {
         let hover = hover_response(&backend, &uri, 1, 12).await;
         let text = match hover {
             Some(Hover {
-                contents: HoverContents::Markup(markup),
+                contents: Contents::MarkupContent(markup),
                 ..
             }) => markup.value,
             other => panic!("expected markup hover, got {other:?}"),

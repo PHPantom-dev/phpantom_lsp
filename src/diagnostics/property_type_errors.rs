@@ -6,7 +6,8 @@
 //!
 //! Handles both instance properties (`$obj->prop = expr`) and static
 //! properties (`ClassName::$prop = expr`), through any receiver the type
-//! engine can resolve.
+//! engine can resolve, and the properties a `clone($obj, ['prop' => expr])`
+//! call writes on the copy.
 //!
 //! Uses the same conservative approach as argument type checking:
 //! when in doubt (unresolved types, `mixed`, complex generics),
@@ -15,17 +16,18 @@
 use std::sync::Arc;
 
 use mago_span::HasSpan;
+use mago_syntax::cst::FunctionCall;
 use mago_syntax::cst::access::Access;
 use mago_syntax::cst::class_like::member::ClassLikeMemberSelector;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::statement::Statement;
 use mago_syntax::cst::variable::Variable;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
-use crate::parser::{for_each_nested_statement_list, with_parsed_program};
+use crate::parser::{clone_with_writes, for_each_nested_statement_list, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
@@ -123,9 +125,6 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         Expression::Assignment(a) if a.operator.is_assign() => a,
         _ => return,
     };
-    if !super::incremental::reports_site(assign.rhs.span().start.offset) {
-        return;
-    }
 
     // The offset of the property name, where the symbol map records the
     // member access.  Dynamic names (`$obj->$name`, `Cls::$$name`) are
@@ -141,6 +140,35 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         },
         _ => return,
     };
+    check_property_write(member_offset, assign.rhs, ctx);
+}
+
+/// Finds the `clone($object, ['prop' => …])` calls anywhere in the file:
+/// each key writes its value to that property of the copy.
+struct CloneWithWalker;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, PropertyCheckCtx<'_>>
+    for CloneWithWalker
+{
+    fn walk_in_function_call(
+        &self,
+        node: &'ast FunctionCall<'arena>,
+        ctx: &mut PropertyCheckCtx<'_>,
+    ) {
+        if let Some((_, writes)) = clone_with_writes(node, ctx.content) {
+            for write in writes {
+                check_property_write(write.start, write.value, ctx);
+            }
+        }
+    }
+}
+
+/// Check the write of `rhs` to the property whose name the symbol map
+/// records a member access for at `member_offset`.
+fn check_property_write(member_offset: u32, rhs: &Expression<'_>, ctx: &mut PropertyCheckCtx<'_>) {
+    if !super::incremental::reports_site(rhs.span().start.offset) {
+        return;
+    }
     let Some(source) = ctx.symbol_map.source(ctx.content) else {
         return;
     };
@@ -169,11 +197,14 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         is_in_static_method: ctx.symbol_map.is_in_static_method(member_offset),
         ..loaders.resolution_ctx_at(ctx.content, member_offset)
     };
-    let SubjectOutcome::Resolved(receivers) = resolve_subject_outcome(
+    let SubjectOutcome::Resolved {
+        classes: receivers, ..
+    } = resolve_subject_outcome(
         subject_text.as_str(source),
         AccessKind::of_member_access(is_static),
         &rctx,
-    ) else {
+    )
+    else {
         return;
     };
 
@@ -202,7 +233,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         PhpType::union(declared_types)
     };
 
-    let site = assign.rhs.span().start.offset;
+    let site = rhs.span().start.offset;
     let declared_type = declared_type.resolve_names(&|name: &str| {
         if name.contains("__anonymous@") {
             return name.to_string();
@@ -215,13 +246,13 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     });
 
     // Resolve the RHS expression type.
-    let rhs_span = assign.rhs.span();
+    let rhs_span = rhs.span();
     let rhs_start = rhs_span.start.offset as usize;
     let rhs_end = rhs_span.end.offset as usize;
 
     let var_ctx = loaders.var_ctx_at(ctx.content, site);
 
-    let rhs_type = resolve_expression_type(assign.rhs, &var_ctx).unwrap_or_else(PhpType::untyped);
+    let rhs_type = resolve_expression_type(rhs, &var_ctx).unwrap_or_else(PhpType::untyped);
 
     // Skip unresolved types.
     if rhs_type.is_untyped()
@@ -339,6 +370,11 @@ impl Backend {
 
                     for stmt in program.statements.iter() {
                         collect_from_statement(stmt, &mut walk_ctx);
+                        mago_syntax::walker::Walker::walk_statement(
+                            &CloneWithWalker,
+                            stmt,
+                            &mut walk_ctx,
+                        );
                     }
 
                     resolved

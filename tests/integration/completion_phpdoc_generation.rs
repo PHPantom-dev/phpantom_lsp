@@ -1,19 +1,19 @@
 use crate::common::{complete_at, create_test_backend, open_php};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Find the docblock generation item (the snippet item with filter_text "/**").
 fn find_docblock_item(items: &[CompletionItem]) -> Option<&CompletionItem> {
     items.iter().find(|i| {
         i.filter_text.as_deref() == Some("/**")
-            && i.insert_text_format == Some(InsertTextFormat::SNIPPET)
+            && i.insert_text_format == Some(InsertTextFormat::Snippet)
     })
 }
 
 /// Extract the snippet text from the completion item's text_edit.
 fn snippet_text(item: &CompletionItem) -> &str {
     match &item.text_edit {
-        Some(CompletionTextEdit::Edit(edit)) => &edit.new_text,
+        Some(CompletionItemTextEdit::TextEdit(edit)) => &edit.new_text,
         _ => "",
     }
 }
@@ -25,7 +25,7 @@ fn snippet_text(item: &CompletionItem) -> &str {
 #[tokio::test]
 async fn generates_summary_only_for_fully_typed_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_func.php").unwrap();
+    let uri = Uri::parse("file:///gen_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -63,7 +63,7 @@ async fn generates_summary_only_for_fully_typed_function() {
 #[tokio::test]
 async fn generates_summary_only_for_void_function_with_scalar_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_void.php").unwrap();
+    let uri = Uri::parse("file:///gen_void.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -91,7 +91,7 @@ async fn generates_summary_only_for_void_function_with_scalar_params() {
 #[tokio::test]
 async fn generates_return_for_missing_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_no_params.php").unwrap();
+    let uri = Uri::parse("file:///gen_no_params.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -132,7 +132,7 @@ async fn generates_return_for_missing_return_type() {
 #[tokio::test]
 async fn generates_param_for_untyped_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_untyped.php").unwrap();
+    let uri = Uri::parse("file:///gen_untyped.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -172,7 +172,7 @@ async fn generates_param_for_untyped_params() {
 #[tokio::test]
 async fn generates_tags_for_array_params_and_return() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_array.php").unwrap();
+    let uri = Uri::parse("file:///gen_array.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -206,7 +206,7 @@ async fn generates_tags_for_array_params_and_return() {
 #[tokio::test]
 async fn generates_docblock_for_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_class.php").unwrap();
+    let uri = Uri::parse("file:///gen_class.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "class MyService {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items);
@@ -231,7 +231,7 @@ async fn generates_docblock_for_class() {
 #[tokio::test]
 async fn generates_docblock_for_interface() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_interface.php").unwrap();
+    let uri = Uri::parse("file:///gen_interface.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "interface Renderable {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items);
@@ -245,7 +245,7 @@ async fn generates_docblock_for_interface() {
 #[tokio::test]
 async fn generates_docblock_for_enum() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_enum.php").unwrap();
+    let uri = Uri::parse("file:///gen_enum.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "enum Status: string {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items);
@@ -259,7 +259,7 @@ async fn generates_docblock_for_enum() {
 #[tokio::test]
 async fn generates_docblock_for_trait() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_trait.php").unwrap();
+    let uri = Uri::parse("file:///gen_trait.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "trait Cacheable {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items);
@@ -275,7 +275,7 @@ async fn generates_docblock_for_trait() {
 #[tokio::test]
 async fn generates_var_for_typed_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_prop_typed.php").unwrap();
+    let uri = Uri::parse("file:///gen_prop_typed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -302,7 +302,7 @@ async fn generates_var_for_typed_property() {
 #[tokio::test]
 async fn generates_docblock_for_untyped_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_prop_untyped.php").unwrap();
+    let uri = Uri::parse("file:///gen_prop_untyped.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -336,7 +336,7 @@ async fn generates_docblock_for_untyped_property() {
 #[tokio::test]
 async fn generates_docblock_for_constant() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_const.php").unwrap();
+    let uri = Uri::parse("file:///gen_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -363,7 +363,7 @@ async fn generates_docblock_for_constant() {
 #[tokio::test]
 async fn generates_docblock_for_typed_constant() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_const_typed.php").unwrap();
+    let uri = Uri::parse("file:///gen_const_typed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -392,7 +392,7 @@ async fn generates_docblock_for_typed_constant() {
 #[tokio::test]
 async fn skips_nullable_param_and_return() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_nullable.php").unwrap();
+    let uri = Uri::parse("file:///gen_nullable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -419,7 +419,7 @@ async fn skips_nullable_param_and_return() {
 #[tokio::test]
 async fn skips_union_param_and_return() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_union.php").unwrap();
+    let uri = Uri::parse("file:///gen_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -446,7 +446,7 @@ async fn skips_union_param_and_return() {
 #[tokio::test]
 async fn generates_param_for_union_with_array() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_union_array.php").unwrap();
+    let uri = Uri::parse("file:///gen_union_array.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -491,7 +491,7 @@ async fn generates_param_for_union_with_array() {
 #[tokio::test]
 async fn generates_param_for_closure() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_closure.php").unwrap();
+    let uri = Uri::parse("file:///gen_closure.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -523,7 +523,7 @@ async fn generates_param_for_closure() {
 #[tokio::test]
 async fn generates_param_for_callable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_callable.php").unwrap();
+    let uri = Uri::parse("file:///gen_callable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -555,7 +555,7 @@ async fn generates_param_for_callable() {
 #[tokio::test]
 async fn blank_separator_between_param_and_throws() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_sep.php").unwrap();
+    let uri = Uri::parse("file:///gen_sep.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class NotFoundException extends \\Exception {}\n",
@@ -603,7 +603,7 @@ async fn blank_separator_between_param_and_throws() {
 #[tokio::test]
 async fn skips_variadic_scalar_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_variadic.php").unwrap();
+    let uri = Uri::parse("file:///gen_variadic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -627,12 +627,12 @@ async fn skips_variadic_scalar_params() {
 #[tokio::test]
 async fn snippet_has_tab_stops() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_tabstops.php").unwrap();
+    let uri = Uri::parse("file:///gen_tabstops.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "function test(string $name): int {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items).unwrap();
 
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 
     let snippet = snippet_text(item);
     // Should contain at least ${1} for the summary line.
@@ -647,13 +647,13 @@ async fn snippet_has_tab_stops() {
 #[tokio::test]
 async fn text_edit_covers_trigger() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_range.php").unwrap();
+    let uri = Uri::parse("file:///gen_range.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "function test(): void {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items).unwrap();
 
     match &item.text_edit {
-        Some(CompletionTextEdit::Edit(edit)) => {
+        Some(CompletionItemTextEdit::TextEdit(edit)) => {
             assert_eq!(edit.range.start.line, 1);
             assert_eq!(edit.range.start.character, 0);
             assert_eq!(edit.range.end.line, 1);
@@ -667,7 +667,7 @@ async fn text_edit_covers_trigger() {
 #[tokio::test]
 async fn generates_docblock_with_autoclosed_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_vscode.php").unwrap();
+    let uri = Uri::parse("file:///gen_vscode.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/** */\n",
@@ -700,7 +700,7 @@ async fn generates_docblock_with_autoclosed_block() {
 #[tokio::test]
 async fn infers_return_below_long_parameter_list() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_long_params.php").unwrap();
+    let uri = Uri::parse("file:///gen_long_params.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/** */\n",
@@ -731,7 +731,7 @@ async fn infers_return_below_long_parameter_list() {
 #[tokio::test]
 async fn infers_return_under_open_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_open_return.php").unwrap();
+    let uri = Uri::parse("file:///gen_open_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -754,13 +754,13 @@ async fn infers_return_under_open_docblock() {
 #[tokio::test]
 async fn text_edit_covers_autoclosed_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_range_ac.php").unwrap();
+    let uri = Uri::parse("file:///gen_range_ac.php").unwrap();
     let text = concat!("<?php\n", "/** */\n", "function test(): void {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items).unwrap();
 
     match &item.text_edit {
-        Some(CompletionTextEdit::Edit(edit)) => {
+        Some(CompletionItemTextEdit::TextEdit(edit)) => {
             assert_eq!(edit.range.start.line, 1);
             assert_eq!(edit.range.start.character, 0);
             assert_eq!(edit.range.end.line, 1);
@@ -779,7 +779,7 @@ async fn text_edit_covers_autoclosed_block() {
 #[tokio::test]
 async fn generates_docblock_with_indented_autoclosed_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_vscode_indent.php").unwrap();
+    let uri = Uri::parse("file:///gen_vscode_indent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -802,7 +802,7 @@ async fn generates_docblock_with_indented_autoclosed_block() {
     );
 
     match &item.unwrap().text_edit {
-        Some(CompletionTextEdit::Edit(edit)) => {
+        Some(CompletionItemTextEdit::TextEdit(edit)) => {
             assert_eq!(edit.range.start.line, 2);
             assert_eq!(edit.range.start.character, 4);
             assert_eq!(edit.range.end.line, 2);
@@ -819,7 +819,7 @@ async fn generates_docblock_with_indented_autoclosed_block() {
 #[tokio::test]
 async fn no_generation_for_existing_single_line_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_existing_sl.php").unwrap();
+    let uri = Uri::parse("file:///gen_existing_sl.php").unwrap();
     let text = concat!("<?php\n", "/** @var int */\n", "public $count = 0;\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items);
@@ -835,7 +835,7 @@ async fn no_generation_for_existing_single_line_docblock() {
 #[tokio::test]
 async fn preserves_indentation_inside_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_indent.php").unwrap();
+    let uri = Uri::parse("file:///gen_indent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -874,7 +874,7 @@ async fn preserves_indentation_inside_class() {
 #[tokio::test]
 async fn no_generation_for_single_line_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_single_line.php").unwrap();
+    let uri = Uri::parse("file:///gen_single_line.php").unwrap();
     let text = concat!("<?php\n", "/** @var int */\n", "public $count = 0;\n",);
     // Cursor right after /** on line 1.
     let items = complete_at(&backend, &uri, text, 1, 3).await;
@@ -889,7 +889,7 @@ async fn no_generation_for_single_line_docblock() {
 #[tokio::test]
 async fn no_generation_inside_existing_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_existing.php").unwrap();
+    let uri = Uri::parse("file:///gen_existing.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -909,7 +909,7 @@ async fn no_generation_inside_existing_docblock() {
 #[tokio::test]
 async fn no_generation_with_code_before() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_code_before.php").unwrap();
+    let uri = Uri::parse("file:///gen_code_before.php").unwrap();
     let text = concat!("<?php\n", "$x = /**\n", "function test(): void {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 8).await;
     let item = find_docblock_item(&items);
@@ -923,7 +923,7 @@ async fn no_generation_with_code_before() {
 #[tokio::test]
 async fn generates_docblock_for_override_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_override.php").unwrap();
+    let uri = Uri::parse("file:///gen_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -948,7 +948,7 @@ async fn generates_docblock_for_override_method() {
 #[tokio::test]
 async fn generates_throws_tags() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_throws.php").unwrap();
+    let uri = Uri::parse("file:///gen_throws.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class NotFoundException extends \\Exception {}\n",
@@ -978,7 +978,7 @@ async fn generates_throws_tags() {
 #[tokio::test]
 async fn generates_docblock_for_abstract_method_summary_only() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_abstract.php").unwrap();
+    let uri = Uri::parse("file:///gen_abstract.php").unwrap();
     let text = concat!(
         "<?php\n",
         "abstract class Shape {\n",
@@ -1011,7 +1011,7 @@ async fn generates_docblock_for_abstract_method_summary_only() {
 #[tokio::test]
 async fn generates_docblock_for_abstract_method_with_untyped_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_abstract2.php").unwrap();
+    let uri = Uri::parse("file:///gen_abstract2.php").unwrap();
     let text = concat!(
         "<?php\n",
         "abstract class Shape {\n",
@@ -1042,7 +1042,7 @@ async fn generates_docblock_for_abstract_method_with_untyped_params() {
 #[tokio::test]
 async fn generates_docblock_for_static_method_summary_only() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_static.php").unwrap();
+    let uri = Uri::parse("file:///gen_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -1078,7 +1078,7 @@ async fn generates_docblock_for_static_method_summary_only() {
 #[tokio::test]
 async fn generates_docblock_for_constructor_with_promotion() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_ctor.php").unwrap();
+    let uri = Uri::parse("file:///gen_ctor.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -1114,7 +1114,7 @@ async fn generates_docblock_for_constructor_with_promotion() {
 #[tokio::test]
 async fn generates_var_for_promoted_property_inside_constructor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_promoted_inline.php").unwrap();
+    let uri = Uri::parse("file:///gen_promoted_inline.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1141,7 +1141,7 @@ async fn generates_var_for_promoted_property_inside_constructor() {
 
     // Verify the text edit range starts at the `/**` column, not column 0.
     let edit = match item.unwrap().text_edit.as_ref().unwrap() {
-        CompletionTextEdit::Edit(e) => e,
+        CompletionItemTextEdit::TextEdit(e) => e,
         _ => panic!("Expected a simple TextEdit"),
     };
     assert_eq!(
@@ -1154,7 +1154,7 @@ async fn generates_var_for_promoted_property_inside_constructor() {
 #[tokio::test]
 async fn constructor_gets_param_but_never_return() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_ctor2.php").unwrap();
+    let uri = Uri::parse("file:///gen_ctor2.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -1190,7 +1190,7 @@ async fn constructor_gets_param_but_never_return() {
 #[tokio::test]
 async fn generates_var_for_readonly_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_readonly.php").unwrap();
+    let uri = Uri::parse("file:///gen_readonly.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1220,7 +1220,7 @@ async fn generates_var_for_readonly_property() {
 #[tokio::test]
 async fn generates_docblock_for_standalone_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_standalone.php").unwrap();
+    let uri = Uri::parse("file:///gen_standalone.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1266,7 +1266,7 @@ async fn generates_docblock_for_standalone_function() {
 #[tokio::test]
 async fn docblock_item_is_preselected() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_preselect.php").unwrap();
+    let uri = Uri::parse("file:///gen_preselect.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "function test(): void {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items).unwrap();
@@ -1283,7 +1283,7 @@ async fn docblock_item_is_preselected() {
 #[tokio::test]
 async fn generates_docblock_for_abstract_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_abstract_class.php").unwrap();
+    let uri = Uri::parse("file:///gen_abstract_class.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "abstract class Shape {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items);
@@ -1309,7 +1309,7 @@ async fn generates_docblock_for_abstract_class() {
 #[tokio::test]
 async fn generates_docblock_for_final_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_final_class.php").unwrap();
+    let uri = Uri::parse("file:///gen_final_class.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "final class Singleton {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items);
@@ -1322,7 +1322,7 @@ async fn generates_docblock_for_final_class() {
 #[tokio::test]
 async fn skips_reference_params_with_scalar_types() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_ref.php").unwrap();
+    let uri = Uri::parse("file:///gen_ref.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1344,7 +1344,7 @@ async fn skips_reference_params_with_scalar_types() {
 #[tokio::test]
 async fn generates_param_for_untyped_reference_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_ref2.php").unwrap();
+    let uri = Uri::parse("file:///gen_ref2.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "function swap(&$a, &$b): void {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items);
@@ -1374,7 +1374,7 @@ async fn generates_param_for_untyped_reference_params() {
 #[tokio::test]
 async fn paramless_void_produces_summary_skeleton() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_pv.php").unwrap();
+    let uri = Uri::parse("file:///gen_pv.php").unwrap();
     let text = concat!("<?php\n", "/**\n", "function noop(): void {}\n",);
     let items = complete_at(&backend, &uri, text, 1, 3).await;
     let item = find_docblock_item(&items);
@@ -1401,7 +1401,7 @@ async fn paramless_void_produces_summary_skeleton() {
 /// Helper: open a file and request on-type formatting at the given position.
 async fn format_on_enter(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     text: &str,
     line: u32,
     character: u32,
@@ -1409,10 +1409,8 @@ async fn format_on_enter(
     open_php(backend, uri, text).await;
 
     let params = DocumentOnTypeFormattingParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        position: Position { line, character },
         ch: "\n".to_string(),
         options: FormattingOptions {
             tab_size: 4,
@@ -1434,7 +1432,7 @@ async fn format_on_enter(
 #[tokio::test]
 async fn on_enter_generates_param_for_untyped() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_func.php").unwrap();
+    let uri = Uri::parse("file:///ot_func.php").unwrap();
     let text = "<?php\n/** */\nfunction greet($name, $age): string {}\n";
     let edits = format_on_enter(&backend, &uri, text, 1, 4).await;
     assert!(
@@ -1464,7 +1462,7 @@ async fn on_enter_generates_param_for_untyped() {
 #[tokio::test]
 async fn on_enter_generates_summary_for_fully_typed() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_func_typed.php").unwrap();
+    let uri = Uri::parse("file:///ot_func_typed.php").unwrap();
     let text = "<?php\n/** */\nfunction greet(string $name, int $age): string {}\n";
     let edits = format_on_enter(&backend, &uri, text, 1, 4).await;
     assert!(
@@ -1489,7 +1487,7 @@ async fn on_enter_generates_summary_for_fully_typed() {
 #[tokio::test]
 async fn on_enter_generates_docblock_for_multiline_empty() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_multi.php").unwrap();
+    let uri = Uri::parse("file:///ot_multi.php").unwrap();
     let text = "<?php\n/**\n * \n */\nfunction test($x): bool {}\n";
     // Cursor on line 2 (the ` * ` line).
     let edits = format_on_enter(&backend, &uri, text, 2, 3).await;
@@ -1517,7 +1515,7 @@ async fn on_enter_generates_docblock_for_multiline_empty() {
 #[tokio::test]
 async fn on_enter_summary_for_void_with_scalar_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_void.php").unwrap();
+    let uri = Uri::parse("file:///ot_void.php").unwrap();
     let text = "<?php\n/** */\nfunction doStuff(int $n): void {}\n";
     let edits = format_on_enter(&backend, &uri, text, 1, 4).await;
     assert!(!edits.is_empty());
@@ -1541,7 +1539,7 @@ async fn on_enter_summary_for_void_with_scalar_params() {
 #[tokio::test]
 async fn on_enter_generates_docblock_for_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_class.php").unwrap();
+    let uri = Uri::parse("file:///ot_class.php").unwrap();
     let text = "<?php\n/** */\nclass MyService {}\n";
     let edits = format_on_enter(&backend, &uri, text, 1, 4).await;
     assert!(!edits.is_empty(), "Should produce edits for class docblock");
@@ -1562,7 +1560,7 @@ async fn on_enter_generates_docblock_for_class() {
 #[tokio::test]
 async fn on_enter_generates_var_for_untyped_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_prop.php").unwrap();
+    let uri = Uri::parse("file:///ot_prop.php").unwrap();
     let text = "<?php\nclass Foo {\n    /** */\n    public $name;\n}\n";
     let edits = format_on_enter(&backend, &uri, text, 2, 7).await;
     assert!(!edits.is_empty());
@@ -1584,7 +1582,7 @@ async fn on_enter_generates_var_for_untyped_property() {
 #[tokio::test]
 async fn on_enter_generates_var_for_typed_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_prop_typed.php").unwrap();
+    let uri = Uri::parse("file:///ot_prop_typed.php").unwrap();
     let text = "<?php\nclass Foo {\n    /** */\n    public string $name;\n}\n";
     let edits = format_on_enter(&backend, &uri, text, 2, 7).await;
     assert!(!edits.is_empty());
@@ -1602,7 +1600,7 @@ async fn on_enter_generates_var_for_typed_property() {
 #[tokio::test]
 async fn on_enter_generates_var_for_promoted_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_promoted.php").unwrap();
+    let uri = Uri::parse("file:///ot_promoted.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1638,7 +1636,7 @@ async fn on_enter_generates_var_for_promoted_property() {
 #[tokio::test]
 async fn on_enter_uses_declaration_indent_not_block_indent() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_promoted_misindent.php").unwrap();
+    let uri = Uri::parse("file:///ot_promoted_misindent.php").unwrap();
     // Simulate Zed: `/** */` at 4-space indent, declaration at 8-space.
     let text = concat!(
         "<?php\n",
@@ -1673,7 +1671,7 @@ async fn on_enter_uses_declaration_indent_not_block_indent() {
 #[tokio::test]
 async fn on_enter_preserves_indentation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_indent.php").unwrap();
+    let uri = Uri::parse("file:///ot_indent.php").unwrap();
     let text = "<?php\nclass Foo {\n    /** */\n    public function bar($x): int {}\n}\n";
     let edits = format_on_enter(&backend, &uri, text, 2, 7).await;
     assert!(!edits.is_empty());
@@ -1703,7 +1701,7 @@ async fn on_enter_preserves_indentation() {
 #[tokio::test]
 async fn on_enter_does_not_replace_existing_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_existing.php").unwrap();
+    let uri = Uri::parse("file:///ot_existing.php").unwrap();
     let text = "<?php\n/**\n * This function does stuff.\n */\nfunction test(): void {}\n";
     // Cursor on the comment-content line.
     let edits = format_on_enter(&backend, &uri, text, 2, 5).await;
@@ -1719,7 +1717,7 @@ async fn on_enter_does_not_replace_existing_docblock() {
 #[tokio::test]
 async fn on_enter_generates_for_override() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_override.php").unwrap();
+    let uri = Uri::parse("file:///ot_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -1744,7 +1742,7 @@ async fn on_enter_generates_for_override() {
 #[tokio::test]
 async fn on_enter_generates_var_for_typed_constant() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_const.php").unwrap();
+    let uri = Uri::parse("file:///ot_const.php").unwrap();
     let text = "<?php\nclass Foo {\n    /** */\n    public const int MAX = 100;\n}\n";
     let edits = format_on_enter(&backend, &uri, text, 2, 7).await;
     assert!(!edits.is_empty());
@@ -1763,7 +1761,7 @@ async fn on_enter_generates_var_for_typed_constant() {
 #[tokio::test]
 async fn on_enter_edit_covers_original_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_range.php").unwrap();
+    let uri = Uri::parse("file:///ot_range.php").unwrap();
     let text = "<?php\n/** */\nfunction test(): void {}\n";
     let edits = format_on_enter(&backend, &uri, text, 1, 4).await;
     assert!(!edits.is_empty());
@@ -1783,7 +1781,7 @@ async fn on_enter_edit_covers_original_block() {
 #[tokio::test]
 async fn generates_return_when_attribute_before_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_attr_override.php").unwrap();
+    let uri = Uri::parse("file:///gen_attr_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1812,7 +1810,7 @@ async fn generates_return_when_attribute_before_declaration() {
 #[tokio::test]
 async fn generates_param_when_multiline_attribute_before_declaration() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_attr_multi.php").unwrap();
+    let uri = Uri::parse("file:///gen_attr_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1849,7 +1847,7 @@ async fn generates_param_when_multiline_attribute_before_declaration() {
 #[tokio::test]
 async fn generates_docblock_when_multiple_attributes() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_attr_multiple.php").unwrap();
+    let uri = Uri::parse("file:///gen_attr_multiple.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1885,7 +1883,7 @@ async fn generates_docblock_when_multiple_attributes() {
 #[tokio::test]
 async fn generates_docblock_when_attribute_shares_the_declaration_line() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_attr_inline.php").unwrap();
+    let uri = Uri::parse("file:///gen_attr_inline.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1920,7 +1918,7 @@ async fn generates_docblock_when_attribute_shares_the_declaration_line() {
 #[tokio::test]
 async fn no_generation_inside_function_body_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_var_assign.php").unwrap();
+    let uri = Uri::parse("file:///gen_var_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -1940,7 +1938,7 @@ async fn no_generation_inside_function_body_variable() {
 #[tokio::test]
 async fn on_enter_no_generation_inside_function_body_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_var_assign.php").unwrap();
+    let uri = Uri::parse("file:///ot_var_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -1959,7 +1957,7 @@ async fn on_enter_no_generation_inside_function_body_variable() {
 #[tokio::test]
 async fn no_generation_inside_nested_scope_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_var_nested.php").unwrap();
+    let uri = Uri::parse("file:///gen_var_nested.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo() {\n",
@@ -1985,7 +1983,7 @@ async fn no_generation_inside_nested_scope_variable() {
 #[tokio::test]
 async fn generates_var_with_constructor_inferred_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_prop_inferred.php").unwrap();
+    let uri = Uri::parse("file:///gen_prop_inferred.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Repository {\n",                             // 1
@@ -2031,7 +2029,7 @@ async fn generates_var_with_constructor_inferred_type() {
 #[tokio::test]
 async fn generates_var_with_promoted_param_new_default_inferred_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_prop_promoted_inferred.php").unwrap();
+    let uri = Uri::parse("file:///gen_prop_promoted_inferred.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "class Repository {\n",                              // 1
@@ -2070,7 +2068,7 @@ async fn generates_var_with_promoted_param_new_default_inferred_type() {
 #[tokio::test]
 async fn generates_var_with_native_type_ignores_constructor_assignment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_prop_native_wins.php").unwrap();
+    let uri = Uri::parse("file:///gen_prop_native_wins.php").unwrap();
     let text = concat!(
         "<?php\n",                                         // 0
         "class Dog { public function bark(): void {} }\n", // 1
@@ -2109,7 +2107,7 @@ async fn generates_var_with_native_type_ignores_constructor_assignment() {
 #[tokio::test]
 async fn on_enter_generates_var_with_constructor_inferred_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///ot_prop_inferred.php").unwrap();
+    let uri = Uri::parse("file:///ot_prop_inferred.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Repository {\n",                             // 1
@@ -2150,7 +2148,7 @@ async fn on_enter_generates_var_with_constructor_inferred_type() {
 #[tokio::test]
 async fn generates_var_mixed_when_no_constructor_inference() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///gen_prop_no_infer.php").unwrap();
+    let uri = Uri::parse("file:///gen_prop_no_infer.php").unwrap();
     let text = concat!(
         "<?php\n",              // 0
         "class Service {\n",    // 1

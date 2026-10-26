@@ -40,10 +40,20 @@ include!(concat!(env!("OUT_DIR"), "/stub_map_generated.rs"));
 
 /// The phpstorm-stubs version that was embedded at build time.
 ///
-/// Set by `build.rs` via `cargo:rustc-env`.  Contains the GitHub release
-/// tag (e.g. `"v2025.3"`), `"unknown"` when stubs were present but the
-/// version file was missing, or `"none"` when stubs could not be fetched.
+/// Set by `build.rs` via `cargo:rustc-env`.  Contains the pinned commit
+/// (e.g. `"master@2049ca3cfa"`), `"external"` when the stubs came from
+/// `PHPANTOM_STUBS_DIR`, or `"none"` when the `offline-stubs` feature
+/// built without them.
 pub const STUBS_VERSION: &str = env!("PHPANTOM_STUBS_VERSION");
+
+/// Warning shown when the binary embeds no stubs, so a broken package
+/// says why everything built in is reported as unknown.
+pub(crate) const MISSING_STUBS_WARNING: &str = "PHPantom was built without the PHP standard library stubs, so every built-in function, class, and constant is reported as unknown. Rebuild it with network access, or with PHPANTOM_STUBS_DIR pointing at phpstorm-stubs.";
+
+/// Whether the binary was built with the phpstorm-stubs embedded.
+pub(crate) fn has_embedded_stubs() -> bool {
+    !STUB_FILES.is_empty()
+}
 
 /// URI prefix an embedded class or constant stub is cached under, as in
 /// `phpantom-stub://PDO` or `phpantom-stub://const/PHP_EOL`.

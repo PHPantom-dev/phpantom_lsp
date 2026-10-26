@@ -2,7 +2,7 @@
 //! collector table, the deferred-edit resolution, and the post-processing
 //! every offered edit goes through (template translation, line endings).
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
@@ -41,7 +41,7 @@ fn skip_leading_whitespace(content: &str, params: &CodeActionParams) -> Option<C
 
 /// A code-action collector: appends the actions it offers for the
 /// request to the list.
-type CollectFn = fn(&Backend, &str, &str, &CodeActionParams, &mut Vec<CodeActionOrCommand>);
+type CollectFn = fn(&Backend, &str, &str, &CodeActionParams, &mut Vec<CodeActionResponse>);
 
 /// Whether a collector's actions are offered for a Blade template, whose
 /// edits are planned against the PHP it lowers to.
@@ -59,12 +59,17 @@ enum TemplatePolicy {
 struct Collector {
     collect: CollectFn,
     template: TemplatePolicy,
+    /// Whether the actions are offered in a resource document (a Twig
+    /// template, a YAML or XML file).  Only the ones about a string key
+    /// it names are; the rest are about PHP code it does not hold.
+    in_resource: bool,
 }
 
 const fn offer(collect: CollectFn) -> Collector {
     Collector {
         collect,
         template: TemplatePolicy::Offer,
+        in_resource: false,
     }
 }
 
@@ -72,6 +77,15 @@ const fn skip_in_template(collect: CollectFn) -> Collector {
     Collector {
         collect,
         template: TemplatePolicy::Skip,
+        in_resource: false,
+    }
+}
+
+const fn offer_in_resource(collect: CollectFn) -> Collector {
+    Collector {
+        collect,
+        template: TemplatePolicy::Offer,
+        in_resource: true,
     }
 }
 
@@ -106,8 +120,8 @@ static COLLECTORS: &[Collector] = &[
     skip_in_template(Backend::collect_fix_class_name_actions),
     offer(Backend::collect_fix_class_case_actions),
     offer(Backend::collect_extract_interface_actions),
-    offer(Backend::collect_create_missing_view_actions),
-    offer(Backend::collect_insert_translation_key_actions),
+    offer_in_resource(Backend::collect_create_missing_view_actions),
+    offer_in_resource(Backend::collect_insert_translation_key_actions),
 ];
 
 impl Backend {
@@ -122,7 +136,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-    ) -> Vec<CodeActionOrCommand> {
+    ) -> Vec<CodeActionResponse> {
         let mut actions = Vec::new();
 
         let adjusted = skip_leading_whitespace(content, params);
@@ -134,8 +148,11 @@ impl Backend {
         let _scope = self.enter_request_scope_borrowed(content);
 
         let is_template = self.is_blade_file(uri);
+        let is_resource = self.is_resource_uri(uri);
         for collector in COLLECTORS {
-            if is_template && collector.template == TemplatePolicy::Skip {
+            if is_template && collector.template == TemplatePolicy::Skip
+                || is_resource && !collector.in_resource
+            {
                 continue;
             }
             (collector.collect)(self, uri, content, params, &mut actions);
@@ -145,7 +162,7 @@ impl Backend {
         // to; the editor applies them to the template itself.
         let eol = crate::text_position::line_ending(content);
         for action in &mut actions {
-            if let CodeActionOrCommand::CodeAction(CodeAction {
+            if let CodeActionResponse::CodeAction(CodeAction {
                 edit: Some(edit), ..
             }) = action
             {
@@ -156,10 +173,10 @@ impl Backend {
 
         if !self.caps().code_action_resolve {
             actions.retain_mut(|action| match action {
-                CodeActionOrCommand::CodeAction(action) => {
+                CodeActionResponse::CodeAction(action) => {
                     self.inline_deferred_edit(action, content)
                 }
-                CodeActionOrCommand::Command(_) => true,
+                CodeActionResponse::Command(_) => true,
             });
         }
 
@@ -364,7 +381,7 @@ impl Backend {
     ) {
         use crate::text_position::{line_ending, match_line_ending};
 
-        let eol_of = |target: &Url| {
+        let eol_of = |target: &Uri| {
             if target.as_str() == uri {
                 return eol;
             }

@@ -1,14 +1,14 @@
 //! Environment-variable names: `env('APP_NAME')` and `Env::get('APP_NAME')`.
 //!
 //! The symbol map records both spellings as
-//! [`crate::symbol_map::LaravelStringKind::Env`] spans, so find-references
+//! [`crate::symbol_map::StringKeyKind::Env`] spans, so find-references
 //! and hover come from the same index every other Laravel string key uses.
 //! What a name resolves *to* is the line that declares it in the project's
 //! `.env`, which is what this module supplies.
 
 use std::path::Path;
 
-use tower_lsp::lsp_types::{Location, Position};
+use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
 

@@ -774,7 +774,7 @@ mod tests {
                 .is_some()
         };
         let uri_of = |relative: &str| {
-            tower_lsp::lsp_types::Url::from_file_path(root.join(relative))
+            tower_lsp_server::gen_lsp_types::Uri::from_file_path(root.join(relative))
                 .unwrap()
                 .to_string()
         };
@@ -808,10 +808,11 @@ mod tests {
         backend.blade_discovery();
         backend.laravel.string_key_cache.write().view_roots = None;
         write(&root, "resources/views/about.blade.php", "");
-        let uri =
-            tower_lsp::lsp_types::Url::from_file_path(root.join("resources/views/about.blade.php"))
-                .unwrap()
-                .to_string();
+        let uri = tower_lsp_server::gen_lsp_types::Uri::from_file_path(
+            root.join("resources/views/about.blade.php"),
+        )
+        .unwrap()
+        .to_string();
 
         let (done, finished) = std::sync::mpsc::channel();
         let refresh = backend.clone_for_blocking();

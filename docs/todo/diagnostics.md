@@ -343,74 +343,6 @@ it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at
 something the type engine has already decided.
 
-## D24. A `match` that does not cover every enum case is not reported
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-enum Suit: string { case Hearts = 'H'; case Spades = 'S'; }
-
-function name(Suit $s): string {
-    return match ($s) {          // should be reported: Suit::Hearts throws UnhandledMatchError
-        Suit::Spades => 'spades',
-    };
-}
-
-function describe(Suit $s): string {
-    if ($s->value === 'H') {
-        return 'hearts';
-    }
-    return match ($s) {          // must stay silent: only Spades reaches here
-        Suit::Spades => 'spades',
-    };
-}
-```
-
-A `match` with no `default` arm throws `UnhandledMatchError` for any subject
-value no arm covers. When the subject resolves to a closed set (an enum, a
-union of enum cases, a `bool`, or a union of literals), subtract each arm's
-conditions from it and report what is left. PHPStan (`match.unhandled`),
-Psalm (`UnhandledMatchCondition`), mago and Qodana all do.
-
-The second function is part of the job, not a follow-up. The check can only
-stay quiet there if a comparison on a backed enum's `->value` narrows the
-enum itself, so `$s->value === 'H'` has to remove `Suit::Hearts` from `$s`
-on the fall-through path. Without that narrowing the check would be a new
-false positive. PHPStan and Psalm report the second function too, and the
-suite counts that against them. Removing a case from an enum-typed
-variable needs a type for the single case, which is
-[T44](type-inference.md#t44-a-single-enum-case-has-no-type).
-
-Found running the php-typing-conformance suite
-(`regressions_backed_enum_value_narrowing.php`). A quick fix to add the
-missing arms is [H16](phpstan-actions.md#h16-matchunhandled-add-missing-match-arms) (`match.unhandled`), which could
-then attach to this diagnostic instead of only PHPStan's.
-
-## D26. Reading a typed property that nothing initialises is not reported
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-```php
-final class User { public string $name; }
-$user = new User();
-echo $user->name; // Error: must not be accessed before initialization
-```
-
-A typed property without a default starts *uninitialized*, and reading it
-throws. The declaration-side check is the tractable half: flag a typed,
-non-promoted property with no default that no constructor path assigns.
-Psalm's `MissingConstructor` works this way. The read-side check needs
-definite-assignment tracking across the constructor and is the harder half.
-
-Keep it conservative. Frameworks and ORMs hydrate properties by reflection
-(Doctrine entities, serializers, `#[Inject]`), and a diagnostic that flags
-all of them is a false positive on correct code. Consider exempting classes
-whose properties carry an attribute or an ORM mapping docblock, and put the
-check behind a `[diagnostics]` toggle if a safe default can't be found.
-
-Found running the php-typing-conformance suite
-(`properties_uninitialized_read.php`). Psalm and Qodana report it.
-
 ## D28. "Remove unreachable code" is wired to PHPStan only
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -467,3 +399,145 @@ dimmed, but the state on either side of it has to carry through.
 
 **Fix:** Thread the reachable/unreachable state through both wrappers
 instead of restarting the scan inside them.
+
+---
+
+## D30. Getting a private Symfony service from the container is not reported
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+$container->get('app.mailer'); // throws: the service is private
+```
+
+Services are private by default since Symfony 3.4: a service is public only
+when its declaration says `public: true` (or `->public()`, or
+`public="true"` in XML), directly or through `_defaults`, or when an alias
+to it is public. Getting a private one from the container throws at
+runtime. PHPStan's Symfony extension reports it from the compiled
+container; the service declarations PHPantom already reads say the same
+for the project's own services. Only judge a service the project declares,
+leave the test container (which exposes private services) alone, and treat
+a service locator or a `ServiceSubscriberInterface` subscriber's own
+`get()` as reading its locator rather than the container.
+
+**Where to look:** `src/symfony/resources.rs` (the declarations),
+`src/diagnostics/laravel_string_keys.rs` (where unknown service IDs are
+judged), and PHPStan's Symfony extension (`ContainerInterfacePrivateServiceRule`).
+The extension's fixture, `tests/fixtures/phpstan_symfony/private_service_in_test.fixture`,
+guards the test container.
+
+---
+
+## D31. Doctrine mappings that disagree with the entity are not reported
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```php
+#[ORM\Column(type: 'string', nullable: true)]
+private string $name; // the column can be null, the property cannot
+```
+
+PHPStan's Doctrine extension checks an entity's mapping against its PHP:
+
+- a column's type and nullability against the property's type, both ways
+  (what the database hands the property, and what the property writes);
+- a relation against the property's type (a to-one is the target entity,
+  a to-many a `Collection` of it);
+- a `final` entity or constructor, which Doctrine cannot proxy unless
+  native lazy objects are enabled;
+- a mapping Doctrine itself rejects, such as an entity without an
+  identifier;
+- a Doctrine proxy class named directly.
+
+The column types map to PHP types through a table of Doctrine's built-in
+types, which custom types have to extend. Read the mapping from attributes
+and from XML, the same mapping the entity and repository CodeLens reads.
+
+**Where to look:** `src/framework.rs` (the Doctrine mapping index), and
+PHPStan's Doctrine extension (`Rules/Doctrine/ORM/`, `Type/Doctrine/Descriptors/`).
+The extension's fixtures are the `entity_*.fixture` fixtures in
+`tests/fixtures/phpstan_doctrine/`, on the entities under
+`tests/phpstan_doctrine/rules/Doctrine/ORM/`, whose custom column types
+`entity-manager.php` registers.
+
+---
+
+## D33. Private properties nothing reads or writes are not reported
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+final class Invoice
+{
+    private string $legacyNumber; // never read
+    private int $total;           // read, never written
+}
+```
+
+A private property nothing outside the class can reach is dead when the
+class never reads it, and holds only its default when the class never
+writes it. A typed one without a default is already reported by
+`uninitialized_property` when the class never writes it; its write
+bookkeeping in `src/diagnostics/uninitialized_properties.rs` is a starting
+point for the rest. Both are a bug or leftover code more often than not, and PHPStan
+reports them (`property.unused`, `property.onlyRead`, `property.onlyWritten`).
+
+Frameworks read and write properties PHP code does not: Doctrine writes an
+entity's generated identifier and every mapped field when it hydrates, and
+reads them when it flushes; Gedmo writes the fields its attributes mark;
+Symfony writes a `#[Required]` property while autowiring. Those count as
+read and written (PHPStan's Doctrine extension models Doctrine's and
+Gedmo's), or the check flags correct entities.
+
+The Doctrine extension's fixtures are `unused_private_property*.fixture`
+and `gedmo_property_assign*.fixture` in `tests/fixtures/phpstan_doctrine/`.
+
+**Where to look:** the unused-variable check (`src/diagnostics/unused_variables.rs`)
+for the read/write bookkeeping, the Doctrine mapping index in
+`src/framework.rs`, and PHPStan's `UnusedPrivatePropertyRule` with the
+Doctrine extension's `PropertiesExtension`s.
+
+---
+
+## D39. Writes to a `@readonly` property are not checked
+
+**Impact: Low · Complexity: Medium**
+
+```php
+final class Invoice
+{
+    /** @readonly */
+    public int $total;
+}
+
+$invoice->total = 0; // nothing reported
+```
+
+`@readonly` (and `@psalm-readonly`, `@phpstan-readonly`) marks a property
+that may only be initialized once, from inside its class, the way native
+`readonly` does, for code that predates PHP 8.1. `invalid_readonly_write`
+only knows the native keyword, so a write from outside the class or a
+second assignment in the constructor goes unreported. The check applies
+unchanged once the property counts as readonly. PHPStan's Doctrine
+extension fixture `missing_readonly_property_assign_phpdoc.fixture` in
+`tests/fixtures/phpstan_doctrine/` has the constructor case.
+
+---
+
+## D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties
+
+**Impact: Low · Complexity: Medium**
+
+`uninitialized_property` reads a Doctrine entity's mapping attributes to
+tell the fields Doctrine generates (an identifier, a version field) from
+the ones the class has to initialize. An entity mapped in XML or YAML
+carries none, so the check skips the entities the Doctrine mapping index
+pairs with a repository, and still reports the generated identifier of
+one mapped without a repository class. Reading each mapped entity's
+generated fields into the index would let the check treat both kinds the
+same.
+
+**Where to look:** `src/framework.rs` (the Doctrine mapping index, which
+D31 also needs) and `src/diagnostics/uninitialized_properties.rs`.
+

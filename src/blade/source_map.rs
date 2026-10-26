@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 /// Source map from virtual PHP back to original Blade positions.
 #[derive(Debug, Clone)]

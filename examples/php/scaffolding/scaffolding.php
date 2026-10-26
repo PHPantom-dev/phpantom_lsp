@@ -276,6 +276,11 @@ class StaticPropHolder
 
     /** @var self */
     public self $holder;
+
+    public function __construct()
+    {
+        $this->holder = $this;
+    }
 }
 
 // PenDrawer — used by ConditionalReturnDemo (conditionals keyed on the type
@@ -783,7 +788,7 @@ class ScaffoldingIteration
 class ScaffoldingArrayFunc
 {
     /** @var list<Pen> */
-    public array $members;
+    public array $members = [];
 
     /** @return list<Pen> */
     public function roster(): array { return []; }
@@ -2907,5 +2912,16 @@ class ScaffoldingBranchVault extends ScaffoldingVault
     public function ledger(): string
     {
         return $this->ledger;
+    }
+}
+
+
+// ── Dynamic member name scaffolding ─────────────────────────────────────────
+
+class ScaffoldingFieldLabel
+{
+    public function __toString(): string
+    {
+        return 'title';
     }
 }

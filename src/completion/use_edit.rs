@@ -13,7 +13,7 @@
 //! written by [`crate::blade::use_block`].
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::blade::use_block::TemplateUseBlock;

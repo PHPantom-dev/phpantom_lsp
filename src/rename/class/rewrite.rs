@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::text_position::{position_to_byte_offset, ranges_overlap};
@@ -30,7 +30,7 @@ pub(super) struct FileRewrite {
     /// virtual PHP it lowers to.  Shared by every block of the file.
     pub(super) content: Arc<String>,
     /// The URI the file's edits are filed under.
-    pub(super) target_uri: Url,
+    pub(super) target_uri: Uri,
     /// The block's namespace.
     pub(super) namespace: Option<String>,
     /// The block's byte range, or `None` when the file has only one

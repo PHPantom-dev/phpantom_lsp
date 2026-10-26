@@ -1,6 +1,6 @@
 //! An index with flags that let hot paths skip its lock.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -10,12 +10,14 @@ use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 /// The hot paths that consult such an index (every class load asks the
 /// macro and pivot indexes) read the flag first, so the common case where
 /// the project has none takes no lock at all.  Whoever writes the index
-/// keeps the flag current with [`Self::set_has_any`] or [`Self::replace`].
+/// keeps the flag current with [`Self::set_has_any`] or [`Self::replace`],
+/// which also move [`Self::generation`].
 #[derive(Default)]
 pub(crate) struct GatedIndex<T> {
     index: RwLock<T>,
     has_any: AtomicBool,
     dirty: AtomicBool,
+    generation: AtomicU64,
 }
 
 impl<T> GatedIndex<T> {
@@ -25,6 +27,7 @@ impl<T> GatedIndex<T> {
             index: RwLock::new(index),
             has_any: AtomicBool::new(false),
             dirty: AtomicBool::new(true),
+            generation: AtomicU64::new(0),
         }
     }
 
@@ -46,8 +49,17 @@ impl<T> GatedIndex<T> {
         self.has_any.load(Ordering::Relaxed)
     }
 
+    /// Record whether the index holds anything, once a write to it is
+    /// done.
     pub(crate) fn set_has_any(&self, has_any: bool) {
         self.has_any.store(has_any, Ordering::Relaxed);
+        self.generation.fetch_add(1, Ordering::Release);
+    }
+
+    /// A stamp that moves with every finished write, for a memo of what was
+    /// derived from the index.  Read it before reading the index.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
     }
 
     /// Swap in a rebuilt index.

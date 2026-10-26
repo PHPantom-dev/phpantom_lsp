@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
@@ -41,7 +41,7 @@ pub(crate) fn namespace_mismatch_diagnostic(
 
     Some(make_diagnostic(
         range,
-        DiagnosticSeverity::WARNING,
+        DiagnosticSeverity::Warning,
         "namespace_mismatch",
         format!("Namespace `{actual_display}` does not match PSR-4 expected `{expected_display}`"),
     ))

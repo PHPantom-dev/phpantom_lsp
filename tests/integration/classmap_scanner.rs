@@ -7,8 +7,8 @@
 use crate::common::create_psr4_workspace;
 use crate::common::open_php;
 use phpantom_lsp::classmap_scanner;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── classmap_scanner::find_classes unit-level integration ──────────────────
 
@@ -324,7 +324,7 @@ class Service {
         ],
     );
 
-    let service_uri = Url::from_file_path(dir.path().join("src/Service.php")).unwrap();
+    let service_uri = Uri::from_file_path(dir.path().join("src/Service.php")).unwrap();
     let service_content = std::fs::read_to_string(dir.path().join("src/Service.php")).unwrap();
 
     open_php(&backend, &service_uri, &service_content).await;
@@ -332,7 +332,7 @@ class Service {
     // Trigger completion at `$product->`
     let result = backend
         .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: service_uri.clone(),
                 },
@@ -353,8 +353,8 @@ class Service {
         .unwrap();
 
     let items = match result {
-        Some(CompletionResponse::List(list)) => list.items,
-        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
         None => vec![],
     };
 
@@ -408,7 +408,7 @@ async fn self_scan_classmap_populates_backend_classmap() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
@@ -423,12 +423,12 @@ class Test {
 }
 "#;
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, test_file).await;
 
     let result = backend
         .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position: Position {
                     line: 6,
@@ -447,8 +447,8 @@ class Test {
         .unwrap();
 
     let items = match result {
-        Some(CompletionResponse::List(list)) => list.items,
-        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
         None => vec![],
     };
 

@@ -20,7 +20,7 @@ use mago_syntax::cst::class_like::method::MethodBody;
 use mago_syntax::cst::class_like::property::{PlainProperty, Property, PropertyItem};
 use mago_syntax::cst::modifier::Modifier;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
@@ -63,9 +63,9 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
-        let doc_uri: Url = match uri.parse() {
+        let doc_uri: Uri = match uri.parse() {
             Ok(u) => u,
             Err(_) => return,
         };
@@ -124,15 +124,16 @@ impl Backend {
             });
         }
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title: "Promote to constructor property".to_string(),
-            kind: Some(CodeActionKind::new("refactor.rewrite")),
+            kind: Some(CodeActionKind::RefactorRewrite),
             diagnostics: None,
             edit: Some(crate::code_actions::single_file_edit(doc_uri, edits)),
             command: None,
             is_preferred: None,
             disabled: None,
             data: None,
+            tags: None,
         }));
     }
 }

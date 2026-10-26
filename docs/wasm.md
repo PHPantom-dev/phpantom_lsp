@@ -111,7 +111,7 @@ it, answer requests about it. Whole-project features are compiled out or simply
 absent, because they depend on things wasm does not have:
 
 - **The stdio and TCP transports.** The host calls `lsp_handle` directly, so
-  `tower-lsp`'s transport (and the `tokio` `net` feature, which pulls in `mio`)
+  `tower-lsp-server`'s transport (and the `tokio` `net` feature, which pulls in `mio`)
   is not built. `tokio` is declared per-target in `Cargo.toml` for this reason.
 - **Parallel project indexing.** The `analyze` and `fix` batch paths spawn OS
   worker threads. That is project indexing, not what an editor needs per

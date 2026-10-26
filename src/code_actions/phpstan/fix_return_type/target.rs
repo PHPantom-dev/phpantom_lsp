@@ -13,7 +13,7 @@ use std::ops::RangeInclusive;
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::TextEdit;
+use tower_lsp_server::gen_lsp_types::TextEdit;
 
 use crate::code_actions::FunctionDocblock;
 use crate::code_actions::cursor_context::FunctionLike;

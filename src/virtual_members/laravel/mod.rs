@@ -327,6 +327,27 @@ pub(crate) fn view_helper_returns_view(func_name: &str, text_args: &str) -> bool
     !first.is_empty() && !first.eq_ignore_ascii_case("null")
 }
 
+/// The fully-qualified name of the response class the `response()` helper
+/// builds when it is given content.
+pub const RESPONSE_FQN: &str = "Illuminate\\Http\\Response";
+
+/// Whether a call to the `response()` helper builds a response rather than
+/// returning the response factory.
+///
+/// The helper's declared return type is
+/// `($content is null ? ResponseFactory : Response)`, but its body branches
+/// on `func_num_args()`: any call with an argument returns
+/// `$factory->make($content ?? '', …)`, even when that argument is `null`.
+/// Following the docblock would type every `response($maybeNull)` as the
+/// union of both.
+pub(crate) fn response_helper_returns_response(func_name: &str, text_args: &str) -> bool {
+    if func_name.trim_start_matches('\\') != "response" {
+        return false;
+    }
+    let args = text_args.trim();
+    !args.is_empty() && args != "..."
+}
+
 /// Build a substitution map that replaces `static`, `$this`, and `self`
 /// with the given type.
 ///

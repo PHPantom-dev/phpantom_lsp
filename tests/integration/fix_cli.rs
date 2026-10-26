@@ -741,7 +741,7 @@ fn unused_use_directives_are_removed_from_the_template() {
                    \n\
                    <div>{{ User::query()->count() }} {{ Team::first() }}</div>\n";
     std::fs::write(&path, content).expect("failed to write the template");
-    let uri = tower_lsp::lsp_types::Url::from_file_path(&path)
+    let uri = tower_lsp_server::gen_lsp_types::Uri::from_file_path(&path)
         .expect("a file URI")
         .to_string();
 

@@ -6,7 +6,7 @@
 //! position in it to resolve from. This reads the raw Blade buffer
 //! instead, the same way component completion does.
 
-use tower_lsp::lsp_types::{Location, Position, Range};
+use tower_lsp_server::gen_lsp_types::{Location, Position, Range};
 
 use crate::Backend;
 use crate::blade::component_tags::{TagCursor, TagKind, tag_context_at};

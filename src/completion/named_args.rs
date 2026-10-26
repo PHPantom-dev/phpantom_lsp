@@ -18,7 +18,7 @@
 //! - Positional arguments are counted to skip leading parameters
 //! - The user's partial prefix is used for filtering
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::text_scan::skip_string_backward;
 
@@ -510,7 +510,7 @@ pub fn build_named_arg_completions(
 
         items.push(CompletionItem {
             label,
-            kind: Some(CompletionItemKind::VARIABLE),
+            kind: Some(CompletionItemKind::Variable),
             detail,
             insert_text: Some(insert),
             filter_text: Some(bare_name.to_string()),

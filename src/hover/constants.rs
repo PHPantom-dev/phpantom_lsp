@@ -3,7 +3,7 @@
 //! The value comes from the constant lookup chain in
 //! `resolution/constants.rs`.
 
-use tower_lsp::lsp_types::Hover;
+use tower_lsp_server::gen_lsp_types::Hover;
 
 use crate::Backend;
 

@@ -30,16 +30,33 @@ pub(crate) struct WorkspaceEnv {
     pub(crate) vendor_uri_prefixes: Mutex<Vec<String>>,
     /// Absolute raw and canonical paths of all known vendor directories.
     pub(crate) vendor_dir_paths: Mutex<Vec<PathBuf>>,
+    /// Who registered each entry of `vendor_dir_paths` and
+    /// `vendor_uri_prefixes`, which are the union of these.
+    ///
+    /// One spelling can be registered for more than one reason (a folder
+    /// of the editor's workspace that is also an `[indexing] include`
+    /// path), so a source that lets go of its locations only removes the
+    /// spellings no other source still claims.
+    pub(crate) library_claims: Mutex<Vec<LibraryClaim>>,
     /// Canonical vendor package roots paired with completion provenance.
     pub(crate) vendor_package_origin_roots:
         Arc<RwLock<Vec<(PathBuf, ClassCompletionOrigin, String)>>>,
     /// What each indexed Composer project (the workspace root, or each
-    /// subproject of a monorepo) contributed to `psr4_mappings` and
-    /// `vendor_package_origin_roots`, which are the union of these.
+    /// subproject of a monorepo) contributed to `psr4_mappings`,
+    /// `vendor_package_origin_roots`, and the stub paths.
     ///
     /// Kept per project so a `composer update` in one subproject replaces
     /// that subproject's share and leaves the others' alone.
     pub(crate) composer_projects: Arc<RwLock<Vec<ComposerProjectPaths>>>,
+    /// The editor's workspace folders, as `initialize` and
+    /// `workspace/didChangeWorkspaceFolders` report them.
+    ///
+    /// The one holding `workspace_root` is this server's own project;
+    /// the others are indexed as library code beside it (see
+    /// [`Backend::extra_roots`](crate::Backend::extra_roots)). Shared by
+    /// `Arc` so the clone that walks for a newly added folder reads the
+    /// list the notification handler wrote.
+    pub(crate) workspace_folders: Arc<RwLock<Vec<PathBuf>>>,
     /// The target PHP version used for version-aware stub filtering.
     pub(crate) php_version: Mutex<PhpVersion>,
     /// Per-project configuration loaded from `.phpantom.toml`.
@@ -73,6 +90,10 @@ pub(crate) struct WorkspaceEnv {
     /// reason `config` is, since a `didChangeConfiguration` handled on
     /// one clone has to be visible to every other.
     pub(crate) client_indexing: Arc<RwLock<config::ClientIndexingOptions>>,
+    /// The stub directory the editor extension forwarded, beside the
+    /// `[stubs]` paths of `config`. Shared by `Arc` for the same reason
+    /// `client_indexing` is.
+    pub(crate) client_stubs: Arc<RwLock<config::ClientStubOptions>>,
     /// Directory symlinks the workspace walks have indexed through.
     ///
     /// Shared by `Arc` because the walk that discovers a link runs on a
@@ -89,6 +110,30 @@ pub(crate) struct WorkspaceEnv {
     pub(crate) filter_rediscovery_generation: Arc<AtomicU64>,
 }
 
+/// Why a location is registered as library code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LibraryClaimant {
+    /// A Composer project's vendor directory.
+    Composer,
+    /// An `[indexing] include` path outside the workspace.
+    Include,
+    /// Another folder of the editor's workspace, by the spelling it was
+    /// registered under.
+    ExtraRoot(PathBuf),
+    /// A `[stubs]` path or the editor's stub directory, inside the
+    /// workspace or not: a stub is never analysed or edited.
+    Stubs,
+}
+
+/// One registration of library locations: the path spellings that mark a
+/// file under them and the matching `file://` URI prefixes.
+#[derive(Clone)]
+pub(crate) struct LibraryClaim {
+    pub(crate) claimant: LibraryClaimant,
+    pub(crate) paths: Vec<PathBuf>,
+    pub(crate) uri_prefixes: Vec<String>,
+}
+
 /// The share of the workspace-wide autoload lists one Composer project
 /// contributed.
 #[derive(Default)]
@@ -97,6 +142,8 @@ pub(crate) struct ComposerProjectPaths {
     pub(crate) root: PathBuf,
     pub(crate) psr4_mappings: Vec<composer::Psr4Mapping>,
     pub(crate) package_roots: Vec<(PathBuf, ClassCompletionOrigin, String)>,
+    /// The roots of the stub packages it installed, which are stub paths.
+    pub(crate) stub_packages: Vec<PathBuf>,
 }
 
 impl WorkspaceEnv {
@@ -117,13 +164,16 @@ impl WorkspaceEnv {
             psr4_mappings: Arc::new(RwLock::new(Vec::new())),
             vendor_uri_prefixes: Mutex::new(Vec::new()),
             vendor_dir_paths: Mutex::new(Vec::new()),
+            library_claims: Mutex::new(Vec::new()),
             vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             composer_projects: Arc::new(RwLock::new(Vec::new())),
+            workspace_folders: Arc::new(RwLock::new(Vec::new())),
             php_version: Mutex::new(PhpVersion::default()),
             config: Arc::new(Mutex::new(config::Config::default())),
             global_config_path,
             index_filters: Arc::new(RwLock::new(None)),
             client_indexing: Arc::new(RwLock::new(config::ClientIndexingOptions::default())),
+            client_stubs: Arc::new(RwLock::new(config::ClientStubOptions::default())),
             followed_links: crate::classmap_scanner::FollowedLinks::default(),
             filter_rediscovery_generation: Arc::new(AtomicU64::new(0)),
         }
@@ -137,13 +187,16 @@ impl Clone for WorkspaceEnv {
             psr4_mappings: Arc::clone(&self.psr4_mappings),
             vendor_uri_prefixes: Mutex::new(self.vendor_uri_prefixes.lock().clone()),
             vendor_dir_paths: Mutex::new(self.vendor_dir_paths.lock().clone()),
+            library_claims: Mutex::new(self.library_claims.lock().clone()),
             vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
             composer_projects: Arc::clone(&self.composer_projects),
+            workspace_folders: Arc::clone(&self.workspace_folders),
             php_version: Mutex::new(*self.php_version.lock()),
             config: Arc::clone(&self.config),
             global_config_path: self.global_config_path.clone(),
             index_filters: Arc::clone(&self.index_filters),
             client_indexing: Arc::clone(&self.client_indexing),
+            client_stubs: Arc::clone(&self.client_stubs),
             followed_links: self.followed_links.clone(),
             filter_rediscovery_generation: Arc::clone(&self.filter_rediscovery_generation),
         }

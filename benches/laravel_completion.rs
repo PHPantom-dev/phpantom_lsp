@@ -2,8 +2,8 @@ use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_ma
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use std::hint::black_box;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -22,12 +22,12 @@ async fn setup_laravel_backend() -> Backend {
     Backend::new_test_with_stubs(stubs)
 }
 
-async fn open_file(backend: &Backend, uri_str: &str, content: &str) -> Url {
-    let uri = Url::parse(uri_str).unwrap();
+async fn open_file(backend: &Backend, uri_str: &str, content: &str) -> Uri {
+    let uri = Uri::parse(uri_str).unwrap();
     let params = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
             uri: uri.clone(),
-            language_id: "php".to_string(),
+            language_id: "php".to_string().into(),
             version: 1,
             text: content.to_string(),
         },
@@ -69,7 +69,7 @@ fn bench_laravel_model_completion(c: &mut Criterion) {
         b.iter(|| {
             runtime.block_on(async {
                 let params = CompletionParams {
-                    text_document_position: TextDocumentPositionParams {
+                    text_document_position_params: TextDocumentPositionParams {
                         text_document: TextDocumentIdentifier { uri: uri.clone() },
                         position: Position {
                             line,
@@ -79,7 +79,7 @@ fn bench_laravel_model_completion(c: &mut Criterion) {
                     work_done_progress_params: WorkDoneProgressParams::default(),
                     partial_result_params: PartialResultParams::default(),
                     context: Some(CompletionContext {
-                        trigger_kind: CompletionTriggerKind::INVOKED,
+                        trigger_kind: CompletionTriggerKind::Invoked,
                         trigger_character: None,
                     }),
                 };
@@ -95,7 +95,7 @@ fn bench_laravel_model_completion(c: &mut Criterion) {
                 for i in 1..=4 {
                     let current_col = col - 4 + i;
                     let params = CompletionParams {
-                        text_document_position: TextDocumentPositionParams {
+                        text_document_position_params: TextDocumentPositionParams {
                             text_document: TextDocumentIdentifier { uri: uri.clone() },
                             position: Position {
                                 line,
@@ -105,7 +105,7 @@ fn bench_laravel_model_completion(c: &mut Criterion) {
                         work_done_progress_params: WorkDoneProgressParams::default(),
                         partial_result_params: PartialResultParams::default(),
                         context: Some(CompletionContext {
-                            trigger_kind: CompletionTriggerKind::INVOKED,
+                            trigger_kind: CompletionTriggerKind::Invoked,
                             trigger_character: None,
                         }),
                     };
@@ -151,13 +151,13 @@ Comment::whereIn('comments.subject_type', ["#,
 
 fn assert_morph_alias_completion(response: Option<CompletionResponse>, expected_range: Range) {
     let items = match response.expect("morph column completion must return a response") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert_eq!(items.len(), 1, "expected only the registered morph alias");
     assert_eq!(items[0].label, "post");
-    assert_eq!(items[0].kind, Some(CompletionItemKind::ENUM_MEMBER));
-    let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+    assert_eq!(items[0].kind, Some(CompletionItemKind::EnumMember));
+    let Some(CompletionItemTextEdit::TextEdit(edit)) = &items[0].text_edit else {
         panic!("morph alias completion must replace the literal contents");
     };
     assert_eq!(edit.range, expected_range);
@@ -177,12 +177,12 @@ fn bench_morph_column_completion(c: &mut Criterion) {
             &source,
         ));
         let params = CompletionParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position,
             },
             context: Some(CompletionContext {
-                trigger_kind: CompletionTriggerKind::INVOKED,
+                trigger_kind: CompletionTriggerKind::Invoked,
                 trigger_character: None,
             }),
             work_done_progress_params: WorkDoneProgressParams::default(),

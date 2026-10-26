@@ -9,8 +9,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
+use tower_lsp_server::jsonrpc::Result;
 
 use crate::Backend;
 
@@ -20,7 +20,7 @@ impl Backend {
     pub(crate) fn document_pull_diagnostic(
         &self,
         params: DocumentDiagnosticParams,
-    ) -> Result<DocumentDiagnosticReportResult> {
+    ) -> Result<DocumentDiagnosticReport> {
         let uri_str = params.text_document.uri.to_string();
 
         // Check resultId — if the client sends back the same resultId we
@@ -36,14 +36,17 @@ impl Backend {
                 && let Some(&current_id) = ids.get(&uri_str)
                 && prev_id == &current_id.to_string()
             {
-                return Ok(DocumentDiagnosticReportResult::Report(
-                    DocumentDiagnosticReport::Unchanged(RelatedUnchangedDocumentDiagnosticReport {
-                        related_documents: None,
-                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
-                            result_id: current_id.to_string(),
+                return Ok(
+                    DocumentDiagnosticReport::RelatedUnchangedDocumentDiagnosticReport(
+                        RelatedUnchangedDocumentDiagnosticReport {
+                            related_documents: None,
+                            unchanged_document_diagnostic_report:
+                                UnchangedDocumentDiagnosticReport {
+                                    result_id: current_id.to_string(),
+                                },
                         },
-                    }),
-                ));
+                    ),
+                );
             }
         }
 
@@ -74,15 +77,17 @@ impl Backend {
             (diags, rid)
         };
 
-        Ok(DocumentDiagnosticReportResult::Report(
-            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
-                related_documents: None,
-                full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                    result_id: Some(result_id),
-                    items: diagnostics,
+        Ok(
+            DocumentDiagnosticReport::RelatedFullDocumentDiagnosticReport(
+                RelatedFullDocumentDiagnosticReport {
+                    related_documents: None,
+                    full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                        result_id: Some(result_id),
+                        items: diagnostics,
+                    },
                 },
-            }),
-        ))
+            ),
+        )
     }
 
     /// Body of `workspace/diagnostic`. Reports open files from the live
@@ -91,7 +96,7 @@ impl Backend {
     pub(crate) fn workspace_pull_diagnostic(
         &self,
         params: WorkspaceDiagnosticParams,
-    ) -> Result<WorkspaceDiagnosticReportResult> {
+    ) -> Result<WorkspaceDiagnosticReport> {
         // The first workspace pull releases the deferred background
         // workspace pass (see `wait_for_first_workspace_pull`).  This
         // request returns whatever is cached; the pass streams the rest
@@ -136,19 +141,22 @@ impl Backend {
                 && let Some(prev_id) = previous.get(uri_str.as_str())
                 && *prev_id == current_id.to_string()
             {
-                let uri = match uri_str.parse::<Url>() {
+                let uri = match uri_str.parse::<Uri>() {
                     Ok(u) => u,
                     Err(_) => continue,
                 };
-                items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
-                    WorkspaceUnchangedDocumentDiagnosticReport {
-                        uri,
-                        version: None,
-                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
-                            result_id: current_id.to_string(),
+                items.push(
+                    WorkspaceDocumentDiagnosticReport::WorkspaceUnchangedDocumentDiagnosticReport(
+                        WorkspaceUnchangedDocumentDiagnosticReport {
+                            uri,
+                            version: None,
+                            unchanged_document_diagnostic_report:
+                                UnchangedDocumentDiagnosticReport {
+                                    result_id: current_id.to_string(),
+                                },
                         },
-                    },
-                ));
+                    ),
+                );
                 continue;
             }
 
@@ -171,21 +179,23 @@ impl Backend {
                 )
             };
 
-            let uri = match uri_str.parse::<Url>() {
+            let uri = match uri_str.parse::<Uri>() {
                 Ok(u) => u,
                 Err(_) => continue,
             };
 
-            items.push(WorkspaceDocumentDiagnosticReport::Full(
-                WorkspaceFullDocumentDiagnosticReport {
-                    uri,
-                    version: None,
-                    full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                        result_id: Some(current_id.to_string()),
-                        items: diagnostics,
+            items.push(
+                WorkspaceDocumentDiagnosticReport::WorkspaceFullDocumentDiagnosticReport(
+                    WorkspaceFullDocumentDiagnosticReport {
+                        uri,
+                        version: None,
+                        full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                            result_id: Some(current_id.to_string()),
+                            items: diagnostics,
+                        },
                     },
-                },
-            ));
+                ),
+            );
         }
 
         // ── Background workspace diagnostics (unopened files) ────────
@@ -213,36 +223,37 @@ impl Backend {
         };
 
         for (uri_str, result_id, diagnostics) in workspace_items {
-            let Ok(uri) = uri_str.parse::<Url>() else {
+            let Ok(uri) = uri_str.parse::<Uri>() else {
                 continue;
             };
 
             match diagnostics {
                 // The client already has this exact result set.
-                None => items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
-                    WorkspaceUnchangedDocumentDiagnosticReport {
-                        uri,
-                        version: None,
-                        unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
-                            result_id,
+                None => items.push(
+                    WorkspaceDocumentDiagnosticReport::WorkspaceUnchangedDocumentDiagnosticReport(
+                        WorkspaceUnchangedDocumentDiagnosticReport {
+                            uri,
+                            version: None,
+                            unchanged_document_diagnostic_report:
+                                UnchangedDocumentDiagnosticReport { result_id },
                         },
-                    },
-                )),
-                Some(diags) => items.push(WorkspaceDocumentDiagnosticReport::Full(
-                    WorkspaceFullDocumentDiagnosticReport {
-                        uri,
-                        version: None,
-                        full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                            result_id: Some(result_id),
-                            items: diags,
+                    ),
+                ),
+                Some(diags) => items.push(
+                    WorkspaceDocumentDiagnosticReport::WorkspaceFullDocumentDiagnosticReport(
+                        WorkspaceFullDocumentDiagnosticReport {
+                            uri,
+                            version: None,
+                            full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                                result_id: Some(result_id),
+                                items: diags,
+                            },
                         },
-                    },
-                )),
+                    ),
+                ),
             }
         }
 
-        Ok(WorkspaceDiagnosticReportResult::Report(
-            WorkspaceDiagnosticReport { items },
-        ))
+        Ok(WorkspaceDiagnosticReport { items })
     }
 }

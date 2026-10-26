@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
@@ -76,7 +76,7 @@ impl Backend {
                 };
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     "invalid_enum_case",
                     message,
                 ));
@@ -133,7 +133,7 @@ fn detect_invalid_backing_type(
 
     out.push(make_diagnostic(
         range,
-        DiagnosticSeverity::ERROR,
+        DiagnosticSeverity::Error,
         "invalid_enum_backing_type",
         format!(
             "Enum backing type must be 'int' or 'string', got '{}'",
@@ -170,7 +170,7 @@ fn check_duplicate_values(
             };
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 "invalid_enum_case",
                 format!(
                     "Duplicate value {} in enum '{}': case '{}' and case '{}' share the same value",

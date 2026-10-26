@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use tower_lsp::lsp_types::{Location, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Uri};
 
 use super::*;
 
 /// The route file the helpers below pretend to be reading.
-fn test_uri() -> Url {
-    Url::parse("file:///app/routes/web.php").unwrap()
+fn test_uri() -> Uri {
+    Uri::parse("file:///app/routes/web.php").unwrap()
 }
 
 /// Resolve `target` against the route table of a single route file, as
@@ -14,7 +14,7 @@ fn test_uri() -> Url {
 fn definitions_of(
     content: &str,
     target: &str,
-    uri: &Url,
+    uri: &Uri,
     file_path: Option<&Path>,
     workspace_root: Option<&Path>,
     macros: &MacroScope,
@@ -69,7 +69,7 @@ fn routes_with_macros(content: &str, macro_source: &str, names: &[&str]) -> Vec<
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("provider.php");
     std::fs::write(&path, macro_source).unwrap();
-    let uri = Url::from_file_path(&path).unwrap().to_string();
+    let uri = Uri::from_file_path(&path).unwrap().to_string();
 
     let scope = MacroScope {
         bodies: names
@@ -875,7 +875,7 @@ fn a_registration_assigned_to_a_variable_is_collected() {
 #[test]
 fn definition_resolves_a_name_built_in_a_loop() {
     let content = "<?php\nforeach (['faq', 'terms'] as $page) {\n    Route::get(\"/{$page}\", 'show')->name(\"pages.{$page}\");\n}\n";
-    let uri = Url::parse("file:///app/routes/web.php").unwrap();
+    let uri = Uri::parse("file:///app/routes/web.php").unwrap();
 
     let macros = MacroScope::default();
     let found = definitions_of(content, "pages.terms", &uri, None, None, &macros);
@@ -916,7 +916,7 @@ fn routes_of_file(path: &Path, workspace_root: &Path) -> Vec<RouteEntry> {
     let mut collector = RouteCollector::default();
     walk_route_file(
         &content,
-        &Url::from_file_path(path).unwrap(),
+        &Uri::from_file_path(path).unwrap(),
         Some(path),
         Some(workspace_root),
         &MacroScope::default(),
@@ -977,7 +977,7 @@ fn definition_follows_a_require_target_held_in_a_variable() {
     let found = definitions_of(
         &content,
         "users.index",
-        &Url::from_file_path(&web).unwrap(),
+        &Uri::from_file_path(&web).unwrap(),
         Some(&web),
         Some(dir.path()),
         &MacroScope::default(),
@@ -985,7 +985,7 @@ fn definition_follows_a_require_target_held_in_a_variable() {
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(
         found[0].uri,
-        Url::from_file_path(dir.path().join("routes/admin.php").canonicalize().unwrap()).unwrap()
+        Uri::from_file_path(dir.path().join("routes/admin.php").canonicalize().unwrap()).unwrap()
     );
 }
 

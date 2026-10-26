@@ -7,7 +7,7 @@ use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
 use phpantom_lsp::types::{ClassInfo, ClassLikeKind};
 use std::sync::Arc;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ async fn test_extends_class_excludes_interface() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_ext_cls.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_cls.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nclass Foo extends Some";
 
     let items = complete_at(&backend, &uri, text, 2, 25).await;
@@ -82,7 +82,7 @@ async fn test_extends_class_excludes_final() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_ext_final.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_final.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nclass Foo extends Final";
 
     let items = complete_at(&backend, &uri, text, 2, 25).await;
@@ -102,7 +102,7 @@ async fn test_extends_class_includes_abstract() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_ext_abs.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_abs.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nclass Foo extends Abstract";
 
     let items = complete_at(&backend, &uri, text, 2, 29).await;
@@ -121,7 +121,7 @@ async fn test_extends_class_includes_concrete() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_ext_conc.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_conc.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nclass Foo extends Concrete";
 
     let items = complete_at(&backend, &uri, text, 2, 29).await;
@@ -141,7 +141,7 @@ async fn test_extends_abstract_class_filters() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_ext_abscls.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_abscls.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nabstract class Foo extends Some";
 
     let items = complete_at(&backend, &uri, text, 2, 34).await;
@@ -166,7 +166,7 @@ async fn test_extends_final_class_filters() {
 
     // Note: `final class Foo extends ...` is technically odd
     // (the result is a final class extending something), but PHP allows it.
-    let uri = Url::parse("file:///test_ext_fincls.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_fincls.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nfinal class Foo extends Some";
 
     let items = complete_at(&backend, &uri, text, 2, 31).await;
@@ -187,7 +187,7 @@ async fn test_extends_interface_only_interfaces() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_ext_iface.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_iface.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\ninterface Foo extends Some";
 
     let items = complete_at(&backend, &uri, text, 2, 29).await;
@@ -219,7 +219,7 @@ async fn test_extends_interface_comma_separated() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_ext_iface_comma.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_iface_comma.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\ninterface Foo extends SomeInterface, Another";
 
     let items = complete_at(&backend, &uri, text, 2, 47).await;
@@ -244,7 +244,7 @@ async fn test_implements_only_interfaces() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_impl.php").unwrap();
+    let uri = Uri::parse("file:///test_impl.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nclass Foo implements Some";
 
     let items = complete_at(&backend, &uri, text, 2, 28).await;
@@ -275,7 +275,7 @@ async fn test_implements_comma_separated() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_impl_comma.php").unwrap();
+    let uri = Uri::parse("file:///test_impl_comma.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nclass Foo implements SomeInterface, Another";
 
     let items = complete_at(&backend, &uri, text, 2, 44).await;
@@ -297,7 +297,7 @@ async fn test_implements_comma_separated() {
 async fn test_implements_excludes_constants_and_functions() {
     let backend = crate::common::create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///test_impl_no_const.php").unwrap();
+    let uri = Uri::parse("file:///test_impl_no_const.php").unwrap();
     let text = "<?php\nclass Foo implements str";
 
     let items = complete_at(&backend, &uri, text, 1, 27).await;
@@ -305,7 +305,7 @@ async fn test_implements_excludes_constants_and_functions() {
     // Functions like str_contains should NOT appear.
     let func_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .collect();
     assert!(
         func_items.is_empty(),
@@ -315,7 +315,7 @@ async fn test_implements_excludes_constants_and_functions() {
 
     let const_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .filter(|i| i.kind == Some(CompletionItemKind::Constant))
         .collect();
     assert!(
         const_items.is_empty(),
@@ -332,7 +332,7 @@ async fn test_trait_use_only_traits() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_trait_use.php").unwrap();
+    let uri = Uri::parse("file:///test_trait_use.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -369,7 +369,7 @@ async fn test_trait_use_comma_separated() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_trait_use_comma.php").unwrap();
+    let uri = Uri::parse("file:///test_trait_use_comma.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -399,7 +399,7 @@ async fn test_top_level_use_no_filter() {
 
     // Load classes in a namespace so they appear in class name completions
     // when the test file types a `use` import for them.
-    let scaffolding_uri = Url::parse("file:///ns_scaffolding.php").unwrap();
+    let scaffolding_uri = Uri::parse("file:///ns_scaffolding.php").unwrap();
     open_php(
         &backend,
         &scaffolding_uri,
@@ -414,7 +414,7 @@ async fn test_top_level_use_no_filter() {
     )
     .await;
 
-    let uri = Url::parse("file:///test_ns_use.php").unwrap();
+    let uri = Uri::parse("file:///test_ns_use.php").unwrap();
     let text = "<?php\nuse Qx";
 
     let items = complete_at(&backend, &uri, text, 1, 6).await;
@@ -450,14 +450,14 @@ async fn test_top_level_use_no_filter() {
 async fn test_trait_use_excludes_constants_and_functions() {
     let backend = crate::common::create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///test_trait_use_no_fn.php").unwrap();
+    let uri = Uri::parse("file:///test_trait_use_no_fn.php").unwrap();
     let text = concat!("<?php\n", "class Foo {\n", "    use str\n", "}\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 11).await;
 
     let func_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .collect();
     assert!(
         func_items.is_empty(),
@@ -474,7 +474,7 @@ async fn test_instanceof_excludes_traits() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///test_instanceof.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\n$x instanceof Some";
 
     let items = complete_at(&backend, &uri, text, 2, 18).await;
@@ -493,7 +493,7 @@ async fn test_instanceof_includes_interfaces() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_instanceof_iface.php").unwrap();
+    let uri = Uri::parse("file:///test_instanceof_iface.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\n$x instanceof Some";
 
     let items = complete_at(&backend, &uri, text, 2, 18).await;
@@ -512,7 +512,7 @@ async fn test_instanceof_includes_classes() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_instanceof_cls.php").unwrap();
+    let uri = Uri::parse("file:///test_instanceof_cls.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\n$x instanceof Concrete";
 
     let items = complete_at(&backend, &uri, text, 2, 21).await;
@@ -531,7 +531,7 @@ async fn test_instanceof_includes_enums() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_instanceof_enum.php").unwrap();
+    let uri = Uri::parse("file:///test_instanceof_enum.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\n$x instanceof Some";
 
     let items = complete_at(&backend, &uri, text, 2, 18).await;
@@ -549,14 +549,14 @@ async fn test_instanceof_includes_enums() {
 async fn test_instanceof_excludes_constants_and_functions() {
     let backend = crate::common::create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///test_instanceof_no_fn.php").unwrap();
+    let uri = Uri::parse("file:///test_instanceof_no_fn.php").unwrap();
     let text = "<?php\n$x instanceof str";
 
     let items = complete_at(&backend, &uri, text, 1, 17).await;
 
     let func_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .collect();
     assert!(
         func_items.is_empty(),
@@ -572,14 +572,14 @@ async fn test_instanceof_excludes_constants_and_functions() {
 async fn test_extends_excludes_constants_and_functions() {
     let backend = crate::common::create_test_backend_with_function_stubs();
 
-    let uri = Url::parse("file:///test_ext_no_fn.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_no_fn.php").unwrap();
     let text = "<?php\nclass Foo extends str";
 
     let items = complete_at(&backend, &uri, text, 1, 24).await;
 
     let func_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .collect();
     assert!(
         func_items.is_empty(),
@@ -596,7 +596,7 @@ async fn test_implements_multiline() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_impl_ml.php").unwrap();
+    let uri = Uri::parse("file:///test_impl_ml.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -624,7 +624,7 @@ async fn test_extends_multiline() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_ext_ml.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_ml.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -652,7 +652,7 @@ async fn test_implements_multiline_comma() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_impl_ml_comma.php").unwrap();
+    let uri = Uri::parse("file:///test_impl_ml_comma.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -683,7 +683,7 @@ async fn test_new_context_still_filters() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_new_ctx.php").unwrap();
+    let uri = Uri::parse("file:///test_new_ctx.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nnew Some";
 
     let items = complete_at(&backend, &uri, text, 2, 8).await;
@@ -716,7 +716,7 @@ async fn test_plain_context_offers_everything() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_plain.php").unwrap();
+    let uri = Uri::parse("file:///test_plain.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nSome";
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
@@ -767,7 +767,7 @@ async fn test_unloaded_classes_pass_through_filter() {
         );
     }
 
-    let uri = Url::parse("file:///test_unloaded.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded.php").unwrap();
     let text = "<?php\nclass Foo implements Mystery";
 
     let items = complete_at(&backend, &uri, text, 1, 31).await;
@@ -788,7 +788,7 @@ async fn test_unloaded_classes_pass_through_filter() {
 async fn test_stub_interface_filtered_in_extends_class() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///test_stub_filter.php").unwrap();
+    let uri = Uri::parse("file:///test_stub_filter.php").unwrap();
     // BackedEnum is an interface stub.  Even without a full parse, the
     // lightweight source scanner (`detect_stub_class_kind`) identifies it
     // as an interface and filters it out of extends-class context.
@@ -812,7 +812,7 @@ async fn test_parsed_stub_interface_filtered_in_extends_class() {
 
     // Force the BackedEnum stub to be parsed by requesting it.
     // We do this by opening a file that references it.
-    let ref_uri = Url::parse("file:///ref.php").unwrap();
+    let ref_uri = Uri::parse("file:///ref.php").unwrap();
     open_php(
         &backend,
         &ref_uri,
@@ -836,7 +836,7 @@ async fn test_parsed_stub_interface_filtered_in_extends_class() {
 
     // BackedEnum is an interface, so extends (class) should filter it
     // out whether detected via ast_map (fast path) or source scan.
-    let uri = Url::parse("file:///test_stub_parsed.php").unwrap();
+    let uri = Uri::parse("file:///test_stub_parsed.php").unwrap();
     let text = "<?php\nclass Foo extends Backed";
     let items = complete_at(&backend, &uri, text, 1, 27).await;
     let cls = class_items(&items);
@@ -856,7 +856,7 @@ async fn test_instanceof_extra_whitespace() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_instanceof_ws.php").unwrap();
+    let uri = Uri::parse("file:///test_instanceof_ws.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\n$x instanceof    Some";
 
     let items = complete_at(&backend, &uri, text, 2, 21).await;
@@ -875,7 +875,7 @@ async fn test_instanceof_not_partial_keyword() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_instanceof_partial.php").unwrap();
+    let uri = Uri::parse("file:///test_instanceof_partial.php").unwrap();
     // "notinstanceof" is not a valid keyword - make sure we don't
     // accidentally match.
     let text = "<?php\nnamespace Scaffold;\n$x = notinstanceof Some";
@@ -900,7 +900,7 @@ async fn test_implements_after_extends() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_impl_after_ext.php").unwrap();
+    let uri = Uri::parse("file:///test_impl_after_ext.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nclass Foo extends ConcreteClass implements Some";
 
     let items = complete_at(&backend, &uri, text, 2, 49).await;
@@ -929,7 +929,7 @@ async fn test_enum_implements() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_enum_impl.php").unwrap();
+    let uri = Uri::parse("file:///test_enum_impl.php").unwrap();
     let text = "<?php\nnamespace Scaffold;\nenum Foo implements Some";
 
     let items = complete_at(&backend, &uri, text, 2, 27).await;
@@ -972,7 +972,7 @@ async fn test_unloaded_stub_class_excluded_from_extends_interface() {
     let backend = Backend::new_test_with_stubs(stubs);
 
     // Do NOT trigger any resolution — stubs remain unloaded.
-    let uri = Url::parse("file:///test_unloaded_stub_ext_iface.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded_stub_ext_iface.php").unwrap();
     let text = "<?php\ninterface A extends Directory";
 
     let items = complete_at(&backend, &uri, text, 1, 29).await;
@@ -997,7 +997,7 @@ async fn test_unloaded_stub_interface_included_in_extends_interface() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_unloaded_stub_iface_ok.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded_stub_iface_ok.php").unwrap();
     let text = "<?php\ninterface A extends Seekable";
 
     let items = complete_at(&backend, &uri, text, 1, 29).await;
@@ -1022,7 +1022,7 @@ async fn test_unloaded_stub_class_excluded_from_trait_use() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_unloaded_stub_trait_use.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded_stub_trait_use.php").unwrap();
     let text = concat!("<?php\n", "class Foo {\n", "    use Directory\n", "}\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 19).await;
@@ -1048,7 +1048,7 @@ async fn test_unloaded_stub_class_excluded_from_implements() {
     stubs.insert("JsonSerializable", "<?php\ninterface JsonSerializable {}\n");
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_unloaded_stub_impl.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded_stub_impl.php").unwrap();
     let text = "<?php\nclass Foo implements Directory";
 
     let items = complete_at(&backend, &uri, text, 1, 31).await;
@@ -1069,7 +1069,7 @@ async fn test_unloaded_stub_interface_included_in_implements() {
     stubs.insert("JsonSerializable", "<?php\ninterface JsonSerializable {}\n");
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_unloaded_stub_impl_ok.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded_stub_impl_ok.php").unwrap();
     let text = "<?php\nclass Foo implements JsonSerializable";
 
     let items = complete_at(&backend, &uri, text, 1, 34).await;
@@ -1090,7 +1090,7 @@ async fn test_unloaded_stub_interface_excluded_from_new() {
     stubs.insert("SpanInterface", "<?php\ninterface SpanInterface {}\n");
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_unloaded_stub_new.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded_stub_new.php").unwrap();
     let text = "<?php\nnew SpanInterface";
 
     let items = complete_at(&backend, &uri, text, 1, 17).await;
@@ -1114,7 +1114,7 @@ async fn test_unloaded_stub_abstract_excluded_from_new() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_unloaded_stub_abs_new.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded_stub_abs_new.php").unwrap();
     let text = "<?php\nnew DatePeriod";
 
     let items = complete_at(&backend, &uri, text, 1, 14).await;
@@ -1138,7 +1138,7 @@ async fn test_unloaded_stub_concrete_class_included_in_new() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_unloaded_stub_cls_new.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded_stub_cls_new.php").unwrap();
     let text = "<?php\nnew DirectoryIterator";
 
     let items = complete_at(&backend, &uri, text, 1, 21).await;
@@ -1165,7 +1165,7 @@ async fn test_unloaded_stub_class_excluded_from_extends_interface_second_use() {
     let backend = Backend::new_test_with_stubs(stubs);
 
     // First use: class extends (class context) — should include the class.
-    let uri1 = Url::parse("file:///test_first_use.php").unwrap();
+    let uri1 = Uri::parse("file:///test_first_use.php").unwrap();
     let text1 = "<?php\nclass A1 extends Directory";
     let items1 = complete_at(&backend, &uri1, text1, 1, 27).await;
     let cls1 = class_items(&items1);
@@ -1176,7 +1176,7 @@ async fn test_unloaded_stub_class_excluded_from_extends_interface_second_use() {
     );
 
     // Second use: interface extends — should exclude the class.
-    let uri2 = Url::parse("file:///test_second_use.php").unwrap();
+    let uri2 = Uri::parse("file:///test_second_use.php").unwrap();
     let text2 = "<?php\ninterface B extends Directory";
     let items2 = complete_at(&backend, &uri2, text2, 1, 30).await;
     let cls2 = class_items(&items2);
@@ -1187,7 +1187,7 @@ async fn test_unloaded_stub_class_excluded_from_extends_interface_second_use() {
     );
 
     // Interface extends should include the interface.
-    let uri3 = Url::parse("file:///test_third_use.php").unwrap();
+    let uri3 = Uri::parse("file:///test_third_use.php").unwrap();
     let text3 = "<?php\ninterface C extends Span";
     let items3 = complete_at(&backend, &uri3, text3, 1, 25).await;
     let cls3 = class_items(&items3);
@@ -1207,7 +1207,7 @@ async fn test_unloaded_stub_trait_excluded_from_instanceof() {
     stubs.insert("JsonSerializable", "<?php\ninterface JsonSerializable {}\n");
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_unloaded_instanceof_trait.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded_instanceof_trait.php").unwrap();
     let text = "<?php\n$x instanceof SomeSpl";
 
     let items = complete_at(&backend, &uri, text, 1, 20).await;
@@ -1228,7 +1228,7 @@ async fn test_unloaded_stub_interface_included_in_instanceof() {
     stubs.insert("JsonSerializable", "<?php\ninterface JsonSerializable {}\n");
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_unloaded_instanceof_iface.php").unwrap();
+    let uri = Uri::parse("file:///test_unloaded_instanceof_iface.php").unwrap();
     let text = "<?php\n$x instanceof JsonSerializable";
 
     let items = complete_at(&backend, &uri, text, 1, 28).await;
@@ -1261,7 +1261,7 @@ async fn test_unloaded_stub_multi_declaration_file() {
     let backend = Backend::new_test_with_stubs(stubs);
 
     // `implements` should include Countable (interface) but exclude ArrayObject (class).
-    let uri = Url::parse("file:///test_multi_decl.php").unwrap();
+    let uri = Uri::parse("file:///test_multi_decl.php").unwrap();
     let text = "<?php\nclass Foo implements Countable";
     let items = complete_at(&backend, &uri, text, 1, 30).await;
     let cls = class_items(&items);
@@ -1271,7 +1271,7 @@ async fn test_unloaded_stub_multi_declaration_file() {
         "implements should include Countable (interface in multi-decl file), got: {lbls:?}"
     );
 
-    let uri2 = Url::parse("file:///test_multi_decl2.php").unwrap();
+    let uri2 = Uri::parse("file:///test_multi_decl2.php").unwrap();
     let text2 = "<?php\nclass Foo implements ArrayObject";
     let items2 = complete_at(&backend, &uri2, text2, 1, 31).await;
     let cls2 = class_items(&items2);
@@ -1292,7 +1292,7 @@ async fn test_unloaded_stub_final_class_excluded_from_extends_class() {
     stubs.insert("NormalStubClass", "<?php\nclass NormalStubClass {}\n");
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_final_stub.php").unwrap();
+    let uri = Uri::parse("file:///test_final_stub.php").unwrap();
     let text = "<?php\nclass Foo extends FinalStub";
     let items = complete_at(&backend, &uri, text, 1, 27).await;
     let cls = class_items(&items);
@@ -1302,7 +1302,7 @@ async fn test_unloaded_stub_final_class_excluded_from_extends_class() {
         "extends (class) should exclude final stub class, got: {lbls:?}"
     );
 
-    let uri2 = Url::parse("file:///test_normal_stub.php").unwrap();
+    let uri2 = Uri::parse("file:///test_normal_stub.php").unwrap();
     let text2 = "<?php\nclass Foo extends NormalStub";
     let items2 = complete_at(&backend, &uri2, text2, 1, 28).await;
     let cls2 = class_items(&items2);
@@ -1334,7 +1334,7 @@ async fn test_loaded_stub_class_excluded_from_extends_interface() {
     let backend = Backend::new_test_with_stubs(stubs);
 
     // Force the stubs to be parsed by opening a file that references them.
-    let ref_uri = Url::parse("file:///ref_stub.php").unwrap();
+    let ref_uri = Uri::parse("file:///ref_stub.php").unwrap();
     open_php(
         &backend,
         &ref_uri,
@@ -1363,7 +1363,7 @@ async fn test_loaded_stub_class_excluded_from_extends_interface() {
 
     // Now: interface extends should exclude the loaded class stub
     // but include the loaded interface stub.
-    let uri = Url::parse("file:///test_loaded_stub.php").unwrap();
+    let uri = Uri::parse("file:///test_loaded_stub.php").unwrap();
     // Use partial "S" which matches SomeStubInterface.
     let text = "<?php\ninterface A extends S";
 
@@ -1377,7 +1377,7 @@ async fn test_loaded_stub_class_excluded_from_extends_interface() {
     );
 
     // Also check with partial "Bad" to verify the class is excluded.
-    let uri2 = Url::parse("file:///test_loaded_stub2.php").unwrap();
+    let uri2 = Uri::parse("file:///test_loaded_stub2.php").unwrap();
     let text2 = "<?php\ninterface A extends Bad";
 
     let items2 = complete_at(&backend, &uri2, text2, 1, 25).await;
@@ -1402,7 +1402,7 @@ async fn test_loaded_stub_class_excluded_from_trait_use() {
     let backend = Backend::new_test_with_stubs(stubs);
 
     // Force the stub to be parsed.
-    let ref_uri = Url::parse("file:///ref_stub2.php").unwrap();
+    let ref_uri = Uri::parse("file:///ref_stub2.php").unwrap();
     open_php(
         &backend,
         &ref_uri,
@@ -1418,7 +1418,7 @@ async fn test_loaded_stub_class_excluded_from_trait_use() {
     )
     .await;
 
-    let uri = Url::parse("file:///test_loaded_trait_use.php").unwrap();
+    let uri = Uri::parse("file:///test_loaded_trait_use.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A extends JsonException {\n",
@@ -1449,7 +1449,7 @@ async fn test_loaded_class_filtered_on_second_use() {
     let backend = Backend::new_test_with_stubs(stubs);
 
     // First use: `interface A extends BadUrlException {}` — loads the stub.
-    let first_uri = Url::parse("file:///first_use.php").unwrap();
+    let first_uri = Uri::parse("file:///first_use.php").unwrap();
     open_php(
         &backend,
         &first_uri,
@@ -1466,7 +1466,7 @@ async fn test_loaded_class_filtered_on_second_use() {
     .await;
 
     // Second use in a different file:
-    let second_uri = Url::parse("file:///second_use.php").unwrap();
+    let second_uri = Uri::parse("file:///second_use.php").unwrap();
     let text = "<?php\ninterface B extends BadUrl";
 
     let items = complete_at(&backend, &second_uri, text, 1, 27).await;
@@ -1488,7 +1488,7 @@ async fn test_classmap_loaded_interface_excluded_from_extends_class() {
     let backend = create_test_backend();
 
     // Load an interface into ast_map.
-    let iface_uri = Url::parse("file:///app/Contracts/Searchable.php").unwrap();
+    let iface_uri = Uri::parse("file:///app/Contracts/Searchable.php").unwrap();
     open_php(
         &backend,
         &iface_uri,
@@ -1505,7 +1505,7 @@ async fn test_classmap_loaded_interface_excluded_from_extends_class() {
         );
     }
 
-    let uri = Url::parse("file:///test_cmap_filter.php").unwrap();
+    let uri = Uri::parse("file:///test_cmap_filter.php").unwrap();
     let text = "<?php\nclass Foo extends Searchable";
 
     let items = complete_at(&backend, &uri, text, 1, 28).await;
@@ -1524,7 +1524,7 @@ async fn test_classmap_loaded_interface_excluded_from_extends_class() {
 async fn test_classmap_loaded_trait_excluded_from_implements() {
     let backend = create_test_backend();
 
-    let trait_uri = Url::parse("file:///app/Traits/Sortable.php").unwrap();
+    let trait_uri = Uri::parse("file:///app/Traits/Sortable.php").unwrap();
     open_php(
         &backend,
         &trait_uri,
@@ -1537,7 +1537,7 @@ async fn test_classmap_loaded_trait_excluded_from_implements() {
         idx.insert("App\\Traits\\Sortable".to_string(), trait_uri.to_string());
     }
 
-    let uri = Url::parse("file:///test_cmap_trait.php").unwrap();
+    let uri = Uri::parse("file:///test_cmap_trait.php").unwrap();
     let text = "<?php\nclass Foo implements Sortable";
 
     let items = complete_at(&backend, &uri, text, 1, 31).await;
@@ -1578,12 +1578,12 @@ async fn test_extends_class_demotes_interface_looking_names() {
         );
     }
 
-    let uri = Url::parse("file:///test_ext_demote.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_demote.php").unwrap();
     // Partial "Zx" matches the first two; separate request for "IZx".
     let text = "<?php\nclass Foo extends Zx";
     let items_zx = complete_at(&backend, &uri, text, 1, 24).await;
 
-    let uri2 = Url::parse("file:///test_ext_demote2.php").unwrap();
+    let uri2 = Uri::parse("file:///test_ext_demote2.php").unwrap();
     let text2 = "<?php\nclass Foo extends IZx";
     let items_izx = complete_at(&backend, &uri2, text2, 1, 25).await;
 
@@ -1676,16 +1676,16 @@ async fn test_implements_demotes_abstract_looking_names() {
         );
     }
 
-    let uri = Url::parse("file:///test_impl_demote.php").unwrap();
+    let uri = Uri::parse("file:///test_impl_demote.php").unwrap();
     // Partial "Yx" matches YxLoggable; separate requests for the others.
     let text_yx = "<?php\nclass Foo implements Yx";
     let items_yx = complete_at(&backend, &uri, text_yx, 1, 27).await;
 
-    let uri2 = Url::parse("file:///test_impl_demote2.php").unwrap();
+    let uri2 = Uri::parse("file:///test_impl_demote2.php").unwrap();
     let text_abs = "<?php\nclass Foo implements AbstractYx";
     let items_abs = complete_at(&backend, &uri2, text_abs, 1, 35).await;
 
-    let uri3 = Url::parse("file:///test_impl_demote3.php").unwrap();
+    let uri3 = Uri::parse("file:///test_impl_demote3.php").unwrap();
     let text_base = "<?php\nclass Foo implements BaseYx";
     let items_base = complete_at(&backend, &uri3, text_base, 1, 31).await;
 
@@ -1778,13 +1778,13 @@ async fn test_trait_use_demotes_non_trait_looking_names() {
         );
     }
 
-    let uri = Url::parse("file:///test_use_demote.php").unwrap();
+    let uri = Uri::parse("file:///test_use_demote.php").unwrap();
     // Partial "Wx" matches WxHasTimestamps and WxUserInterface.
     let text_wx = concat!("<?php\n", "class Bar {\n", "    use Wx\n", "}\n",);
     let items_wx = complete_at(&backend, &uri, text_wx, 2, 10).await;
 
     // Separate request for "AbstractWx".
-    let uri2 = Url::parse("file:///test_use_demote2.php").unwrap();
+    let uri2 = Uri::parse("file:///test_use_demote2.php").unwrap();
     let text_abs = concat!("<?php\n", "class Bar {\n", "    use AbstractWx\n", "}\n",);
     let items_abs = complete_at(&backend, &uri2, text_abs, 2, 18).await;
 
@@ -1838,7 +1838,7 @@ async fn test_instanceof_no_heuristic_demotion() {
         );
     }
 
-    let uri = Url::parse("file:///test_instanceof_sort.php").unwrap();
+    let uri = Uri::parse("file:///test_instanceof_sort.php").unwrap();
     let text = "<?php\n$x instanceof User";
 
     let items = complete_at(&backend, &uri, text, 1, 21).await;
@@ -1912,7 +1912,7 @@ async fn test_extends_interface_does_not_demote_interface_names() {
         );
     }
 
-    let uri = Url::parse("file:///test_ext_iface_sort.php").unwrap();
+    let uri = Uri::parse("file:///test_ext_iface_sort.php").unwrap();
     let text = "<?php\ninterface Foo extends Log";
 
     let items = complete_at(&backend, &uri, text, 1, 28).await;
@@ -1951,7 +1951,7 @@ async fn test_extends_interface_does_not_demote_interface_names() {
 /// Load a file containing an anonymous class into the backend for the
 /// anonymous-class exclusion tests below.
 async fn load_anon_scaffolding(backend: &Backend) {
-    let uri = Url::parse("file:///anon_scaffolding.php").unwrap();
+    let uri = Uri::parse("file:///anon_scaffolding.php").unwrap();
     open_php(
         backend,
         &uri,
@@ -1975,7 +1975,7 @@ async fn test_anonymous_class_excluded_plain_context() {
     let backend = create_test_backend();
     load_anon_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///anon_plain.php").unwrap();
+    let uri = Uri::parse("file:///anon_plain.php").unwrap();
     let text = "<?php\nnamespace AnonTest;\nAnon";
     let items = complete_at(&backend, &uri, text, 2, 4).await;
     let cls = class_items(&items);
@@ -1998,7 +1998,7 @@ async fn test_anonymous_class_excluded_extends() {
     let backend = create_test_backend();
     load_anon_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///anon_ext.php").unwrap();
+    let uri = Uri::parse("file:///anon_ext.php").unwrap();
     let text = "<?php\nnamespace AnonTest;\nclass Foo extends Anon";
     let items = complete_at(&backend, &uri, text, 2, 25).await;
     let cls = class_items(&items);
@@ -2016,7 +2016,7 @@ async fn test_anonymous_class_excluded_implements() {
     let backend = create_test_backend();
     load_anon_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///anon_impl.php").unwrap();
+    let uri = Uri::parse("file:///anon_impl.php").unwrap();
     let text = "<?php\nnamespace AnonTest;\nclass Foo implements Anon";
     let items = complete_at(&backend, &uri, text, 2, 28).await;
     let cls = class_items(&items);
@@ -2034,7 +2034,7 @@ async fn test_anonymous_class_excluded_instanceof() {
     let backend = create_test_backend();
     load_anon_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///anon_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///anon_instanceof.php").unwrap();
     let text = "<?php\nnamespace AnonTest;\n$x instanceof Anon";
     let items = complete_at(&backend, &uri, text, 2, 18).await;
     let cls = class_items(&items);
@@ -2052,7 +2052,7 @@ async fn test_anonymous_class_excluded_new() {
     let backend = create_test_backend();
     load_anon_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///anon_new.php").unwrap();
+    let uri = Uri::parse("file:///anon_new.php").unwrap();
     let text = "<?php\nnamespace AnonTest;\nnew Anon";
     let items = complete_at(&backend, &uri, text, 2, 8).await;
     let cls = class_items(&items);
@@ -2070,7 +2070,7 @@ async fn test_anonymous_class_excluded_trait_use() {
     let backend = create_test_backend();
     load_anon_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///anon_trait_use.php").unwrap();
+    let uri = Uri::parse("file:///anon_trait_use.php").unwrap();
     let text = "<?php\nnamespace AnonTest;\nclass Bar {\n    use Anon\n}\n";
     let items = complete_at(&backend, &uri, text, 3, 12).await;
     let cls = class_items(&items);
@@ -2100,7 +2100,7 @@ async fn test_loaded_final_stub_class_filtered_in_all_contexts() {
     let backend = Backend::new_test_with_stubs(stubs);
 
     // Force the stub to be loaded by resolving it through a member access.
-    let load_uri = Url::parse("file:///load_stub.php").unwrap();
+    let load_uri = Uri::parse("file:///load_stub.php").unwrap();
     let load_text = concat!(
         "<?php\n",
         "class Preload extends V8JsScriptException {}\n",
@@ -2110,7 +2110,7 @@ async fn test_loaded_final_stub_class_filtered_in_all_contexts() {
     let _ = complete_at(&backend, &load_uri, load_text, 2, 24).await;
 
     // ── extends (class) — final class must be excluded ──
-    let uri1 = Url::parse("file:///test_final_ext_class.php").unwrap();
+    let uri1 = Uri::parse("file:///test_final_ext_class.php").unwrap();
     let text1 = "<?php\nclass A extends V8Js";
     let items1 = complete_at(&backend, &uri1, text1, 1, 22).await;
     let cls1 = class_items(&items1);
@@ -2121,7 +2121,7 @@ async fn test_loaded_final_stub_class_filtered_in_all_contexts() {
     );
 
     // ── extends (interface) — class must be excluded ──
-    let uri2 = Url::parse("file:///test_final_ext_iface.php").unwrap();
+    let uri2 = Uri::parse("file:///test_final_ext_iface.php").unwrap();
     let text2 = "<?php\ninterface B extends V8Js";
     let items2 = complete_at(&backend, &uri2, text2, 1, 26).await;
     let cls2 = class_items(&items2);
@@ -2132,7 +2132,7 @@ async fn test_loaded_final_stub_class_filtered_in_all_contexts() {
     );
 
     // ── implements — class must be excluded ──
-    let uri3 = Url::parse("file:///test_final_impl.php").unwrap();
+    let uri3 = Uri::parse("file:///test_final_impl.php").unwrap();
     let text3 = "<?php\nclass C implements V8Js";
     let items3 = complete_at(&backend, &uri3, text3, 1, 25).await;
     let cls3 = class_items(&items3);
@@ -2143,7 +2143,7 @@ async fn test_loaded_final_stub_class_filtered_in_all_contexts() {
     );
 
     // ── use (trait) — class must be excluded ──
-    let uri4 = Url::parse("file:///test_final_trait.php").unwrap();
+    let uri4 = Uri::parse("file:///test_final_trait.php").unwrap();
     let text4 = "<?php\nclass D {\n    use V8Js\n}\n";
     let items4 = complete_at(&backend, &uri4, text4, 2, 11).await;
     let cls4 = class_items(&items4);
@@ -2154,7 +2154,7 @@ async fn test_loaded_final_stub_class_filtered_in_all_contexts() {
     );
 
     // ── new — final class IS instantiable, so it SHOULD appear ──
-    let uri5 = Url::parse("file:///test_final_new.php").unwrap();
+    let uri5 = Uri::parse("file:///test_final_new.php").unwrap();
     let text5 = "<?php\nnew V8Js";
     let items5 = complete_at(&backend, &uri5, text5, 1, 8).await;
     let cls5 = class_items(&items5);
@@ -2165,7 +2165,7 @@ async fn test_loaded_final_stub_class_filtered_in_all_contexts() {
     );
 
     // ── instanceof — class SHOULD appear ──
-    let uri6 = Url::parse("file:///test_final_instanceof.php").unwrap();
+    let uri6 = Uri::parse("file:///test_final_instanceof.php").unwrap();
     let text6 = "<?php\n$x instanceof V8Js";
     let items6 = complete_at(&backend, &uri6, text6, 1, 21).await;
     let cls6 = class_items(&items6);
@@ -2225,7 +2225,7 @@ async fn test_real_multi_class_stub_unloaded_filtering() {
 
     // extends (class): V8Js is a plain class → included.
     // V8JsScriptException is final → excluded.
-    let uri1 = Url::parse("file:///test_v8_ext_class.php").unwrap();
+    let uri1 = Uri::parse("file:///test_v8_ext_class.php").unwrap();
     let text1 = "<?php\nclass A extends V8Js";
     let items1 = complete_at(&backend, &uri1, text1, 1, 22).await;
     let cls1 = class_items(&items1);
@@ -2244,7 +2244,7 @@ async fn test_real_multi_class_stub_unloaded_filtering() {
     );
 
     // extends (interface): all are classes → none should appear.
-    let uri2 = Url::parse("file:///test_v8_ext_iface.php").unwrap();
+    let uri2 = Uri::parse("file:///test_v8_ext_iface.php").unwrap();
     let text2 = "<?php\ninterface B extends V8Js";
     let items2 = complete_at(&backend, &uri2, text2, 1, 26).await;
     let cls2 = class_items(&items2);
@@ -2259,7 +2259,7 @@ async fn test_real_multi_class_stub_unloaded_filtering() {
     );
 
     // implements: all are classes → none should appear.
-    let uri3 = Url::parse("file:///test_v8_impl.php").unwrap();
+    let uri3 = Uri::parse("file:///test_v8_impl.php").unwrap();
     let text3 = "<?php\nclass C implements V8Js";
     let items3 = complete_at(&backend, &uri3, text3, 1, 25).await;
     let cls3 = class_items(&items3);
@@ -2270,7 +2270,7 @@ async fn test_real_multi_class_stub_unloaded_filtering() {
     );
 
     // trait use: all are classes → none should appear.
-    let uri4 = Url::parse("file:///test_v8_trait.php").unwrap();
+    let uri4 = Uri::parse("file:///test_v8_trait.php").unwrap();
     let text4 = "<?php\nclass D {\n    use V8Js\n}\n";
     let items4 = complete_at(&backend, &uri4, text4, 2, 11).await;
     let cls4 = class_items(&items4);
@@ -2282,7 +2282,7 @@ async fn test_real_multi_class_stub_unloaded_filtering() {
 
     // new: V8Js (non-final, non-abstract) → included.
     // V8JsScriptException (final but concrete) → included.
-    let uri5 = Url::parse("file:///test_v8_new.php").unwrap();
+    let uri5 = Uri::parse("file:///test_v8_new.php").unwrap();
     let text5 = "<?php\nnew V8Js";
     let items5 = complete_at(&backend, &uri5, text5, 1, 8).await;
     let cls5 = class_items(&items5);
@@ -2297,7 +2297,7 @@ async fn test_real_multi_class_stub_unloaded_filtering() {
     );
 
     // instanceof: all classes should appear.
-    let uri6 = Url::parse("file:///test_v8_instanceof.php").unwrap();
+    let uri6 = Uri::parse("file:///test_v8_instanceof.php").unwrap();
     let text6 = "<?php\n$x instanceof V8Js";
     let items6 = complete_at(&backend, &uri6, text6, 1, 21).await;
     let cls6 = class_items(&items6);
@@ -2323,7 +2323,7 @@ async fn test_real_multi_class_stub_loaded_filtering() {
     let backend = Backend::new_test_with_stubs(stubs);
 
     // Load the stub by resolving V8JsScriptException through member access.
-    let load_uri = Url::parse("file:///load_v8.php").unwrap();
+    let load_uri = Uri::parse("file:///load_v8.php").unwrap();
     let load_text = concat!(
         "<?php\n",
         "class Preload extends V8JsScriptException {}\n",
@@ -2335,7 +2335,7 @@ async fn test_real_multi_class_stub_loaded_filtering() {
     // After loading, the same filtering should apply via the ast_map fast path.
 
     // extends (class): final classes excluded, V8Js included.
-    let uri1 = Url::parse("file:///test_v8_loaded_ext.php").unwrap();
+    let uri1 = Uri::parse("file:///test_v8_loaded_ext.php").unwrap();
     let text1 = "<?php\nclass A extends V8Js";
     let items1 = complete_at(&backend, &uri1, text1, 1, 22).await;
     let cls1 = class_items(&items1);
@@ -2350,7 +2350,7 @@ async fn test_real_multi_class_stub_loaded_filtering() {
     );
 
     // implements: all are classes → excluded.
-    let uri2 = Url::parse("file:///test_v8_loaded_impl.php").unwrap();
+    let uri2 = Uri::parse("file:///test_v8_loaded_impl.php").unwrap();
     let text2 = "<?php\nclass C implements V8Js";
     let items2 = complete_at(&backend, &uri2, text2, 1, 25).await;
     let cls2 = class_items(&items2);
@@ -2361,7 +2361,7 @@ async fn test_real_multi_class_stub_loaded_filtering() {
     );
 
     // new: final concrete classes are instantiable.
-    let uri3 = Url::parse("file:///test_v8_loaded_new.php").unwrap();
+    let uri3 = Uri::parse("file:///test_v8_loaded_new.php").unwrap();
     let text3 = "<?php\nnew V8Js";
     let items3 = complete_at(&backend, &uri3, text3, 1, 8).await;
     let cls3 = class_items(&items3);
@@ -2380,7 +2380,7 @@ async fn test_real_multi_class_stub_loaded_filtering() {
 async fn test_use_import_excludes_constants_and_functions() {
     let backend = create_test_backend_with_stubs();
 
-    let scaffolding_uri = Url::parse("file:///use_scaffold.php").unwrap();
+    let scaffolding_uri = Uri::parse("file:///use_scaffold.php").unwrap();
     open_php(
         &backend,
         &scaffolding_uri,
@@ -2403,7 +2403,7 @@ async fn test_use_import_excludes_constants_and_functions() {
         );
     }
 
-    let uri = Url::parse("file:///use_test.php").unwrap();
+    let uri = Uri::parse("file:///use_test.php").unwrap();
     // `use Some` — top-level use import context.
     let text = concat!("<?php\n", "use Some\n",);
 
@@ -2411,10 +2411,10 @@ async fn test_use_import_excludes_constants_and_functions() {
 
     let has_class = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::CLASS));
+        .any(|i| i.kind == Some(CompletionItemKind::Class));
     let has_function = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::FUNCTION));
+        .any(|i| i.kind == Some(CompletionItemKind::Function));
 
     assert!(has_class, "use import should offer classes, got: {items:?}");
     assert!(
@@ -2429,14 +2429,14 @@ async fn test_use_import_excludes_constants_and_functions() {
 async fn test_use_import_suggests_function_keyword() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///use_f.php").unwrap();
+    let uri = Uri::parse("file:///use_f.php").unwrap();
     let text = concat!("<?php\n", "use f\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 5).await;
 
     let kw_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Keyword))
         .collect();
     let kw_labels: Vec<&str> = kw_items.iter().map(|i| i.label.as_str()).collect();
 
@@ -2459,14 +2459,14 @@ async fn test_use_import_suggests_function_keyword() {
 async fn test_use_import_suggests_const_keyword() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///use_c.php").unwrap();
+    let uri = Uri::parse("file:///use_c.php").unwrap();
     let text = concat!("<?php\n", "use c\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 5).await;
 
     let kw_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Keyword))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2482,14 +2482,14 @@ async fn test_use_import_suggests_const_keyword() {
 async fn test_use_import_no_keyword_for_uppercase() {
     let backend = create_test_backend_with_stubs();
 
-    let uri = Url::parse("file:///use_upper.php").unwrap();
+    let uri = Uri::parse("file:///use_upper.php").unwrap();
     let text = concat!("<?php\n", "use F\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 5).await;
 
     let kw_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Keyword))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -2520,17 +2520,17 @@ async fn test_use_function_shows_only_functions() {
         );
     }
 
-    let uri = Url::parse("file:///use_func.php").unwrap();
+    let uri = Uri::parse("file:///use_func.php").unwrap();
     let text = concat!("<?php\n", "use function array_m\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 20).await;
 
     let has_function = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::FUNCTION));
+        .any(|i| i.kind == Some(CompletionItemKind::Function));
     let has_class = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::CLASS));
+        .any(|i| i.kind == Some(CompletionItemKind::Class));
 
     assert!(
         has_function,
@@ -2562,20 +2562,20 @@ async fn test_use_const_shows_only_constants() {
         );
     }
 
-    let uri = Url::parse("file:///use_const.php").unwrap();
+    let uri = Uri::parse("file:///use_const.php").unwrap();
     let text = concat!("<?php\n", "use const APP_V\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 15).await;
 
     let has_constant = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::CONSTANT));
+        .any(|i| i.kind == Some(CompletionItemKind::Constant));
     let has_class = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::CLASS));
+        .any(|i| i.kind == Some(CompletionItemKind::Class));
     let has_function = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::FUNCTION));
+        .any(|i| i.kind == Some(CompletionItemKind::Function));
 
     assert!(
         has_constant,
@@ -2603,7 +2603,7 @@ async fn test_use_import_inserts_fqn_no_redundant_text_edit() {
     let backend = create_test_backend();
 
     // Load a namespaced class so it appears in completions.
-    let scaffolding_uri = Url::parse("file:///decimal_scaffolding.php").unwrap();
+    let scaffolding_uri = Uri::parse("file:///decimal_scaffolding.php").unwrap();
     open_php(
         &backend,
         &scaffolding_uri,
@@ -2611,7 +2611,7 @@ async fn test_use_import_inserts_fqn_no_redundant_text_edit() {
     )
     .await;
 
-    let uri = Url::parse("file:///test_use_fqn.php").unwrap();
+    let uri = Uri::parse("file:///test_use_fqn.php").unwrap();
     let text = "<?php\nuse De";
 
     let items = complete_at(&backend, &uri, text, 1, 6).await;
@@ -2644,7 +2644,7 @@ async fn test_use_import_same_namespace_still_uses_fqn() {
     let backend = create_test_backend();
 
     // Load a class in namespace App\Models.
-    let scaffolding_uri = Url::parse("file:///models_scaffolding.php").unwrap();
+    let scaffolding_uri = Uri::parse("file:///models_scaffolding.php").unwrap();
     open_php(
         &backend,
         &scaffolding_uri,
@@ -2653,7 +2653,7 @@ async fn test_use_import_same_namespace_still_uses_fqn() {
     .await;
 
     // The test file is in the SAME namespace.
-    let uri = Url::parse("file:///test_same_ns_use.php").unwrap();
+    let uri = Uri::parse("file:///test_same_ns_use.php").unwrap();
     let text = "<?php\nnamespace App\\Models;\nuse App\\Models\\Or";
 
     let items = complete_at(&backend, &uri, text, 2, 19).await;
@@ -2677,7 +2677,7 @@ async fn test_trait_use_not_affected_by_use_import() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///trait_use_unchanged.php").unwrap();
+    let uri = Uri::parse("file:///trait_use_unchanged.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -2727,7 +2727,7 @@ async fn test_trait_use_filters_stub_use_map_entries() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test_trait_use_stub_usemap.php").unwrap();
+    let uri = Uri::parse("file:///test_trait_use_stub_usemap.php").unwrap();
     // Test with partial "S" — matches Stringable (interface, should be
     // excluded) but not RetryPolicy or Exception.
     let text_s = concat!(
@@ -2751,7 +2751,7 @@ async fn test_trait_use_filters_stub_use_map_entries() {
 
     // Test with partial "E" — matches Exception (class, should be
     // excluded) but not RetryPolicy or Stringable.
-    let uri_e = Url::parse("file:///test_trait_use_stub_usemap_e.php").unwrap();
+    let uri_e = Uri::parse("file:///test_trait_use_stub_usemap_e.php").unwrap();
     let text_e = concat!(
         "<?php\n",
         "namespace Demo;\n",
@@ -2773,7 +2773,7 @@ async fn test_trait_use_filters_stub_use_map_entries() {
 
     // Test with partial "R" — matches RetryPolicy (trait, should be
     // included).
-    let uri_r = Url::parse("file:///test_trait_use_stub_usemap_r.php").unwrap();
+    let uri_r = Uri::parse("file:///test_trait_use_stub_usemap_r.php").unwrap();
     let text_r = concat!(
         "<?php\n",
         "namespace Demo;\n",
@@ -2803,7 +2803,7 @@ async fn test_trait_use_filters_stub_use_map_entries() {
 async fn test_trait_use_rejects_unknown_use_map_entries() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_trait_use_unknown.php").unwrap();
+    let uri = Uri::parse("file:///test_trait_use_unknown.php").unwrap();
     // `Cassandra\ExceptionInterface` does not exist in any index.
     let text = concat!(
         "<?php\n",

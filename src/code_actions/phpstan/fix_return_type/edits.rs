@@ -2,7 +2,7 @@
 //! on the function [`target_function`](super::target::target_function)
 //! found for the diagnostic.
 
-use tower_lsp::lsp_types::TextEdit;
+use tower_lsp_server::gen_lsp_types::TextEdit;
 
 use crate::code_actions::indent_of_line_at;
 use crate::php_type::PhpType;

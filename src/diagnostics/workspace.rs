@@ -53,7 +53,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use tower_lsp::lsp_types::{Diagnostic, MessageType};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, MessageType};
 
 use crate::Backend;
 use crate::diagnostics::ignore_rules::{self, CompiledIgnoreRule};
@@ -808,7 +808,7 @@ impl Backend {
         // cuts the pass off by design, so it is not reported either way.
         if outcome.unchecked() > 0 && !self.workspace_pass_stopping() {
             self.log(
-                MessageType::WARNING,
+                MessageType::Warning,
                 format!(
                     "Workspace diagnostics stopped with {} of {} files unchecked, after giving \
                      up on every file it had in hand. Those files keep the diagnostics they \
@@ -958,7 +958,7 @@ impl Backend {
                         "PHPantom: workspace diagnostics gave up on {name} after {secs}s"
                     );
                     self.log(
-                        MessageType::WARNING,
+                        MessageType::Warning,
                         format!(
                             "Workspace diagnostics gave up on {name} after {secs}s and moved on \
                              to the rest of the project. Open the file to have it diagnosed on \
@@ -1143,7 +1143,7 @@ impl Backend {
             if self.open_files.read().contains_key(&uri_str) {
                 continue;
             }
-            let Ok(uri) = uri_str.parse::<tower_lsp::lsp_types::Url>() else {
+            let Ok(uri) = uri_str.parse::<tower_lsp_server::gen_lsp_types::Uri>() else {
                 continue;
             };
             let diags = self.diag.workspace_diags.lock().merged(&uri_str);
@@ -1481,19 +1481,19 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::{
-        DiagnosticSeverity, NumberOrString, PartialResultParams, Position, PreviousResultId, Range,
-        Url, WorkDoneProgressParams, WorkspaceDiagnosticParams, WorkspaceDiagnosticReportResult,
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::{
+        Code, DiagnosticSeverity, PartialResultParams, Position, PreviousResultId, Range, Uri,
+        WorkDoneProgressParams, WorkspaceDiagnosticParams, WorkspaceDiagnosticReport,
         WorkspaceDocumentDiagnosticReport,
     };
 
     fn diag(code: &str, line: u32) -> Diagnostic {
         Diagnostic {
             range: Range::new(Position::new(line, 0), Position::new(line, 5)),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String(code.to_string())),
-            message: format!("test {code}"),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String(code.to_string())),
+            message: format!("test {code}").into(),
             ..Default::default()
         }
     }
@@ -1674,9 +1674,9 @@ mod tests {
         };
 
         assert!(
-            broken_diags.iter().any(|d| {
-                matches!(&d.code, Some(NumberOrString::String(c)) if c == "unknown_class")
-            }),
+            broken_diags
+                .iter()
+                .any(|d| { matches!(&d.code, Some(Code::String(c)) if c == "unknown_class") }),
             "Broken.php should have an unknown_class diagnostic, got: {:?}",
             broken_diags
         );
@@ -1696,26 +1696,22 @@ mod tests {
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        let WorkspaceDiagnosticReportResult::Report(report) = backend
+        let report: WorkspaceDiagnosticReport = backend
             .workspace_diagnostic(params)
             .await
-            .expect("workspace diagnostic")
-        else {
-            panic!("expected a full workspace diagnostic report");
-        };
+            .expect("workspace diagnostic");
 
-        let full_item = report
-            .items
-            .iter()
-            .find_map(|item| match item {
-                WorkspaceDocumentDiagnosticReport::Full(full)
-                    if full.uri.as_str() == broken_uri =>
-                {
-                    Some(full)
-                }
-                _ => None,
-            })
-            .expect("Broken.php should be reported");
+        let full_item =
+            report
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    WorkspaceDocumentDiagnosticReport::WorkspaceFullDocumentDiagnosticReport(
+                        full,
+                    ) if full.uri.as_str() == broken_uri => Some(full),
+                    _ => None,
+                })
+                .expect("Broken.php should be reported");
         assert!(!full_item.full_document_diagnostic_report.items.is_empty());
         let result_id = full_item
             .full_document_diagnostic_report
@@ -1728,23 +1724,20 @@ mod tests {
         let params = WorkspaceDiagnosticParams {
             identifier: None,
             previous_result_ids: vec![PreviousResultId {
-                uri: broken_uri.parse::<Url>().expect("uri"),
+                uri: broken_uri.parse::<Uri>().expect("uri"),
                 value: result_id.clone(),
             }],
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
         };
-        let WorkspaceDiagnosticReportResult::Report(report) = backend
+        let report: WorkspaceDiagnosticReport = backend
             .workspace_diagnostic(params)
             .await
-            .expect("workspace diagnostic")
-        else {
-            panic!("expected a full workspace diagnostic report");
-        };
+            .expect("workspace diagnostic");
         assert!(
             report.items.iter().any(|item| matches!(
                 item,
-                WorkspaceDocumentDiagnosticReport::Unchanged(u)
+                WorkspaceDocumentDiagnosticReport::WorkspaceUnchangedDocumentDiagnosticReport(u)
                     if u.uri.as_str() == broken_uri
                         && u.unchanged_document_diagnostic_report.result_id == result_id
             )),

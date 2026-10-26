@@ -27,6 +27,7 @@ impl Backend {
     /// takes from it.
     ///
     /// Searches in order, lazily parsing files as needed:
+    /// 0. The stub paths, whose declaration wins over every other.
     /// 1. `global_defines` — constants already parsed.
     /// 2. `autoload_constant_index` — the file the byte-level scan found
     ///    the constant in.
@@ -44,6 +45,11 @@ impl Backend {
         search: DefineSearch,
         read: impl Fn(&DefineInfo) -> T,
     ) -> Option<T> {
+        // A stub path's declaration wins over every other.
+        if let Some(found) = self.load_external_stub_define(candidates, &read) {
+            return Some(found);
+        }
+
         let find_parsed = || {
             let dmap = self.symbols.global_defines.read();
             candidates

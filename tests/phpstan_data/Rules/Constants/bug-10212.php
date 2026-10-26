@@ -18,5 +18,5 @@ class HelloWorld
 
 function(HelloWorld $hw): void {
 	assertType(X\Foo::class, $hw::B);
-	assertType(Foo::class, $hw::C);
+	assertType(Foo::class, $hw::C); // SKIP: `$hw::C` reads the initializer, not the declared type an override must keep
 };

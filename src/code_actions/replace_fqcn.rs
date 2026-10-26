@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::completion::use_edit::{
@@ -127,16 +127,17 @@ fn replacement_edit(span: &SymbolSpan, replacement: &str, content: &str) -> Text
     }
 }
 
-fn import_action(title: String, doc_uri: Url, edits: Vec<TextEdit>) -> CodeActionOrCommand {
-    CodeActionOrCommand::CodeAction(CodeAction {
+fn import_action(title: String, doc_uri: Uri, edits: Vec<TextEdit>) -> CodeActionResponse {
+    CodeActionResponse::CodeAction(CodeAction {
         title,
-        kind: Some(CodeActionKind::REFACTOR_REWRITE),
+        kind: Some(CodeActionKind::RefactorRewrite),
         diagnostics: None,
         edit: Some(crate::code_actions::single_file_edit(doc_uri, edits)),
         command: None,
         is_preferred: Some(false),
         disabled: None,
         data: None,
+        tags: None,
     })
 }
 
@@ -146,7 +147,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let Some(symbol_map) = self.symbol_map_for(uri) else {
             return;
@@ -177,7 +178,7 @@ impl Backend {
         if !cursor_fqn.contains('\\') {
             return;
         }
-        let Ok(doc_uri) = uri.parse::<Url>() else {
+        let Ok(doc_uri) = uri.parse::<Uri>() else {
             return;
         };
 

@@ -11,7 +11,7 @@ use crate::common::{
     LARAVEL_APP_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
     definitions_at, hover_on, position_after, position_of, references_response,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// A class in `app/` whose one method runs `body`.
 fn caller(body: &str) -> String {
@@ -25,7 +25,7 @@ fn caller(body: &str) -> String {
 async fn workspace(
     files: &[(&str, &str)],
     body: &str,
-) -> (phpantom_lsp::Backend, tempfile::TempDir, Url, String) {
+) -> (phpantom_lsp::Backend, tempfile::TempDir, Uri, String) {
     let content = caller(body);
     let mut all: Vec<(&str, &str)> = files.to_vec();
     all.push(("app/Demo.php", content.as_str()));
@@ -46,7 +46,7 @@ fn location_in<'a>(found: &'a [Location], name: &str) -> Option<&'a Location> {
 /// The completion labels offered inside `env('')` in `content`.
 async fn env_completion_labels(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     content: &str,
 ) -> Vec<String> {
     let position = position_after(content, "env('");

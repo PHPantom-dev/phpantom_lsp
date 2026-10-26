@@ -1,9 +1,10 @@
-//! Go-to-definition and find-references for Laravel string-key spans.
+//! Go-to-definition and find-references for string-key spans.
 //!
 //! Laravel encodes several kinds of navigable references as plain string
 //! literals: `config('app.name')`, `view('emails.welcome')`,
-//! `route('users.index')`, `__('messages.saved')`.  The symbol map records
-//! these as [`crate::symbol_map::LaravelStringKey`] spans; this module turns
+//! `route('users.index')`, `__('messages.saved')`, and so does Symfony's
+//! container (`$container->get('app.mailer')`).  The symbol map records
+//! these as [`crate::symbol_map::StringKey`] spans; this module turns
 //! a span (kind + key) into concrete definition/reference [`Location`]s.
 
 use super::{
@@ -12,11 +13,11 @@ use super::{
 };
 use super::{route_names, trans_keys, view_names};
 
-use tower_lsp::lsp_types::Location;
+use tower_lsp_server::gen_lsp_types::Location;
 
 /// Unified go-to-definition entry point for all Laravel string-key spans.
 ///
-/// Dispatches on [`crate::symbol_map::LaravelStringKind`] so callers in
+/// Dispatches on [`crate::symbol_map::StringKeyKind`] so callers in
 /// `definition/resolve.rs` only need one import and one call site.  Adding a
 /// new Laravel navigation feature only requires a new match arm here, not a
 /// new `pub(crate) use` in the parent module.
@@ -27,19 +28,19 @@ use tower_lsp::lsp_types::Location;
 /// other half is in whatever renders that template.
 pub(crate) fn resolve_laravel_string_key(
     backend: &crate::Backend,
-    kind: &crate::symbol_map::LaravelStringKind,
+    kind: &crate::symbol_map::StringKeyKind,
     key: &str,
     uri: &str,
 ) -> Vec<Location> {
-    use crate::symbol_map::LaravelStringKind;
+    use crate::symbol_map::StringKeyKind;
     match kind {
-        LaravelStringKind::Section => {
+        StringKeyKind::Section => {
             backend.blade_block_definitions(uri, crate::blade::blocks::BlockKind::Section, key)
         }
-        LaravelStringKind::Stack => {
+        StringKeyKind::Stack => {
             backend.blade_block_definitions(uri, crate::blade::blocks::BlockKind::Stack, key)
         }
-        LaravelStringKind::Config => {
+        StringKeyKind::Config => {
             if crate::symbol_map::laravel_resources::resource_from_config_key(key).is_some() {
                 resolve_config_key_declaration_exact(backend, key)
                     .into_iter()
@@ -50,22 +51,31 @@ pub(crate) fn resolve_laravel_string_key(
                     .collect()
             }
         }
-        LaravelStringKind::ConfigResource(resource) => {
+        StringKeyKind::ConfigResource(resource) => {
             let config_key = crate::symbol_map::laravel_resources::config_key(*resource, key);
             resolve_config_key_declaration_exact(backend, &config_key)
                 .into_iter()
                 .collect()
         }
-        LaravelStringKind::View => view_names::resolve_view_definitions(backend, key),
-        LaravelStringKind::Route => route_names::resolve_route_definitions(backend, key),
-        LaravelStringKind::Trans => trans_keys::resolve_trans_definitions(backend, key),
-        LaravelStringKind::Command => resolve_command_definition(backend, key)
+        StringKeyKind::View => view_names::resolve_view_definitions(backend, key),
+        StringKeyKind::Route => route_names::resolve_route_definitions(backend, key),
+        StringKeyKind::Trans => trans_keys::resolve_trans_definitions(backend, key),
+        StringKeyKind::Command => resolve_command_definition(backend, key)
             .into_iter()
             .collect(),
-        LaravelStringKind::MorphAlias => resolve_morph_alias_definitions(backend, key),
-        LaravelStringKind::GateAbility => resolve_gate_ability_definitions(backend, key),
-        LaravelStringKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
-        LaravelStringKind::Env => super::env_vars::resolve_env_definitions(backend, key),
+        StringKeyKind::MorphAlias => resolve_morph_alias_definitions(backend, key),
+        StringKeyKind::GateAbility => resolve_gate_ability_definitions(backend, key),
+        StringKeyKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
+        StringKeyKind::Env => super::env_vars::resolve_env_definitions(backend, key),
+        StringKeyKind::ServiceId
+        | StringKeyKind::ContainerParameter
+        | StringKeyKind::SymfonyRoute
+        | StringKeyKind::SymfonyTranslation
+        | StringKeyKind::TranslationDomain
+        | StringKeyKind::TwigTemplate
+        | StringKeyKind::SymfonyConfigKey
+        | StringKeyKind::SymfonyEvent
+        | StringKeyKind::MessengerBus => backend.symfony_declaration_locations(*kind, key),
     }
 }
 
@@ -208,46 +218,63 @@ fn resolve_command_definition(backend: &crate::Backend, name: &str) -> Option<Lo
 
 /// Unified find-references entry point for all Laravel string-key spans.
 ///
-/// Dispatches on [`crate::symbol_map::LaravelStringKind`] — see
+/// Dispatches on [`crate::symbol_map::StringKeyKind`] — see
 /// [`resolve_laravel_string_key`] for the same rationale.
 pub(crate) fn find_laravel_string_key_references(
     backend: &crate::Backend,
-    kind: &crate::symbol_map::LaravelStringKind,
+    kind: &crate::symbol_map::StringKeyKind,
     key: &str,
     uri: &str,
     snapshot: &[(String, std::sync::Arc<crate::symbol_map::SymbolMap>)],
     include_declaration: bool,
 ) -> Vec<Location> {
-    use crate::symbol_map::LaravelStringKind;
+    use crate::symbol_map::StringKeyKind;
     let mut locations = match kind {
-        LaravelStringKind::Config | LaravelStringKind::ConfigResource(_) => {
+        StringKeyKind::Config | StringKeyKind::ConfigResource(_) => {
             find_all_config_references(backend, kind, key, snapshot, include_declaration)
         }
         // Two unrelated pages that both fill `content` fill two different
         // sections, so the span index's project-wide answer is the wrong
         // one: only the templates that render each other share a name.
-        LaravelStringKind::Section => {
+        StringKeyKind::Section => {
             return backend.blade_block_references(
                 uri,
                 crate::blade::blocks::BlockKind::Section,
                 key,
             );
         }
-        LaravelStringKind::Stack => {
+        StringKeyKind::Stack => {
             return backend.blade_block_references(
                 uri,
                 crate::blade::blocks::BlockKind::Stack,
                 key,
             );
         }
-        LaravelStringKind::View
-        | LaravelStringKind::Route
-        | LaravelStringKind::Trans
-        | LaravelStringKind::Command
-        | LaravelStringKind::MorphAlias
-        | LaravelStringKind::GateAbility
-        | LaravelStringKind::ContainerBinding
-        | LaravelStringKind::Env => find_string_key_usages(kind, key, backend, snapshot),
+        StringKeyKind::View
+        | StringKeyKind::Route
+        | StringKeyKind::Trans
+        | StringKeyKind::Command
+        | StringKeyKind::MorphAlias
+        | StringKeyKind::GateAbility
+        | StringKeyKind::ContainerBinding
+        | StringKeyKind::Env => find_string_key_usages(kind, key, backend, snapshot, true),
+        // A Symfony declaration is a span in a configuration file's (or a
+        // template's) map like any use, so the usages already hold it.
+        StringKeyKind::ServiceId
+        | StringKeyKind::ContainerParameter
+        | StringKeyKind::SymfonyRoute
+        | StringKeyKind::SymfonyTranslation
+        | StringKeyKind::TwigTemplate
+        | StringKeyKind::SymfonyConfigKey
+        | StringKeyKind::SymfonyEvent
+        | StringKeyKind::MessengerBus => {
+            return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
+        }
+        // The catalogues named after a domain declare it, and are added
+        // below.
+        StringKeyKind::TranslationDomain => {
+            find_string_key_usages(kind, key, backend, snapshot, false)
+        }
     };
 
     if include_declaration && !kind.is_config_backed() {
@@ -271,11 +298,14 @@ pub(crate) fn find_laravel_string_key_references(
 
 /// Scan pre-built [`crate::symbol_map::SymbolMap`] spans for all call sites
 /// matching `kind` + `key` — zero file re-parses, O(total spans) memory walk.
+///
+/// `include_writes` set to `false` leaves out the spans that declare the key.
 fn find_string_key_usages(
-    kind: &crate::symbol_map::LaravelStringKind,
+    kind: &crate::symbol_map::StringKeyKind,
     key: &str,
     backend: &crate::Backend,
     snapshot: &[(String, std::sync::Arc<crate::symbol_map::SymbolMap>)],
+    include_writes: bool,
 ) -> Vec<Location> {
     use crate::references::push_location;
     use crate::symbol_map::SymbolKind;
@@ -283,27 +313,27 @@ fn find_string_key_usages(
 
     let mut locations = Vec::new();
     for (file_uri, symbol_map) in snapshot {
-        // A render site whose receiver only a type settles is not in the
-        // map, so ask for the file's confirmed extras — but only when a
-        // candidate names this very key, so the type resolution is paid
-        // for the handful of files that could contribute a hit.
+        // A call whose receiver only a type settles is not in the map, so
+        // ask for the file's confirmed extras — but only when a candidate
+        // names this very key, so the type resolution is paid for the
+        // handful of files that could contribute a hit.
         let has_candidate = symbol_map
-            .view_receiver_sites
+            .typed_receiver_sites
             .iter()
-            .any(|site| *kind == crate::symbol_map::LaravelStringKind::View && site.key == key);
+            .any(|site| site.may_name(*kind, key));
         let extra = if has_candidate {
-            backend.typed_receiver_view_spans_for(file_uri, symbol_map)
+            backend.typed_receiver_spans_for(file_uri, symbol_map)
         } else {
             std::sync::Arc::new(Vec::new())
         };
-        let morph_columns = (*kind == crate::symbol_map::LaravelStringKind::MorphAlias
+        let morph_columns = (*kind == crate::symbol_map::StringKeyKind::MorphAlias
             && symbol_map
                 .morph_column_sites
                 .iter()
                 .any(|site| site.key == key))
         .then(|| backend.morph_column_spans_for(file_uri, symbol_map));
 
-        // First pass: check if this file even has ANY LaravelStringKey matches.
+        // First pass: check if this file even has ANY StringKey matches.
         // This avoids reading file content from disk for thousands of unrelated files.
         let spans = || {
             symbol_map
@@ -312,18 +342,18 @@ fn find_string_key_usages(
                 .chain(extra.iter())
                 .chain(morph_columns.iter().flat_map(|spans| spans.iter()))
         };
-        let has_match = spans().any(|span| {
-            if let SymbolKind::LaravelStringKey {
-                kind: span_kind,
-                key: span_key,
-                ..
-            } = &span.kind
-            {
-                span_kind == kind && span_key == key
-            } else {
-                false
-            }
-        });
+        let matches = |span: &crate::symbol_map::SymbolSpan| {
+            matches!(
+                &span.kind,
+                SymbolKind::StringKey {
+                    kind: span_kind,
+                    key: span_key,
+                    is_write,
+                    ..
+                } if span_kind == kind && span_key == key && (include_writes || !is_write)
+            )
+        };
+        let has_match = spans().any(matches);
 
         if !has_match {
             continue;
@@ -338,19 +368,10 @@ fn find_string_key_usages(
             continue;
         };
         let lines = LineIndex::new(&content);
-        for span in spans() {
-            if let SymbolKind::LaravelStringKey {
-                kind: span_kind,
-                key: span_key,
-                ..
-            } = &span.kind
-                && span_kind == kind
-                && span_key == key
-            {
-                let start = lines.position(span.start as usize);
-                let end = lines.position(span.end as usize);
-                push_location(&mut locations, &parsed_uri, start, end);
-            }
+        for span in spans().filter(|span| matches(span)) {
+            let start = lines.position(span.start as usize);
+            let end = lines.position(span.end as usize);
+            push_location(&mut locations, &parsed_uri, start, end);
         }
     }
     locations
@@ -359,7 +380,7 @@ fn find_string_key_usages(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+    use crate::symbol_map::{LaravelConfigResource, StringKeyKind};
 
     #[test]
     fn configured_resources_resolve_exact_entries_without_file_fallback() {
@@ -375,12 +396,12 @@ mod tests {
         let backend = crate::Backend::new_test();
         *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
         let usage_uri = "file:///project/usage.php";
-        let resource_kind = LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore);
+        let resource_kind = StringKeyKind::ConfigResource(LaravelConfigResource::CacheStore);
 
         let short = resolve_laravel_string_key(&backend, &resource_kind, "redis", usage_uri);
         let full = resolve_laravel_string_key(
             &backend,
-            &LaravelStringKind::Config,
+            &StringKeyKind::Config,
             "cache.stores.redis",
             usage_uri,
         );
@@ -393,7 +414,7 @@ mod tests {
         assert!(
             resolve_laravel_string_key(
                 &backend,
-                &LaravelStringKind::Config,
+                &StringKeyKind::Config,
                 "cache.stores.missing",
                 usage_uri,
             )
@@ -402,14 +423,14 @@ mod tests {
 
         let generic = resolve_laravel_string_key(
             &backend,
-            &LaravelStringKind::Config,
+            &StringKeyKind::Config,
             "cache.unlisted",
             usage_uri,
         );
         assert_eq!(generic.len(), 1);
         assert_eq!(
             generic[0].range.start,
-            tower_lsp::lsp_types::Position::new(0, 0)
+            tower_lsp_server::gen_lsp_types::Position::new(0, 0)
         );
     }
 }

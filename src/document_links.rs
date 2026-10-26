@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use mago_allocator::LocalArena;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{DocumentLink, Range};
+use tower_lsp_server::gen_lsp_types::{DocumentLink, Range};
 
 use crate::Backend;
 use crate::atom::{bytes_to_str, literal_bytes_to_str};

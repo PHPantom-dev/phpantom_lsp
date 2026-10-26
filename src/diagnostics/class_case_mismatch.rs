@@ -19,7 +19,7 @@
 //! available, and a reference to a class declared in the same file is
 //! already loaded, so neither reaches the autoloader.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::names::resolve_to_fqn;
@@ -68,7 +68,7 @@ impl Backend {
         for m in self.class_case_mismatches_in(ctx, uri, content) {
             out.push(make_diagnostic(
                 m.range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 CLASS_CASE_MISMATCH_CODE,
                 m.message,
             ));

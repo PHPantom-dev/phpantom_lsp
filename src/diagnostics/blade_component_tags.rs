@@ -11,7 +11,7 @@
 //! the directive stream; this turns what it finds into reports anchored
 //! on the offending tag in the Blade source.
 
-use tower_lsp::lsp_types::Diagnostic;
+use tower_lsp_server::gen_lsp_types::Diagnostic;
 
 use crate::Backend;
 use crate::blade::component_tags::{TagImbalance, TagKind, tag_imbalances};

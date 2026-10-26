@@ -651,6 +651,9 @@ class Demo
      *     including the one in config/database.php and the .env line itself.
      *  5. Hover "APP_NAME" to see the value .env sets it to, and type inside
      *     an empty env('') to complete every variable the project declares.
+     *  6. Hover "app.name" to see the APP_NAME variable it reads, its default,
+     *     and the value .env sets it to. Hover "database.connections.mysql.password"
+     *     and the .env value stays hidden.
      */
     public function laravelConfigEnv(): void
     {

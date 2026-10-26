@@ -1,0 +1,16 @@
+{
+    "name": "phpantom/phpstan-doctrine-fixtures-pdo",
+    "description": "The project PHPStan's Doctrine extension DBAL fixtures run in on a pdo_pgsql connection",
+    "type": "project",
+    "require": {
+        "doctrine/dbal": "^4.2",
+        "doctrine/orm": "^3.3"
+    },
+    "autoload": {
+        "psr-4": {
+            "Doctrine\\DBAL\\": "../../../stubs/doctrine/dbal/src/",
+            "Doctrine\\ORM\\": "../../../stubs/doctrine/orm/src/",
+            "Doctrine\\Persistence\\": "../../../stubs/doctrine/persistence/src/"
+        }
+    }
+}

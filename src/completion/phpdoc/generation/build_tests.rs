@@ -2,7 +2,7 @@ use super::*;
 use crate::atom::atom;
 use crate::completion::phpdoc::context::SymbolInfo;
 use std::collections::HashMap;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 /// Dummy class loader that returns `None` for all lookups.
 fn no_classes(_name: &str) -> Option<Arc<ClassInfo>> {

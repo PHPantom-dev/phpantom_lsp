@@ -6,8 +6,8 @@ use crate::common::initialize_with_options;
 use phpantom_lsp::Backend;
 use std::fs;
 use std::path::Path;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// A workspace holding a class under `generated/` and one in a `.module`
 /// file, which the default filters index and skip respectively.
@@ -35,8 +35,8 @@ async fn create_on_disk(backend: &Backend, path: &Path, class: &str) {
     backend
         .did_change_watched_files(DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
-                uri: Url::from_file_path(path).unwrap(),
-                typ: FileChangeType::CREATED,
+                uri: Uri::from_file_path(path).unwrap(),
+                kind: FileChangeType::Created,
             }],
         })
         .await;

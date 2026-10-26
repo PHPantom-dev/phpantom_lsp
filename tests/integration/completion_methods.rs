@@ -1,6 +1,6 @@
 use crate::common::{completion_response, create_test_backend, open_php};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Regression test: completion on `collect($var)->` resolves Collection members.
 ///
@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::*;
 async fn test_completion_on_function_call_arrow() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///collect_map.php").unwrap();
+    let uri = Uri::parse("file:///collect_map.php").unwrap();
     let text = r#"<?php
 
 class Collection {
@@ -61,8 +61,8 @@ class PaymentService {
 
     let result = completion_response(&backend, &uri, target_line as u32, 28, None).await;
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
 
@@ -94,8 +94,8 @@ class PaymentService {
     // after `->map`
     let result2 = completion_response(&backend, &uri, chain_line as u32, arrow_col + 3, None).await;
     let items2 = match result2 {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
     let labels2: Vec<&str> = items2.iter().map(|i| i.label.as_str()).collect();
@@ -112,7 +112,7 @@ class PaymentService {
 async fn test_completion_method_insert_text_no_params() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///insert.php").unwrap();
+    let uri = Uri::parse("file:///insert.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -130,10 +130,10 @@ async fn test_completion_method_insert_text_no_params() {
     // Cursor right after `$this->` on line 5
     let result = completion_response(&backend, &uri, 5, 15, None).await;
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
             for item in &method_items {
                 let insert = item.insert_text.as_deref().unwrap();
@@ -147,7 +147,7 @@ async fn test_completion_method_insert_text_no_params() {
                 );
                 assert_eq!(
                     item.insert_text_format,
-                    Some(InsertTextFormat::SNIPPET),
+                    Some(InsertTextFormat::Snippet),
                     "insert_text_format should be Snippet"
                 );
                 // label should be the full signature, e.g. "render()"
@@ -159,7 +159,7 @@ async fn test_completion_method_insert_text_no_params() {
                 );
             }
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -167,7 +167,7 @@ async fn test_completion_method_insert_text_no_params() {
 async fn test_completion_method_insert_text_with_required_params() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///params.php").unwrap();
+    let uri = Uri::parse("file:///params.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Editor {\n",
@@ -186,10 +186,10 @@ async fn test_completion_method_insert_text_with_required_params() {
     // Cursor right after `$this->` on line 6
     let result = completion_response(&backend, &uri, 6, 15, None).await;
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
             assert_eq!(
                 method_items.len(),
@@ -210,7 +210,7 @@ async fn test_completion_method_insert_text_with_required_params() {
             );
             assert_eq!(
                 update_text.insert_text_format,
-                Some(InsertTextFormat::SNIPPET),
+                Some(InsertTextFormat::Snippet),
             );
 
             // setTitle(string $title) — one required param
@@ -225,7 +225,7 @@ async fn test_completion_method_insert_text_with_required_params() {
             );
             assert_eq!(
                 set_title.insert_text_format,
-                Some(InsertTextFormat::SNIPPET),
+                Some(InsertTextFormat::Snippet),
             );
 
             // reset() — no params
@@ -238,9 +238,9 @@ async fn test_completion_method_insert_text_with_required_params() {
                 Some("reset()$0"),
                 "insert_text should be a snippet with empty parens"
             );
-            assert_eq!(reset.insert_text_format, Some(InsertTextFormat::SNIPPET),);
+            assert_eq!(reset.insert_text_format, Some(InsertTextFormat::Snippet),);
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -248,7 +248,7 @@ async fn test_completion_method_insert_text_with_required_params() {
 async fn test_completion_method_insert_text_multiple_required_params() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multi_params.php").unwrap();
+    let uri = Uri::parse("file:///multi_params.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Calculator {\n",
@@ -266,10 +266,10 @@ async fn test_completion_method_insert_text_multiple_required_params() {
     // Cursor right after `$this->` on line 5
     let result = completion_response(&backend, &uri, 5, 15, None).await;
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
 
             // add(int $a, int $b) — two required params
@@ -282,7 +282,7 @@ async fn test_completion_method_insert_text_multiple_required_params() {
                 Some("add(${1:\\$a}, ${2:\\$b})$0"),
                 "insert_text should be a snippet with two required params"
             );
-            assert_eq!(add.insert_text_format, Some(InsertTextFormat::SNIPPET),);
+            assert_eq!(add.insert_text_format, Some(InsertTextFormat::Snippet),);
 
             // addWithLabel(int $a, int $b, string $label = 'sum') — two required, one optional
             let add_with_label = method_items
@@ -296,10 +296,10 @@ async fn test_completion_method_insert_text_multiple_required_params() {
             );
             assert_eq!(
                 add_with_label.insert_text_format,
-                Some(InsertTextFormat::SNIPPET),
+                Some(InsertTextFormat::Snippet),
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -307,7 +307,7 @@ async fn test_completion_method_insert_text_multiple_required_params() {
 async fn test_completion_method_insert_text_variadic_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///variadic.php").unwrap();
+    let uri = Uri::parse("file:///variadic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -325,10 +325,10 @@ async fn test_completion_method_insert_text_variadic_param() {
     // Cursor right after `$this->` on line 5
     let result = completion_response(&backend, &uri, 5, 15, None).await;
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
 
             // log(string $message, ...$context) — one required, one variadic
@@ -341,7 +341,7 @@ async fn test_completion_method_insert_text_variadic_param() {
                 Some("log(${1:\\$message})$0"),
                 "insert_text should include the required param but not the variadic"
             );
-            assert_eq!(log.insert_text_format, Some(InsertTextFormat::SNIPPET),);
+            assert_eq!(log.insert_text_format, Some(InsertTextFormat::Snippet),);
 
             // logAll(...$messages) — only variadic, no required
             let log_all = method_items
@@ -353,9 +353,9 @@ async fn test_completion_method_insert_text_variadic_param() {
                 Some("logAll()$0"),
                 "insert_text should be empty parens (variadic is not required)"
             );
-            assert_eq!(log_all.insert_text_format, Some(InsertTextFormat::SNIPPET),);
+            assert_eq!(log_all.insert_text_format, Some(InsertTextFormat::Snippet),);
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -363,7 +363,7 @@ async fn test_completion_method_insert_text_variadic_param() {
 async fn test_completion_method_all_optional_params() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///optional.php").unwrap();
+    let uri = Uri::parse("file:///optional.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -380,7 +380,7 @@ async fn test_completion_method_all_optional_params() {
     // Cursor right after `$this->` on line 4
     let result = completion_response(&backend, &uri, 4, 15, None).await;
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             // setup($debug = false, $verbose = false) — all optional
             let setup = items
                 .iter()
@@ -391,9 +391,9 @@ async fn test_completion_method_all_optional_params() {
                 Some("setup()$0"),
                 "insert_text should be empty parens (all params are optional)"
             );
-            assert_eq!(setup.insert_text_format, Some(InsertTextFormat::SNIPPET),);
+            assert_eq!(setup.insert_text_format, Some(InsertTextFormat::Snippet),);
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -401,7 +401,7 @@ async fn test_completion_method_all_optional_params() {
 async fn test_completion_method_detail_shows_signature() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///detail.php").unwrap();
+    let uri = Uri::parse("file:///detail.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Editor {\n",
@@ -418,7 +418,7 @@ async fn test_completion_method_detail_shows_signature() {
     // Cursor right after `$this->` on line 4
     let result = completion_response(&backend, &uri, 4, 15, None).await;
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let update = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("updateText"))
@@ -463,9 +463,9 @@ async fn test_completion_method_detail_shows_signature() {
                 Some("updateText(${1:\\$text})$0"),
                 "insert_text should be a snippet with required param $text"
             );
-            assert_eq!(update.insert_text_format, Some(InsertTextFormat::SNIPPET),);
+            assert_eq!(update.insert_text_format, Some(InsertTextFormat::Snippet),);
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -473,7 +473,7 @@ async fn test_completion_method_detail_shows_signature() {
 async fn test_completion_resolve_union_member_shows_all_branches() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///union_resolve.php").unwrap();
+    let uri = Uri::parse("file:///union_resolve.php").unwrap();
     let text = r#"<?php
 class Lamp {
     public function turnOff(): void {}
@@ -503,8 +503,8 @@ class Consumer {
     // Cursor right after `$ambiguous->` on line 18
     let result = completion_response(&backend, &uri, 18, 20, None).await;
     let items = match result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
 
     // Find the turnOff item (present on both branches).
@@ -579,7 +579,7 @@ class Widget {
 "#,
     );
 
-    let uri = Url::parse("file:///not_imported_resolve.php").unwrap();
+    let uri = Uri::parse("file:///not_imported_resolve.php").unwrap();
     let text = r#"<?php
 namespace App;
 class Consumer {
@@ -594,8 +594,8 @@ class Consumer {
 
     let result = completion_response(&backend, &uri, 4, 12, None).await;
     let items = match result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let spin = items
         .iter()
@@ -618,7 +618,7 @@ class Consumer {
 async fn test_completion_resolve_union_deduplicates_common_ancestor() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///union_dedup.php").unwrap();
+    let uri = Uri::parse("file:///union_dedup.php").unwrap();
     let text = r#"<?php
 class BaseDevice {
     public function turnOff(): void {}
@@ -650,8 +650,8 @@ class Consumer {
     // Cursor right after `$ambiguous->` on line 20
     let result = completion_response(&backend, &uri, 20, 20, None).await;
     let items = match result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
 
     let turn_off = items

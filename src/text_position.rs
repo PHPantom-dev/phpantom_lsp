@@ -7,7 +7,7 @@
 //! and LSP `Position`/`Range` values (UTF-16 code units per the LSP
 //! spec).
 
-use tower_lsp::lsp_types::{Position, Range, TextEdit};
+use tower_lsp_server::gen_lsp_types::{Position, Range, TextEdit};
 
 /// Check whether two LSP ranges overlap (share at least one character
 /// position).

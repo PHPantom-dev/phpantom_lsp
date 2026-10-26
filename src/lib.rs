@@ -110,8 +110,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
-use tower_lsp::Client;
-use tower_lsp::lsp_types::CompletionItem;
+use tower_lsp_server::Client;
+use tower_lsp_server::gen_lsp_types::CompletionItem;
 
 use backend::external_tool_worker::ExternalToolWorker;
 use backend::requests::WholeFileCoalesce;
@@ -141,6 +141,11 @@ pub(crate) struct WatchedFileInputs {
     /// Whether the project was classified as Laravel, which adds the
     /// schema watchers.
     pub(crate) is_laravel: bool,
+    /// Whether the project was classified as Symfony, which adds the
+    /// XLIFF catalogue watchers.
+    pub(crate) is_symfony: bool,
+    /// Whether the project uses Twig, which adds the template watchers.
+    pub(crate) is_twig: bool,
     /// Directory symlinks the index reached through, one relative-pattern
     /// watcher each. Empty when the client cannot match a relative
     /// pattern, since then there is nothing to ask it for.
@@ -263,6 +268,7 @@ pub mod fix;
 mod folding;
 pub mod format_cli;
 pub mod formatting;
+mod framework;
 mod highlight;
 mod hover;
 mod indexing;
@@ -313,9 +319,11 @@ pub mod stub_patches;
 pub mod stubs;
 mod symbol_index;
 pub(crate) mod symbol_map;
+mod symfony;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
+mod twig;
 pub mod type_engine;
 mod type_hierarchy;
 pub mod types;
@@ -391,6 +399,14 @@ pub struct BackendState {
     /// errors, imports, namespaces, resolved names and template lowering,
     /// published and removed as one record (see [`file_state`]).
     pub(crate) files: Arc<RwLock<file_state::FileStates>>,
+    /// Per-file Symfony/Doctrine YAML/XML references: the namespace-prefix
+    /// service keys and resource paths the resource symbol maps do not
+    /// record, and the class and member names in the spelling each file
+    /// writes them, which rename has to keep.
+    pub(crate) framework_references: framework::FrameworkReferenceIndex,
+    /// Doctrine entity-to-repository pairs from YAML/XML mappings, keyed by
+    /// source URI so a watched change replaces one file's entries.
+    pub(crate) framework_doctrine_repositories: framework::DoctrineRepositoryIndex,
     /// Cross-file candidate index for find-references.
     ///
     /// Maintained from each file's symbol map (see [`files`](Self::files)) during parsing.
@@ -413,6 +429,13 @@ pub struct BackendState {
     /// handler also verifies that the captured text is still current before
     /// updating shared maps.
     pub(crate) did_change_parse_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    /// The last open file `update_ast` parsed, kept for the diagnostic
+    /// pass its edit schedules, keyed by URI.
+    ///
+    /// One slot rather than one per file: only the file being typed in is
+    /// diagnosed right after its parse, and the parse of a large file
+    /// holds tens of megabytes.
+    pub(crate) parsed_for_diagnostics: Mutex<Option<(String, crate::parser::ParsedFile)>>,
     /// Coalescing state for expensive whole-file requests. See
     /// [`WholeFileCoalesce`] for why this exists.
     pub(crate) whole_file_coalesce: Arc<WholeFileCoalesce>,
@@ -480,6 +503,24 @@ pub struct BackendState {
     /// [`crate::composer::is_application_project`].  Starts `true` so a
     /// workspace with no `composer.json` to classify behaves as before.
     pub(crate) is_application: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project uses Doctrine, which the Doctrine entity and
+    /// repository lenses are gated on.  See
+    /// [`crate::composer::is_doctrine_project`].  Starts `true` so a
+    /// workspace with no `composer.json` to classify behaves as before.
+    pub(crate) is_doctrine: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the project builds a Symfony service container, which
+    /// service IDs and container parameters are read in.  See
+    /// [`crate::composer::is_symfony_project`].  Starts `true` so a
+    /// workspace with no `composer.json` to classify behaves as before.
+    pub(crate) is_symfony: Arc<std::sync::atomic::AtomicBool>,
+    /// The files that declare Symfony service IDs or container parameters.
+    pub(crate) symfony: symfony::SymfonyState,
+    /// Whether the project uses Twig, which template names are read in.
+    /// See [`crate::composer::is_twig_project`].  Starts `true` so a
+    /// workspace with no `composer.json` to classify behaves as before.
+    pub(crate) is_twig: Arc<std::sync::atomic::AtomicBool>,
+    /// The project's Twig template files and the roots they live under.
+    pub(crate) twig: twig::TwigState,
     /// The `Pest.php` files of the project's test directories, read on
     /// first use and dropped when one is saved.  `None` until then.
     pub(crate) pest_configs: Arc<RwLock<Option<pest::PestConfigs>>>,
@@ -506,6 +547,16 @@ pub struct BackendState {
     /// remove stubs that do not exist in the target PHP version.
     /// Can be consulted when resolving standalone constant references.
     pub(crate) stub_constant_index: Arc<RwLock<HashMap<&'static str, &'static str>>>,
+    /// Where the stub paths (`[stubs]` in `.phpantom.toml` and the editor's
+    /// stub directory) declare each name.  Consulted by the class,
+    /// function and constant lookups ahead of everything else, since a stub
+    /// path's declaration wins over every other.  Rebuilt whole when the
+    /// paths change; see [`refresh_stub_paths`](Self::refresh_stub_paths).
+    pub(crate) external_stubs: Arc<RwLock<Arc<indexing::stub_paths::ExternalStubIndex>>>,
+    /// Whether `external_stubs` holds any stub path, read before its lock
+    /// so the class and function lookups, which run millions of times in
+    /// a diagnostic pass, pay one atomic load when there are none.
+    pub(crate) has_external_stubs: Arc<std::sync::atomic::AtomicBool>,
     /// Diagnostic debouncing state and the pull-model diagnostic caches.
     pub(crate) diag: crate::diagnostics::state::DiagnosticState,
     /// PHPStan's dedicated background worker state (extremely slow and

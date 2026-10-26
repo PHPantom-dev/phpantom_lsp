@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use tower_lsp::lsp_types::{Location, Position, Range, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Position, Range, Uri};
 
 use crate::Backend;
 use crate::references::push_location;
-use crate::symbol_map::{LaravelStringKind, SymbolKind, SymbolMap, SymbolSpan};
+use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::{LineIndex, offset_to_position};
 
 #[derive(Debug)]
@@ -78,14 +78,14 @@ fn framework_config_dir(root: &std::path::Path) -> std::path::PathBuf {
 // ─── Keys declared at runtime ─────────────────────────────────────────────────
 
 /// The config keys a single file declares at runtime, read from the
-/// [`SymbolKind::LaravelStringKey`] spans the extractor already marked as
+/// [`SymbolKind::StringKey`] spans the extractor already marked as
 /// writes.
 fn config_write_keys(symbol_map: &SymbolMap) -> Vec<String> {
     let mut keys: Vec<String> = symbol_map
         .spans
         .iter()
         .filter_map(|span| match &span.kind {
-            SymbolKind::LaravelStringKey {
+            SymbolKind::StringKey {
                 kind,
                 key,
                 is_write: true,
@@ -280,7 +280,7 @@ impl Backend {
 
 /// Find all references for a Laravel config key across the project.
 ///
-/// Uses pre-built [`SymbolKind::LaravelStringKey`] spans to avoid re-parsing
+/// Uses pre-built [`SymbolKind::StringKey`] spans to avoid re-parsing
 /// every file at request time (same pattern as `find_member_references`).
 pub(crate) fn find_config_references(
     backend: &Backend,
@@ -294,9 +294,7 @@ pub(crate) fn find_config_references(
         backend.lookup_symbol_at_position(uri, content, position)
     {
         match sym.kind {
-            SymbolKind::LaravelStringKey { kind, key, .. } if kind.is_config_backed() => {
-                (kind, key)
-            }
+            SymbolKind::StringKey { kind, key, .. } if kind.is_config_backed() => (kind, key),
             _ => return None,
         }
     } else {
@@ -308,11 +306,10 @@ pub(crate) fn find_config_references(
             .into_iter()
             .find(|d| cursor_offset >= d.start && cursor_offset <= d.end)
             .map(|d| d.key)?;
-        (LaravelStringKind::Config, key)
+        (StringKeyKind::Config, key)
     };
 
-    let reference_key =
-        crate::reference_index::laravel_string_reference_key(target_kind, &target_key);
+    let reference_key = crate::reference_index::string_key_reference_key(target_kind, &target_key);
     let snapshot = backend.user_file_symbol_maps_for_reference_keys(&[reference_key]);
     let locations = find_all_config_references(
         backend,
@@ -330,7 +327,7 @@ pub(crate) fn find_config_references(
 }
 
 /// Called from `resolve_from_symbol` when the symbol map contains a
-/// [`SymbolKind::LaravelStringKey`] span with `kind == Config` at the cursor —
+/// [`SymbolKind::StringKey`] span with `kind == Config` at the cursor —
 /// no file re-parse is needed for the usage side.
 ///
 /// The files that can declare the key are tried in the order Laravel lets
@@ -416,7 +413,7 @@ fn resolve_config_key_declaration_inner(
     fallback.map(|uri| crate::definition::point_location(uri, Position::new(0, 0)))
 }
 
-fn config_declaration_location(uri: Url, content: &str, declaration: &ConfigKeyMatch) -> Location {
+fn config_declaration_location(uri: Uri, content: &str, declaration: &ConfigKeyMatch) -> Location {
     Location {
         uri,
         range: Range::new(
@@ -428,13 +425,13 @@ fn config_declaration_location(uri: Url, content: &str, declaration: &ConfigKeyM
 
 /// Find all references for a Laravel config key across the project.
 ///
-/// Iterates pre-built [`SymbolKind::LaravelStringKey`] spans for usages
+/// Iterates pre-built [`SymbolKind::StringKey`] spans for usages
 /// (zero re-parses per file, same pattern as `find_member_references`).
 /// Declaration lookup parses only the config file that can own the canonical
 /// key, independently of the usage-candidate snapshot.
 pub(crate) fn find_all_config_references(
     backend: &Backend,
-    target_kind: &LaravelStringKind,
+    target_kind: &StringKeyKind,
     target_key: &str,
     snapshot: &[(String, Arc<SymbolMap>)],
     include_declaration: bool,
@@ -487,45 +484,41 @@ pub(crate) fn find_all_config_references(
     locations
 }
 
-fn config_span_matches(
-    span: &SymbolSpan,
-    target_kind: &LaravelStringKind,
-    target_key: &str,
-) -> bool {
+fn config_span_matches(span: &SymbolSpan, target_kind: &StringKeyKind, target_key: &str) -> bool {
     matches!(
         &span.kind,
-        SymbolKind::LaravelStringKey { kind, key, .. }
+        SymbolKind::StringKey { kind, key, .. }
             if config_keys_match(target_kind, target_key, kind, key)
     )
 }
 
 fn config_keys_match(
-    left_kind: &LaravelStringKind,
+    left_kind: &StringKeyKind,
     left_key: &str,
-    right_kind: &LaravelStringKind,
+    right_kind: &StringKeyKind,
     right_key: &str,
 ) -> bool {
     match (left_kind, right_kind) {
-        (LaravelStringKind::Config, LaravelStringKind::Config) => left_key == right_key,
-        (LaravelStringKind::ConfigResource(left), LaravelStringKind::ConfigResource(right)) => {
+        (StringKeyKind::Config, StringKeyKind::Config) => left_key == right_key,
+        (StringKeyKind::ConfigResource(left), StringKeyKind::ConfigResource(right)) => {
             left == right
                 && crate::symbol_map::laravel_resources::same_resource_name(
                     *left, left_key, right_key,
                 )
         }
-        (LaravelStringKind::Config, LaravelStringKind::ConfigResource(resource)) => {
+        (StringKeyKind::Config, StringKeyKind::ConfigResource(resource)) => {
             crate::symbol_map::laravel_resources::matches_config_key(*resource, right_key, left_key)
         }
-        (LaravelStringKind::ConfigResource(resource), LaravelStringKind::Config) => {
+        (StringKeyKind::ConfigResource(resource), StringKeyKind::Config) => {
             crate::symbol_map::laravel_resources::matches_config_key(*resource, left_key, right_key)
         }
         _ => false,
     }
 }
 
-fn canonical_config_key<'a>(kind: &LaravelStringKind, key: &'a str) -> Cow<'a, str> {
+fn canonical_config_key<'a>(kind: &StringKeyKind, key: &'a str) -> Cow<'a, str> {
     match kind {
-        LaravelStringKind::ConfigResource(resource) => Cow::Owned(
+        StringKeyKind::ConfigResource(resource) => Cow::Owned(
             crate::symbol_map::laravel_resources::config_key(*resource, key),
         ),
         _ => Cow::Borrowed(key),
@@ -748,21 +741,21 @@ return array_merge([
     fn config_resource_keys_match_generic_config_keys_symmetrically() {
         use crate::symbol_map::LaravelConfigResource::{CacheStore, StorageDisk};
 
-        let resource = LaravelStringKind::ConfigResource(CacheStore);
+        let resource = StringKeyKind::ConfigResource(CacheStore);
         assert!(config_keys_match(
             &resource,
             "redis",
-            &LaravelStringKind::Config,
+            &StringKeyKind::Config,
             "cache.stores.redis",
         ));
         assert!(config_keys_match(
-            &LaravelStringKind::Config,
+            &StringKeyKind::Config,
             "cache.stores.redis",
             &resource,
             "redis",
         ));
         assert!(!config_keys_match(
-            &LaravelStringKind::ConfigResource(StorageDisk),
+            &StringKeyKind::ConfigResource(StorageDisk),
             "redis",
             &resource,
             "redis",
@@ -771,16 +764,16 @@ return array_merge([
         assert!(!config_keys_match(
             &resource,
             "redis",
-            &LaravelStringKind::Config,
+            &StringKeyKind::Config,
             "cache.stores.redis.options",
         ));
         assert!(!config_keys_match(
-            &LaravelStringKind::View,
+            &StringKeyKind::View,
             "redis",
-            &LaravelStringKind::Config,
+            &StringKeyKind::Config,
             "cache.stores.redis",
         ));
-        let database = LaravelStringKind::ConfigResource(
+        let database = StringKeyKind::ConfigResource(
             crate::symbol_map::LaravelConfigResource::DatabaseConnection,
         );
         assert!(config_keys_match(
@@ -792,13 +785,13 @@ return array_merge([
         assert!(config_keys_match(
             &database,
             "mysql::direct",
-            &LaravelStringKind::Config,
+            &StringKeyKind::Config,
             "database.connections.mysql",
         ));
         assert!(!config_keys_match(
-            &LaravelStringKind::ConfigResource(CacheStore),
+            &StringKeyKind::ConfigResource(CacheStore),
             "null",
-            &LaravelStringKind::Config,
+            &StringKeyKind::Config,
             "cache.stores.null",
         ));
     }
@@ -818,8 +811,8 @@ return array_merge([
                 SymbolSpan {
                     start: 0,
                     end: 5,
-                    kind: SymbolKind::LaravelStringKey {
-                        kind: LaravelStringKind::ConfigResource(CacheStore),
+                    kind: SymbolKind::StringKey {
+                        kind: StringKeyKind::ConfigResource(CacheStore),
                         key: "redis".to_string(),
                         is_write: false,
                         is_optional: false,
@@ -828,8 +821,8 @@ return array_merge([
                 SymbolSpan {
                     start: 6,
                     end: source.len() as u32,
-                    kind: SymbolKind::LaravelStringKey {
-                        kind: LaravelStringKind::Config,
+                    kind: SymbolKind::StringKey {
+                        kind: StringKeyKind::Config,
                         key: "cache.stores.redis".to_string(),
                         is_write: false,
                         is_optional: false,
@@ -842,14 +835,14 @@ return array_merge([
 
         let resource = find_all_config_references(
             &backend,
-            &LaravelStringKind::ConfigResource(CacheStore),
+            &StringKeyKind::ConfigResource(CacheStore),
             "redis",
             &snapshot,
             false,
         );
         let generic = find_all_config_references(
             &backend,
-            &LaravelStringKind::Config,
+            &StringKeyKind::Config,
             "cache.stores.redis",
             &snapshot,
             false,
@@ -865,14 +858,8 @@ return array_merge([
             Range::new(Position::new(0, 6), Position::new(0, source.len() as u32),)
         );
         assert!(
-            find_all_config_references(
-                &backend,
-                &LaravelStringKind::View,
-                "redis",
-                &snapshot,
-                false,
-            )
-            .is_empty()
+            find_all_config_references(&backend, &StringKeyKind::View, "redis", &snapshot, false,)
+                .is_empty()
         );
     }
 
@@ -891,8 +878,8 @@ return array_merge([
             spans: vec![SymbolSpan {
                 start: 0,
                 end: content.len() as u32,
-                kind: SymbolKind::LaravelStringKey {
-                    kind: LaravelStringKind::ConfigResource(CacheStore),
+                kind: SymbolKind::StringKey {
+                    kind: StringKeyKind::ConfigResource(CacheStore),
                     key: content.to_string(),
                     is_write: false,
                     is_optional: false,
@@ -970,25 +957,25 @@ return array_merge([
             ]);
 
         let app = resolve_config_key_declaration_exact(&backend, "cache.stores.tenant").unwrap();
-        assert_eq!(app.uri, Url::from_file_path(app_config).unwrap());
+        assert_eq!(app.uri, Uri::from_file_path(app_config).unwrap());
         assert_ne!(app.range.start, app.range.end);
 
         let provider =
             resolve_config_key_declaration_exact(&backend, "cache.stores.package").unwrap();
-        assert_eq!(provider.uri, Url::from_file_path(provider_config).unwrap());
+        assert_eq!(provider.uri, Uri::from_file_path(provider_config).unwrap());
 
         let second_provider =
             resolve_config_key_declaration_exact(&backend, "cache.stores.second").unwrap();
         assert_eq!(
             second_provider.uri,
-            Url::from_file_path(second_provider_config).unwrap()
+            Uri::from_file_path(second_provider_config).unwrap()
         );
 
         let framework =
             resolve_config_key_declaration_exact(&backend, "cache.stores.redis").unwrap();
         assert_eq!(
             framework.uri,
-            Url::from_file_path(framework_config).unwrap()
+            Uri::from_file_path(framework_config).unwrap()
         );
 
         assert!(resolve_config_key_declaration_exact(&backend, "cache.stores.missing").is_none());
@@ -1025,11 +1012,11 @@ return array_merge([
             });
 
         let exact = resolve_config_key_declaration_exact(&backend, "cache.stores.shared").unwrap();
-        assert_eq!(exact.uri, Url::from_file_path(&provider_config).unwrap());
+        assert_eq!(exact.uri, Uri::from_file_path(&provider_config).unwrap());
         assert!(resolve_config_key_declaration_exact(&backend, "cache.stores.missing").is_none());
 
         let fallback = resolve_config_key_declaration(&backend, "cache.stores.missing").unwrap();
-        assert_eq!(fallback.uri, Url::from_file_path(provider_config).unwrap());
+        assert_eq!(fallback.uri, Uri::from_file_path(provider_config).unwrap());
         assert_eq!(
             fallback.range,
             Range::new(Position::new(0, 0), Position::new(0, 0))

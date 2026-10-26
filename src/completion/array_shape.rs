@@ -30,7 +30,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::{ResolvedClassLoader, find_class_at_offset};
@@ -415,10 +415,13 @@ impl Backend {
 
             items.push(CompletionItem {
                 label: key_name.to_string(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some(detail),
                 filter_text: Some(key_name.to_string()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text })),
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
+                    range,
+                    new_text,
+                })),
                 sort_text: Some(format!("{:04}", sort_idx)),
                 ..CompletionItem::default()
             });
@@ -455,10 +458,13 @@ impl Backend {
 
             items.push(CompletionItem {
                 label: key.to_string(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 detail: Some(detail.to_string()),
                 filter_text: Some(key.to_string()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text })),
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
+                    range,
+                    new_text,
+                })),
                 sort_text: Some(format!("{:04}", sort_idx)),
                 ..CompletionItem::default()
             });

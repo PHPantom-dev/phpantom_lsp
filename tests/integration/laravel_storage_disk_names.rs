@@ -1,12 +1,13 @@
 //! End-to-end coverage for Laravel storage disk names backed by config keys.
 
+use crate::common::message_text;
 use crate::common::{
     complete_labels_at_opened, create_psr4_workspace, goto_definition_at, open_php_at,
     position_after,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^12.0" },
@@ -24,7 +25,7 @@ return [
 ];
 "#;
 
-async fn open_workspace(source: &str) -> (Backend, tempfile::TempDir, Url) {
+async fn open_workspace(source: &str) -> (Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(
         COMPOSER_JSON,
         &[
@@ -39,15 +40,17 @@ async fn open_workspace(source: &str) -> (Backend, tempfile::TempDir, Url) {
     (backend, dir, uri)
 }
 
-async fn completion_labels(backend: &Backend, uri: &Url, position: Position) -> Vec<String> {
+async fn completion_labels(backend: &Backend, uri: &Uri, position: Position) -> Vec<String> {
     complete_labels_at_opened(backend, uri, position.line, position.character).await
 }
 
-fn definition_location(response: GotoDefinitionResponse) -> Location {
+fn definition_location(response: DefinitionResponse) -> Location {
     match response {
-        GotoDefinitionResponse::Scalar(location) => location,
-        GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
-        GotoDefinitionResponse::Link(mut links) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => location,
+        DefinitionResponse::Definition(Definition::LocationList(mut locations)) => {
+            locations.remove(0)
+        }
+        DefinitionResponse::DefinitionLinkList(mut links) => {
             let link = links.remove(0);
             Location::new(link.target_uri, link.target_selection_range)
         }
@@ -194,7 +197,7 @@ class DiskConsumer {}
         let hover = backend
             .handle_hover(uri.as_str(), source, position)
             .expect("configured disk should have hover");
-        let HoverContents::Markup(markup) = hover.contents else {
+        let Contents::MarkupContent(markup) = hover.contents else {
             panic!("expected markdown hover");
         };
         assert!(markup.value.contains("**Storage disk** `archive`"));
@@ -232,7 +235,7 @@ class DiskConsumer {
 }
 "#;
     let (backend, dir, uri) = open_workspace(source).await;
-    let config_uri = Url::from_file_path(dir.path().join("config/filesystems.php")).unwrap();
+    let config_uri = Uri::from_file_path(dir.path().join("config/filesystems.php")).unwrap();
     let declaration_position = position_after(FILESYSTEMS_CONFIG, "'arch");
     let expected_references = backend
         .find_references(
@@ -267,7 +270,7 @@ class DiskConsumer {
         let hover = backend
             .handle_hover(uri.as_str(), source, position)
             .unwrap_or_else(|| panic!("group-imported alias at `{prefix}` should hover"));
-        let HoverContents::Markup(markup) = hover.contents else {
+        let Contents::MarkupContent(markup) = hover.contents else {
             panic!("expected markdown hover");
         };
         assert!(markup.value.contains("**Storage disk** `archive`"));
@@ -323,7 +326,7 @@ class DiskConsumer {
         diagnostics.iter().all(|diagnostic| {
             !matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code == "invalid_laravel_storage_disk"
+                Some(Code::String(code)) if code == "invalid_laravel_storage_disk"
             )
         }),
         "configured aliases are valid and local homonyms name no disk: {diagnostics:#?}"
@@ -353,7 +356,7 @@ class DiskConsumer {}
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code == "invalid_laravel_storage_disk"
+                Some(Code::String(code)) if code == "invalid_laravel_storage_disk"
             )
         })
         .collect::<Vec<_>>();
@@ -361,7 +364,7 @@ class DiskConsumer {}
 
     let messages = invalid_disks
         .iter()
-        .map(|diagnostic| diagnostic.message.as_str())
+        .map(|diagnostic| message_text(&diagnostic.message))
         .collect::<Vec<_>>();
     assert!(
         messages
@@ -424,7 +427,7 @@ class DiskConsumer {}
         )
         .expect("generic config key should have references");
 
-    let config_uri = Url::from_file_path(dir.path().join("config/filesystems.php")).unwrap();
+    let config_uri = Uri::from_file_path(dir.path().join("config/filesystems.php")).unwrap();
     let declaration_references = backend
         .find_references(
             config_uri.as_str(),

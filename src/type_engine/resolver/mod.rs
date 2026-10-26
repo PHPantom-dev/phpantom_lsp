@@ -48,7 +48,9 @@ pub(crate) use context::{
     ResolutionCtx, ScopeVarResolverFn, SourceImports, VarResolutionCtx,
     with_chain_resolution_cache, with_isolated_chain_cache,
 };
-pub(crate) use subject_outcome::{SubjectOutcome, resolve_subject_outcome};
+pub(crate) use subject_outcome::{
+    SubjectOutcome, UnionBranch, UnionBranches, resolve_subject_outcome,
+};
 pub(crate) use variable_subjects::resolve_dynamic_member_name;
 pub(in crate::type_engine) use written_names::WrittenNames;
 
@@ -261,6 +263,18 @@ fn resolve_target_classes_expr_inner(
             resolve_static_access_subject(class, member, ctx)
         }
 
+        // ── `new $class` builds the class the variable names ────
+        SubjectExpr::NewExpr { class_name } if class_name.starts_with('$') => {
+            let operand = resolve_variable_fallback(class_name, AccessKind::Arrow, ctx);
+            let owning_class = current_class.map(|cc| cc.fqn());
+            crate::type_engine::variable::class_string_resolution::instances_built_by_new(
+                &operand,
+                owning_class.as_ref().map_or("", |fqn| fqn.as_str()),
+                all_classes,
+                class_loader,
+            )
+        }
+
         // ── A bare class name, and `new ClassName` without trailing
         //    call parens, are the same reference written two ways ──
         SubjectExpr::ClassName(name) | SubjectExpr::NewExpr { class_name: name } => {
@@ -271,6 +285,17 @@ fn resolve_target_classes_expr_inner(
                 .map(ResolvedType::from_arc)
                 .into_iter()
                 .collect()
+        }
+
+        // ── Closure literal: a `Closure` with its own signature ─
+        SubjectExpr::Closure(text) => {
+            let Some(ty) = Backend::resolve_arg_text_to_type(text, ctx) else {
+                return vec![];
+            };
+            match class_loader(Fqn::new("Closure")) {
+                Some(closure) => vec![ResolvedType::from_both_arc(ty, closure)],
+                None => vec![ResolvedType::from_type_string(ty)],
+            }
         }
 
         // ── Call expression ─────────────────────────────────────
@@ -447,12 +472,19 @@ fn resolve_call_subject(
     // branch, `Foo&MockInterface`) is used unconditionally: without
     // it, `classes` is a flat, untagged list of the intersection's
     // members, which `types_joined` cannot tell apart from a union
-    // of alternatives.
+    // of alternatives.  The same holds for an intersection inside a
+    // union (`(A&I)|B`).
     if let Some(h) = hint {
         let hint_names_a_class = matches!(h.kind(), TypeKind::Generic(g) if classes
             .iter()
             .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()));
-        let is_intersection = matches!(h.kind(), TypeKind::Intersection(_));
+        let is_intersection = match h.kind() {
+            TypeKind::Intersection(_) => true,
+            TypeKind::Union(members) => members
+                .iter()
+                .any(|m| matches!(m.kind(), TypeKind::Intersection(_))),
+            _ => false,
+        };
         if is_intersection
             || classes.iter().any(|c| !c.template_params.is_empty())
             || hint_names_a_class
@@ -497,6 +529,11 @@ fn resolve_property_chain_subject(
     // only its base name, so each is given its generic spelling
     // back below.
     let mut generic_hints: Vec<PhpType> = Vec::new();
+    // The intersections in the property's hint, e.g. `Foo&MockObject`.
+    // Their classes resolve as flat entries, which would read as the
+    // alternatives `Foo|MockObject`, so each is tagged with the whole
+    // intersection below the way a call's return type is.
+    let mut intersection_hints: Vec<PhpType> = Vec::new();
     for cls in &base_arcs {
         let Some(hint) = resolve_property_type_hint(cls, property, class_loader) else {
             continue;
@@ -512,6 +549,13 @@ fn resolve_property_chain_subject(
                 .union_members()
                 .into_iter()
                 .filter(|member| matches!(member.kind(), TypeKind::Generic(_)))
+                .cloned(),
+        );
+        intersection_hints.extend(
+            hint.unwrap_nullable()
+                .union_members()
+                .into_iter()
+                .filter(|member| matches!(member.kind(), TypeKind::Intersection(_)))
                 .cloned(),
         );
 
@@ -535,17 +579,22 @@ fn resolve_property_chain_subject(
         }
     }
 
-    // The generic spelling of each class the hint named.
+    // The generic spelling of each class the hint named, or the
+    // intersection it is part of.
     let mut resolved = ResolvedType::from_classes(arc_results);
     for rt in &mut resolved {
         let Some(class) = &rt.class_info else {
             continue;
         };
         let fqn = class.fqn();
-        if let Some(hint) = generic_hints.iter().find(|hint| {
-            hint.base_name()
+        let names_class = |ty: &PhpType| {
+            ty.base_name()
                 .is_some_and(|base| base == fqn.as_str() || crate::util::short_name(&fqn) == base)
-        }) {
+        };
+        let intersection = intersection_hints.iter().find(|hint| {
+            matches!(hint.kind(), TypeKind::Intersection(parts) if parts.iter().any(names_class))
+        });
+        if let Some(hint) = intersection.or_else(|| generic_hints.iter().find(|h| names_class(h))) {
             rt.type_string = hint.clone();
         }
     }

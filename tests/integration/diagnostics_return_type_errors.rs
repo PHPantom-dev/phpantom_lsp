@@ -3,7 +3,7 @@ use crate::common::{
     messages_with_code,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -3559,6 +3559,50 @@ fn argument_less_view_helper_still_resolves_to_the_factory() {
     );
 }
 
+/// Laravel's `response()` helper keys its declared return type on
+/// `$content is null`, but its body keys it on whether an argument was
+/// passed: any call with content builds a `Response`, even a `null` one.
+const RESPONSE_SCAFFOLD: &str = r#"
+namespace Illuminate\Contracts\Routing {
+    interface ResponseFactory {}
+}
+namespace Illuminate\Http {
+    class Response {}
+}
+namespace {
+    /** @return ($content is null ? \Illuminate\Contracts\Routing\ResponseFactory : \Illuminate\Http\Response) */
+    function response($content = null, $status = 200, array $headers = []) {}
+}
+"#;
+
+#[test]
+fn response_helper_with_nullable_content_is_a_response() {
+    let php = format!(
+        "<?php\n{RESPONSE_SCAFFOLD}\nnamespace App {{\n    use Illuminate\\Http\\Response;\n    class Feeds {{\n        public function direct(?string $file): Response {{ return response($file, 200, []); }}\n        public function viaVariable(?string $file): Response {{ $r = response($file); return $r; }}\n        public function literalNull(): Response {{ return response(null); }}\n    }}\n}}\n"
+    );
+    let diags = collect(&php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "response() with any argument should resolve to Response, got: {}",
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
+    );
+}
+
+#[test]
+fn argument_less_response_helper_still_resolves_to_the_factory() {
+    let php = format!(
+        "<?php\n{RESPONSE_SCAFFOLD}\nnamespace App {{\n    use Illuminate\\Contracts\\Routing\\ResponseFactory;\n    use Illuminate\\Http\\Response;\n    class Responses {{\n        public function factory(): ResponseFactory {{ return response(); }}\n        public function wrong(): Response {{ return response(); }}\n    }}\n}}\n"
+    );
+    let diags = collect(&php);
+    let mismatches = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "only the factory returned as a Response should be flagged, got: {}",
+        mismatches.join("; ")
+    );
+}
+
 #[test]
 fn scalar_conditional_function_return_survives_template_binding() {
     // A templated wrapper binds its return from the shared text-based call
@@ -3731,6 +3775,33 @@ function returnsClass() { return SomeClass::class; }
     let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("interface-string"), "{messages:?}");
+}
+
+#[test]
+fn enum_and_trait_names_returned_where_their_strings_are_declared() {
+    let php = r#"<?php
+namespace App;
+
+enum SomeEnum { case A; }
+trait SomeTrait {}
+final class SomeClass {}
+
+/** @return enum-string */
+function returnsEnum() { return SomeEnum::class; }
+
+/** @return trait-string */
+function returnsTrait() { return SomeTrait::class; }
+
+/** @return enum-string */
+function returnsClassAsEnum() { return SomeClass::class; }
+
+/** @return trait-string */
+function returnsClassAsTrait() { return SomeClass::class; }
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(messages[0].contains("enum-string"), "{messages:?}");
+    assert!(messages[1].contains("trait-string"), "{messages:?}");
 }
 
 #[test]

@@ -2389,6 +2389,7 @@ fn stub_function_info(name: &str, return_type: Option<PhpType>) -> crate::types:
         is_pure: false,
         is_impure: false,
         reads_func_args: false,
+        is_no_discard: false,
         unverified_doc_types: Default::default(),
     }
 }

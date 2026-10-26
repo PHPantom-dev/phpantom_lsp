@@ -90,6 +90,9 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     if let Some((var_name, constant)) = extract_class_constant_identity(condition, true) {
         strip_null_by_constant_identity(&var_name, constant, scope, ctx);
     }
+    // `$x === Suit::Hearts` — the subject is that case; `$x !== Suit::Hearts`
+    // leaves the enum's other cases.
+    apply_enum_case_identity_narrowing(condition, scope, ctx, true);
     // `$x === $y` — the same reasoning for any comparand whose own type
     // rules out null.
     apply_identity_comparison_null_narrowing(condition, scope, ctx, true);
@@ -198,6 +201,7 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     if let Some((var_name, constant)) = extract_class_constant_identity(condition, false) {
         strip_null_by_constant_identity(&var_name, constant, scope, ctx);
     }
+    apply_enum_case_identity_narrowing(condition, scope, ctx, false);
     // When the condition is `$x !== $y`, the inverse (else/guard) means
     // the two were identical, so a comparand that cannot be null leaves
     // no null in the subject.

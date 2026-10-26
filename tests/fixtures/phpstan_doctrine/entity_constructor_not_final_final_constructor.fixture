@@ -1,0 +1,8 @@
+// test: An entity's final constructor Doctrine cannot proxy
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityConstructorNotFinalRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/EntityFinalConstructor.php
+// expect_diagnostic: 10: Constructor of class PHPStan\Rules\Doctrine\ORM\EntityFinalConstructor is final which can cause problems with proxies. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

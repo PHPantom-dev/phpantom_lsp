@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Position, Uri};
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -47,7 +47,7 @@ pub(crate) fn find_route_registration_references(
     position: Position,
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
-    use crate::symbol_map::LaravelStringKind;
+    use crate::symbol_map::StringKeyKind;
 
     let is_route_file = uri.contains("/routes/")
         || crate::util::uri_to_path(uri).is_some_and(|path| {
@@ -70,12 +70,10 @@ pub(crate) fn find_route_registration_references(
 
     let keys: Vec<_> = names
         .iter()
-        .map(
-            |key| crate::reference_index::ReferenceIndexKey::LaravelString {
-                kind: LaravelStringKind::Route,
-                key: key.clone(),
-            },
-        )
+        .map(|key| crate::reference_index::ReferenceIndexKey::StringKey {
+            kind: StringKeyKind::Route,
+            key: key.clone(),
+        })
         .collect();
     let snapshot = backend.user_file_symbol_maps_for_reference_keys(&keys);
     let mut locations: Vec<Location> = Vec::new();
@@ -83,7 +81,7 @@ pub(crate) fn find_route_registration_references(
         locations.extend(
             crate::virtual_members::laravel::find_laravel_string_key_references(
                 backend,
-                &LaravelStringKind::Route,
+                &StringKeyKind::Route,
                 name,
                 uri,
                 &snapshot,
@@ -136,7 +134,7 @@ pub(crate) struct RouteEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RouteDeclaration {
     /// The file the registration is written in.
-    pub file: Arc<Url>,
+    pub file: Arc<Uri>,
     /// Where go-to-definition lands: between the quotes of a plain literal
     /// name, and at the start of anything else.
     pub position: Position,
@@ -712,7 +710,7 @@ fn mark_from_vendor(routes: &mut [RouteEntry]) {
 /// accounting for group prefixes and file includes.
 pub(super) fn walk_route_file(
     content: &str,
-    uri: &Url,
+    uri: &Uri,
     file_path: Option<&Path>,
     workspace_root: Option<&Path>,
     macros: &MacroScope,

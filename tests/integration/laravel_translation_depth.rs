@@ -2,8 +2,8 @@ use crate::common::{
     completion_response, create_psr4_workspace, definition_locations, find_references,
     goto_definition_at, lsp_pos_to_offset, markup_hover_at, open_document, open_php, position_of,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "require": {"laravel/framework": "^13.0"},
@@ -26,10 +26,10 @@ async fn new_php_translation_buffers_resolve_before_their_first_save() {
                 ("lang/en/existing.php", existing),
             ],
         );
-        let source_uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
-        let existing_uri = Url::from_file_path(dir.path().join("lang/en/existing.php")).unwrap();
+        let source_uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
+        let existing_uri = Uri::from_file_path(dir.path().join("lang/en/existing.php")).unwrap();
         let translation_path = dir.path().join(path);
-        let translation_uri = Url::from_file_path(&translation_path).unwrap();
+        let translation_uri = Uri::from_file_path(&translation_path).unwrap();
         open_php(&backend, &source_uri, &source).await;
         open_php(&backend, &existing_uri, existing).await;
 
@@ -82,12 +82,12 @@ async fn json_translation_definitions_and_references_use_exact_key_ranges() {
             ("resources/lang/fr.json", french),
         ],
     );
-    let php_uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
-    let en_uri = Url::from_file_path(dir.path().join("lang/en.json")).unwrap();
-    let fr_uri = Url::from_file_path(dir.path().join("resources/lang/fr.json")).unwrap();
+    let php_uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let en_uri = Uri::from_file_path(dir.path().join("lang/en.json")).unwrap();
+    let fr_uri = Uri::from_file_path(dir.path().join("resources/lang/fr.json")).unwrap();
     open_php(&backend, &php_uri, php).await;
     let definitions = backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: php_uri.clone(),
@@ -100,7 +100,7 @@ async fn json_translation_definitions_and_references_use_exact_key_ranges() {
         .await
         .unwrap()
         .expect("JSON definitions");
-    let GotoDefinitionResponse::Array(definitions) = definitions else {
+    let DefinitionResponse::Definition(Definition::LocationList(definitions)) = definitions else {
         panic!("expected locales")
     };
     assert_eq!(definitions.len(), 2);
@@ -146,8 +146,8 @@ async fn json_translation_navigation_reads_unsaved_escaped_keys() {
         COMPOSER,
         &[("src/usage.php", php), ("lang/en.json", initial)],
     );
-    let php_uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
-    let json_uri = Url::from_file_path(dir.path().join("lang/en.json")).unwrap();
+    let php_uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let json_uri = Uri::from_file_path(dir.path().join("lang/en.json")).unwrap();
     open_php(&backend, &php_uri, php).await;
     open_document(&backend, &json_uri, "json", updated).await;
     let found = find_references(&backend, &json_uri, position_of(updated, "Say"), true).await;
@@ -176,7 +176,7 @@ async fn translation_argument_completion_uses_both_language_folders() {
             ("src/usage.php", "<?php"),
         ],
     );
-    let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
     for (source, expected) in [
         ("<?php __('messages.hello', [], '|');", vec!["en", "fr"]),
         (
@@ -196,8 +196,8 @@ async fn translation_argument_completion_uses_both_language_folders() {
             .await
             .unwrap();
         let items = match response {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         assert_eq!(
             items
@@ -224,7 +224,7 @@ async fn translation_hover_and_references_bind_named_keys_and_show_all_locales()
             ),
         ],
     );
-    let uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
     open_php(&backend, &uri, source).await;
     let hover = backend
         .hover(HoverParams {
@@ -237,7 +237,7 @@ async fn translation_hover_and_references_bind_named_keys_and_show_all_locales()
         .await
         .unwrap()
         .unwrap();
-    let HoverContents::Markup(markup) = hover.contents else {
+    let Contents::MarkupContent(markup) = hover.contents else {
         panic!("markdown hover")
     };
     assert!(
@@ -274,10 +274,10 @@ async fn json_translation_references_decode_php_and_blade_string_escapes() {
             ("resources/lang/en.json", json),
         ],
     );
-    let php_uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+    let php_uri = Uri::from_file_path(dir.path().join("src/usage.php")).unwrap();
     let blade_uri =
-        Url::from_file_path(dir.path().join("resources/views/welcome.blade.php")).unwrap();
-    let json_uri = Url::from_file_path(dir.path().join("resources/lang/en.json")).unwrap();
+        Uri::from_file_path(dir.path().join("resources/views/welcome.blade.php")).unwrap();
+    let json_uri = Uri::from_file_path(dir.path().join("resources/lang/en.json")).unwrap();
     open_php(&backend, &php_uri, php).await;
     open_document(&backend, &blade_uri, "blade", blade).await;
     let found = find_references(&backend, &json_uri, position_of(json, "It's open"), true).await;

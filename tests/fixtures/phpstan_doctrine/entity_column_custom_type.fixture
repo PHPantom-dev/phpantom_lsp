@@ -1,0 +1,10 @@
+// test: A custom DBAL type's PHP values
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testCustomType.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/EntityWithCustomType.php
+// expect_diagnostic: 22: Property PHPStan\Rules\Doctrine\ORM\EntityWithCustomType::$foo type mapping mismatch: database can contain DateTimeInterface but property expects int. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 22: Property PHPStan\Rules\Doctrine\ORM\EntityWithCustomType::$foo type mapping mismatch: property can contain int but database expects array. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 28: Property PHPStan\Rules\Doctrine\ORM\EntityWithCustomType::$numeric type mapping mismatch: property can contain string but database expects numeric-string. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

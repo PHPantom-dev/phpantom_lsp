@@ -1,0 +1,27 @@
+// test: `static` as a type argument of a return type carries the receiver's own type arguments
+// feature: hover
+// expect: ArrayNodeDefinition<TreeBuilder>
+---
+<?php
+
+class TreeBuilder {}
+
+/** @template TParent */
+class NodeBuilder
+{
+    /** @return TParent */
+    public function end() {}
+}
+
+/** @template TParent */
+class ArrayNodeDefinition
+{
+    /** @return NodeBuilder<static> */
+    public function children(): NodeBuilder {}
+}
+
+/** @param ArrayNodeDefinition<TreeBuilder> $root */
+function demo(ArrayNodeDefinition $root): void {
+    $parent = $root->children()->end();
+    $par<>ent;
+}

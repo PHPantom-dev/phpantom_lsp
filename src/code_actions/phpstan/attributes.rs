@@ -9,7 +9,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::attribute::AttributeList;
 use mago_syntax::cst::sequence::Sequence;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::TextEdit;
+use tower_lsp_server::gen_lsp_types::TextEdit;
 
 use crate::atom::{bytes_to_str, last_segment};
 use crate::code_actions::indent_of_line_at;

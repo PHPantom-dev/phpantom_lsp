@@ -6,8 +6,8 @@
 use crate::common::{complete_at, create_psr4_workspace};
 use phpantom_lsp::Backend;
 use std::fs;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "name": "test/project",
@@ -22,15 +22,15 @@ fn fqns(items: &[CompletionItem]) -> Vec<String> {
 /// Simulate the workspace scan by indexing a file's classes the same way
 /// the server does (FQN → `file://` URI).
 fn index_class(backend: &Backend, fqn: &str, path: &std::path::Path) {
-    let uri = Url::from_file_path(path).unwrap().to_string();
+    let uri = Uri::from_file_path(path).unwrap().to_string();
     backend.fqn_uri_index().write().insert(fqn.to_string(), uri);
 }
 
 fn delete_event(path: &std::path::Path) -> DidChangeWatchedFilesParams {
     DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
-            uri: Url::from_file_path(path).unwrap(),
-            typ: FileChangeType::DELETED,
+            uri: Uri::from_file_path(path).unwrap(),
+            kind: FileChangeType::Deleted,
         }],
     }
 }
@@ -38,8 +38,8 @@ fn delete_event(path: &std::path::Path) -> DidChangeWatchedFilesParams {
 fn change_event(path: &std::path::Path) -> DidChangeWatchedFilesParams {
     DidChangeWatchedFilesParams {
         changes: vec![FileEvent {
-            uri: Url::from_file_path(path).unwrap(),
-            typ: FileChangeType::CHANGED,
+            uri: Uri::from_file_path(path).unwrap(),
+            kind: FileChangeType::Changed,
         }],
     }
 }
@@ -54,7 +54,7 @@ async fn deleted_model_is_no_longer_suggested() {
     // Simulate the workspace scan having indexed the model.
     index_class(&backend, "App\\Models\\OldModel", &model_path);
 
-    let consumer = Url::parse("file:///app.php").unwrap();
+    let consumer = Uri::parse("file:///app.php").unwrap();
     let items = complete_at(&backend, &consumer, "<?php\nnew OldMo\n", 1, 8).await;
     assert!(
         fqns(&items).contains(&"App\\Models\\OldModel".to_string()),
@@ -88,7 +88,7 @@ async fn deleted_model_is_no_longer_suggested() {
 /// Mark a workspace file as already parsed, mirroring a lazy load via
 /// `find_or_load_class` (which stores the canonical `file://` URI).
 fn mark_loaded(backend: &Backend, path: &std::path::Path) {
-    let uri = Url::from_file_path(path).unwrap().to_string();
+    let uri = Uri::from_file_path(path).unwrap().to_string();
     backend.parsed_uris().write().insert(uri);
 }
 
@@ -236,16 +236,16 @@ async fn batch_of_mixed_changes_reindexes_in_one_notification() {
         .did_change_watched_files(DidChangeWatchedFilesParams {
             changes: vec![
                 FileEvent {
-                    uri: Url::from_file_path(&stale_path).unwrap(),
-                    typ: FileChangeType::DELETED,
+                    uri: Uri::from_file_path(&stale_path).unwrap(),
+                    kind: FileChangeType::Deleted,
                 },
                 FileEvent {
-                    uri: Url::from_file_path(&edited_path).unwrap(),
-                    typ: FileChangeType::CHANGED,
+                    uri: Uri::from_file_path(&edited_path).unwrap(),
+                    kind: FileChangeType::Changed,
                 },
                 FileEvent {
-                    uri: Url::from_file_path(&created_path).unwrap(),
-                    typ: FileChangeType::CREATED,
+                    uri: Uri::from_file_path(&created_path).unwrap(),
+                    kind: FileChangeType::Created,
                 },
             ],
         })
@@ -280,8 +280,8 @@ async fn created_file_becomes_suggestable() {
     backend
         .did_change_watched_files(DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
-                uri: Url::from_file_path(&path).unwrap(),
-                typ: FileChangeType::CREATED,
+                uri: Uri::from_file_path(&path).unwrap(),
+                kind: FileChangeType::Created,
             }],
         })
         .await;

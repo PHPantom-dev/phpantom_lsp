@@ -5,7 +5,7 @@
 //! `$fillable`, etc.) so that go-to-definition can jump to the right
 //! position in the source file.
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use crate::Backend;
 

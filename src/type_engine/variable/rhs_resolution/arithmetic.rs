@@ -9,6 +9,7 @@ use mago_syntax::cst::binary::{Binary, BinaryOperator};
 use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::cst::{Expression, Literal, Variable};
 
+use crate::atom::atom;
 use crate::php_type::{PhpType, TypeKind, with_keyword_lowercase};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::type_ops::const_fold::{self, BitwiseOp};
@@ -111,6 +112,9 @@ pub(super) fn resolve_binary_result_type<'b>(
     if let Some(op) = bitwise_op(&binary.operator) {
         let lhs_types = resolve_rhs_expression(binary.lhs, ctx);
         let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
+        if let Some(result) = overloaded_number_result(&lhs_types, &rhs_types, true) {
+            return Some(vec![ResolvedType::from_type_string(result)]);
+        }
         // `&`, `|` and `^` are the ones PHP overloads for strings; a shift
         // always produces an int.
         if matches!(op, BitwiseOp::And | BitwiseOp::Or | BitwiseOp::Xor) {
@@ -151,6 +155,93 @@ pub(super) fn resolve_binary_result_type<'b>(
     }
 
     None
+}
+
+/// A built-in class whose instances overload PHP's arithmetic operators.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverloadedNumber {
+    Gmp,
+    BcMathNumber,
+}
+
+impl OverloadedNumber {
+    fn of_type(ty: &PhpType) -> Option<Self> {
+        let name = ty.class_name()?;
+        let name = name.strip_prefix('\\').unwrap_or(name);
+        if name.eq_ignore_ascii_case("GMP") {
+            Some(Self::Gmp)
+        } else if name.eq_ignore_ascii_case("BcMath\\Number") {
+            Some(Self::BcMathNumber)
+        } else {
+            None
+        }
+    }
+
+    /// The class an operand is an instance of, when every branch of it
+    /// (bar `null`) is that one class.
+    pub(crate) fn of_operand(types: &[ResolvedType]) -> Option<Self> {
+        let mut found = None;
+        for rt in types {
+            Self::collect(&rt.type_string, &mut found)?;
+        }
+        found
+    }
+
+    fn collect(ty: &PhpType, found: &mut Option<Self>) -> Option<()> {
+        match ty.kind() {
+            TypeKind::Union(members) => {
+                for member in members {
+                    Self::collect(member, found)?;
+                }
+                Some(())
+            }
+            TypeKind::Nullable(inner) => Self::collect(inner, found),
+            _ if ty.is_null() => Some(()),
+            _ => {
+                let class = Self::of_type(ty)?;
+                if found.is_some_and(|seen| seen != class) {
+                    return None;
+                }
+                *found = Some(class);
+                Some(())
+            }
+        }
+    }
+
+    /// Whether the class also overloads the bitwise operators (`&`, `|`,
+    /// `^`, `<<`, `>>`, `~`). Only `GMP` does.
+    fn overloads_bitwise(self) -> bool {
+        self == Self::Gmp
+    }
+
+    pub(crate) fn to_type(self) -> PhpType {
+        PhpType::named(atom(match self {
+            Self::Gmp => "GMP",
+            Self::BcMathNumber => "BcMath\\Number",
+        }))
+    }
+}
+
+/// The result of an operator one of whose operands is a `GMP` or a
+/// `BcMath\Number`: an instance of that class. Both classes take the other
+/// operand as an instance of the class, an `int`, or a numeric string, and
+/// throw for anything else, so whenever the operation produces a value it
+/// is the class. `None` when neither operand is one, or the two are
+/// instances of different such classes (which throws).
+pub(crate) fn overloaded_number_result(
+    lhs_types: &[ResolvedType],
+    rhs_types: &[ResolvedType],
+    bitwise: bool,
+) -> Option<PhpType> {
+    let class = match (
+        OverloadedNumber::of_operand(lhs_types),
+        OverloadedNumber::of_operand(rhs_types),
+    ) {
+        (Some(lhs), Some(rhs)) if lhs != rhs => return None,
+        (Some(class), _) | (None, Some(class)) => class,
+        (None, None) => return None,
+    };
+    (!bitwise || class.overloads_bitwise()).then(|| class.to_type())
 }
 
 /// Classify a resolved operand as `int`, `float`, or unknown for arithmetic
@@ -280,12 +371,17 @@ impl ArithmeticOpKind {
 /// - `float op float` → `float`
 /// - `int / int` or `int ** int` → benevolent `int|float` (either can
 ///   produce a float depending on the operand values)
+/// - an operand that is a `GMP` or `BcMath\Number` → that class
 /// - Anything else → `int|float`
 pub(crate) fn infer_arithmetic_result_type(
     lhs_types: &[ResolvedType],
     rhs_types: &[ResolvedType],
     op_kind: ArithmeticOpKind,
 ) -> PhpType {
+    if let Some(result) = overloaded_number_result(lhs_types, rhs_types, false) {
+        return result;
+    }
+
     // Two operands that are each pinned to one literal value fold to the
     // exact value PHP would compute, the same way a mask built from two
     // literal ints already folds through `apply_bitwise` above. Division by
@@ -456,12 +552,15 @@ pub(crate) fn infer_addition_result_type(
     infer_arithmetic_result_type(lhs_types, rhs_types, ArithmeticOpKind::Addition)
 }
 
-/// Infer the result type of `%` / `%=`: always an `int`, and the exact one
-/// when both operands are known integers.
+/// Infer the result type of `%` / `%=`: an `int`, and the exact one when
+/// both operands are known integers, unless an operand overloads it.
 pub(crate) fn infer_modulo_result_type(
     lhs_types: &[ResolvedType],
     rhs_types: &[ResolvedType],
 ) -> PhpType {
+    if let Some(result) = overloaded_number_result(lhs_types, rhs_types, false) {
+        return result;
+    }
     match (
         single_arithmetic_number(lhs_types),
         single_arithmetic_number(rhs_types),

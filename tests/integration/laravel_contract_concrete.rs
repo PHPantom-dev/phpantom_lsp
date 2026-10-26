@@ -12,8 +12,9 @@
 //! surfaces them and unknown-member diagnostics are suppressed.
 
 use crate::common::create_psr4_workspace;
+use crate::common::message_text;
 use crate::common::{completion_response, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -67,14 +68,14 @@ class Renderer {
         ],
     );
 
-    let uri = Url::parse("file:///src/Renderer.php").unwrap();
+    let uri = Uri::parse("file:///src/Renderer.php").unwrap();
     open_php(&backend, &uri, consumer).await;
 
     let result = completion_response(&backend, &uri, 5, 15, None).await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -127,9 +128,9 @@ class Renderer {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(

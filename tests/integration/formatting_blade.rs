@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{create_test_backend, open_document};
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     async fn format_with(
         backend: &phpantom_lsp::Backend,
-        uri: Url,
+        uri: Uri,
         language_id: &str,
         text: &str,
         options: FormattingOptions,
@@ -25,7 +25,7 @@ mod tests {
 
     async fn format(
         backend: &phpantom_lsp::Backend,
-        uri: Url,
+        uri: Uri,
         language_id: &str,
         text: &str,
     ) -> Option<Vec<TextEdit>> {
@@ -53,7 +53,7 @@ mod tests {
     #[tokio::test]
     async fn test_blade_extension_is_reindented() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///resources/views/view.blade.php").unwrap();
+        let uri = Uri::parse("file:///resources/views/view.blade.php").unwrap();
         let text = "@if($x)\n<p>hello</p>\n@endif\n";
 
         let result = format(&backend, uri, "php", text).await;
@@ -64,7 +64,7 @@ mod tests {
     #[tokio::test]
     async fn test_blade_language_id_without_extension_is_reindented() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///resources/views/view.php").unwrap();
+        let uri = Uri::parse("file:///resources/views/view.php").unwrap();
         let text = "@if($x)\n<p>hello</p>\n@endif\n";
 
         let result = format(&backend, uri, "blade", text).await;
@@ -75,7 +75,7 @@ mod tests {
     #[tokio::test]
     async fn test_blade_formatting_never_touches_line_content() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///resources/views/view.blade.php").unwrap();
+        let uri = Uri::parse("file:///resources/views/view.blade.php").unwrap();
         // The PHP formatter would rewrite this line; the Blade one may not
         // unless the project sets `blade-php = true`.
         let text = "@php\necho   'hello' ;\n@endphp\n";
@@ -88,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn test_blade_formatting_honours_editor_indent_options() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///resources/views/view.blade.php").unwrap();
+        let uri = Uri::parse("file:///resources/views/view.blade.php").unwrap();
         let text = "<div>\n<p>hello</p>\n</div>\n";
 
         let result = format_with(
@@ -110,7 +110,7 @@ mod tests {
     #[tokio::test]
     async fn test_already_formatted_blade_is_a_no_op() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///resources/views/view.blade.php").unwrap();
+        let uri = Uri::parse("file:///resources/views/view.blade.php").unwrap();
         let text = "<div>\n    <p>hello</p>\n</div>\n";
 
         let result = format(&backend, uri, "php", text).await;
@@ -121,7 +121,7 @@ mod tests {
     #[tokio::test]
     async fn test_mail_templates_are_left_alone() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///resources/views/mail/welcome.blade.php").unwrap();
+        let uri = Uri::parse("file:///resources/views/mail/welcome.blade.php").unwrap();
         let text = "<x-mail::message>\n# Hello\n<x-mail::button :url=\"$url\">\nGo\n</x-mail::button>\n</x-mail::message>\n";
 
         let result = format(&backend, uri, "php", text).await;
@@ -135,7 +135,7 @@ mod tests {
     #[tokio::test]
     async fn test_plain_php_file_still_formats() {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///Plain.php").unwrap();
+        let uri = Uri::parse("file:///Plain.php").unwrap();
         let text = "<?php\necho   'hello' ;  \n";
 
         let result = format(&backend, uri, "php", text).await;

@@ -6,8 +6,8 @@ use crate::common::{
     find_action, find_action_titled, get_code_actions_at, get_code_actions_in_range,
     resolve_action,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Assert every line break in `result` is `\r\n`.
 fn assert_crlf_only(result: &str) {
@@ -75,7 +75,7 @@ async fn completion_auto_import_uses_crlf() {
         "file:///vendor/acme/Widget.php",
         "<?php\nnamespace Acme;\n\nclass Widget {}\n",
     );
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let content = "<?php\r\nnamespace App;\r\n\r\nnew Widg\r\n";
 
     let items = complete_at(&backend, &uri, content, 3, 8).await;
@@ -96,16 +96,14 @@ async fn completion_auto_import_uses_crlf() {
 #[tokio::test]
 async fn docblock_on_enter_uses_crlf() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let content = "<?php\r\n/** */\r\nfunction greet($name): string {}\r\n";
     crate::common::open_php(&backend, &uri, content).await;
 
     let edits = backend
         .on_type_formatting(DocumentOnTypeFormattingParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position::new(1, 4),
-            },
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position::new(1, 4),
             ch: "\n".to_string(),
             options: FormattingOptions {
                 tab_size: 4,

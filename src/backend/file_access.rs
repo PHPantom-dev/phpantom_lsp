@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use crate::Backend;
 use crate::file_state::FileState;
@@ -451,12 +451,14 @@ impl Backend {
         // not just open ones, so a deleted or renamed one would stay in the
         // template lists the Blade refresh passes enumerate.
         self.files.write().remove(uri);
-        self.evict_typed_receiver_view_spans(uri);
+        self.evict_typed_receiver_spans(uri);
         // Another file's entry is stamped with the class-lookup generation,
         // which a class this file withdraws bumps, so only this file's own
         // entry goes stale here.
         self.evict_morph_column_spans(uri);
         self.evict_reference_index_uri(uri);
+        self.remove_framework_uri(uri);
+        self.forget_symfony_declarations(uri);
         // Likewise a template's injected variables.
         self.blade.uris.write().remove(uri);
         self.blade.injected_vars.write().remove(uri);

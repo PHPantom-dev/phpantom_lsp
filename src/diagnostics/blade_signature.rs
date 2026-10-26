@@ -19,7 +19,7 @@
 //! `@bladestan-signature` block is a mistake: everything below the first is
 //! silently unread.
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::Backend;
 use crate::blade::signature;
@@ -66,7 +66,7 @@ impl Backend {
             {
                 out.push(make_diagnostic(
                     range_of(block),
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     DUPLICATE_CODE,
                     "This template already declares a @bladestan-signature; only the first one is read".to_string(),
                 ));
@@ -118,7 +118,7 @@ impl Backend {
             };
             out.push(make_diagnostic(
                 range_of(span),
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 COVARIANCE_CODE,
                 format!(
                     "Layout '{layout}' declares ${name} as {inherited}, which {declared} does not satisfy: a template may narrow its layout's declaration, never widen it",

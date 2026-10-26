@@ -362,6 +362,7 @@ impl ScopeState {
         // Preserve class-backed alternatives (and their completion
         // metadata) while collapsing only redundant non-class values.
         *entry = ResolvedType::collapse_redundant_runtime_literals(std::mem::take(entry));
+        ResolvedType::join_complete_enum_entries(entry);
 
         // Remove entries whose type is subsumed by a broader entry
         // (e.g. `string|null` ⊆ `int|string|null`). `mixed_absorbs_siblings:

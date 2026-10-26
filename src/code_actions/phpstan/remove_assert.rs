@@ -25,7 +25,7 @@
 //! payload but no `edit`.  Phase 2 (`resolve_remove_assert`) recomputes
 //! the workspace edit on demand when the user picks the action.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
@@ -53,7 +53,7 @@ impl Backend {
         uri: &str,
         _content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -69,7 +69,7 @@ impl Backend {
             // Only handle `assert()` calls — other functions with the
             // same identifier (e.g. `is_bool()`) appear inside
             // conditions where removal would change control flow.
-            if !diag.message.starts_with(ASSERT_MESSAGE_PREFIX) {
+            if !crate::util::message_text(&diag.message).starts_with(ASSERT_MESSAGE_PREFIX) {
                 continue;
             }
 
@@ -101,7 +101,7 @@ impl Backend {
 
         let edit = build_remove_assert_edit(content, diag_line)?;
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 }
@@ -334,10 +334,10 @@ mod tests {
                 start: Position::new(line, 0),
                 end: Position::new(line, 100),
             },
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String(code.to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String(code.to_string())),
             source: Some("PHPStan".to_string()),
-            message: message.to_string(),
+            message: message.to_string().into(),
             ..Default::default()
         }
     }
@@ -358,7 +358,7 @@ mod tests {
     fn rejects_wrong_identifier() {
         let diag = make_diagnostic(1, "Call to function assert() with ...", "some.other");
         let identifier = match &diag.code {
-            Some(NumberOrString::String(s)) => s.as_str(),
+            Some(Code::String(s)) => s.as_str(),
             _ => "",
         };
         assert_ne!(identifier, ALREADY_NARROWED_ID);
@@ -372,10 +372,10 @@ mod tests {
             ALREADY_NARROWED_ID,
         );
         let identifier = match &diag.code {
-            Some(NumberOrString::String(s)) => s.as_str(),
+            Some(Code::String(s)) => s.as_str(),
             _ => "",
         };
         assert_eq!(identifier, ALREADY_NARROWED_ID);
-        assert!(diag.message.starts_with(ASSERT_MESSAGE_PREFIX));
+        assert!(crate::util::message_text(&diag.message).starts_with(ASSERT_MESSAGE_PREFIX));
     }
 }

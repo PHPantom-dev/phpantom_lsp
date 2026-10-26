@@ -1,0 +1,12 @@
+// test: DQL strings that do not parse or name unknown fields and classes
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, DqlRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/dql.php
+// expect_diagnostic: 35: DQL: [Syntax Error] line 0, col -1: Error: Expected Doctrine\ORM\Query\TokenType::T_IDENTIFIER, got end of string. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 42: DQL: [Semantical Error] line 0, col 60 near 'transient = ': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named transient // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 49: DQL: [Semantical Error] line 0, col 14 near 'Foo e': Error: Class 'Foo' is not defined. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 56: DQL: [Semantical Error] line 0, col 17 near 'Foo': Error: Class 'Foo' is not defined. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 64: DQL: [Semantical Error] line 0, col 17 near 'Foo': Error: Class 'Foo' is not defined. // SKIP: DQL and query builder strings are not checked
+---

@@ -10,9 +10,11 @@
 //! fallback for older clients; it deliberately does not send the same native
 //! diagnostics through both channels for the same client.
 //!
+//! The `diagnostic_provider` capability is advertised to every client, but
+//! the delivery model follows the client's own declaration.
+//!
 //! - **Pull model** (preferred) — when the client advertises
-//!   `textDocument.diagnostic` support, the server registers a
-//!   `diagnostic_provider` capability.  The editor requests diagnostics
+//!   `textDocument.diagnostic` support.  The editor requests diagnostics
 //!   via `textDocument/diagnostic` for visible files and
 //!   `workspace/diagnostic` for all open files.  Cross-file invalidation
 //!   (e.g. a class signature change) sends `workspace/diagnostic/refresh`
@@ -25,25 +27,22 @@
 //!   server pushes diagnostics via `textDocument/publishDiagnostics`
 //!   from a debounced background worker.  Each `did_change` bumps a
 //!   version counter; the worker waits for a quiet period before
-//!   publishing.
+//!   publishing.  Each published set is also cached with a `resultId`,
+//!   so a pull from such a client answers with what was last published.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tower_lsp::LanguageServer;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::request::{
-    GotoImplementationParams, GotoImplementationResponse, GotoTypeDefinitionParams,
-    GotoTypeDefinitionResponse,
-};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
+use tower_lsp_server::jsonrpc::Result;
 
 use crate::Backend;
 use crate::formatting;
 
 /// Run `f` on a blocking thread in a way that survives `$/cancelRequest`.
 ///
-/// tower-lsp 0.20 wedges its serve loop if a request handler future is
+/// The tower-lsp serve loop wedges if a request handler future is
 /// dropped (which is how it implements cancellation) while that future is
 /// directly awaiting a `spawn_blocking` JoinHandle: dropping the await
 /// detaches the handle, and when the orphaned blocking task later finishes it
@@ -98,6 +97,17 @@ where
 }
 
 impl Backend {
+    /// Whether `uri` is a resource document (a Twig template, a YAML or XML
+    /// file), which the client serves with another extension.  PHPantom
+    /// answers there only for the names it reads (completion, hover,
+    /// definition, references, rename, and the code actions on a string
+    /// key); every other request answers nothing, so the editor keeps that
+    /// extension's formatter, highlighting, outline, and folding rather
+    /// than having PHPantom's PHP features displace them.
+    fn is_foreign_document(&self, uri: &Uri) -> bool {
+        self.is_resource_uri(uri.as_str())
+    }
+
     /// Run a position-based request handler on the blocking pool.
     ///
     /// Wires up the `Backend` clone, URI clone, and cancel-safe dispatch
@@ -138,7 +148,7 @@ impl Backend {
         name: &'static str,
         title: &str,
         message: &str,
-        token: Option<NumberOrString>,
+        token: Option<ProgressToken>,
         body: F,
     ) -> Option<R>
     where
@@ -175,14 +185,18 @@ impl Backend {
 
     /// Format a document, or with `range` only the lines it selects.
     ///
-    /// Every formatter works on a whole file, so a range request formats
-    /// the whole document and keeps the edits that touch the range.
+    /// The built-in formatter formats the construct enclosing the range;
+    /// the other formatters work on a whole file.  Either way only the
+    /// edits that touch the range are kept.
     async fn format_document(
         &self,
-        uri: &Url,
+        uri: &Uri,
         options: &FormattingOptions,
         range: Option<Range>,
     ) -> Result<Option<Vec<TextEdit>>> {
+        if self.is_foreign_document(uri) {
+            return Ok(None);
+        }
         let uri = uri.to_string();
 
         // External tools discover their config from the file's real path.
@@ -194,8 +208,8 @@ impl Backend {
         };
 
         // Blade markup isn't PHP, so a template resolves its own strategy:
-        // Pint when the project formats Blade with it, the built-in
-        // reindenter otherwise.
+        // Pint or blade-formatter when the project formats Blade with one,
+        // the built-in reindenter otherwise.
         let is_blade = self.is_blade_file(&uri);
         let blade_options = formatting::blade::options_from_lsp(options);
 
@@ -214,7 +228,12 @@ impl Backend {
                 )
             } else {
                 let strategy = backend.resolve_formatting_strategy();
-                backend.format_content(&strategy, &file_path, &content, &backend.shutdown_flag)
+                let cancelled = &backend.shutdown_flag;
+                match range {
+                    Some(range) => backend
+                        .format_range_content(&strategy, &file_path, &content, range, cancelled),
+                    None => backend.format_content(&strategy, &file_path, &content, cancelled),
+                }
             };
             formatted.map(|formatted| {
                 formatted.map(|text| match range {
@@ -228,19 +247,19 @@ impl Backend {
         match result {
             Some(Ok(edits)) => Ok(edits),
             Some(Err(e)) => {
-                self.log(MessageType::ERROR, format!("Formatting failed: {}", e))
+                self.log(MessageType::Error, format!("Formatting failed: {}", e))
                     .await;
-                Err(tower_lsp::jsonrpc::Error {
-                    code: tower_lsp::jsonrpc::ErrorCode::InternalError,
+                Err(tower_lsp_server::jsonrpc::Error {
+                    code: tower_lsp_server::jsonrpc::ErrorCode::InternalError,
                     message: format!("Formatting failed: {}", e).into(),
                     data: None,
                 })
             }
             None => {
                 let msg = "Formatting task panicked".to_string();
-                self.log(MessageType::ERROR, msg.clone()).await;
-                Err(tower_lsp::jsonrpc::Error {
-                    code: tower_lsp::jsonrpc::ErrorCode::InternalError,
+                self.log(MessageType::Error, msg.clone()).await;
+                Err(tower_lsp_server::jsonrpc::Error {
+                    code: tower_lsp_server::jsonrpc::ErrorCode::InternalError,
                     message: msg.into(),
                     data: None,
                 })
@@ -249,7 +268,6 @@ impl Backend {
     }
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         self.on_initialize(params).await
@@ -295,18 +313,21 @@ impl LanguageServer for Backend {
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         // Clients re-push settings for reasons of their own, so a
-        // notification that carries no file filters is not a request to
-        // drop the ones already in force, and one that repeats the
-        // current filters is not a change.
-        let Some(options) =
-            crate::config::ClientIndexingOptions::from_client_settings(&params.settings)
-        else {
+        // notification that carries no file filters or stub directory is
+        // not a request to drop the ones already in force, and one that
+        // repeats the current settings is not a change.
+        let indexing = crate::config::ClientIndexingOptions::from_client_settings(&params.settings);
+        let stubs = crate::config::ClientStubOptions::from_client_settings(&params.settings);
+        if indexing.is_none() && stubs.is_none() {
             return;
-        };
+        }
         // Captured before the change, so the reconciliation below can
-        // tell which way the filters moved.
+        // tell which way the inputs moved.
         let previous_inputs = self.discovery_inputs();
-        if !self.set_client_indexing_options(options) {
+        let filters_changed =
+            indexing.is_some_and(|options| self.set_client_indexing_options(options));
+        let stubs_changed = stubs.is_some_and(|options| self.set_client_stub_options(options));
+        if !filters_changed && !stubs_changed {
             return;
         }
 
@@ -314,11 +335,13 @@ impl LanguageServer for Backend {
         // never reports events for those files and the index keeps
         // serving the last full scan. Same follow-up a live
         // `.phpantom.toml` edit performs.
-        self.reregister_watched_files_if_changed();
+        if filters_changed {
+            self.reregister_watched_files_if_changed();
+        }
 
-        // The index was built under the filters the user just changed
-        // away from: drop what they now exclude, and walk for what they
-        // now admit.
+        // The index was built under the settings the user just changed
+        // away from: drop what the filters now exclude, walk for what they
+        // now admit, and rebuild the stub index if its paths moved.
         self.reconcile_index_for_input_change(&previous_inputs);
 
         // A narrowed exclude list makes classes resolvable that were
@@ -333,10 +356,14 @@ impl LanguageServer for Backend {
         self.on_did_change_watched_files(params).await
     }
 
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        self.on_did_change_workspace_folders(params).await
+    }
+
     async fn goto_definition(
         &self,
-        params: GotoDefinitionParams,
-    ) -> Result<Option<GotoDefinitionResponse>> {
+        params: DefinitionParams,
+    ) -> Result<Option<DefinitionResponse>> {
         let uri = params
             .text_document_position_params
             .text_document
@@ -352,17 +379,19 @@ impl LanguageServer for Backend {
                 // YAML and XML may name PHP classes under any schema. Resolve
                 // fully-qualified class and Class::member tokens before entering
                 // the PHP-only symbol-map path below.
-                if crate::resource_navigation::is_resource_document(uri) {
-                    let location = backend.get_file_content(uri).and_then(|content| {
-                        crate::util::catch_panic_unwind_safe(
-                            "goto_definition",
-                            uri,
-                            Some(position),
-                            || backend.resolve_resource_definition(&content, position),
-                        )
-                        .flatten()
-                    });
-                    return Ok(location.map(GotoDefinitionResponse::Scalar));
+                if backend.is_resource_uri(uri) {
+                    let locations = backend
+                        .get_file_content(uri)
+                        .and_then(|content| {
+                            crate::util::catch_panic_unwind_safe(
+                                "goto_definition",
+                                uri,
+                                Some(position),
+                                || backend.resolve_resource_definition(uri, &content, position),
+                            )
+                        })
+                        .unwrap_or_default();
+                    return Ok(wrap_locations(locations).map(DefinitionResponse::Definition));
                 }
 
                 // A component tag is HTML, so it has no position in the virtual
@@ -377,7 +406,9 @@ impl LanguageServer for Backend {
                     )
                     .flatten()
                 {
-                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                    return Ok(Some(DefinitionResponse::Definition(Definition::Location(
+                        location,
+                    ))));
                 }
                 // For Blade files, check if the cursor is on an echo delimiter
                 // (`{{`/`}}` or `{!!`/`!!}`) first, so go-to-definition agrees
@@ -389,23 +420,17 @@ impl LanguageServer for Backend {
                     && let Some(delimiter_result) =
                         backend.blade_echo_delimiter_definition(uri, position)
                 {
-                    return Ok(delimiter_result.map(GotoDefinitionResponse::Scalar));
+                    return Ok(delimiter_result.map(|location| {
+                        DefinitionResponse::Definition(Definition::Location(location))
+                    }));
                 }
                 backend.handle_with_position("goto_definition", uri, position, |content, pos| {
-                    let locs = backend.resolve_definition(uri, content, pos);
-                    if locs.is_empty() {
-                        None
-                    } else if locs.len() == 1 {
-                        Some(GotoDefinitionResponse::Scalar(
-                            backend.translate_location(locs[0].clone()),
-                        ))
-                    } else {
-                        Some(GotoDefinitionResponse::Array(
-                            locs.into_iter()
-                                .map(|l| backend.translate_location(l))
-                                .collect(),
-                        ))
-                    }
+                    let locs = backend
+                        .resolve_definition(uri, content, pos)
+                        .into_iter()
+                        .map(|l| backend.translate_location(l))
+                        .collect();
+                    wrap_locations(locs).map(DefinitionResponse::Definition)
                 })
             },
         )
@@ -414,8 +439,11 @@ impl LanguageServer for Backend {
 
     async fn goto_implementation(
         &self,
-        params: GotoImplementationParams,
-    ) -> Result<Option<GotoImplementationResponse>> {
+        params: ImplementationParams,
+    ) -> Result<Option<ImplementationResponse>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -441,6 +469,7 @@ impl LanguageServer for Backend {
                                     .collect()
                             })
                             .and_then(wrap_locations)
+                            .map(ImplementationResponse::Definition)
                     },
                 )
             },
@@ -451,8 +480,11 @@ impl LanguageServer for Backend {
 
     async fn goto_type_definition(
         &self,
-        params: GotoTypeDefinitionParams,
-    ) -> Result<Option<GotoTypeDefinitionResponse>> {
+        params: TypeDefinitionParams,
+    ) -> Result<Option<TypeDefinitionResponse>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -478,6 +510,7 @@ impl LanguageServer for Backend {
                                     .collect()
                             })
                             .and_then(wrap_locations)
+                            .map(TypeDefinitionResponse::Definition)
                     },
                 )
             },
@@ -535,8 +568,8 @@ impl LanguageServer for Backend {
 
         let elapsed = started.elapsed();
         let item_count = match &result {
-            Ok(Some(CompletionResponse::Array(items))) => items.len(),
-            Ok(Some(CompletionResponse::List(list))) => list.items.len(),
+            Ok(Some(CompletionResponse::CompletionItemList(items))) => items.len(),
+            Ok(Some(CompletionResponse::CompletionList(list))) => list.items.len(),
             _ => 0,
         };
         tracing::debug!(
@@ -564,8 +597,12 @@ impl LanguageServer for Backend {
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let uri = params.text_document_position.text_document.uri.to_string();
-        let position = params.text_document_position.position;
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
         let include_declaration = params.context.include_declaration;
         self.run_with_progress(
             "find_references",
@@ -591,7 +628,10 @@ impl LanguageServer for Backend {
         .unwrap_or(Ok(None))
     }
 
-    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> Result<Option<Vec<CodeActionResponse>>> {
         let uri = params.text_document.uri.to_string();
 
         // Code actions are not yet Blade-aware (edits target virtual PHP
@@ -641,6 +681,9 @@ impl LanguageServer for Backend {
     }
 
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -660,6 +703,9 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentHighlightParams,
     ) -> Result<Option<Vec<DocumentHighlight>>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -693,7 +739,7 @@ impl LanguageServer for Backend {
     async fn prepare_rename(
         &self,
         params: TextDocumentPositionParams,
-    ) -> Result<Option<PrepareRenameResponse>> {
+    ) -> Result<Option<PrepareRenameResult>> {
         let uri = params.text_document.uri.to_string();
         let position = params.position;
 
@@ -702,16 +748,21 @@ impl LanguageServer for Backend {
                 backend
                     .handle_prepare_rename(uri, content, pos)
                     .and_then(|res| match res {
-                        PrepareRenameResponse::Range(r) => backend
+                        PrepareRenameResult::Range(r) => backend
                             .try_translate_blade_range(uri, r)
-                            .map(PrepareRenameResponse::Range),
-                        PrepareRenameResponse::RangeWithPlaceholder { range, placeholder } => {
-                            backend.try_translate_blade_range(uri, range).map(|range| {
-                                PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }
-                            })
-                        }
-                        PrepareRenameResponse::DefaultBehavior { default_behavior } => {
-                            Some(PrepareRenameResponse::DefaultBehavior { default_behavior })
+                            .map(PrepareRenameResult::Range),
+                        PrepareRenameResult::PrepareRenamePlaceholder(p) => backend
+                            .try_translate_blade_range(uri, p.range)
+                            .map(|range| {
+                                PrepareRenameResult::PrepareRenamePlaceholder(
+                                    PrepareRenamePlaceholder {
+                                        range,
+                                        placeholder: p.placeholder,
+                                    },
+                                )
+                            }),
+                        default @ PrepareRenameResult::PrepareRenameDefaultBehavior(_) => {
+                            Some(default)
                         }
                     })
             })
@@ -720,8 +771,12 @@ impl LanguageServer for Backend {
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
-        let uri = params.text_document_position.text_document.uri.to_string();
-        let position = params.text_document_position.position;
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
         let new_name = params.new_name.clone();
 
         let backend = self.clone_for_blocking();
@@ -756,9 +811,9 @@ impl LanguageServer for Backend {
         // of the rename protocol an editor shows them.
         match outcome {
             Some(Err(message)) => {
-                self.log(MessageType::WARNING, message.clone()).await;
-                Err(tower_lsp::jsonrpc::Error {
-                    code: tower_lsp::jsonrpc::ErrorCode::InvalidRequest,
+                self.log(MessageType::Warning, message.clone()).await;
+                Err(tower_lsp_server::jsonrpc::Error {
+                    code: tower_lsp_server::jsonrpc::ErrorCode::InvalidRequest,
                     message: message.into(),
                     data: None,
                 })
@@ -772,6 +827,9 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -787,7 +845,7 @@ impl LanguageServer for Backend {
     async fn symbol(
         &self,
         params: WorkspaceSymbolParams,
-    ) -> Result<Option<Vec<SymbolInformation>>> {
+    ) -> Result<Option<WorkspaceSymbolResponse>> {
         // The query is matched against every symbol of every parsed file, so
         // this walks the whole workspace index.
         let backend = self.clone_for_blocking();
@@ -795,10 +853,14 @@ impl LanguageServer for Backend {
             backend.handle_workspace_symbol(&params.query)
         })
         .await
-        .flatten())
+        .flatten()
+        .map(WorkspaceSymbolResponse::SymbolInformationList))
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -811,6 +873,9 @@ impl LanguageServer for Backend {
     }
 
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -840,8 +905,8 @@ impl LanguageServer for Backend {
         params: ExecuteCommandParams,
     ) -> Result<Option<serde_json::Value>> {
         if params.command == "phpantom.navigateToPrototype"
-            && let [uri_val, pos_val] = params.arguments.as_slice()
-            && let Ok(uri) = serde_json::from_value::<Url>(uri_val.clone())
+            && let Some([uri_val, pos_val]) = params.arguments.as_deref()
+            && let Ok(uri) = serde_json::from_value::<Uri>(uri_val.clone())
             && let Ok(position) = serde_json::from_value::<Position>(pos_val.clone())
             && let Some(ref client) = self.client
         {
@@ -872,6 +937,9 @@ impl LanguageServer for Backend {
     }
 
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
@@ -887,6 +955,9 @@ impl LanguageServer for Backend {
         &self,
         params: SelectionRangeParams,
     ) -> Result<Option<Vec<SelectionRange>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         let positions = params.positions;
         // Each request re-parses the whole file. Not coalesced like the other
@@ -906,7 +977,10 @@ impl LanguageServer for Backend {
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
-    ) -> Result<Option<SemanticTokensResult>> {
+    ) -> Result<Option<SemanticTokens>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params.text_document.uri.to_string();
         // Highlighting is requested on every keystroke, re-serializes the whole
         // token array, and is one of the most expensive whole-file requests.
@@ -923,6 +997,9 @@ impl LanguageServer for Backend {
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        if self.is_foreign_document(&params.text_document.uri) {
+            return Ok(None);
+        }
         self.inlay_hint_request(params).await
     }
 
@@ -930,6 +1007,9 @@ impl LanguageServer for Backend {
         &self,
         params: CallHierarchyPrepareParams,
     ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -986,6 +1066,9 @@ impl LanguageServer for Backend {
         &self,
         params: TypeHierarchyPrepareParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
         let uri = params
             .text_document_position_params
             .text_document
@@ -1059,12 +1142,12 @@ impl LanguageServer for Backend {
         params: DocumentOnTypeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         // Only handle Enter ("\n") for PHPDoc block generation.
-        if params.ch != "\n" {
+        if params.ch != "\n" || self.is_foreign_document(&params.text_document.uri) {
             return Ok(None);
         }
 
-        let uri = params.text_document_position.text_document.uri.to_string();
-        let position = params.text_document_position.position;
+        let uri = params.text_document.uri.to_string();
+        let position = params.position;
 
         let content = match self.get_file_content(&uri) {
             Some(c) => c,
@@ -1119,14 +1202,14 @@ impl LanguageServer for Backend {
     async fn diagnostic(
         &self,
         params: DocumentDiagnosticParams,
-    ) -> Result<DocumentDiagnosticReportResult> {
+    ) -> Result<DocumentDiagnosticReport> {
         self.document_pull_diagnostic(params)
     }
 
     async fn workspace_diagnostic(
         &self,
         params: WorkspaceDiagnosticParams,
-    ) -> Result<WorkspaceDiagnosticReportResult> {
+    ) -> Result<WorkspaceDiagnosticReport> {
         self.workspace_pull_diagnostic(params)
     }
 }
@@ -1138,11 +1221,13 @@ pub(crate) fn type_hierarchy_registration() -> Registration {
         register_options: Some(
             serde_json::to_value(TypeHierarchyRegistrationOptions {
                 text_document_registration_options: TextDocumentRegistrationOptions {
-                    document_selector: Some(vec![DocumentFilter {
-                        language: Some("php".to_string()),
-                        scheme: None,
-                        pattern: None,
-                    }]),
+                    document_selector: Some(vec![DocumentFilter::TextDocumentFilter(
+                        TextDocumentFilter::Language(TextDocumentFilterLanguage {
+                            language: "php".to_string(),
+                            scheme: None,
+                            pattern: None,
+                        }),
+                    )]),
                 },
                 type_hierarchy_options: TypeHierarchyOptions::default(),
                 static_registration_options: StaticRegistrationOptions::default(),
@@ -1152,18 +1237,16 @@ pub(crate) fn type_hierarchy_registration() -> Registration {
     }
 }
 
-/// Convert a `Vec<Location>` into a `GotoDefinitionResponse`.
+/// Convert a `Vec<Location>` into a `Definition`, the payload shared by
+/// the definition, implementation and type-definition responses.
 ///
-/// Returns `Scalar` for a single location, `Array` for multiple, and
-/// `None` for an empty vec.  This is used by `goto_implementation` and
-/// `goto_type_definition` which both share this pattern.
-fn wrap_locations(locations: Vec<Location>) -> Option<GotoDefinitionResponse> {
+/// Returns a single `Location` for one location, a list for several, and
+/// `None` for an empty vec.
+fn wrap_locations(mut locations: Vec<Location>) -> Option<Definition> {
     match locations.len() {
         0 => None,
-        1 => Some(GotoDefinitionResponse::Scalar(
-            locations.into_iter().next().unwrap(),
-        )),
-        _ => Some(GotoDefinitionResponse::Array(locations)),
+        1 => locations.pop().map(Definition::Location),
+        _ => Some(Definition::LocationList(locations)),
     }
 }
 

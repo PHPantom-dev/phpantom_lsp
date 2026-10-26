@@ -10,7 +10,7 @@
 
 use super::*;
 use crate::blade::markers;
-use crate::symbol_map::LaravelStringKind;
+use crate::symbol_map::StringKeyKind;
 
 /// Whether a static call's class, as written, is `Illuminate\Support\Env`.
 pub(in crate::symbol_map::extraction) fn is_env_class_name(name: &str) -> bool {
@@ -95,7 +95,7 @@ pub(crate) fn facade_static_call_arg_kind(
     clean_subject: &str,
     member_name: &str,
     index: usize,
-) -> Option<LaravelStringKind> {
+) -> Option<StringKeyKind> {
     if index == 0
         && let Some(kind) = facade_static_call_first_arg_kind(clean_subject, member_name)
     {
@@ -105,15 +105,15 @@ pub(crate) fn facade_static_call_arg_kind(
         && view_factory_names_view_at(member_name, index))
         || (index == ROUTE_VIEW_ARG && is_route_view_call(clean_subject, member_name))
     {
-        Some(LaravelStringKind::View)
+        Some(StringKeyKind::View)
     } else if is_route_pattern_call(clean_subject, member_name) {
-        Some(LaravelStringKind::Route)
+        Some(StringKeyKind::Route)
     } else if matches_laravel_facade(clean_subject, "App")
         && container_key_argument(member_name).is_some_and(|(arg, _)| arg == index)
     {
-        Some(LaravelStringKind::ContainerBinding)
+        Some(StringKeyKind::ContainerBinding)
     } else if index == MORPH_TYPES_ARG && is_morph_types_query_method(member_name) {
-        Some(LaravelStringKind::MorphAlias)
+        Some(StringKeyKind::MorphAlias)
     } else {
         None
     }
@@ -125,11 +125,11 @@ pub(crate) fn facade_static_call_arg_kind(
 /// `whereHasMorph()` takes, a view factory's candidates (`View::first([…])`)
 /// and `Config::getMany([…])`.  The list's bare entries are the names; a
 /// value under a `'key' =>` is not one.
-pub(crate) fn argument_takes_name_list(kind: &LaravelStringKind, member_name: &str) -> bool {
+pub(crate) fn argument_takes_name_list(kind: &StringKeyKind, member_name: &str) -> bool {
     match kind {
-        LaravelStringKind::GateAbility | LaravelStringKind::MorphAlias => true,
-        LaravelStringKind::View => view_factory_method_name_index(member_name).is_some(),
-        LaravelStringKind::Config => member_name.eq_ignore_ascii_case("getMany"),
+        StringKeyKind::GateAbility | StringKeyKind::MorphAlias => true,
+        StringKeyKind::View => view_factory_method_name_index(member_name).is_some(),
+        StringKeyKind::Config => member_name.eq_ignore_ascii_case("getMany"),
         _ => false,
     }
 }
@@ -139,27 +139,27 @@ pub(crate) fn argument_takes_name_list(kind: &LaravelStringKind, member_name: &s
 fn facade_static_call_first_arg_kind(
     clean_subject: &str,
     member_name: &str,
-) -> Option<LaravelStringKind> {
+) -> Option<StringKeyKind> {
     if is_config_facade_name(clean_subject) && is_config_repository_method(member_name) {
-        Some(LaravelStringKind::Config)
+        Some(StringKeyKind::Config)
     } else if is_view_first_arg_call(clean_subject, member_name) {
-        Some(LaravelStringKind::View)
+        Some(StringKeyKind::View)
     } else if is_route_name_facade_call(clean_subject, member_name)
         || is_route_pattern_call(clean_subject, member_name)
     {
-        Some(LaravelStringKind::Route)
+        Some(StringKeyKind::Route)
     } else if is_env_key_call(clean_subject, member_name) {
-        Some(LaravelStringKind::Env)
+        Some(StringKeyKind::Env)
     } else if is_lang_key_call(clean_subject, member_name) {
-        Some(LaravelStringKind::Trans)
+        Some(StringKeyKind::Trans)
     } else if is_artisan_command_static_call(clean_subject, member_name) {
-        Some(LaravelStringKind::Command)
+        Some(StringKeyKind::Command)
     } else if is_gate_facade(clean_subject)
         && (member_name.eq_ignore_ascii_case("define") || is_gate_check_method(member_name))
     {
-        Some(LaravelStringKind::GateAbility)
+        Some(StringKeyKind::GateAbility)
     } else if is_morph_alias_lookup_call(clean_subject, member_name) {
-        Some(LaravelStringKind::MorphAlias)
+        Some(StringKeyKind::MorphAlias)
     } else {
         None
     }
@@ -210,7 +210,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     // `Response::view('pages.about', [...])` names it first.
     if is_route_view_call(clean_subject, member_name) {
         try_emit_laravel_string_span_at(
-            crate::symbol_map::LaravelStringKind::View,
+            crate::symbol_map::StringKeyKind::View,
             ROUTE_VIEW_ARG,
             argument_list,
             ctx.content,
@@ -220,7 +220,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     if matches_laravel_facade(clean_subject, "Response") && member_name.eq_ignore_ascii_case("view")
     {
         try_emit_laravel_string_span(
-            crate::symbol_map::LaravelStringKind::View,
+            crate::symbol_map::StringKeyKind::View,
             argument_list,
             ctx.content,
             &mut ctx.spans,
@@ -230,7 +230,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     // `Redirect::route('home')`, `Response::redirectToRoute(…)`.
     if is_route_name_facade_call(clean_subject, member_name) {
         try_emit_laravel_string_span(
-            crate::symbol_map::LaravelStringKind::Route,
+            crate::symbol_map::StringKeyKind::Route,
             argument_list,
             ctx.content,
             &mut ctx.spans,
@@ -240,7 +240,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     // the names the current route is checked against.
     if is_route_pattern_call(clean_subject, member_name) {
         try_emit_laravel_string_spans_all(
-            crate::symbol_map::LaravelStringKind::Route,
+            crate::symbol_map::StringKeyKind::Route,
             argument_list,
             ctx.content,
             &mut ctx.spans,
@@ -250,7 +250,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     // helper it backs does.
     if is_env_key_call(clean_subject, member_name) {
         try_emit_laravel_string_span(
-            crate::symbol_map::LaravelStringKind::Env,
+            crate::symbol_map::StringKeyKind::Env,
             argument_list,
             ctx.content,
             &mut ctx.spans,
@@ -258,7 +258,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     }
     if is_lang_key_call(clean_subject, member_name) {
         try_emit_laravel_string_span(
-            crate::symbol_map::LaravelStringKind::Trans,
+            crate::symbol_map::StringKeyKind::Trans,
             argument_list,
             ctx.content,
             &mut ctx.spans,
@@ -273,7 +273,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     // `Artisan::queue('app:sync')`, `Schedule::command('app:sync')`.
     if is_artisan_command_static_call(clean_subject, member_name) {
         try_emit_laravel_string_span(
-            crate::symbol_map::LaravelStringKind::Command,
+            crate::symbol_map::StringKeyKind::Command,
             argument_list,
             ctx.content,
             &mut ctx.spans,
@@ -306,9 +306,9 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     }
     if let Some(dependency) = ctx
         .resolved_names
-        .and_then(|_| crate::symbol_map::LaravelStringDependency::root_facade(semantic_subject))
+        .and_then(|_| crate::symbol_map::StringKeyDependency::root_facade(semantic_subject))
     {
-        ctx.defer_laravel_spans_since(laravel_span_start, dependency);
+        ctx.defer_string_key_spans_since(laravel_span_start, dependency);
     }
 }
 
@@ -359,22 +359,22 @@ const BLADE_VIEW_MARKERS: [&str; 3] = [markers::VIEW, markers::COMPONENT, marker
 ///
 /// A Blade directive that names a template or an ability is lowered to a
 /// marker call, so the marker names what the directive does.
-pub(crate) fn helper_function_first_arg_kind(name: &str) -> Option<LaravelStringKind> {
+pub(crate) fn helper_function_first_arg_kind(name: &str) -> Option<StringKeyKind> {
     let is_one_of = |names: &[&str]| names.iter().any(|n| name.eq_ignore_ascii_case(n));
     if name.eq_ignore_ascii_case("view") || is_one_of(&BLADE_VIEW_MARKERS) {
-        Some(LaravelStringKind::View)
+        Some(StringKeyKind::View)
     } else if is_one_of(&["route", "to_route"]) {
-        Some(LaravelStringKind::Route)
+        Some(StringKeyKind::Route)
     } else if is_one_of(&["__", "trans", "trans_choice"]) {
-        Some(LaravelStringKind::Trans)
+        Some(StringKeyKind::Trans)
     } else if name.eq_ignore_ascii_case("config") {
-        Some(LaravelStringKind::Config)
+        Some(StringKeyKind::Config)
     } else if name.eq_ignore_ascii_case("env") {
-        Some(LaravelStringKind::Env)
+        Some(StringKeyKind::Env)
     } else if is_one_of(&["app", "resolve"]) {
-        Some(LaravelStringKind::ContainerBinding)
+        Some(StringKeyKind::ContainerBinding)
     } else if name.eq_ignore_ascii_case(markers::CAN) {
-        Some(LaravelStringKind::GateAbility)
+        Some(StringKeyKind::GateAbility)
     } else {
         None
     }

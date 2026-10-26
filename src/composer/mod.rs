@@ -41,11 +41,14 @@ pub use autoload_files::{
     scan_composer_bootstrap_classes,
 };
 pub use installed::extract_path_repo_psr4_mappings;
-pub(crate) use installed::{InstalledPackages, parse_installed_packages, read_installed_packages};
+pub(crate) use installed::{
+    InstalledPackages, parse_installed_packages, path_repo_psr4_mappings, read_installed_packages,
+    stub_package_roots,
+};
 pub(crate) use project::{
     detect_drupal_web_root, explicit_dependency_names, has_dependency, has_laravel_aware_phpstan,
-    has_require_dev, has_runtime_permission_package, is_application_project,
-    is_laravel_application, is_laravel_project,
+    has_require_dev, has_runtime_permission_package, is_application_project, is_doctrine_project,
+    is_laravel_application, is_laravel_project, is_symfony_project, is_twig_project,
 };
 pub use project::{detect_php_version, detect_php_version_from_package};
 pub use psr4::{

@@ -9,7 +9,7 @@
 //! fix applied by hand, …) shows the diagnostic no longer applies, so
 //! `assemble_and_push` can prune it eagerly.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Check whether a cached PHPStan diagnostic is stale given the current
 /// file content.
@@ -29,7 +29,7 @@ use tower_lsp::lsp_types::*;
 /// can tell whether the right fix is to change the type or the code.
 pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> bool {
     let identifier = match &diag.code {
-        Some(NumberOrString::String(s)) => s.as_str(),
+        Some(Code::String(s)) => s.as_str(),
         _ => return false,
     };
 
@@ -78,7 +78,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
         return crate::code_actions::phpstan::fix_phpdoc_type::is_fix_phpdoc_type_stale(
             content,
             diag.range.start.line as usize,
-            &diag.message,
+            crate::util::message_text(&diag.message),
             identifier,
         );
     }
@@ -101,7 +101,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
         return crate::code_actions::phpstan::fix_prefixed_class::is_fix_prefixed_class_stale(
             content,
             diag.range.start.line as usize,
-            &diag.message,
+            crate::util::message_text(&diag.message),
         );
     }
 
@@ -110,7 +110,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
     // identifier).  The diagnostic is stale when `assert(` no longer
     // appears on the diagnostic line.
     if identifier == "function.alreadyNarrowedType"
-        && diag.message.starts_with("Call to function assert()")
+        && crate::util::message_text(&diag.message).starts_with("Call to function assert()")
     {
         return crate::code_actions::phpstan::remove_assert::is_remove_assert_stale(
             content,
@@ -130,7 +130,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
             content,
             diag.range.start.line as usize,
             identifier,
-            &diag.message,
+            crate::util::message_text(&diag.message),
         );
     }
 
@@ -147,7 +147,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
         return crate::code_actions::phpstan::add_iterable_type::is_add_iterable_type_stale(
             content,
             diag.range.start.line as usize,
-            &diag.message,
+            crate::util::message_text(&diag.message),
         );
     }
 
@@ -156,7 +156,7 @@ pub(crate) fn is_stale_phpstan_diagnostic(diag: &Diagnostic, content: &str) -> b
         return crate::code_actions::phpstan::remove_unused_return_type::is_remove_unused_return_type_stale(
             content,
             diag.range.start.line as usize,
-            &diag.message,
+            crate::util::message_text(&diag.message),
         );
     }
 
@@ -213,10 +213,10 @@ mod tests {
     fn make_phpstan_diag(line: u32, code: &str, message: &str) -> Diagnostic {
         Diagnostic {
             range: make_range(line, 0, line, 200),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String(code.to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String(code.to_string())),
             source: Some("PHPStan".to_string()),
-            message: message.to_string(),
+            message: message.to_string().into(),
             ..Default::default()
         }
     }
@@ -511,10 +511,10 @@ mod tests {
         let content = "<?php\n// @phpstan-ignore return.type\nfoo();";
         let diag = Diagnostic {
             range: make_range(1, 0, 1, 200),
-            severity: Some(DiagnosticSeverity::ERROR),
+            severity: Some(DiagnosticSeverity::Error),
             code: None,
             source: Some("PHPStan".to_string()),
-            message: "Some error.".to_string(),
+            message: "Some error.".to_string().into(),
             ..Default::default()
         };
         assert!(

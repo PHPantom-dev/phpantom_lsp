@@ -23,7 +23,7 @@
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::cursor_context::{FunctionKinds, find_enclosing_function};
@@ -53,7 +53,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -66,10 +66,11 @@ impl Backend {
                 continue;
             }
 
-            let exception_fqn = match extract_exception_fqn(&diag.message) {
-                Some(fqn) => fqn,
-                None => continue,
-            };
+            let exception_fqn =
+                match extract_exception_fqn(crate::util::message_text(&diag.message)) {
+                    Some(fqn) => fqn,
+                    None => continue,
+                };
 
             let short_name = crate::util::short_name(&exception_fqn);
 
@@ -171,7 +172,7 @@ impl Backend {
             }
         }
 
-        let doc_uri: Url = uri.parse().ok()?;
+        let doc_uri: Uri = uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }

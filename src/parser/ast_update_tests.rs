@@ -13,8 +13,8 @@ fn has_config_resource_span(
         map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
-                crate::symbol_map::SymbolKind::LaravelStringKey {
-                    kind: crate::symbol_map::LaravelStringKind::ConfigResource(found),
+                crate::symbol_map::SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::ConfigResource(found),
                     key: found_key,
                     ..
                 } if *found == resource && found_key == key
@@ -29,8 +29,8 @@ fn reference_index_has_config_resource(
     key: &str,
     resource: crate::symbol_map::LaravelConfigResource,
 ) -> bool {
-    let index_key = crate::reference_index::laravel_string_reference_key(
-        crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+    let index_key = crate::reference_index::string_key_reference_key(
+        crate::symbol_map::StringKeyKind::ConfigResource(resource),
         key,
     );
     backend
@@ -356,8 +356,8 @@ fn controller_middleware_does_not_claim_auth_guards_without_a_typed_receiver() {
         map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
-                crate::symbol_map::SymbolKind::LaravelStringKey {
-                    kind: crate::symbol_map::LaravelStringKind::GateAbility,
+                crate::symbol_map::SymbolKind::StringKey {
+                    kind: crate::symbol_map::StringKeyKind::GateAbility,
                     key,
                     ..
                 } if key == "update"
@@ -780,4 +780,75 @@ fn reparsing_a_class_does_not_duplicate_its_inheritance_edges() {
             "{parent} should list Child exactly once, got {kids:?}"
         );
     }
+}
+
+/// The diagnostic pass an edit schedules reads the parse the edit made
+/// for the index instead of parsing the buffer again.
+#[test]
+fn open_file_parse_is_handed_to_its_diagnostic_pass() {
+    let backend = Backend::new_test();
+    let uri = "file:///project/src/Widget.php";
+    let content = "<?php\nclass Widget {\n    public function run(): int { return 1; }\n}\n";
+    backend
+        .open_files
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+    backend.update_ast(uri, content);
+
+    let parsed = backend
+        .take_parsed_for_diagnostics(uri, content)
+        .expect("the open file's parse is kept");
+    let kept_program = std::ptr::from_ref(parsed.program()) as usize;
+    let text = std::sync::Arc::clone(parsed.content());
+    let _guard = crate::parser::with_parsed_file_cache(parsed);
+    let read_program = crate::parser::with_parsed_program(&text, "test", |program, _| {
+        std::ptr::from_ref(program) as usize
+    });
+    assert_eq!(read_program, kept_program, "the pass reparsed the file");
+    assert!(
+        backend.take_parsed_for_diagnostics(uri, content).is_none(),
+        "a parse is handed over once"
+    );
+}
+
+#[test]
+fn a_parse_is_only_kept_for_the_text_and_file_it_read() {
+    let backend = Backend::new_test();
+    let uri = "file:///project/src/Widget.php";
+    let before = "<?php\nclass Widget {}\n";
+    let after = "<?php\nclass Widget { const A = 1; }\n";
+
+    // A file that is not open is not diagnosed after its parse.
+    backend.update_ast(uri, before);
+    assert!(backend.take_parsed_for_diagnostics(uri, before).is_none());
+
+    backend
+        .open_files
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(before.to_string()));
+    backend.update_ast(uri, before);
+    assert!(
+        backend
+            .take_parsed_for_diagnostics("file:///project/src/Other.php", before)
+            .is_none(),
+        "another file's pass does not get this parse"
+    );
+    assert!(
+        backend.take_parsed_for_diagnostics(uri, after).is_none(),
+        "a pass over newer text does not get the older parse"
+    );
+}
+
+#[test]
+fn a_constant_removed_before_the_php_version_is_not_published() {
+    let backend = Backend::new_test();
+    backend.set_php_version(crate::types::PhpVersion::new(8, 0));
+    backend.update_ast(
+        "file:///standard_defines.php",
+        "<?php\ndefine('ASSERT_ACTIVE', 1);\n/**\n * @removed 8.0\n */\ndefine('ASSERT_QUIET_EVAL', 5);\n",
+    );
+
+    let defines = backend.symbols.global_defines.read();
+    assert!(defines.contains_key("ASSERT_ACTIVE"));
+    assert!(!defines.contains_key("ASSERT_QUIET_EVAL"));
 }

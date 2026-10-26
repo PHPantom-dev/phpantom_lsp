@@ -7,21 +7,30 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 pub fn create_test_backend() -> Backend {
     Backend::new_test()
 }
 
+/// The text of a diagnostic message, whether it was sent as a plain string
+/// or as markup.
+pub fn message_text(message: &Message) -> &str {
+    match message {
+        Message::String(text) => text,
+        Message::MarkupContent(markup) => &markup.value,
+    }
+}
+
 /// Open `text` in the backend as `uri` with the given LSP language id,
 /// the way an editor's `textDocument/didOpen` would.
-pub async fn open_document(backend: &Backend, uri: &Url, language_id: &str, text: &str) {
+pub async fn open_document(backend: &Backend, uri: &Uri, language_id: &str, text: &str) {
     backend
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: uri.clone(),
-                language_id: language_id.to_string(),
+                language_id: language_id.to_string().into(),
                 version: 1,
                 text: text.to_string(),
             },
@@ -30,7 +39,7 @@ pub async fn open_document(backend: &Backend, uri: &Url, language_id: &str, text
 }
 
 /// [`open_document`] for a PHP file.
-pub async fn open_php(backend: &Backend, uri: &Url, text: &str) {
+pub async fn open_php(backend: &Backend, uri: &Uri, text: &str) {
     open_document(backend, uri, "php", text).await;
 }
 
@@ -42,8 +51,8 @@ pub async fn open_php_at(
     dir: &tempfile::TempDir,
     relative: &str,
     content: &str,
-) -> Url {
-    let uri = Url::from_file_path(dir.path().join(relative)).unwrap();
+) -> Uri {
+    let uri = Uri::from_file_path(dir.path().join(relative)).unwrap();
     open_php(backend, &uri, content).await;
     uri
 }
@@ -54,14 +63,14 @@ pub async fn open_php_at(
 /// open.  The one place these helpers build `CompletionParams`.
 pub async fn completion_response(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
     context: Option<CompletionContext>,
 ) -> Option<CompletionResponse> {
     backend
         .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position: Position { line, character },
             },
@@ -78,8 +87,8 @@ pub async fn completion_response(
 /// list".
 fn response_items(response: Option<CompletionResponse>) -> Option<Vec<CompletionItem>> {
     match response {
-        Some(CompletionResponse::Array(items)) => Some(items),
-        Some(CompletionResponse::List(list)) => Some(list.items),
+        Some(CompletionResponse::CompletionItemList(items)) => Some(items),
+        Some(CompletionResponse::CompletionList(list)) => Some(list.items),
         None => None,
     }
 }
@@ -97,7 +106,7 @@ pub fn response_labels(response: Option<CompletionResponse>) -> Vec<String> {
 /// Open `text` as PHP and return the raw completion response at the position.
 pub async fn complete_response_at(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     text: &str,
     line: u32,
     character: u32,
@@ -109,7 +118,7 @@ pub async fn complete_response_at(
 /// [`complete_at`] that distinguishes no response from an empty one.
 pub async fn complete_at_raw(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     text: &str,
     line: u32,
     character: u32,
@@ -120,7 +129,7 @@ pub async fn complete_at_raw(
 /// Open `text` as PHP and return the completion items offered at the position.
 pub async fn complete_at(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     text: &str,
     line: u32,
     character: u32,
@@ -133,7 +142,7 @@ pub async fn complete_at(
 /// [`complete_at`] reduced to the item labels.
 pub async fn complete_labels_at(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     text: &str,
     line: u32,
     character: u32,
@@ -146,7 +155,7 @@ pub async fn complete_labels_at(
 /// completing need.
 pub async fn complete_at_opened(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
 ) -> Vec<CompletionItem> {
@@ -157,7 +166,7 @@ pub async fn complete_at_opened(
 /// [`complete_at_opened`] reduced to the item labels.
 pub async fn complete_labels_at_opened(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
 ) -> Vec<String> {
@@ -169,7 +178,7 @@ pub async fn complete_labels_at_opened(
 /// [`complete_at_opened_with_trigger`], reduced to the labels offered.
 pub async fn complete_labels_at_opened_with_trigger(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
     trigger_character: &str,
@@ -181,13 +190,13 @@ pub async fn complete_labels_at_opened_with_trigger(
 
 pub async fn complete_at_opened_with_trigger(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
     trigger_character: &str,
 ) -> Vec<CompletionItem> {
     let context = CompletionContext {
-        trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+        trigger_kind: CompletionTriggerKind::TriggerCharacter,
         trigger_character: Some(trigger_character.to_string()),
     };
     response_items(completion_response(backend, uri, line, character, Some(context)).await)
@@ -766,8 +775,8 @@ pub fn workspace_path(backend: &Backend, relative: &str) -> PathBuf {
 }
 
 /// [`workspace_path`] as the URI an editor would open the file under.
-pub fn workspace_uri(backend: &Backend, relative: &str) -> Url {
-    Url::from_file_path(workspace_path(backend, relative)).unwrap()
+pub fn workspace_uri(backend: &Backend, relative: &str) -> Uri {
+    Uri::from_file_path(workspace_path(backend, relative)).unwrap()
 }
 
 // ── Shared code-action test helpers ─────────────────────────────────────────
@@ -799,10 +808,10 @@ pub fn inject_phpstan_diag_with_data(
             start: Position::new(line, 0),
             end: Position::new(line, 80),
         },
-        severity: Some(DiagnosticSeverity::ERROR),
-        code: Some(NumberOrString::String(identifier.to_string())),
+        severity: Some(DiagnosticSeverity::Error),
+        code: Some(Code::String(identifier.to_string())),
         source: Some("PHPStan".to_string()),
-        message: message.to_string(),
+        message: message.to_string().into(),
         data,
         ..Default::default()
     };
@@ -840,7 +849,7 @@ pub fn get_code_actions_in_range(
     uri: &str,
     content: &str,
     range: Range,
-) -> Vec<CodeActionOrCommand> {
+) -> Vec<CodeActionResponse> {
     backend.handle_code_action(uri, content, &code_action_params(uri, range, vec![]))
 }
 
@@ -855,9 +864,9 @@ pub fn get_code_actions_in_range(
 /// to come through here, with the document opened first.
 pub async fn code_actions_via_server(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     range: Range,
-) -> Option<CodeActionResponse> {
+) -> Option<Vec<CodeActionResponse>> {
     backend
         .code_action(code_action_params(uri.as_str(), range, vec![]))
         .await
@@ -871,7 +880,7 @@ pub fn get_code_actions_at(
     content: &str,
     line: u32,
     character: u32,
-) -> Vec<CodeActionOrCommand> {
+) -> Vec<CodeActionResponse> {
     let pos = Position::new(line, character);
     get_code_actions_in_range(backend, uri, content, Range::new(pos, pos))
 }
@@ -882,7 +891,7 @@ pub fn get_code_actions_on_line(
     uri: &str,
     content: &str,
     line: u32,
-) -> Vec<CodeActionOrCommand> {
+) -> Vec<CodeActionResponse> {
     get_code_actions_in_range(
         backend,
         uri,
@@ -892,55 +901,55 @@ pub fn get_code_actions_on_line(
 }
 
 /// Find a code action by title prefix.
-pub fn find_action<'a>(actions: &'a [CodeActionOrCommand], prefix: &str) -> Option<&'a CodeAction> {
+pub fn find_action<'a>(actions: &'a [CodeActionResponse], prefix: &str) -> Option<&'a CodeAction> {
     actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with(prefix) => Some(ca),
+        CodeActionResponse::CodeAction(ca) if ca.title.starts_with(prefix) => Some(ca),
         _ => None,
     })
 }
 
 /// Find a code action by exact title.
 pub fn find_action_titled<'a>(
-    actions: &'a [CodeActionOrCommand],
+    actions: &'a [CodeActionResponse],
     title: &str,
 ) -> Option<&'a CodeAction> {
     actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title == title => Some(ca),
+        CodeActionResponse::CodeAction(ca) if ca.title == title => Some(ca),
         _ => None,
     })
 }
 
 /// Find a code action whose title contains `needle`.
 pub fn find_action_containing<'a>(
-    actions: &'a [CodeActionOrCommand],
+    actions: &'a [CodeActionResponse],
     needle: &str,
 ) -> Option<&'a CodeAction> {
     actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title.contains(needle) => Some(ca),
+        CodeActionResponse::CodeAction(ca) if ca.title.contains(needle) => Some(ca),
         _ => None,
     })
 }
 
 /// Find all code actions whose title contains `needle`.
 pub fn find_actions_containing<'a>(
-    actions: &'a [CodeActionOrCommand],
+    actions: &'a [CodeActionResponse],
     needle: &str,
 ) -> Vec<&'a CodeAction> {
     actions
         .iter()
         .filter_map(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) if ca.title.contains(needle) => Some(ca),
+            CodeActionResponse::CodeAction(ca) if ca.title.contains(needle) => Some(ca),
             _ => None,
         })
         .collect()
 }
 
 /// Find all code actions whose title starts with `prefix`.
-pub fn find_actions<'a>(actions: &'a [CodeActionOrCommand], prefix: &str) -> Vec<&'a CodeAction> {
+pub fn find_actions<'a>(actions: &'a [CodeActionResponse], prefix: &str) -> Vec<&'a CodeAction> {
     actions
         .iter()
         .filter_map(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with(prefix) => Some(ca),
+            CodeActionResponse::CodeAction(ca) if ca.title.starts_with(prefix) => Some(ca),
             _ => None,
         })
         .collect()
@@ -1035,7 +1044,7 @@ pub async fn initialize_with_options(
 ) {
     #[allow(deprecated)] // `root_uri` is what this generation of clients sends
     let params = InitializeParams {
-        root_uri: Some(Url::from_file_path(root).unwrap()),
+        root_uri: Some(Uri::from_file_path(root).unwrap()),
         initialization_options,
         ..Default::default()
     };
@@ -1079,10 +1088,10 @@ pub async fn initialize_with_resource_operations(backend: &Backend) {
 /// Helper: send a prepare-rename request and return the response.
 pub async fn prepare_rename(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
-) -> Option<PrepareRenameResponse> {
+) -> Option<PrepareRenameResult> {
     let params = TextDocumentPositionParams {
         text_document: TextDocumentIdentifier { uri: uri.clone() },
         position: Position { line, character },
@@ -1094,7 +1103,7 @@ pub async fn prepare_rename(
 /// Helper: send a rename request and return the workspace edit.
 pub async fn rename(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
     new_name: &str,
@@ -1108,13 +1117,13 @@ pub async fn rename(
 /// message the user is shown.
 pub async fn rename_result(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
     new_name: &str,
 ) -> std::result::Result<Option<WorkspaceEdit>, String> {
     let params = RenameParams {
-        text_document_position: TextDocumentPositionParams {
+        text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position { line, character },
         },
@@ -1139,62 +1148,60 @@ pub fn line_char_of(haystack: &str, needle: &str) -> (u32, u32) {
 }
 
 /// Collect all text edits for a given URI from a WorkspaceEdit.
-pub fn edits_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<TextEdit> {
+pub fn edits_for_uri(edit: &WorkspaceEdit, uri: &Uri) -> Vec<TextEdit> {
     if let Some(changes) = edit.changes.as_ref() {
         return changes.get(uri).cloned().unwrap_or_default();
     }
-    let Some(DocumentChanges::Operations(ops)) = &edit.document_changes else {
+    let Some(ops) = &edit.document_changes else {
         return Vec::new();
     };
     ops.iter()
         .filter_map(|op| match op {
-            DocumentChangeOperation::Edit(e) if e.text_document.uri == *uri => Some(&e.edits),
+            DocumentChange::TextDocumentEdit(e)
+                if e.text_document.text_document_identifier.uri == *uri =>
+            {
+                Some(&e.edits)
+            }
             _ => None,
         })
         .flatten()
-        .map(|e| match e {
-            OneOf::Left(e) => e.clone(),
-            OneOf::Right(e) => e.text_edit.clone(),
-        })
+        .map(plain_text_edit)
         .collect()
 }
 
 /// Extract the `RenameFile` operation from a `WorkspaceEdit`, if any.
 pub fn extract_rename_file(edit: &WorkspaceEdit) -> Option<&RenameFile> {
-    let doc_changes = edit.document_changes.as_ref()?;
-    match doc_changes {
-        DocumentChanges::Operations(ops) => {
-            for op in ops {
-                if let DocumentChangeOperation::Op(ResourceOp::Rename(rf)) = op {
-                    return Some(rf);
-                }
-            }
-            None
-        }
-        _ => None,
+    edit.document_changes
+        .as_ref()?
+        .iter()
+        .find_map(|op| match op {
+            DocumentChange::RenameFile(rf) => Some(rf),
+            _ => None,
+        })
+}
+
+/// The plain [`TextEdit`] of a document edit. Panics on a snippet edit,
+/// which no code action emits.
+pub fn plain_text_edit(edit: &Edit) -> TextEdit {
+    match edit {
+        Edit::TextEdit(e) => e.clone(),
+        Edit::AnnotatedTextEdit(e) => e.text_edit.clone(),
+        Edit::SnippetTextEdit(e) => panic!("unexpected snippet edit: {e:?}"),
     }
 }
 
 /// Collect all text edits for a given URI from a `WorkspaceEdit` that uses
-/// `document_changes` (the `DocumentChanges::Operations` variant).
-pub fn doc_change_edits_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<TextEdit> {
-    let Some(DocumentChanges::Operations(ops)) = &edit.document_changes else {
+/// `document_changes`.
+pub fn doc_change_edits_for_uri(edit: &WorkspaceEdit, uri: &Uri) -> Vec<TextEdit> {
+    let Some(ops) = &edit.document_changes else {
         return Vec::new();
     };
     let mut result = Vec::new();
     for op in ops {
-        if let DocumentChangeOperation::Edit(tde) = op
-            && tde.text_document.uri == *uri
+        if let DocumentChange::TextDocumentEdit(tde) = op
+            && tde.text_document.text_document_identifier.uri == *uri
         {
-            for e in &tde.edits {
-                match e {
-                    OneOf::Left(te) => result.push(te.clone()),
-                    OneOf::Right(ate) => result.push(TextEdit {
-                        range: ate.text_edit.range,
-                        new_text: ate.text_edit.new_text.clone(),
-                    }),
-                }
-            }
+            result.extend(tde.edits.iter().map(plain_text_edit));
         }
     }
     result
@@ -1204,7 +1211,7 @@ pub fn doc_change_edits_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<TextEdit
 
 /// [`open_php`] for a URI written as a string.
 pub async fn open_php_str(backend: &Backend, uri: &str, text: &str) {
-    open_php(backend, &Url::parse(uri).unwrap(), text).await;
+    open_php(backend, &Uri::parse(uri).unwrap(), text).await;
 }
 
 /// The labels of `items`, in the order they were offered.
@@ -1216,7 +1223,7 @@ pub fn labels(items: &[CompletionItem]) -> Vec<&str> {
 pub fn method_names(items: &[CompletionItem]) -> Vec<&str> {
     items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect()
 }
@@ -1225,7 +1232,7 @@ pub fn method_names(items: &[CompletionItem]) -> Vec<&str> {
 pub fn property_names(items: &[CompletionItem]) -> Vec<&str> {
     items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+        .filter(|i| i.kind == Some(CompletionItemKind::Property))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect()
 }
@@ -1258,7 +1265,8 @@ pub fn position_of_last(content: &str, needle: &str) -> Position {
     offset_position(content, offset)
 }
 
-fn offset_position(content: &str, offset: usize) -> Position {
+/// The LSP position of the byte `offset` in `content`.
+pub fn offset_position(content: &str, offset: usize) -> Position {
     let before = &content[..offset];
     let line = before.matches('\n').count() as u32;
     let character = before
@@ -1288,7 +1296,7 @@ pub fn hover_at(
 /// The markdown of a hover; panics on any other content kind.
 pub fn hover_text(hover: &Hover) -> &str {
     match &hover.contents {
-        HoverContents::Markup(markup) => &markup.value,
+        Contents::MarkupContent(markup) => &markup.value,
         other => panic!("expected markup hover, got {other:?}"),
     }
 }
@@ -1312,7 +1320,7 @@ pub fn hover_last(backend: &Backend, content: &str, needle: &str) -> String {
 /// open.  The one place these helpers build `HoverParams`.
 pub async fn hover_response(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
 ) -> Option<Hover> {
@@ -1333,28 +1341,19 @@ pub async fn hover_response(
 /// when nothing hovers.
 pub async fn hover_text_at(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
 ) -> Option<String> {
     let hover = hover_response(backend, uri, line, character).await?;
     Some(match hover.contents {
-        HoverContents::Markup(markup) => markup.value,
-        HoverContents::Scalar(MarkedString::String(s)) => s,
-        HoverContents::Scalar(MarkedString::LanguageString(ls)) => ls.value,
-        HoverContents::Array(items) => items
-            .into_iter()
-            .map(|item| match item {
-                MarkedString::String(s) => s,
-                MarkedString::LanguageString(ls) => ls.value,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Contents::MarkupContent(markup) => markup.value,
+        other => panic!("expected a markup hover, got {other:?}"),
     })
 }
 
 /// [`hover_text_at`] for a position that must hover.
-pub async fn markup_hover_at(backend: &Backend, uri: &Url, line: u32, character: u32) -> String {
+pub async fn markup_hover_at(backend: &Backend, uri: &Uri, line: u32, character: u32) -> String {
     hover_text_at(backend, uri, line, character)
         .await
         .unwrap_or_else(|| panic!("expected a hover at {line}:{character}"))
@@ -1362,7 +1361,7 @@ pub async fn markup_hover_at(backend: &Backend, uri: &Url, line: u32, character:
 
 /// The hover a couple of characters into the first occurrence of `needle`
 /// in `content`, a document that is already open as `uri`.
-pub async fn hover_on(backend: &Backend, uri: &Url, content: &str, needle: &str) -> String {
+pub async fn hover_on(backend: &Backend, uri: &Uri, content: &str, needle: &str) -> String {
     let position = position_of(content, needle);
     markup_hover_at(backend, uri, position.line, position.character + 2).await
 }
@@ -1374,7 +1373,7 @@ pub fn items_of_kind(items: &[CompletionItem], kind: CompletionItemKind) -> Vec<
 
 /// The class items among `items`.
 pub fn class_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items_of_kind(items, CompletionItemKind::CLASS)
+    items_of_kind(items, CompletionItemKind::Class)
 }
 
 /// The `filter_text` of every item that carries one.
@@ -1389,12 +1388,12 @@ pub fn filter_texts(items: &[CompletionItem]) -> Vec<&str> {
 /// already open.
 pub async fn goto_definition_at(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     line: u32,
     character: u32,
-) -> Option<GotoDefinitionResponse> {
+) -> Option<DefinitionResponse> {
     backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position: Position { line, character },
@@ -1411,7 +1410,7 @@ pub async fn goto_definition_at(
 /// with nothing.
 pub async fn find_references(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     position: Position,
     include_declaration: bool,
 ) -> Vec<Location> {
@@ -1424,13 +1423,13 @@ pub async fn find_references(
 /// (`None`) apart from an empty list.
 pub async fn references_response(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     position: Position,
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
     backend
         .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position,
             },
@@ -1447,7 +1446,7 @@ pub async fn references_response(
 /// The messages of the syntax, argument-count, and slow diagnostics
 /// reported on an open Blade template, read against the virtual PHP it
 /// lowers to.
-pub fn template_diagnostics(backend: &Backend, uri: &Url) -> Vec<String> {
+pub fn template_diagnostics(backend: &Backend, uri: &Uri) -> Vec<String> {
     let virtual_php = backend
         .blade_virtual_php(uri.as_str())
         .expect("the template should be preprocessed");
@@ -1455,12 +1454,15 @@ pub fn template_diagnostics(backend: &Backend, uri: &Url) -> Vec<String> {
     backend.collect_syntax_error_diagnostics(uri.as_str(), &virtual_php, &mut diags);
     backend.collect_argument_count_diagnostics(uri.as_str(), &virtual_php, &mut diags);
     backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
-    diags.into_iter().map(|d| d.message).collect()
+    diags
+        .into_iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
 }
 
 /// The "Undefined variable" messages reported on an open Blade template,
 /// read against the virtual PHP it lowers to.
-pub fn blade_undefined_variables(backend: &Backend, uri: &Url) -> Vec<String> {
+pub fn blade_undefined_variables(backend: &Backend, uri: &Uri) -> Vec<String> {
     let virtual_php = backend
         .blade_virtual_php(uri.as_str())
         .expect("blade virtual content");
@@ -1468,8 +1470,8 @@ pub fn blade_undefined_variables(backend: &Backend, uri: &Url) -> Vec<String> {
     backend.collect_undefined_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
     diags
         .into_iter()
-        .filter(|d| d.message.contains("Undefined variable"))
-        .map(|d| d.message)
+        .filter(|d| message_text(&d.message).contains("Undefined variable"))
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 
@@ -1486,7 +1488,7 @@ pub fn unknown_member_diagnostics_with_scope_cache(
     out.retain(|d| {
         d.code
             .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
     });
     out
 }
@@ -1495,12 +1497,12 @@ pub fn unknown_member_diagnostics_with_scope_cache(
 
 /// The targets of a go-to-definition response as plain locations, whatever
 /// shape the server answered in.
-pub fn definition_locations(response: Option<GotoDefinitionResponse>) -> Vec<Location> {
+pub fn definition_locations(response: Option<DefinitionResponse>) -> Vec<Location> {
     match response {
         None => Vec::new(),
-        Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
-        Some(GotoDefinitionResponse::Array(locations)) => locations,
-        Some(GotoDefinitionResponse::Link(links)) => links
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => vec![location],
+        Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => locations,
+        Some(DefinitionResponse::DefinitionLinkList(links)) => links
             .into_iter()
             .map(|link| Location {
                 uri: link.target_uri,
@@ -1515,7 +1517,7 @@ pub fn definition_locations(response: Option<GotoDefinitionResponse>) -> Vec<Loc
 /// `uri`.
 pub async fn definitions_at(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     content: &str,
     needle: &str,
 ) -> Vec<Location> {
@@ -1527,9 +1529,9 @@ pub async fn definitions_at(
 
 /// Assert that a go-to-definition response is a single location in `uri`
 /// starting on `line`.
-pub fn assert_location(response: GotoDefinitionResponse, uri: &Url, line: u32) {
+pub fn assert_location(response: DefinitionResponse, uri: &Uri, line: u32) {
     match response {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(&location.uri, uri, "jumped to the wrong file");
             assert_eq!(location.range.start.line, line, "jumped to the wrong line");
         }
@@ -1538,11 +1540,11 @@ pub fn assert_location(response: GotoDefinitionResponse, uri: &Url, line: u32) {
 }
 
 /// The URI of the first target of a go-to-definition response.
-pub fn definition_uri(response: &GotoDefinitionResponse) -> &Url {
+pub fn definition_uri(response: &DefinitionResponse) -> &Uri {
     match response {
-        GotoDefinitionResponse::Scalar(location) => &location.uri,
-        GotoDefinitionResponse::Array(locations) => &locations[0].uri,
-        GotoDefinitionResponse::Link(links) => &links[0].target_uri,
+        DefinitionResponse::Definition(Definition::Location(location)) => &location.uri,
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => &locations[0].uri,
+        DefinitionResponse::DefinitionLinkList(links) => &links[0].target_uri,
     }
 }
 
@@ -1647,27 +1649,27 @@ pub const LIVEWIRE_COMPONENT_STUB: &str = "<?php\nnamespace Livewire;\n\
 /// Open the Blade template at `relative` in the backend's workspace from
 /// disk, the way an editor opening it with language id `blade` would, and
 /// hand back its URI.
-pub async fn open_blade_template(backend: &Backend, relative: &str) -> Url {
+pub async fn open_blade_template(backend: &Backend, relative: &str) -> Uri {
     let path = workspace_path(backend, relative);
     let text = fs::read_to_string(&path).unwrap();
-    let uri = Url::from_file_path(&path).unwrap();
+    let uri = Uri::from_file_path(&path).unwrap();
     open_document(backend, &uri, "blade", &text).await;
     uri
 }
 
 /// [`open_blade_template`] with the workspace scan already run, so provider
 /// registrations and view discovery are in place before the template opens.
-pub async fn open_initialized_blade_template(backend: &Backend, relative: &str) -> Url {
+pub async fn open_initialized_blade_template(backend: &Backend, relative: &str) -> Uri {
     backend.initialized(InitializedParams {}).await;
     open_blade_template(backend, relative).await
 }
 
 /// Open the PHP file at `relative` in the backend's workspace from disk,
 /// the way an editor opening it would, and hand back its URI.
-pub async fn open_php_file(backend: &Backend, relative: &str) -> Url {
+pub async fn open_php_file(backend: &Backend, relative: &str) -> Uri {
     let path = workspace_path(backend, relative);
     let text = fs::read_to_string(&path).unwrap();
-    let uri = Url::from_file_path(&path).unwrap();
+    let uri = Uri::from_file_path(&path).unwrap();
     open_php(backend, &uri, &text).await;
     uri
 }
@@ -1675,7 +1677,7 @@ pub async fn open_php_file(backend: &Backend, relative: &str) -> Url {
 /// [`open_php_file`] with the workspace scan already run, so provider
 /// registrations, route files, and the other Laravel discoveries are in
 /// place before the file opens.
-pub async fn open_initialized_php(backend: &Backend, relative: &str) -> Url {
+pub async fn open_initialized_php(backend: &Backend, relative: &str) -> Uri {
     backend.initialized(InitializedParams {}).await;
     open_php_file(backend, relative).await
 }
@@ -1686,7 +1688,7 @@ pub async fn create_initialized_psr4_workspace(
     composer_json: &str,
     files: &[(&str, &str)],
     open_path: &str,
-) -> (Backend, tempfile::TempDir, Url) {
+) -> (Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(composer_json, files);
     let uri = open_initialized_php(&backend, open_path).await;
     (backend, dir, uri)
@@ -1701,7 +1703,7 @@ pub fn with_code(diags: Vec<Diagnostic>, code: &str) -> Vec<Diagnostic> {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == code))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == code))
         })
         .collect()
 }
@@ -1714,9 +1716,9 @@ pub fn messages_with_code(diags: &[Diagnostic], code: &str) -> Vec<String> {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == code))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == code))
         })
-        .map(|d| d.message.clone())
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 

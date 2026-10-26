@@ -6,9 +6,10 @@
 //! container-binding string (`'view'`), which is looked up in the core
 //! container alias table to find the concrete class. No application booting.
 
+use crate::common::message_text;
 use crate::common::{completion_response, create_psr4_workspace, open_php_str, position_after};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -139,7 +140,7 @@ class Consumer {
 
     let result = completion_response(
         &backend,
-        &Url::parse("file:///src/Consumer.php").unwrap(),
+        &Uri::parse("file:///src/Consumer.php").unwrap(),
         5,
         12,
         None,
@@ -147,8 +148,8 @@ class Consumer {
     .await;
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -197,9 +198,9 @@ class Consumer {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(
@@ -241,9 +242,9 @@ class Consumer {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(
@@ -276,9 +277,9 @@ class ViewServiceProvider
 
     let result = backend
         .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
+                    uri: Uri::parse(uri).unwrap(),
                 },
                 position: position_after(provider, "$this->"),
             },
@@ -290,8 +291,8 @@ class ViewServiceProvider
         .unwrap();
 
     let items = match result.expect("completion should return results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     let names: Vec<&str> = items
         .iter()
@@ -344,9 +345,9 @@ class ViewServiceProvider
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message.as_str())
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(

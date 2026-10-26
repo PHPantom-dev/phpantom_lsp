@@ -3,14 +3,14 @@
 use crate::common::{
     apply_edits, create_test_backend, edits_for_uri, open_php, prepare_rename, rename, split_cursor,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Variable Rename ────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn rename_variable_in_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): void {\n",
@@ -46,7 +46,7 @@ async fn rename_variable_in_function() {
 #[tokio::test]
 async fn rename_variable_without_dollar_prefix() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): void {\n",
@@ -70,7 +70,7 @@ async fn rename_variable_without_dollar_prefix() {
 #[tokio::test]
 async fn rename_variable_updates_compact_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): array {\n",
@@ -96,7 +96,7 @@ async fn rename_variable_updates_compact_string() {
 #[tokio::test]
 async fn rename_variable_updates_dynamic_property_selector() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(object $message, string $type): void {\n",
@@ -126,7 +126,7 @@ async fn rename_variable_updates_dynamic_property_selector() {
 #[tokio::test]
 async fn rename_from_compact_string_updates_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): array {\n",
@@ -152,7 +152,7 @@ async fn rename_from_compact_string_updates_variable() {
 #[tokio::test]
 async fn prepare_rename_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): void {\n",
@@ -169,17 +169,21 @@ async fn prepare_rename_variable() {
         "Expected prepare rename to succeed for $count"
     );
 
-    if let Some(PrepareRenameResponse::RangeWithPlaceholder { placeholder, .. }) = response {
+    if let Some(PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+        placeholder,
+        ..
+    })) = response
+    {
         assert_eq!(placeholder, "$count");
     } else {
-        panic!("Expected RangeWithPlaceholder response");
+        panic!("Expected PrepareRenamePlaceholder response");
     }
 }
 
 #[tokio::test]
 async fn prepare_rename_compact_string_uses_bare_name() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): array {\n",
@@ -196,10 +200,14 @@ async fn prepare_rename_compact_string_uses_bare_name() {
         "Expected prepare rename on compact string"
     );
 
-    if let Some(PrepareRenameResponse::RangeWithPlaceholder { placeholder, .. }) = response {
+    if let Some(PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+        placeholder,
+        ..
+    })) = response
+    {
         assert_eq!(placeholder, "user");
     } else {
-        panic!("Expected RangeWithPlaceholder response");
+        panic!("Expected PrepareRenamePlaceholder response");
     }
 }
 
@@ -208,7 +216,7 @@ async fn prepare_rename_compact_string_uses_bare_name() {
 #[tokio::test]
 async fn rename_variable_does_not_leak_across_functions() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function alpha(): void {\n",
@@ -240,7 +248,7 @@ async fn rename_variable_does_not_leak_across_functions() {
 #[tokio::test]
 async fn rename_closure_parameter_from_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -298,7 +306,7 @@ async fn rename_closure_parameter_from_param() {
 #[tokio::test]
 async fn rename_closure_parameter_from_body_usage() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -349,7 +357,7 @@ async fn rename_closure_parameter_from_body_usage() {
 #[tokio::test]
 async fn rename_function_parameter_from_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function greet(string $name): string {\n",
@@ -389,7 +397,7 @@ async fn rename_function_parameter_from_param() {
 #[tokio::test]
 async fn rename_method_parameter_from_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Greeter {\n",
@@ -431,7 +439,7 @@ async fn rename_method_parameter_from_param() {
 #[tokio::test]
 async fn rename_parameter_includes_docblock_param_tag() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Greeter {\n",
@@ -481,7 +489,7 @@ async fn rename_parameter_includes_docblock_param_tag() {
 #[tokio::test]
 async fn rename_parameter_includes_docblock_from_body_usage() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -529,7 +537,7 @@ async fn rename_parameter_includes_docblock_from_body_usage() {
 #[tokio::test]
 async fn rename_parameter_multiple_docblock_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Math {\n",
@@ -578,7 +586,7 @@ async fn rename_parameter_multiple_docblock_params() {
 #[tokio::test]
 async fn rename_parameter_includes_conditional_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -635,7 +643,7 @@ async fn rename_parameter_includes_conditional_return_type() {
 #[tokio::test]
 async fn rename_parameter_includes_nested_conditional_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -679,7 +687,7 @@ async fn rename_parameter_includes_nested_conditional_return_type() {
 #[tokio::test]
 async fn rename_parameter_conditional_return_from_body_usage() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -726,7 +734,7 @@ async fn rename_parameter_conditional_return_from_body_usage() {
 #[tokio::test]
 async fn rename_arrow_function_parameter() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): void {\n",
@@ -766,7 +774,7 @@ async fn rename_arrow_function_parameter() {
 #[tokio::test]
 async fn rename_closure_parameter_does_not_leak_to_outer_scope() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function demo(): void {\n",
@@ -814,7 +822,7 @@ async fn rename_closure_parameter_does_not_leak_to_outer_scope() {
 #[tokio::test]
 async fn rename_function_param_propagates_into_closure_use_and_arrow() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function test(string $param): void\n",
@@ -872,7 +880,7 @@ async fn rename_function_param_propagates_into_closure_use_and_arrow() {
 async fn rename_at_cursor(source: &str, new_name: &str) -> String {
     let (text, position) = split_cursor(source);
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, &text).await;
     let edit = rename(&backend, &uri, position.line, position.character, new_name)
         .await

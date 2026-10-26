@@ -10,7 +10,7 @@ use crate::common::{
     resolve_action,
 };
 use std::sync::Arc;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: send a code action request with a selection range and return
 /// the list of code actions.
@@ -22,7 +22,7 @@ fn get_code_actions(
     start_char: u32,
     end_line: u32,
     end_char: u32,
-) -> Vec<CodeActionOrCommand> {
+) -> Vec<CodeActionResponse> {
     get_code_actions_in_range(
         backend,
         uri,
@@ -35,9 +35,9 @@ fn get_code_actions(
 }
 
 /// Find an "Extract function" or "Extract method" code action from a list.
-fn find_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
+fn find_extract_action(actions: &[CodeActionResponse]) -> Option<&CodeAction> {
     actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca)
+        CodeActionResponse::CodeAction(ca)
             if ca.disabled.is_none()
                 && (ca.title.starts_with("Extract function")
                     || ca.title.starts_with("Extract method")) =>
@@ -50,17 +50,16 @@ fn find_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
 
 /// [`find_extract_action`] but without the "not disabled" requirement, for
 /// the tests that assert on what the handler offers at all.
-fn find_any_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
+fn find_any_extract_action(actions: &[CodeActionResponse]) -> Option<&CodeAction> {
     find_action(actions, "Extract function").or_else(|| find_action(actions, "Extract method"))
 }
 
 /// Find a `refactor.extract` action whose title mentions "Extract",
 /// matching on the kind rather than on a title prefix.
-fn find_refactor_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
+fn find_refactor_extract_action(actions: &[CodeActionResponse]) -> Option<&CodeAction> {
     actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca)
-            if ca.kind == Some(CodeActionKind::REFACTOR_EXTRACT)
-                && ca.title.contains("Extract") =>
+        CodeActionResponse::CodeAction(ca)
+            if ca.kind == Some(CodeActionKind::RefactorExtract) && ca.title.contains("Extract") =>
         {
             Some(ca)
         }
@@ -70,11 +69,11 @@ fn find_refactor_extract_action(actions: &[CodeActionOrCommand]) -> Option<&Code
 
 /// Find a *disabled* `refactor.extract` action whose title mentions
 /// "Extract".
-fn find_disabled_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
+fn find_disabled_extract_action(actions: &[CodeActionResponse]) -> Option<&CodeAction> {
     actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca)
+        CodeActionResponse::CodeAction(ca)
             if ca.disabled.is_some()
-                && ca.kind == Some(CodeActionKind::REFACTOR_EXTRACT)
+                && ca.kind == Some(CodeActionKind::RefactorExtract)
                 && ca.title.contains("Extract") =>
         {
             Some(ca)
@@ -84,12 +83,12 @@ fn find_disabled_extract_action(actions: &[CodeActionOrCommand]) -> Option<&Code
 }
 
 /// The titles of every offered action, for assertion messages.
-fn action_titles(actions: &[CodeActionOrCommand]) -> Vec<String> {
+fn action_titles(actions: &[CodeActionResponse]) -> Vec<String> {
     actions
         .iter()
         .map(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) => ca.title.clone(),
-            CodeActionOrCommand::Command(cmd) => cmd.title.clone(),
+            CodeActionResponse::CodeAction(ca) => ca.title.clone(),
+            CodeActionResponse::Command(cmd) => cmd.title.clone(),
         })
         .collect()
 }
@@ -117,7 +116,7 @@ function foo() {
     );
     assert_eq!(
         action.unwrap().kind,
-        Some(CodeActionKind::REFACTOR_EXTRACT),
+        Some(CodeActionKind::RefactorExtract),
         "should be refactor.extract"
     );
 }
@@ -1096,7 +1095,7 @@ function foo() {
     let action = find_extract_action(&actions).expect("should offer action");
     assert_eq!(
         action.kind,
-        Some(CodeActionKind::REFACTOR_EXTRACT),
+        Some(CodeActionKind::RefactorExtract),
         "kind should be refactor.extract"
     );
 }
@@ -1223,8 +1222,8 @@ class Foo {
         actions
             .iter()
             .map(|a| match a {
-                CodeActionOrCommand::CodeAction(ca) => ca.title.clone(),
-                CodeActionOrCommand::Command(cmd) => cmd.title.clone(),
+                CodeActionResponse::CodeAction(ca) => ca.title.clone(),
+                CodeActionResponse::Command(cmd) => cmd.title.clone(),
             })
             .collect::<Vec<_>>()
     );

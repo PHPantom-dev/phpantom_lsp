@@ -19,10 +19,16 @@ impl Backend {
     /// `stub_index`.  When found there, it parses and caches the stub
     /// under a `phpantom-stub://` URI so subsequent lookups are free.
     ///
-    /// **No disk I/O is performed.**  Classes that live on disk (class index,
-    /// PSR-4, vendor) are not resolved — callers that need those should
-    /// use [`find_or_load_class`] instead.
+    /// **No disk I/O is performed** beyond reading a stub path that
+    /// declares the name.  Classes that live on disk (class index, PSR-4,
+    /// vendor) are not resolved — callers that need those should use
+    /// [`find_or_load_class`] instead.
     pub(crate) fn load_stub_class(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
+        // A stub path's declaration of a built-in replaces the embedded
+        // one wherever the embedded one would have been read.
+        if let Some(cls) = self.load_external_stub_class(class_name) {
+            return Some(cls);
+        }
         let last_segment = short_name(class_name);
 
         // Fast path: already parsed and cached.
@@ -117,8 +123,11 @@ impl Backend {
             inflight: &self.parse_inflight,
             uri: uri.clone(),
         };
+        // A stub path is as likely as the embedded stubs to be
+        // phpstorm-stubs, whose declarations are filtered by PHP version.
+        let php_version = self.is_external_stub_uri(&uri).then(|| self.php_version());
         let content = crate::util::read_php_source(file_path);
-        content.and_then(|c| self.parse_and_cache_content(&c, &uri))
+        content.and_then(|c| self.parse_and_cache_content_versioned(&c, &uri, php_version))
     }
 
     /// Parse an embedded stub under its `phpantom-stub://` URI, sharing
@@ -277,14 +286,17 @@ impl Backend {
         }
 
         // Apply class stub patches for phpstorm-stubs deficiencies
-        // (e.g. ArrayIterator missing @template parameters).
-        // Only patch classes loaded from stub URIs to avoid touching
+        // (e.g. ArrayIterator missing @template parameters), to the
+        // embedded copy and to a checkout under a stub path alike.
+        // Only patch classes loaded from phpstorm-stubs to avoid touching
         // user code.
-        if crate::stubs::is_embedded_stub_uri(uri) {
+        if self.is_phpstorm_stubs_uri(uri) {
             for class in &mut classes {
                 crate::stub_patches::apply_class_stub_patches(class);
             }
-        } else {
+        } else if !self.is_external_stub_uri(uri) {
+            // A stub path says what its classes are, so it is left as
+            // written.
             // A handful of third-party classes make a promise their own
             // docblocks leave undeclared.  Keyed by FQN, so everything
             // else passes through on one string compare.

@@ -1,7 +1,7 @@
 //! Integration tests for the "Create missing view" code action.
 
 use crate::common::{create_psr4_workspace, find_action, get_code_actions_in_range};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "autoload": { "psr-4": { "App\\": "app/" } }
@@ -13,7 +13,7 @@ fn actions_on_line(
     uri: &str,
     content: &str,
     line: u32,
-) -> Vec<CodeActionOrCommand> {
+) -> Vec<CodeActionResponse> {
     get_code_actions_in_range(
         backend,
         uri,
@@ -29,20 +29,17 @@ fn offered_and_falls_back_to_conventional_dir_when_none_exists() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("app/HomeController.php", CONTROLLER)]);
 
     let uri_path = dir.path().join("app/HomeController.php");
-    let uri = Url::from_file_path(&uri_path).unwrap();
+    let uri = Uri::from_file_path(&uri_path).unwrap();
     backend.update_ast(uri.as_str(), CONTROLLER);
 
     let actions = actions_on_line(&backend, uri.as_str(), CONTROLLER, 7);
     let action = find_action(&actions, "Create missing view").expect("should offer the action");
 
     let edit = action.edit.as_ref().expect("action should carry an edit");
-    let ops = match edit.document_changes.as_ref().expect("document_changes") {
-        DocumentChanges::Operations(ops) => ops,
-        DocumentChanges::Edits(_) => panic!("expected operations, not plain edits"),
-    };
+    let ops = edit.document_changes.as_ref().expect("document_changes");
     assert_eq!(ops.len(), 1);
     match &ops[0] {
-        DocumentChangeOperation::Op(ResourceOp::Create(cf)) => {
+        DocumentChange::CreateFile(cf) => {
             let path = cf.uri.to_file_path().unwrap();
             let expected = dir.path().join("resources/views/missing/page.blade.php");
             assert_eq!(path, expected);
@@ -64,19 +61,16 @@ fn offered_under_an_existing_view_root() {
     );
 
     let uri_path = dir.path().join("app/HomeController.php");
-    let uri = Url::from_file_path(&uri_path).unwrap();
+    let uri = Uri::from_file_path(&uri_path).unwrap();
     backend.update_ast(uri.as_str(), CONTROLLER);
 
     let actions = actions_on_line(&backend, uri.as_str(), CONTROLLER, 7);
     let action = find_action(&actions, "Create missing view").expect("should offer the action");
 
     let edit = action.edit.as_ref().expect("action should carry an edit");
-    let ops = match edit.document_changes.as_ref().expect("document_changes") {
-        DocumentChanges::Operations(ops) => ops,
-        DocumentChanges::Edits(_) => panic!("expected operations, not plain edits"),
-    };
+    let ops = edit.document_changes.as_ref().expect("document_changes");
     match &ops[0] {
-        DocumentChangeOperation::Op(ResourceOp::Create(cf)) => {
+        DocumentChange::CreateFile(cf) => {
             let path = cf.uri.to_file_path().unwrap();
             let expected = dir.path().join("resources/views/missing/page.blade.php");
             assert_eq!(path, expected);
@@ -96,7 +90,7 @@ fn not_offered_when_the_view_already_resolves() {
     );
 
     let uri_path = dir.path().join("app/HomeController.php");
-    let uri = Url::from_file_path(&uri_path).unwrap();
+    let uri = Uri::from_file_path(&uri_path).unwrap();
     backend.update_ast(uri.as_str(), CONTROLLER);
 
     let actions = actions_on_line(&backend, uri.as_str(), CONTROLLER, 7);
@@ -111,7 +105,7 @@ fn not_offered_when_cursor_is_elsewhere() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("app/HomeController.php", CONTROLLER)]);
 
     let uri_path = dir.path().join("app/HomeController.php");
-    let uri = Url::from_file_path(&uri_path).unwrap();
+    let uri = Uri::from_file_path(&uri_path).unwrap();
     backend.update_ast(uri.as_str(), CONTROLLER);
 
     // Line 3 is the class declaration, nowhere near the view() call.

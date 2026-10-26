@@ -174,6 +174,16 @@ impl Backend {
             && let Some(class_name) =
                 crate::completion::source::helpers::extract_new_expression_class(trimmed)
         {
+            // `new $class(…)` builds whatever class the variable names.
+            if class_name.starts_with('$') {
+                let built = crate::type_engine::resolver::resolve_target_classes_expr(
+                    &crate::type_engine::subject_expr::SubjectExpr::NewExpr { class_name },
+                    crate::AccessKind::Arrow,
+                    ctx,
+                );
+                return (!built.is_empty())
+                    .then(|| crate::types::ResolvedType::types_joined(&built));
+            }
             let resolved_name = ctx.written_names().resolve_class(&class_name);
             return Some(PhpType::named(atom(
                 resolved_name.strip_prefix('\\').unwrap_or(&resolved_name),

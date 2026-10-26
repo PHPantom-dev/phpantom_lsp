@@ -281,3 +281,17 @@ fn scan_vendor_packages_files_autoload_without_autoloader_is_not_full_scanned() 
         "a plain files autoload must not trigger a full package scan"
     );
 }
+
+#[test]
+fn only_a_call_to_spl_autoload_register_is_a_custom_autoloader() {
+    assert!(registers_autoloader(
+        b"<?php\nspl_autoload_register(fn ($c) => null);"
+    ));
+    assert!(registers_autoloader(
+        b"<?php\n\\spl_autoload_register (static function ($c) {});"
+    ));
+    // phpstorm-stubs' map names the function without calling it.
+    assert!(!registers_autoloader(
+        b"<?php\nconst FUNCTIONS = array (\n  'spl_autoload_register' => 'SPL/SPL_f.php',\n);"
+    ));
+}

@@ -39,12 +39,12 @@ use crate::php_type::{PhpType, ShapeEntry};
 pub(crate) enum ConfigValue {
     /// A string literal, e.g. `'web'` or `'users'`.
     Str(String),
-    /// An integer literal, e.g. `3306`.
-    Int,
-    /// A float literal, e.g. `0.5`.
-    Float,
-    /// A boolean literal (`true` or `false`).
-    Bool,
+    /// An integer literal as written, e.g. `3306`.
+    Int(String),
+    /// A float literal as written, e.g. `0.5`.
+    Float(String),
+    /// A boolean literal.
+    Bool(bool),
     /// A `null` literal.
     Null,
     /// A `::class` constant, e.g. `App\Models\User::class`.  The stored name
@@ -56,11 +56,15 @@ pub(crate) enum ConfigValue {
     /// `env('is_admin') ? User::class : Admin::class`.  We do not evaluate the
     /// condition; the honest value is *one of* the arms.
     OneOf(Vec<ConfigValue>),
-    /// `env('KEY', <default>)`: the default argument is statically known, but
-    /// an environment variable may override it at runtime.
-    EnvDefault(Box<ConfigValue>),
-    /// Not statically resolvable (bare `env('KEY')`, a variable, a call, or a
-    /// shape we do not recognize).
+    /// `env('KEY', <default>)`: the default argument, when there is one, is
+    /// statically known, but the environment variable may override it at
+    /// runtime.  `name` is absent when the key is not a string literal.
+    Env {
+        name: Option<String>,
+        default: Option<Box<ConfigValue>>,
+    },
+    /// Not statically resolvable (a variable, a call, or a shape we do not
+    /// recognize).
     Dynamic,
 }
 
@@ -94,17 +98,19 @@ impl ConfigValue {
         match self {
             ConfigValue::Str(s) => push_unique(out, s),
             ConfigValue::ClassString(_)
-            | ConfigValue::Int
-            | ConfigValue::Float
-            | ConfigValue::Bool
+            | ConfigValue::Int(_)
+            | ConfigValue::Float(_)
+            | ConfigValue::Bool(_)
             | ConfigValue::Null => *dynamic = true,
             ConfigValue::OneOf(arms) => {
                 for arm in arms {
                     arm.collect_strings(out, dynamic);
                 }
             }
-            ConfigValue::EnvDefault(inner) => {
-                inner.collect_strings(out, dynamic);
+            ConfigValue::Env { default, .. } => {
+                if let Some(default) = default {
+                    default.collect_strings(out, dynamic);
+                }
                 *dynamic = true;
             }
             ConfigValue::Dynamic => *dynamic = true,
@@ -116,17 +122,19 @@ impl ConfigValue {
             ConfigValue::ClassString(name) => push_unique(out, name),
             ConfigValue::Str(s) if s.contains('\\') => push_unique(out, s),
             ConfigValue::Str(_)
-            | ConfigValue::Int
-            | ConfigValue::Float
-            | ConfigValue::Bool
+            | ConfigValue::Int(_)
+            | ConfigValue::Float(_)
+            | ConfigValue::Bool(_)
             | ConfigValue::Null => *dynamic = true,
             ConfigValue::OneOf(arms) => {
                 for arm in arms {
                     arm.collect_classes(out, dynamic);
                 }
             }
-            ConfigValue::EnvDefault(inner) => {
-                inner.collect_classes(out, dynamic);
+            ConfigValue::Env { default, .. } => {
+                if let Some(default) = default {
+                    default.collect_classes(out, dynamic);
+                }
                 *dynamic = true;
             }
             ConfigValue::Dynamic => *dynamic = true,
@@ -138,9 +146,9 @@ impl ConfigValue {
     pub(crate) fn to_php_type(&self) -> PhpType {
         match self {
             ConfigValue::Str(_) => PhpType::string(),
-            ConfigValue::Int => PhpType::int(),
-            ConfigValue::Float => PhpType::float(),
-            ConfigValue::Bool => PhpType::bool(),
+            ConfigValue::Int(_) => PhpType::int(),
+            ConfigValue::Float(_) => PhpType::float(),
+            ConfigValue::Bool(_) => PhpType::bool(),
             ConfigValue::Null => PhpType::null(),
             ConfigValue::ClassString(name) => {
                 PhpType::class_string(Some(PhpType::named(atom(name))))
@@ -159,8 +167,11 @@ impl ConfigValue {
                     PhpType::union(members)
                 }
             }
-            ConfigValue::EnvDefault(inner) => inner.to_php_type(),
-            ConfigValue::Dynamic => PhpType::mixed(),
+            ConfigValue::Env {
+                default: Some(default),
+                ..
+            } => default.to_php_type(),
+            ConfigValue::Env { default: None, .. } | ConfigValue::Dynamic => PhpType::mixed(),
         }
     }
 }
@@ -462,11 +473,14 @@ fn classify_value(
                 None => ConfigValue::Dynamic,
             }
         }
-        Expression::Literal(literal::Literal::Integer(_)) => ConfigValue::Int,
-        Expression::Literal(literal::Literal::Float(_)) => ConfigValue::Float,
-        Expression::Literal(literal::Literal::True(_) | literal::Literal::False(_)) => {
-            ConfigValue::Bool
+        Expression::Literal(literal::Literal::Integer(int)) => {
+            ConfigValue::Int(bytes_to_str(int.raw).to_string())
         }
+        Expression::Literal(literal::Literal::Float(float)) => {
+            ConfigValue::Float(bytes_to_str(float.raw).to_string())
+        }
+        Expression::Literal(literal::Literal::True(_)) => ConfigValue::Bool(true),
+        Expression::Literal(literal::Literal::False(_)) => ConfigValue::Bool(false),
         Expression::Literal(literal::Literal::Null(_)) => ConfigValue::Null,
         Expression::Access(Access::ClassConstant(cca)) => classify_class_constant(cca, use_map),
         Expression::Conditional(cond) => {
@@ -512,13 +526,21 @@ fn classify_call(
     }
     // `env('KEY', <default>)` anchors on the default argument; a bare
     // `env('KEY')` has no static value.
-    let default_arg = fc.argument_list.arguments.iter().nth(1);
-    match default_arg {
-        Some(arg) => {
-            ConfigValue::EnvDefault(Box::new(classify_value(arg.value(), content, use_map)))
-        }
-        None => ConfigValue::Dynamic,
+    let mut arguments = fc.argument_list.arguments.iter();
+    let name = match arguments.next().map(|arg| arg.value()) {
+        Some(Expression::Literal(literal::Literal::String(s))) => s
+            .value
+            .and_then(|v| std::str::from_utf8(v).ok())
+            .map(str::to_string),
+        _ => None,
+    };
+    let default = arguments
+        .next()
+        .map(|arg| Box::new(classify_value(arg.value(), content, use_map)));
+    if name.is_none() && default.is_none() {
+        return ConfigValue::Dynamic;
     }
+    ConfigValue::Env { name, default }
 }
 
 /// The options of a framework config file that `LoadConfiguration` merges
@@ -553,10 +575,17 @@ fn flatten_one_of(value: ConfigValue, out: &mut Vec<ConfigValue>) {
 
 impl Backend {
     pub(crate) fn resolve_config_type(&self, dotted_key: &str) -> Option<PhpType> {
+        self.with_config_node(dotted_key, ConfigNode::to_php_type)
+    }
+
+    /// Run `f` on the node a dotted config key names, if a config file
+    /// declares it.
+    pub(crate) fn with_config_node<R>(
+        &self,
+        dotted_key: &str,
+        f: impl FnOnce(&ConfigNode) -> R,
+    ) -> Option<R> {
         let parts: Vec<&str> = dotted_key.split('.').collect();
-        if parts.is_empty() {
-            return None;
-        }
         let trees = self.cached_config_trees();
         for (prefix, tree) in trees.iter() {
             let prefix_parts: Vec<&str> = prefix.split('.').collect();
@@ -566,12 +595,7 @@ impl Backend {
             if parts[..prefix_parts.len()] != prefix_parts[..] {
                 continue;
             }
-            let remaining = &parts[prefix_parts.len()..];
-            if remaining.is_empty() {
-                return Some(tree.to_php_type());
-            }
-            let node = tree.get(remaining)?;
-            return Some(node.to_php_type());
+            return tree.get(&parts[prefix_parts.len()..]).map(f);
         }
         None
     }

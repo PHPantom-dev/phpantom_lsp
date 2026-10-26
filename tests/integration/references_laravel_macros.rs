@@ -6,7 +6,7 @@
 //! scan is needed.
 
 use crate::common::{create_test_backend, find_references, line_char_of, open_php};
-use tower_lsp::lsp_types::{Location, Position, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Position, Uri};
 
 const WIDGET: &str = "\
 <?php
@@ -44,8 +44,8 @@ use App\\Support\\BaseCollection;
 BaseCollection::macro('shine', function (): string { return 'ok'; });
 ";
 
-fn uri(name: &str) -> Url {
-    Url::parse(&format!("file:///{name}")).unwrap()
+fn uri(name: &str) -> Uri {
+    Uri::parse(&format!("file:///{name}")).unwrap()
 }
 
 fn at(text: &str, needle: &str) -> Position {
@@ -53,7 +53,7 @@ fn at(text: &str, needle: &str) -> Position {
     Position { line, character }
 }
 
-fn has_location(locations: &[Location], uri: &Url, line: u32, character: u32) -> bool {
+fn has_location(locations: &[Location], uri: &Uri, line: u32, character: u32) -> bool {
     locations.iter().any(|loc| {
         &loc.uri == uri && loc.range.start.line == line && loc.range.start.character == character
     })

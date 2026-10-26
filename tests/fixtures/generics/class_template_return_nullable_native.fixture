@@ -1,0 +1,25 @@
+// test: class template bounded with null in @return keeps a nullable native return type's null out of the binding
+// feature: hover
+// expect: Parent_
+// expect_absent: null
+// expect_absent: ?Parent_
+---
+<?php
+
+interface NodeParent {}
+
+class Parent_ implements NodeParent {}
+
+/** @template TParent of NodeParent|null = null */
+class Node
+{
+    /** @return TParent */
+    public function end(): ?NodeParent {}
+}
+
+function demo(): void
+{
+    /** @var Node<Parent_> $node */
+    $parent = $node->end();
+    $par<>ent;
+}

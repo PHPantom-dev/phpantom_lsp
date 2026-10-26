@@ -9,8 +9,8 @@ use crate::common::{
     LARAVEL_SRC_COMPOSER, create_initialized_psr4_workspace, open_php_file, position_after,
     response_labels,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const ROUTES: &str = "\
 <?php
@@ -43,7 +43,7 @@ async fn labels_after(consumer: &str, needle: &str) -> Vec<String> {
 
     let result = backend
         .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri },
                 position: position_after(consumer, needle),
             },

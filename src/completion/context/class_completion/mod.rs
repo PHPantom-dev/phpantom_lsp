@@ -14,7 +14,7 @@
 //! `namespace_completion`).
 use std::collections::{HashMap, HashSet};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::text_position::utf16_col_to_char_index;
@@ -518,13 +518,13 @@ impl Backend {
 
                     items.push(CompletionItem {
                         label,
-                        kind: Some(CompletionItemKind::MODULE),
+                        kind: Some(CompletionItemKind::Module),
                         detail: Some(format!("namespace {}", segment)),
                         insert_text: Some(insert_ns.clone()),
                         filter_text: Some(filter),
                         sort_text: Some(format!("0!_{}", short.to_lowercase())),
                         text_edit: fqn_replace_range.map(|range| {
-                            CompletionTextEdit::Edit(TextEdit {
+                            CompletionItemTextEdit::TextEdit(TextEdit {
                                 range,
                                 new_text: insert_ns,
                             })

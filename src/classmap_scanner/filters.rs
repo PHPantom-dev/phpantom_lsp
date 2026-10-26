@@ -220,7 +220,7 @@ impl LinkClaims {
 ///
 /// - **Watcher registration.** A client watches its workspace folders,
 ///   and a tree behind a link is not in one of them. Each link here
-///   becomes a [`RelativePattern`](tower_lsp::lsp_types::RelativePattern)
+///   becomes a [`RelativePattern`](tower_lsp_server::gen_lsp_types::RelativePattern)
 ///   watcher based at the link, which is what asks the client for those
 ///   events.
 /// - **Event paths.** A client that resolves the base it was handed

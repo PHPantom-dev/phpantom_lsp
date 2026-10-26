@@ -28,7 +28,7 @@ use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
 use mago_syntax::cst::class_like::property::Property;
 use mago_syntax::cst::sequence::Sequence;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -376,7 +376,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let cursor_offset = position_to_byte_offset(content, params.range.start) as u32;
 
@@ -394,9 +394,9 @@ impl Backend {
             format!("Convert {} to instance variable", info.var_name)
         };
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title,
-            kind: Some(CodeActionKind::new("refactor.extract")),
+            kind: Some(CodeActionKind::RefactorExtract),
             diagnostics: None,
             edit: None,
             command: None,
@@ -408,6 +408,7 @@ impl Backend {
                 &params.range,
                 serde_json::json!({}),
             )),
+            tags: None,
         }));
     }
 
@@ -428,7 +429,7 @@ impl Backend {
             return None;
         }
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         let mut edits: Vec<TextEdit> = Vec::new();
 
         let insert_pos = offset_to_position(content, conversion.insert_offset);

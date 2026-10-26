@@ -1,5 +1,5 @@
 use crate::common::{complete_at, create_test_backend, filter_texts};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Basic: method on same-file class ───────────────────────────────────────
 
@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::*;
 #[tokio::test]
 async fn test_named_args_this_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_this.php").unwrap();
+    let uri = Uri::parse("file:///na_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Greeter {\n",
@@ -40,7 +40,7 @@ async fn test_named_args_this_method() {
 #[tokio::test]
 async fn test_named_args_unclosed_call_in_braced_namespace_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_braced_block.php").unwrap();
+    let uri = Uri::parse("file:///na_braced_block.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Lib {\n",
@@ -74,7 +74,7 @@ async fn test_named_args_unclosed_call_in_braced_namespace_block() {
 #[tokio::test]
 async fn test_named_args_have_variable_kind() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_kind.php").unwrap();
+    let uri = Uri::parse("file:///na_kind.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -89,7 +89,7 @@ async fn test_named_args_have_variable_kind() {
     for item in &items {
         assert_eq!(
             item.kind,
-            Some(CompletionItemKind::VARIABLE),
+            Some(CompletionItemKind::Variable),
             "Named arg '{:?}' should use VARIABLE kind",
             item.label
         );
@@ -100,7 +100,7 @@ async fn test_named_args_have_variable_kind() {
 #[tokio::test]
 async fn test_named_args_insert_text_format() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_insert.php").unwrap();
+    let uri = Uri::parse("file:///na_insert.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -127,7 +127,7 @@ async fn test_named_args_insert_text_format() {
 #[tokio::test]
 async fn test_named_args_label_with_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_label.php").unwrap();
+    let uri = Uri::parse("file:///na_label.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -157,7 +157,7 @@ async fn test_named_args_label_with_type() {
 #[tokio::test]
 async fn test_named_args_label_without_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_notype.php").unwrap();
+    let uri = Uri::parse("file:///na_notype.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -182,7 +182,7 @@ async fn test_named_args_label_without_type() {
 #[tokio::test]
 async fn test_named_args_skip_already_used() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_skip.php").unwrap();
+    let uri = Uri::parse("file:///na_skip.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -221,7 +221,7 @@ async fn test_named_args_skip_already_used() {
 #[tokio::test]
 async fn test_named_args_skip_positional() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_pos.php").unwrap();
+    let uri = Uri::parse("file:///na_pos.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -257,7 +257,7 @@ async fn test_named_args_skip_positional() {
 #[tokio::test]
 async fn test_named_args_after_array_and_match_arguments() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_nested.php").unwrap();
+    let uri = Uri::parse("file:///na_nested.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -289,7 +289,7 @@ async fn test_named_args_after_array_and_match_arguments() {
 #[tokio::test]
 async fn test_named_args_prefix_filter() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_prefix.php").unwrap();
+    let uri = Uri::parse("file:///na_prefix.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -326,7 +326,7 @@ async fn test_named_args_prefix_filter() {
 #[tokio::test]
 async fn test_named_args_constructor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_ctor.php").unwrap();
+    let uri = Uri::parse("file:///na_ctor.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class UserDTO {\n",
@@ -363,7 +363,7 @@ async fn test_named_args_constructor() {
 #[tokio::test]
 async fn test_named_args_constructor_partial() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_ctor2.php").unwrap();
+    let uri = Uri::parse("file:///na_ctor2.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Point {\n",
@@ -390,7 +390,7 @@ async fn test_named_args_constructor_partial() {
 #[tokio::test]
 async fn test_named_args_static_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_static.php").unwrap();
+    let uri = Uri::parse("file:///na_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -422,7 +422,7 @@ async fn test_named_args_static_method() {
 #[tokio::test]
 async fn test_named_args_self_static_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_self.php").unwrap();
+    let uri = Uri::parse("file:///na_self.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -454,7 +454,7 @@ async fn test_named_args_self_static_method() {
 #[tokio::test]
 async fn test_named_args_parent_construct() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_parent.php").unwrap();
+    let uri = Uri::parse("file:///na_parent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -488,7 +488,7 @@ async fn test_named_args_parent_construct() {
 #[tokio::test]
 async fn test_named_args_variable_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_var.php").unwrap();
+    let uri = Uri::parse("file:///na_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -523,7 +523,7 @@ async fn test_named_args_variable_method() {
 #[tokio::test]
 async fn test_named_args_not_triggered_for_variables() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_novar.php").unwrap();
+    let uri = Uri::parse("file:///na_novar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -556,7 +556,7 @@ async fn test_named_args_not_triggered_for_variables() {
 #[tokio::test]
 async fn test_named_args_not_triggered_after_arrow() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_noarrow.php").unwrap();
+    let uri = Uri::parse("file:///na_noarrow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -589,7 +589,7 @@ async fn test_named_args_not_triggered_after_arrow() {
 #[tokio::test]
 async fn test_named_args_multiline() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_multi.php").unwrap();
+    let uri = Uri::parse("file:///na_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -630,7 +630,7 @@ async fn test_named_args_multiline() {
 #[tokio::test]
 async fn test_named_args_detail_optional() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_detail.php").unwrap();
+    let uri = Uri::parse("file:///na_detail.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -665,7 +665,7 @@ async fn test_named_args_detail_optional() {
 #[tokio::test]
 async fn test_named_args_no_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_noparams.php").unwrap();
+    let uri = Uri::parse("file:///na_noparams.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -696,7 +696,7 @@ async fn test_named_args_no_params() {
 #[tokio::test]
 async fn test_named_args_all_used() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_allused.php").unwrap();
+    let uri = Uri::parse("file:///na_allused.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -727,7 +727,7 @@ async fn test_named_args_all_used() {
 #[tokio::test]
 async fn test_named_args_inherited_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_inherit.php").unwrap();
+    let uri = Uri::parse("file:///na_inherit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -766,7 +766,7 @@ async fn test_named_args_inherited_method() {
 #[tokio::test]
 async fn test_named_args_property_chain_subject() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_prop_chain.php").unwrap();
+    let uri = Uri::parse("file:///na_prop_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Formatter {\n",
@@ -808,7 +808,7 @@ async fn test_named_args_property_chain_subject() {
 #[tokio::test]
 async fn test_named_args_class_name_static_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_class_static.php").unwrap();
+    let uri = Uri::parse("file:///na_class_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -846,7 +846,7 @@ async fn test_named_args_class_name_static_method() {
 #[tokio::test]
 async fn test_named_args_method_return_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_chain.php").unwrap();
+    let uri = Uri::parse("file:///na_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -885,7 +885,7 @@ async fn test_named_args_method_return_chain() {
 #[tokio::test]
 async fn test_named_args_symbol_map_with_prefix() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_sm_prefix.php").unwrap();
+    let uri = Uri::parse("file:///na_sm_prefix.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Greeter {\n",
@@ -923,7 +923,7 @@ async fn test_named_args_symbol_map_with_prefix() {
 #[tokio::test]
 async fn test_named_args_new_expression_chain() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_new_chain.php").unwrap();
+    let uri = Uri::parse("file:///na_new_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Renderer {\n",
@@ -962,7 +962,7 @@ async fn test_named_args_new_expression_chain() {
 #[tokio::test]
 async fn test_named_args_not_triggered_inside_array_arg() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_array_arg.php").unwrap();
+    let uri = Uri::parse("file:///na_array_arg.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function view(string $view, array $data = [], array $mergedData = []): string {\n",
@@ -995,7 +995,7 @@ async fn test_named_args_not_triggered_inside_array_arg() {
 #[tokio::test]
 async fn test_named_args_not_triggered_inside_nested_array_with_prefix() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_nested_arr.php").unwrap();
+    let uri = Uri::parse("file:///na_nested_arr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function render(string $template, array $vars = [], array $options = []): string {\n",
@@ -1032,7 +1032,7 @@ async fn test_named_args_not_triggered_inside_nested_array_with_prefix() {
 #[tokio::test]
 async fn test_named_args_mixed_with_normal_completions() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_mixed.php").unwrap();
+    let uri = Uri::parse("file:///na_mixed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function my_helper(): string { return ''; }\n",
@@ -1073,7 +1073,7 @@ async fn test_named_args_mixed_with_normal_completions() {
 #[tokio::test]
 async fn test_named_args_value_position_has_normal_completions() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_value.php").unwrap();
+    let uri = Uri::parse("file:///na_value.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function do_stuff(): string { return ''; }\n",
@@ -1104,7 +1104,7 @@ async fn test_named_args_value_position_has_normal_completions() {
 #[tokio::test]
 async fn test_named_args_no_match_still_has_normal_completions() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///na_nomatch.php").unwrap();
+    let uri = Uri::parse("file:///na_nomatch.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function array_values(array $array): array { return []; }\n",

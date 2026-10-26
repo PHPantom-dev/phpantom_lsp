@@ -128,6 +128,11 @@ impl LaravelAliasCell {
         *self.tables.write() = Some(tables);
     }
 
+    /// A stamp that moves with every [`invalidate`](Self::invalidate).
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::Acquire)
+    }
+
     /// Discard the built tables so the next reader rebuilds them.
     pub(crate) fn invalidate(&self) {
         self.generation

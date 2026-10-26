@@ -7,6 +7,7 @@
 //! subjects, inline assignments in the condition, and `@phpstan-assert`
 //! on property/array subjects.
 
+use crate::common::message_text;
 use crate::common::{
     create_test_backend, slow_diagnostic_messages, unknown_member_diagnostics_with_scope_cache,
 };
@@ -313,7 +314,8 @@ class C {{
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("value") && d.message.contains("OtherExpr")),
+            .any(|d| message_text(&d.message).contains("value")
+                && message_text(&d.message).contains("OtherExpr")),
         "Accessing `->value` on the narrowed `OtherExpr` should be \
          flagged, got: {diags:?}"
     );

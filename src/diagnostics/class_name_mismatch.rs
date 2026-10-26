@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::diagnostics::helpers::make_diagnostic;
@@ -43,7 +43,7 @@ pub(crate) fn class_name_mismatch_diagnostic(
 
     Some(make_diagnostic(
         range,
-        DiagnosticSeverity::WARNING,
+        DiagnosticSeverity::Warning,
         "class_name_mismatch",
         format!(
             "Class name `{}` does not match filename `{expected_name}`",

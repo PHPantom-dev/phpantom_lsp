@@ -58,7 +58,11 @@ impl PhpType {
                 None
             }
             TypeKind::Nullable(inner) => inner.shape_entry(key),
-            TypeKind::Union(members) => members.iter().find_map(|m| m.shape_entry(key)),
+            // `array<string, mixed>&array{at: Carbon}` holds the entry its
+            // shape member lists; the other members only bound the rest.
+            TypeKind::Union(members) | TypeKind::Intersection(members) => {
+                members.iter().find_map(|m| m.shape_entry(key))
+            }
             _ => None,
         }
     }
@@ -131,7 +135,9 @@ impl PhpType {
         match self.kind() {
             TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => Some(entries),
             TypeKind::Nullable(inner) => inner.known_shape_entries(),
-            TypeKind::Union(members) => members.iter().find_map(|m| m.known_shape_entries()),
+            TypeKind::Union(members) | TypeKind::Intersection(members) => {
+                members.iter().find_map(|m| m.known_shape_entries())
+            }
             _ => None,
         }
     }

@@ -15,7 +15,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::statement::Statement;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;

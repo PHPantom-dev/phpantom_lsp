@@ -39,7 +39,7 @@ pub(crate) fn is_morph_types_query_method(member_name: &str) -> bool {
     )
 }
 
-/// Push a [`crate::symbol_map::LaravelStringKind::MorphAlias`] span for every
+/// Push a [`crate::symbol_map::StringKeyKind::MorphAlias`] span for every
 /// alias key of a `Relation::morphMap(['post' => Post::class, …])` argument.
 pub(in crate::symbol_map::extraction) fn try_emit_morph_map_key_spans(
     argument_list: &ArgumentList<'_>,
@@ -90,8 +90,8 @@ fn push_morph_alias_span(expr: &Expression<'_>, content: &str, spans: &mut Vec<S
     spans.push(SymbolSpan {
         start,
         end,
-        kind: SymbolKind::LaravelStringKey {
-            kind: crate::symbol_map::LaravelStringKind::MorphAlias,
+        kind: SymbolKind::StringKey {
+            kind: crate::symbol_map::StringKeyKind::MorphAlias,
             key: alias.to_string(),
             is_write: false,
             is_optional: false,

@@ -321,8 +321,12 @@ fn strip_array_literal_from_shape(ty: &PhpType, excluded: &PhpType) -> Option<Op
 }
 
 /// Whether `ty` holds exactly one value: a scalar literal, `null`, `true`,
-/// `false`, or a sealed shape whose every entry is one of those.
+/// `false`, an enum case, or a sealed shape whose every entry is one of
+/// those.
 pub(super) fn is_single_value(ty: &PhpType) -> bool {
+    if ty.as_enum_case().is_some() {
+        return true;
+    }
     match ty.kind() {
         TypeKind::Literal(_) => true,
         TypeKind::Named(name) => ["null", "true", "false"]

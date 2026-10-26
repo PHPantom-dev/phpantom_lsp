@@ -2,7 +2,7 @@
 //! auto-closed empty docblock (`onTypeFormatting` path), plus
 //! extraction of the raw declaration text that follows either.
 
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp_server::gen_lsp_types::{Position, Range};
 
 use crate::completion::source::comment_position::position_to_byte_offset;
 use crate::text_position::{byte_offset_to_utf16_col, utf16_col_to_byte_offset};

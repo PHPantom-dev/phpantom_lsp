@@ -8,7 +8,7 @@
 use crate::common::{
     apply_workspace_edit, create_test_backend, find_action_titled, get_code_actions_at,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── Basic promotion ─────────────────────────────────────────────────────────
 
@@ -529,7 +529,7 @@ class Foo {
         .expect("should offer promote action");
     assert_eq!(
         action.kind,
-        Some(CodeActionKind::new("refactor.rewrite")),
+        Some(CodeActionKind::RefactorRewrite),
         "should be a refactor.rewrite action"
     );
 }

@@ -11,18 +11,18 @@
 use crate::common::{
     assert_location, create_psr4_workspace, create_test_backend, goto_definition_at, open_php,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
 /// Assert that a definition response points to a file path ending with the given suffix.
 fn assert_location_path_ends_with(
-    response: GotoDefinitionResponse,
+    response: DefinitionResponse,
     path_suffix: &str,
     expected_line: u32,
 ) {
     match response {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with(path_suffix),
@@ -49,7 +49,7 @@ fn assert_location_path_ends_with(
 #[tokio::test]
 async fn test_goto_definition_parameter_type_hint_same_file() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "class Request {\n",                            // 1
@@ -72,7 +72,7 @@ async fn test_goto_definition_parameter_type_hint_same_file() {
 #[tokio::test]
 async fn test_goto_definition_nullable_parameter_type_hint() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // 0
         "class Request {\n",                             // 1
@@ -98,7 +98,7 @@ async fn test_goto_definition_nullable_parameter_type_hint() {
 #[tokio::test]
 async fn test_goto_definition_union_parameter_first_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                     // 0
         "class Reader { public function read(): void {} }\n",          // 1
@@ -123,7 +123,7 @@ async fn test_goto_definition_union_parameter_first_type() {
 #[tokio::test]
 async fn test_goto_definition_union_parameter_second_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                     // 0
         "class Reader { public function read(): void {} }\n",          // 1
@@ -149,7 +149,7 @@ async fn test_goto_definition_union_parameter_second_type() {
 #[tokio::test]
 async fn test_goto_definition_type_hint_skips_class_in_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                          // 0
         "class User { public function getEmail(): string {} }\n",           // 1
@@ -178,7 +178,7 @@ async fn test_goto_definition_type_hint_skips_class_in_comment() {
 #[tokio::test]
 async fn test_goto_definition_intersection_parameter_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                          // 0
         "interface Countable { public function count(): int; }\n",          // 1
@@ -215,7 +215,7 @@ async fn test_goto_definition_intersection_parameter_type() {
 #[tokio::test]
 async fn test_goto_definition_return_type_hint_same_file() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class Response { public function send(): void {} }\n", // 1
@@ -237,7 +237,7 @@ async fn test_goto_definition_return_type_hint_same_file() {
 #[tokio::test]
 async fn test_goto_definition_nullable_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class Response { public function send(): void {} }\n", // 1
@@ -259,7 +259,7 @@ async fn test_goto_definition_nullable_return_type() {
 #[tokio::test]
 async fn test_goto_definition_union_return_type_hint() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                   // 0
         "class Response { public function send(): void {} }\n",      // 1
@@ -297,7 +297,7 @@ async fn test_goto_definition_union_return_type_hint() {
 #[tokio::test]
 async fn test_goto_definition_property_type_hint() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "class UserRepository {\n",                     // 1
@@ -319,7 +319,7 @@ async fn test_goto_definition_property_type_hint() {
 #[tokio::test]
 async fn test_goto_definition_nullable_property_type_hint() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "class Logger {\n",                     // 1
@@ -344,7 +344,7 @@ async fn test_goto_definition_nullable_property_type_hint() {
 #[tokio::test]
 async fn test_goto_definition_union_property_type_hint() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                   // 0
         "class HtmlString {\n",                      // 1
@@ -373,7 +373,7 @@ async fn test_goto_definition_union_property_type_hint() {
 #[tokio::test]
 async fn test_goto_definition_promoted_parameter_type_hint() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                            // 0
         "class Config { public function get(): mixed {} }\n", // 1
@@ -402,7 +402,7 @@ async fn test_goto_definition_promoted_parameter_type_hint() {
 #[tokio::test]
 async fn test_goto_definition_standalone_function_parameter_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "class User {\n",                       // 1
@@ -426,7 +426,7 @@ async fn test_goto_definition_standalone_function_parameter_type() {
 #[tokio::test]
 async fn test_goto_definition_standalone_function_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                         // 0
         "class User {\n",                  // 1
@@ -475,7 +475,7 @@ async fn test_goto_definition_type_hint_cross_file_psr4() {
         )],
     );
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",                                        // 0
         "namespace App\\Http;\n",                         // 1
@@ -524,7 +524,7 @@ async fn test_goto_definition_return_type_hint_cross_file_psr4() {
         )],
     );
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "namespace App\\Http;\n",                  // 1
@@ -571,7 +571,7 @@ async fn test_goto_definition_property_type_hint_cross_file_psr4() {
         )],
     );
 
-    let uri = Url::parse("file:///service.php").unwrap();
+    let uri = Uri::parse("file:///service.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "namespace App\\Services;\n",               // 1
@@ -601,7 +601,7 @@ async fn test_goto_definition_property_type_hint_cross_file_psr4() {
 #[tokio::test]
 async fn test_goto_definition_catch_exception_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                        // 0
         "class CustomException extends \\Exception {}\n", // 1
@@ -628,7 +628,7 @@ async fn test_goto_definition_catch_exception_type() {
 #[tokio::test]
 async fn test_goto_definition_multi_catch_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "class NotFoundException extends \\Exception {}\n",               // 1
@@ -668,7 +668,7 @@ async fn test_goto_definition_multi_catch_type() {
 #[tokio::test]
 async fn test_goto_definition_extends_clause() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                               // 0
         "class BaseModel {\n",                   // 1
@@ -692,7 +692,7 @@ async fn test_goto_definition_extends_clause() {
 #[tokio::test]
 async fn test_goto_definition_implements_clause() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "interface Serializable {\n",                               // 1
@@ -721,7 +721,7 @@ async fn test_goto_definition_implements_clause() {
 #[tokio::test]
 async fn test_goto_definition_new_expression() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "class User {\n",                      // 1
@@ -749,7 +749,7 @@ async fn test_goto_definition_new_expression() {
 #[tokio::test]
 async fn test_goto_definition_docblock_param_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class Request {\n",                        // 1
@@ -778,7 +778,7 @@ async fn test_goto_definition_docblock_param_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                        // 0
         "class User {\n",                 // 1
@@ -807,7 +807,7 @@ async fn test_goto_definition_docblock_return_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_generic_inner_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "class User { public string $name; }\n",             // 1
@@ -844,7 +844,7 @@ async fn test_goto_definition_docblock_generic_inner_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_generic_wildcard_after_multibyte() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "class Café {}\n",                     // 1
@@ -874,7 +874,7 @@ async fn test_goto_definition_docblock_generic_wildcard_after_multibyte() {
 #[tokio::test]
 async fn test_goto_definition_docblock_throws_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class NotFoundException extends \\Exception {}\n", // 1
@@ -901,7 +901,7 @@ async fn test_goto_definition_docblock_throws_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_var_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "class Logger {\n",                     // 1
@@ -927,7 +927,7 @@ async fn test_goto_definition_docblock_var_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_union_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "class User { public string $name; }\n",   // 1
@@ -983,7 +983,7 @@ async fn test_goto_definition_docblock_type_cross_file_psr4() {
         )],
     );
 
-    let uri = Url::parse("file:///service.php").unwrap();
+    let uri = Uri::parse("file:///service.php").unwrap();
     let text = concat!(
         "<?php\n",                        // 0
         "namespace App\\Services;\n",     // 1
@@ -1013,7 +1013,7 @@ async fn test_goto_definition_docblock_type_cross_file_psr4() {
 #[tokio::test]
 async fn test_goto_definition_docblock_extends_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "class Collection {}\n",                       // 1
@@ -1051,7 +1051,7 @@ async fn test_goto_definition_docblock_extends_type() {
 #[tokio::test]
 async fn test_goto_definition_inline_var_annotation_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "class User {\n",                      // 1
@@ -1084,7 +1084,7 @@ async fn test_goto_definition_inline_var_annotation_type() {
 #[tokio::test]
 async fn test_goto_definition_scalar_type_returns_none() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "class App {\n",                                     // 1
@@ -1106,7 +1106,7 @@ async fn test_goto_definition_scalar_type_returns_none() {
 #[tokio::test]
 async fn test_goto_definition_void_return_type_returns_none() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "class App {\n",                       // 1
@@ -1132,7 +1132,7 @@ async fn test_goto_definition_void_return_type_returns_none() {
 #[tokio::test]
 async fn test_goto_definition_use_trait_statement() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "trait HasTimestamps {\n",                // 1
@@ -1161,7 +1161,7 @@ async fn test_goto_definition_use_trait_statement() {
 #[tokio::test]
 async fn test_goto_definition_dnf_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                              // 0
         "interface Countable { public function count(): int; }\n",              // 1
@@ -1198,7 +1198,7 @@ async fn test_goto_definition_dnf_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_mixin_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                // 0
         "class QueryBuilder {\n",                 // 1
@@ -1222,7 +1222,7 @@ async fn test_goto_definition_docblock_mixin_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_property_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                         // 0
         "class Address {\n",               // 1
@@ -1253,7 +1253,7 @@ async fn test_goto_definition_docblock_property_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_nullable_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                               // 0
         "class User { public string $name; }\n", // 1
@@ -1277,7 +1277,7 @@ async fn test_goto_definition_docblock_nullable_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_array_generic_value_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                               // 0
         "class User { public string $name; }\n", // 1
@@ -1310,7 +1310,7 @@ async fn test_goto_definition_docblock_array_generic_value_type() {
 #[tokio::test]
 async fn test_goto_definition_second_implements_interface() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "interface Loggable { public function log(): void; }\n",    // 1
@@ -1347,7 +1347,7 @@ async fn test_goto_definition_second_implements_interface() {
 #[tokio::test]
 async fn test_goto_definition_closure_parameter_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "class User { public string $name; }\n",   // 1
@@ -1373,7 +1373,7 @@ async fn test_goto_definition_closure_parameter_type() {
 #[tokio::test]
 async fn test_goto_definition_closure_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                               // 0
         "class User { public string $name; }\n", // 1
@@ -1404,7 +1404,7 @@ async fn test_goto_definition_closure_return_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_callable_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                         // 0
         "class Pencil {\n",                                // 1
@@ -1431,7 +1431,7 @@ async fn test_goto_definition_docblock_callable_return_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_callable_param_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class Request {\n",                                      // 1
@@ -1468,7 +1468,7 @@ async fn test_goto_definition_docblock_callable_param_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_callable_base_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                        // 0
         "class Result {\n",                               // 1
@@ -1494,7 +1494,7 @@ async fn test_goto_definition_docblock_callable_base_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_callable_multiple_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "class Config {}\n",                                        // 1
@@ -1530,7 +1530,7 @@ async fn test_goto_definition_docblock_callable_multiple_params() {
 #[tokio::test]
 async fn test_goto_definition_docblock_return_callable_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                   // 0
         "class User {}\n",                           // 1
@@ -1556,7 +1556,7 @@ async fn test_goto_definition_docblock_return_callable_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_callable_no_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // 0
         "class Event {}\n",                              // 1
@@ -1583,7 +1583,7 @@ async fn test_goto_definition_docblock_callable_no_return_type() {
 #[tokio::test]
 async fn test_goto_definition_docblock_template_shadows_same_named_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///template_shadows_class.php").unwrap();
+    let uri = Uri::parse("file:///template_shadows_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class T {}\n",

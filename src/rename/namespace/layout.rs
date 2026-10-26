@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
@@ -89,7 +89,7 @@ impl Backend {
         &self,
         old_prefix: &str,
         new_prefix: &str,
-    ) -> Option<Vec<(Url, Url)>> {
+    ) -> Option<Vec<(Uri, Uri)>> {
         let psr4 = self.workspace.psr4_mappings.read();
         let workspace_root = self.workspace.workspace_root.read().clone()?;
 
@@ -103,7 +103,7 @@ impl Backend {
         // place.
         let new_dir = composer::psr4_directory_for_namespace(&psr4, &workspace_root, new_prefix)?;
 
-        let mut ops: Vec<(Url, Url)> = Vec::new();
+        let mut ops: Vec<(Uri, Uri)> = Vec::new();
 
         for (_, old_dir) in namespace_source_dirs(&psr4, &workspace_root, old_prefix, &new_dir) {
             if new_dir.exists() {
@@ -201,7 +201,7 @@ fn namespace_source_dirs<'a>(
 /// source directory on top of it would clobber or fail depending on the
 /// editor.  A destination that is already occupied is left out entirely
 /// — the file stays where it is rather than overwriting what is there.
-fn collect_merge_move_ops(dir: &Path, old_root: &Path, new_root: &Path, ops: &mut Vec<(Url, Url)>) {
+fn collect_merge_move_ops(dir: &Path, old_root: &Path, new_root: &Path, ops: &mut Vec<(Uri, Uri)>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };

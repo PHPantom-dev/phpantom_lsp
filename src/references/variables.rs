@@ -8,7 +8,7 @@ use super::*;
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, VarDefKind};
 use crate::text_position::LineIndex;

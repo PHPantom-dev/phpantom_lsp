@@ -1,6 +1,6 @@
 use crate::common::{completion_response, create_test_backend, open_php};
 use phpantom_lsp::types::PhpVersion;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Interface Completion Tests ─────────────────────────────────────────────
 
@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::*;
 async fn test_completion_interface_type_hint_resolves_methods() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///iface.php").unwrap();
+    let uri = Uri::parse("file:///iface.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Loggable {\n",
@@ -32,7 +32,7 @@ async fn test_completion_interface_type_hint_resolves_methods() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 names.iter().any(|n| n.starts_with("log(")),
@@ -53,7 +53,7 @@ async fn test_completion_interface_type_hint_resolves_methods() {
 async fn test_completion_interface_constant_via_double_colon() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///iface_const.php").unwrap();
+    let uri = Uri::parse("file:///iface_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface HasStatus {\n",
@@ -78,7 +78,7 @@ async fn test_completion_interface_constant_via_double_colon() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 names.contains(&"STATUS_ACTIVE"),
@@ -101,7 +101,7 @@ async fn test_completion_interface_constant_via_double_colon() {
 async fn test_completion_returns_none_when_nothing_matches() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = "<?php\n$x = 1;\n".to_string();
 
     open_php(&backend, &uri, &text).await;
@@ -117,7 +117,7 @@ async fn test_completion_returns_none_when_nothing_matches() {
 async fn test_completion_suggests_php_keywords() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords.php").unwrap();
+    let uri = Uri::parse("file:///keywords.php").unwrap();
     let text = concat!("<?php\n", "function demo(): void {\n", "    ret\n", "}\n",).to_string();
 
     open_php(&backend, &uri, &text).await;
@@ -130,13 +130,13 @@ async fn test_completion_suggests_php_keywords() {
     );
 
     let items = match result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert!(
         items
             .iter()
-            .any(|i| i.label == "return" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "return" && i.kind == Some(CompletionItemKind::Keyword)),
         "Expected `return` keyword completion, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -146,21 +146,21 @@ async fn test_completion_suggests_php_keywords() {
 async fn test_completion_does_not_suggest_return_at_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords_top_level.php").unwrap();
+    let uri = Uri::parse("file:///keywords_top_level.php").unwrap();
     let text = concat!("<?php\n", "ret\n").to_string();
 
     open_php(&backend, &uri, &text).await;
 
     let result = completion_response(&backend, &uri, 1, 3, None).await;
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         !items
             .iter()
-            .any(|i| i.label == "return" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "return" && i.kind == Some(CompletionItemKind::Keyword)),
         "Top-level completion should not suggest `return`, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -170,7 +170,7 @@ async fn test_completion_does_not_suggest_return_at_top_level() {
 async fn test_completion_suggests_break_inside_loop_only() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords_break.php").unwrap();
+    let uri = Uri::parse("file:///keywords_break.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function loopDemo(bool $cond): void {\n",
@@ -188,13 +188,13 @@ async fn test_completion_suggests_break_inside_loop_only() {
 
     let loop_result = completion_response(&backend, &uri, 3, 10, None).await;
     let loop_items = match loop_result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert!(
         loop_items
             .iter()
-            .any(|i| i.label == "break" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "break" && i.kind == Some(CompletionItemKind::Keyword)),
         "Inside loop completion should suggest `break`, got: {:?}",
         loop_items
             .iter()
@@ -204,14 +204,14 @@ async fn test_completion_suggests_break_inside_loop_only() {
 
     let non_loop_result = completion_response(&backend, &uri, 7, 6, None).await;
     let non_loop_items = match non_loop_result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         !non_loop_items
             .iter()
-            .any(|i| i.label == "break" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "break" && i.kind == Some(CompletionItemKind::Keyword)),
         "Outside loop completion should not suggest `break`, got: {:?}",
         non_loop_items
             .iter()
@@ -224,7 +224,7 @@ async fn test_completion_suggests_break_inside_loop_only() {
 async fn test_completion_suggests_continue_in_loop_not_switch() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords_continue.php").unwrap();
+    let uri = Uri::parse("file:///keywords_continue.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function loopDemo(): void {\n",
@@ -246,14 +246,14 @@ async fn test_completion_suggests_continue_in_loop_not_switch() {
     // `continue` inside a foreach loop — should be suggested.
     let loop_result = completion_response(&backend, &uri, 3, 11, None).await;
     let loop_items = match loop_result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         loop_items
             .iter()
-            .any(|i| i.label == "continue" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "continue" && i.kind == Some(CompletionItemKind::Keyword)),
         "`continue` should be suggested inside a loop, got: {:?}",
         loop_items
             .iter()
@@ -264,14 +264,14 @@ async fn test_completion_suggests_continue_in_loop_not_switch() {
     // `continue` inside a switch (but not a loop) — should NOT be suggested.
     let switch_result = completion_response(&backend, &uri, 9, 15, None).await;
     let switch_items = match switch_result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         !switch_items
             .iter()
-            .any(|i| i.label == "continue" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "continue" && i.kind == Some(CompletionItemKind::Keyword)),
         "`continue` should NOT be suggested inside a switch (without a loop), got: {:?}",
         switch_items
             .iter()
@@ -284,7 +284,7 @@ async fn test_completion_suggests_continue_in_loop_not_switch() {
 async fn test_completion_suggests_case_default_inside_switch() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords_switch.php").unwrap();
+    let uri = Uri::parse("file:///keywords_switch.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function switchDemo(int $x): void {\n",
@@ -305,14 +305,14 @@ async fn test_completion_suggests_case_default_inside_switch() {
     // `case` inside a switch — should be suggested.
     let switch_result = completion_response(&backend, &uri, 5, 11, None).await;
     let switch_items = match switch_result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         switch_items
             .iter()
-            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::Keyword)),
         "`case` should be suggested inside a switch, got: {:?}",
         switch_items
             .iter()
@@ -323,14 +323,14 @@ async fn test_completion_suggests_case_default_inside_switch() {
     // `case` outside a switch — should NOT be suggested.
     let non_switch_result = completion_response(&backend, &uri, 9, 7, None).await;
     let non_switch_items = match non_switch_result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         !non_switch_items
             .iter()
-            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::Keyword)),
         "`case` should NOT be suggested outside a switch, got: {:?}",
         non_switch_items
             .iter()
@@ -343,21 +343,21 @@ async fn test_completion_suggests_case_default_inside_switch() {
 async fn test_completion_interface_body_keyword_restrictions() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords_interface_body.php").unwrap();
+    let uri = Uri::parse("file:///keywords_interface_body.php").unwrap();
     let text = concat!("<?php\n", "interface Loggable {\n", "    pu\n", "}\n",).to_string();
 
     open_php(&backend, &uri, &text).await;
 
     let result = completion_response(&backend, &uri, 2, 6, None).await;
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
 
     let keyword_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Keyword))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -380,7 +380,7 @@ async fn test_completion_interface_body_keyword_restrictions() {
 async fn test_completion_suggests_namespace_only_at_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords_namespace.php").unwrap();
+    let uri = Uri::parse("file:///keywords_namespace.php").unwrap();
     let text = concat!(
         "<?php\n",
         "nam\n",
@@ -394,13 +394,13 @@ async fn test_completion_suggests_namespace_only_at_top_level() {
 
     let top_result = completion_response(&backend, &uri, 1, 3, None).await;
     let top_items = match top_result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert!(
         top_items
             .iter()
-            .any(|i| i.label == "namespace" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "namespace" && i.kind == Some(CompletionItemKind::Keyword)),
         "Top-level completion should suggest `namespace`, got: {:?}",
         top_items
             .iter()
@@ -410,14 +410,14 @@ async fn test_completion_suggests_namespace_only_at_top_level() {
 
     let fn_result = completion_response(&backend, &uri, 3, 7, None).await;
     let fn_items = match fn_result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         !fn_items
             .iter()
-            .any(|i| i.label == "namespace" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "namespace" && i.kind == Some(CompletionItemKind::Keyword)),
         "Function-scope completion should not suggest `namespace`, got: {:?}",
         fn_items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -427,7 +427,7 @@ async fn test_completion_suggests_namespace_only_at_top_level() {
 async fn test_completion_suggests_extends_implements_only_in_declaration_header() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords_decl_header.php").unwrap();
+    let uri = Uri::parse("file:///keywords_decl_header.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Child ex\n",
@@ -448,13 +448,13 @@ async fn test_completion_suggests_extends_implements_only_in_declaration_header(
         .await
         .unwrap()
     {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert!(
         extends_items
             .iter()
-            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::Keyword)),
         "Class declaration header should suggest `extends`, got: {:?}",
         extends_items
             .iter()
@@ -467,13 +467,13 @@ async fn test_completion_suggests_extends_implements_only_in_declaration_header(
         .await
         .unwrap()
     {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert!(
         impl_items
             .iter()
-            .any(|i| i.label == "implements" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "implements" && i.kind == Some(CompletionItemKind::Keyword)),
         "Class declaration header should suggest `implements`, got: {:?}",
         impl_items
             .iter()
@@ -484,14 +484,14 @@ async fn test_completion_suggests_extends_implements_only_in_declaration_header(
     // `interface Contract im|` should NOT suggest implements.
     let iface_result = completion_response(&backend, &uri, 3, 21, None).await;
     let iface_items = match iface_result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         !iface_items
             .iter()
-            .any(|i| i.label == "implements" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "implements" && i.kind == Some(CompletionItemKind::Keyword)),
         "Interface declaration header should not suggest `implements`, got: {:?}",
         iface_items
             .iter()
@@ -502,14 +502,14 @@ async fn test_completion_suggests_extends_implements_only_in_declaration_header(
     // `function demo() { ex| }` should NOT suggest extends.
     let fn_result = completion_response(&backend, &uri, 5, 6, None).await;
     let fn_items = match fn_result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         !fn_items
             .iter()
-            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::Keyword)),
         "Function scope should not suggest `extends`, got: {:?}",
         fn_items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -517,14 +517,14 @@ async fn test_completion_suggests_extends_implements_only_in_declaration_header(
     // `enum Status ex|` should NOT suggest extends — PHP enums cannot extend.
     let enum_result = completion_response(&backend, &uri, 7, 14, None).await;
     let enum_items = match enum_result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         !enum_items
             .iter()
-            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::Keyword)),
         "Enum declaration header should not suggest `extends`, got: {:?}",
         enum_items
             .iter()
@@ -537,13 +537,13 @@ async fn test_completion_suggests_extends_implements_only_in_declaration_header(
         .await
         .unwrap()
     {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert!(
         iface_extends_items
             .iter()
-            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "extends" && i.kind == Some(CompletionItemKind::Keyword)),
         "Interface declaration header should suggest `extends`, got: {:?}",
         iface_extends_items
             .iter()
@@ -556,7 +556,7 @@ async fn test_completion_suggests_extends_implements_only_in_declaration_header(
 async fn test_completion_class_body_keywords_are_contextual() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords_class_body.php").unwrap();
+    let uri = Uri::parse("file:///keywords_class_body.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -577,13 +577,13 @@ async fn test_completion_class_body_keywords_are_contextual() {
         .await
         .unwrap()
     {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert!(
         vis_items
             .iter()
-            .any(|i| i.label == "public" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "public" && i.kind == Some(CompletionItemKind::Keyword)),
         "Class body should suggest visibility keyword `public`, got: {:?}",
         vis_items
             .iter()
@@ -593,28 +593,28 @@ async fn test_completion_class_body_keywords_are_contextual() {
 
     // `class User { if| }` => should NOT suggest `if`.
     let if_items = match completion_response(&backend, &uri, 3, 6, None).await {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         !if_items
             .iter()
-            .any(|i| i.label == "if" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "if" && i.kind == Some(CompletionItemKind::Keyword)),
         "Class body should not suggest statement keyword `if`, got: {:?}",
         if_items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
 
     // `class User { ca| }` => should NOT suggest enum `case`.
     let class_case_items = match completion_response(&backend, &uri, 4, 6, None).await {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         !class_case_items
             .iter()
-            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::Keyword)),
         "Class body should not suggest enum keyword `case`, got: {:?}",
         class_case_items
             .iter()
@@ -627,13 +627,13 @@ async fn test_completion_class_body_keywords_are_contextual() {
         .await
         .unwrap()
     {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert!(
         enum_case_items
             .iter()
-            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "case" && i.kind == Some(CompletionItemKind::Keyword)),
         "Enum body should suggest `case`, got: {:?}",
         enum_case_items
             .iter()
@@ -646,7 +646,7 @@ async fn test_completion_class_body_keywords_are_contextual() {
 async fn test_completion_after_visibility_suggests_member_keywords() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords_after_visibility.php").unwrap();
+    let uri = Uri::parse("file:///keywords_after_visibility.php").unwrap();
     let text = concat!("<?php\n", "class User {\n", "    public \n", "}\n",).to_string();
 
     open_php(&backend, &uri, &text).await;
@@ -654,21 +654,21 @@ async fn test_completion_after_visibility_suggests_member_keywords() {
     // Cursor right after `public ` on line 2.
     let result = completion_response(&backend, &uri, 2, 11, None).await;
     let items = match result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
 
     assert!(
         items
             .iter()
-            .any(|i| i.label == "function" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "function" && i.kind == Some(CompletionItemKind::Keyword)),
         "After visibility, completion should suggest `function`, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
     assert!(
         items
             .iter()
-            .any(|i| i.label == "const" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "const" && i.kind == Some(CompletionItemKind::Keyword)),
         "After visibility, completion should suggest `const`, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -679,7 +679,7 @@ async fn test_completion_after_function_keyword_does_not_suggest_classes() {
     // Issue #249 / #126: typing a method name must not offer class names.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_name_no_classes.php").unwrap();
+    let uri = Uri::parse("file:///method_name_no_classes.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -698,14 +698,14 @@ async fn test_completion_after_function_keyword_does_not_suggest_classes() {
     let result = completion_response(&backend, &uri, 6, 27, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
 
     let class_labels: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
+        .filter(|i| i.kind == Some(CompletionItemKind::Class))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -725,7 +725,7 @@ async fn test_completion_after_function_keyword_does_not_suggest_classes() {
 async fn test_completion_suggests_parent_method_overrides() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///override_methods.php").unwrap();
+    let uri = Uri::parse("file:///override_methods.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Article {\n",
@@ -745,8 +745,8 @@ async fn test_completion_suggests_parent_method_overrides() {
     let result = completion_response(&backend, &uri, 8, 26, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
 
@@ -778,7 +778,7 @@ async fn test_completion_suggests_parent_method_overrides() {
     assert!(
         !items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::CLASS)),
+            .any(|i| i.kind == Some(CompletionItemKind::Class)),
         "must not suggest classes alongside overrides, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -792,8 +792,8 @@ async fn test_completion_suggests_parent_method_overrides() {
         .as_deref()
         .or_else(|| {
             dated.text_edit.as_ref().map(|te| match te {
-                CompletionTextEdit::Edit(e) => e.new_text.as_str(),
-                CompletionTextEdit::InsertAndReplace(e) => e.new_text.as_str(),
+                CompletionItemTextEdit::TextEdit(e) => e.new_text.as_str(),
+                CompletionItemTextEdit::InsertReplaceEdit(e) => e.new_text.as_str(),
             })
         })
         .unwrap_or("");
@@ -830,7 +830,7 @@ async fn test_completion_suggests_parent_method_overrides() {
 async fn test_completion_override_skips_already_implemented() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///override_skip.php").unwrap();
+    let uri = Uri::parse("file:///override_skip.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -849,8 +849,8 @@ async fn test_completion_override_skips_already_implemented() {
     let result = completion_response(&backend, &uri, 7, 26, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let filter_names: Vec<&str> = items
@@ -873,7 +873,7 @@ async fn test_completion_override_includes_override_attribute_on_php83() {
     // Default test backend uses PhpVersion::default() = 8.5, so #[Override] applies.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///override_attr.php").unwrap();
+    let uri = Uri::parse("file:///override_attr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -890,8 +890,8 @@ async fn test_completion_override_includes_override_attribute_on_php83() {
     let result = completion_response(&backend, &uri, 5, 23, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let item = items
@@ -914,7 +914,7 @@ async fn test_completion_override_includes_override_attribute_on_php83() {
 async fn test_completion_suggests_parent_property_overrides() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///override_props.php").unwrap();
+    let uri = Uri::parse("file:///override_props.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -934,8 +934,8 @@ async fn test_completion_suggests_parent_property_overrides() {
     let result = completion_response(&backend, &uri, 7, 15, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let names: Vec<&str> = items
@@ -979,7 +979,7 @@ async fn test_completion_property_override_skips_override_attribute_before_php85
     let backend = create_test_backend();
     backend.set_php_version(PhpVersion::new(8, 4));
 
-    let uri = Url::parse("file:///override_props_php84.php").unwrap();
+    let uri = Uri::parse("file:///override_props_php84.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -996,8 +996,8 @@ async fn test_completion_property_override_skips_override_attribute_before_php85
     let result = completion_response(&backend, &uri, 5, 15, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let title = items
@@ -1014,7 +1014,7 @@ async fn test_completion_property_override_skips_override_attribute_before_php85
 async fn test_completion_suggests_parent_property_overrides_after_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///override_typed_props.php").unwrap();
+    let uri = Uri::parse("file:///override_typed_props.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -1031,8 +1031,8 @@ async fn test_completion_suggests_parent_property_overrides_after_type() {
     let result = completion_response(&backend, &uri, 5, 24, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let attributes = items
@@ -1050,7 +1050,7 @@ async fn test_completion_suggests_parent_property_overrides_after_type() {
 async fn test_completion_suggests_parent_constant_overrides() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///override_consts.php").unwrap();
+    let uri = Uri::parse("file:///override_consts.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -1071,8 +1071,8 @@ async fn test_completion_suggests_parent_constant_overrides() {
     let result = completion_response(&backend, &uri, 7, 24, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let names: Vec<&str> = items
@@ -1113,7 +1113,7 @@ async fn test_completion_constant_override_includes_override_attribute_on_php86(
     let backend = create_test_backend();
     backend.set_php_version(PhpVersion::new(8, 6));
 
-    let uri = Url::parse("file:///override_consts_php86.php").unwrap();
+    let uri = Uri::parse("file:///override_consts_php86.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -1131,8 +1131,8 @@ async fn test_completion_constant_override_includes_override_attribute_on_php86(
     let result = completion_response(&backend, &uri, 5, 24, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let ok = items
@@ -1151,7 +1151,7 @@ async fn test_completion_constant_override_includes_override_attribute_on_php86(
 async fn test_completion_suggests_parent_constant_overrides_after_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///override_typed_consts.php").unwrap();
+    let uri = Uri::parse("file:///override_typed_consts.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -1169,8 +1169,8 @@ async fn test_completion_suggests_parent_constant_overrides_after_type() {
     let result = completion_response(&backend, &uri, 5, 31, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let ok = items
@@ -1188,7 +1188,7 @@ async fn test_completion_suggests_parent_constant_overrides_after_type() {
 async fn test_completion_suggests_backed_enum_types_after_enum_colon() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///keywords_enum_backed_type.php").unwrap();
+    let uri = Uri::parse("file:///keywords_enum_backed_type.php").unwrap();
     let text = concat!("<?php\n", "enum Role: \n", "enum Status: st\n",).to_string();
 
     open_php(&backend, &uri, &text).await;
@@ -1198,13 +1198,13 @@ async fn test_completion_suggests_backed_enum_types_after_enum_colon() {
         .await
         .unwrap()
     {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert!(
         empty_prefix_items
             .iter()
-            .any(|i| i.label == "string" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "string" && i.kind == Some(CompletionItemKind::Keyword)),
         "Backed enum type completion should suggest `string`, got: {:?}",
         empty_prefix_items
             .iter()
@@ -1214,7 +1214,7 @@ async fn test_completion_suggests_backed_enum_types_after_enum_colon() {
     assert!(
         empty_prefix_items
             .iter()
-            .any(|i| i.label == "int" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "int" && i.kind == Some(CompletionItemKind::Keyword)),
         "Backed enum type completion should suggest `int`, got: {:?}",
         empty_prefix_items
             .iter()
@@ -1227,13 +1227,13 @@ async fn test_completion_suggests_backed_enum_types_after_enum_colon() {
         .await
         .unwrap()
     {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
     assert!(
         st_prefix_items
             .iter()
-            .any(|i| i.label == "string" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "string" && i.kind == Some(CompletionItemKind::Keyword)),
         "Backed enum type prefix `st` should suggest `string`, got: {:?}",
         st_prefix_items
             .iter()
@@ -1243,7 +1243,7 @@ async fn test_completion_suggests_backed_enum_types_after_enum_colon() {
     assert!(
         !st_prefix_items
             .iter()
-            .any(|i| i.label == "int" && i.kind == Some(CompletionItemKind::KEYWORD)),
+            .any(|i| i.label == "int" && i.kind == Some(CompletionItemKind::Keyword)),
         "Backed enum type prefix `st` should not suggest `int`, got: {:?}",
         st_prefix_items
             .iter()
@@ -1256,7 +1256,7 @@ async fn test_completion_suggests_backed_enum_types_after_enum_colon() {
 async fn test_completion_inside_class_returns_methods() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///user.php").unwrap();
+    let uri = Uri::parse("file:///user.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -1276,11 +1276,11 @@ async fn test_completion_inside_class_returns_methods() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             // Should have 3 non-static methods (login, logout, test)
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
             assert_eq!(method_items.len(), 3, "Should return 3 method completions");
 
@@ -1313,12 +1313,12 @@ async fn test_completion_inside_class_returns_methods() {
                 );
                 assert_eq!(
                     item.insert_text_format,
-                    Some(InsertTextFormat::SNIPPET),
+                    Some(InsertTextFormat::Snippet),
                     "insert_text_format should be Snippet"
                 );
             }
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1326,7 +1326,7 @@ async fn test_completion_inside_class_returns_methods() {
 async fn test_completion_outside_class_returns_fallback() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///user.php").unwrap();
+    let uri = Uri::parse("file:///user.php").unwrap();
     let text = "<?php\n\nclass User {\n    function login() {}\n}\n\n$x = 1;\n".to_string();
 
     open_php(&backend, &uri, &text).await;
@@ -1343,7 +1343,7 @@ async fn test_completion_outside_class_returns_fallback() {
 async fn test_completion_with_multiple_classes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multi.php").unwrap();
+    let uri = Uri::parse("file:///multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -1372,10 +1372,10 @@ async fn test_completion_with_multiple_classes() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
             // Bar has handleRequest and test — both non-static
             assert_eq!(method_items.len(), 2, "Bar has two methods");
@@ -1386,7 +1386,7 @@ async fn test_completion_with_multiple_classes() {
             assert!(names.contains(&"handleRequest"));
             assert!(names.contains(&"test"));
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1394,7 +1394,7 @@ async fn test_completion_with_multiple_classes() {
 async fn test_completion_empty_class_falls_back() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///empty.php").unwrap();
+    let uri = Uri::parse("file:///empty.php").unwrap();
     let text = "<?php\nclass Empty {\n}\n".to_string();
 
     open_php(&backend, &uri, &text).await;
@@ -1404,14 +1404,14 @@ async fn test_completion_empty_class_falls_back() {
     // Empty class with no parent has nothing to override — only member
     // keywords (`public`, `function`, `const`, …) are offered.
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         items
             .iter()
-            .all(|i| i.kind == Some(CompletionItemKind::KEYWORD)),
+            .all(|i| i.kind == Some(CompletionItemKind::Keyword)),
         "Empty class body should only offer member keywords, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -1425,7 +1425,7 @@ async fn test_completion_empty_class_falls_back() {
 async fn test_completion_no_access_operator_shows_fallback() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///all.php").unwrap();
+    let uri = Uri::parse("file:///all.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -1445,14 +1445,14 @@ async fn test_completion_no_access_operator_shows_fallback() {
     // Without `->` or `::`, the class's own members must not be
     // suggested — only member keywords for a new declaration.
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     assert!(
         items
             .iter()
-            .all(|i| i.kind == Some(CompletionItemKind::KEYWORD)),
+            .all(|i| i.kind == Some(CompletionItemKind::Keyword)),
         "No access operator should offer only member keywords, got: {:?}",
         items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
@@ -1462,7 +1462,7 @@ async fn test_completion_no_access_operator_shows_fallback() {
 async fn test_completion_suggests_trait_method_overrides() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_override.php").unwrap();
+    let uri = Uri::parse("file:///trait_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Bar {\n",
@@ -1482,8 +1482,8 @@ async fn test_completion_suggests_trait_method_overrides() {
     let result = completion_response(&backend, &uri, 8, 26, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
 
@@ -1527,7 +1527,7 @@ async fn test_completion_suggests_trait_method_overrides() {
 async fn test_completion_suggests_trait_method_overrides_trait_only_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_only.php").unwrap();
+    let uri = Uri::parse("file:///trait_only.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Baz {\n",
@@ -1545,8 +1545,8 @@ async fn test_completion_suggests_trait_method_overrides_trait_only_class() {
     let result = completion_response(&backend, &uri, 6, 24, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
 
@@ -1565,7 +1565,7 @@ async fn test_completion_suggests_trait_method_overrides_trait_only_class() {
 async fn test_completion_shared_trait_on_parent_and_child_uses_override() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///shared_trait.php").unwrap();
+    let uri = Uri::parse("file:///shared_trait.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait SharedTrait {\n",
@@ -1586,8 +1586,8 @@ async fn test_completion_shared_trait_on_parent_and_child_uses_override() {
     let result = completion_response(&backend, &uri, 9, 28, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
 
@@ -1618,7 +1618,7 @@ async fn test_completion_shared_trait_on_parent_and_child_uses_override() {
 async fn test_completion_override_this_return_becomes_static() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///override_this_return.php").unwrap();
+    let uri = Uri::parse("file:///override_this_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -1636,8 +1636,8 @@ async fn test_completion_override_this_return_becomes_static() {
     let result = completion_response(&backend, &uri, 6, 24, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let item = items
@@ -1649,8 +1649,8 @@ async fn test_completion_override_this_return_becomes_static() {
         .as_deref()
         .or_else(|| {
             item.text_edit.as_ref().map(|te| match te {
-                CompletionTextEdit::Edit(e) => e.new_text.as_str(),
-                CompletionTextEdit::InsertAndReplace(e) => e.new_text.as_str(),
+                CompletionItemTextEdit::TextEdit(e) => e.new_text.as_str(),
+                CompletionItemTextEdit::InsertReplaceEdit(e) => e.new_text.as_str(),
             })
         })
         .unwrap_or("");
@@ -1672,7 +1672,7 @@ async fn test_completion_override_this_return_becomes_static() {
 async fn test_completion_trait_override_restates_docblock_types() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_override_docblock.php").unwrap();
+    let uri = Uri::parse("file:///trait_override_docblock.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Sortable {\n",
@@ -1694,8 +1694,8 @@ async fn test_completion_trait_override_restates_docblock_types() {
     let result = completion_response(&backend, &uri, 10, 24, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let item = items
@@ -1737,7 +1737,7 @@ async fn test_completion_trait_override_restates_docblock_types() {
 async fn test_completion_trait_override_skips_redundant_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_override_no_docblock.php").unwrap();
+    let uri = Uri::parse("file:///trait_override_no_docblock.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Probe {\n",
@@ -1760,8 +1760,8 @@ async fn test_completion_trait_override_skips_redundant_docblock() {
     let result = completion_response(&backend, &uri, 11, 22, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     for name in ["zzPlain", "zzStatic", "zzNullDefault", "zzNative"] {
@@ -1785,7 +1785,7 @@ async fn test_completion_trait_override_skips_redundant_docblock() {
 async fn test_completion_trait_override_template_return_is_not_a_native_hint() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_override_template.php").unwrap();
+    let uri = Uri::parse("file:///trait_override_template.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Maker {\n",
@@ -1808,8 +1808,8 @@ async fn test_completion_trait_override_template_return_is_not_a_native_hint() {
     let result = completion_response(&backend, &uri, 11, 22, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let item = items
@@ -1841,7 +1841,7 @@ async fn test_completion_trait_override_template_return_is_not_a_native_hint() {
 async fn test_completion_trait_override_restates_variadic_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///trait_override_variadic.php").unwrap();
+    let uri = Uri::parse("file:///trait_override_variadic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Joiner {\n",
@@ -1860,8 +1860,8 @@ async fn test_completion_trait_override_restates_variadic_param() {
     let result = completion_response(&backend, &uri, 7, 22, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
     let item = items
@@ -1891,7 +1891,7 @@ async fn test_completion_trait_override_restates_variadic_param() {
 async fn test_member_completion_after_astral_character_on_same_line() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///utf16_member.php").unwrap();
+    let uri = Uri::parse("file:///utf16_member.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -1907,7 +1907,7 @@ async fn test_member_completion_after_astral_character_on_same_line() {
     // `    $label = '` is 14 units, the emoji 2, `'; $order->` 11.
     let result = completion_response(&backend, &uri, 5, 27, None).await;
     match result {
-        Some(CompletionResponse::Array(items)) => {
+        Some(CompletionResponse::CompletionItemList(items)) => {
             let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 names.iter().any(|n| n.starts_with("total(")),
@@ -1923,7 +1923,7 @@ async fn test_member_completion_after_astral_character_on_same_line() {
 async fn test_variable_completion_range_after_astral_character() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///utf16_variable.php").unwrap();
+    let uri = Uri::parse("file:///utf16_variable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function show(int $userId): void {\n",
@@ -1936,14 +1936,14 @@ async fn test_variable_completion_range_after_astral_character() {
     // `    $label = '🎉'; ` is 19 units, `$us` 3.
     let result = completion_response(&backend, &uri, 2, 22, None).await;
     match result {
-        Some(CompletionResponse::Array(items))
-        | Some(CompletionResponse::List(CompletionList { items, .. })) => {
+        Some(CompletionResponse::CompletionItemList(items))
+        | Some(CompletionResponse::CompletionList(CompletionList { items, .. })) => {
             let item = items
                 .iter()
                 .find(|i| i.label == "$userId")
                 .unwrap_or_else(|| panic!("Should suggest $userId, got: {:?}", items));
             match &item.text_edit {
-                Some(CompletionTextEdit::Edit(edit)) => {
+                Some(CompletionItemTextEdit::TextEdit(edit)) => {
                     assert_eq!(edit.range.start, Position::new(2, 19));
                     assert_eq!(edit.range.end, Position::new(2, 22));
                 }

@@ -99,6 +99,8 @@ src/
 ├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
 ├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
+├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
+├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 ├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
@@ -132,6 +134,8 @@ tests/
 ├── unit/                   # Unit tests (composer, docblock, named args, …)
 ├── fixtures/               # Fixtures driven by fixture_runner.rs
 ├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var => 'ExpectedType'` assertion suites ported from Psalm / PHPStan
+├── phpstan_symfony/, phpstan_doctrine/   # Projects the PHPStan Symfony and Doctrine extensions' type and rule tests run in
+├── support/                # Code both runners share (the fixture projects' backend)
 └── assert_type_runner.rs, fixture_runner.rs
 ```
 
@@ -239,9 +243,10 @@ The symbol map also stores:
 - **Variable definition sites** (`var_defs`): records every assignment, parameter, foreach binding, catch variable, static/global declaration, and destructuring site with its byte offset, scope boundary, and `effective_from` offset (for assignments, this is the end of the statement so the RHS sees the previous definition). Go-to-definition for `$var` finds the most recent definition before the cursor within the enclosing scope via binary search.
 - **Scope boundaries** (`scopes`): function, method, closure, and arrow function body ranges. Used by `find_enclosing_scope` to determine which scope the cursor is in.
 - **Template parameter definitions** (`template_defs`): `@template` tag locations so that template parameter names (e.g. `TKey`, `TModel`) that appear in docblock types can be resolved to their declaration site.
-- **Candidate render sites** (`view_receiver_sites`): the view names a method call spells when only the receiver's *type* decides whether it renders — a constructor-injected `Factory $views` behind `$this->views->make('page')`, a mailable held in a local. Extraction runs before the file's classes are resolved and cannot type the receiver, so it records the candidates and `blade/typed_receiver.rs` confirms them lazily through the shared type engine, once per file. Consumers of view keys (the call-site diagnostics, call-site inference, `lookup_symbol_map`, find-references) read the confirmed spans alongside the map's own `LaravelStringKey` spans. The reference candidate index takes the *unconfirmed* candidates, since a file has to be findable before it can be asked.
-- **Config-backed Laravel resource names**: one declarative table maps direct helpers, facades, contextual attributes, and middleware parameters to their config subtrees. A `SymbolSpan` whose Laravel string kind is `ConfigResource(...)` stores the short source name, while completion, navigation, diagnostics, and references derive the full dot key only at the config boundary. This keeps source ranges and reference identity exact without duplicating one trigger table across LSP features.
+- **Candidate typed-receiver sites** (`typed_receiver_sites`): the string keys a method call spells when only the receiver's *type* decides what it names — a constructor-injected `Factory $views` behind `$this->views->make('page')`, a mailable held in a local, a Symfony `ContainerInterface $container` behind `$container->get('app.mailer')`, a configurator's `$services->set('app.mailer')`, a URL generator's `$urls->generate('blog_index')`, a translator's `$translator->trans('demo.title')`, a controller's or Twig's `render('page.html.twig')`, an event dispatcher's `$events->dispatch($event, 'app.order.placed')`. Each site records the classes its receiver may be and the kind of key each makes it (`ReceiverClass::targets`). Extraction runs before the file's classes are resolved and cannot type the receiver, so it records the candidates and `blade/typed_receiver.rs` confirms them lazily through the shared type engine, once per file. Consumers of those keys (the call-site diagnostics, call-site inference, `lookup_symbol_map`, find-references, the Symfony declaration lookup) read the confirmed spans alongside the map's own `StringKey` spans. The reference candidate index takes the *unconfirmed* candidates, under every kind each could turn out to be, since a file has to be findable before it can be asked.
+- **Config-backed Laravel resource names**: one declarative table maps direct helpers, facades, contextual attributes, and middleware parameters to their config subtrees. A `SymbolSpan` whose string-key kind is `ConfigResource(...)` stores the short source name, while completion, navigation, diagnostics, and references derive the full dot key only at the config boundary. This keeps source ranges and reference identity exact without duplicating one trigger table across LSP features.
 - **Candidate morph-column aliases** (`morph_column_sites`): literals compared with properties or query columns are confirmed lazily by `virtual_members/laravel/typed_morph_columns.rs`. The shared type engine identifies the receiver model, and its parsed `morphTo()` metadata identifies the column. Array values in one query share a single model and column check. Confirmed literals become ordinary `MorphAlias` spans for completion, navigation, references, and diagnostics. Model metadata changes invalidate dependent confirmations, including when a relation's column changes without changing its PHP signature.
+- **Messenger handlers** (`messenger_handlers`): each method a Symfony `#[AsMessageHandler]` registers, with the message class it receives, read from the attribute's `handles:` or the method's first parameter type. A handler is a fact about a class rather than a string at a cursor, so it is a side table rather than a span. The files holding one are among the Symfony declaring files (`symfony/mod.rs`), which is how the CodeLens on a message class finds the handlers that receive it.
 
 ### Tier 2: Stored Byte Offsets (cross-file jumps)
 
@@ -263,6 +268,51 @@ Variable go-to-definition (`$var` → jump to definition) uses two layers:
 
 1. **Symbol map** (`var_defs`): the primary path. Finds the most recent `VarDefSite` before the cursor within the enclosing scope. When the cursor is physically on a definition token (parameter, foreach binding, catch variable), it returns `None` so the caller can fall through to type-hint resolution.
 2. **AST-based search** (`resolve_variable_definition_ast`): parses the file and walks the enclosing scope to find the definition site. Handles destructuring (`[$a, $b] = ...`, `list($a, $b) = ...`) and nested scopes correctly. Used as a fallback when the symbol map doesn't have a match. Returns `None` when the AST parse fails.
+
+## Framework Names in Strings
+
+Frameworks name things in strings: a Laravel `route('home')` or
+`config('app.name')`, a Symfony `$container->get('app.mailer')`,
+`generateUrl('app_home')`, or `dispatch($event, 'app.order.placed')`. Each
+such string is a `SymbolKind::StringKey` span whose `StringKeyKind` says
+what it names, and whose `is_write` flag says whether it declares the name
+or reads it. Hover, go-to-definition, find references, highlights,
+semantic tokens, and the unknown-name diagnostics all read those spans, so
+a new kind of name is a new `StringKeyKind` variant plus the code that
+emits it.
+
+The spans come from two places, and nowhere else:
+
+- **PHP** is read from the AST during symbol-map extraction
+  (`symbol_map/extraction/laravel/` and `symbol_map/extraction/symfony.rs`).
+  A function, an attribute, or a `new` is recognised by its resolved name.
+  A method call whose name is too common to claim on sight (`get()`,
+  `set()`, `render()`, `dispatch()`) is recorded as a candidate
+  typed-receiver site (see above) and settled by the shared type engine,
+  never by guessing from the receiver's spelling.
+- **YAML, XML, XLIFF, and Twig** are read as text by the scanners in
+  `symfony/` and `twig/`, which build each resource file's symbol map
+  (`resource_navigation.rs`). These files have no AST we share, and their
+  shapes are small enough that a line-oriented scan reads them reliably.
+  Whether a file is a resource document is mostly its extension, but an
+  `.html` file is a Twig template only under a root discovered from the
+  names other templates reference (`twig/roots.rs`), so the check is
+  `Backend::is_resource_uri`, not the URI alone.
+
+Completion asks the same questions: it judges the call under the cursor
+with the predicates extraction uses (`symfony_receiver_method`, the
+attribute checks), and a configuration file through the same scan, so
+completion and navigation cannot disagree about which strings name what.
+
+A Symfony name is declared by a span with `is_write` set, so there is no
+separate table of declarations. `symfony/mod.rs` only tracks which files
+hold one (the configuration, the controllers with `#[Route]`s, the
+listeners, the catalogues), and reads the declared names out of those
+files' symbol maps on demand. The maps are kept current by the ordinary
+document and watched-file lifecycle, and the reference index files every
+span by its key, so references need no second walk. All of it is gated on
+the project: Symfony names are only read when the project builds a Symfony
+container, and Laravel's only when it is a Laravel application.
 
 ## Go-to-Type-Definition Architecture
 
@@ -473,14 +523,25 @@ file that declares it.
 
 ## Symbol Resolution: `find_or_load_class`
 
-When the LSP needs to resolve a class name (e.g. during completion on `Iterator::` or when following a type hint), it calls `find_or_load_class`. This method tries four phases in order, returning as soon as one succeeds:
+When the LSP needs to resolve a class name (e.g. during completion on `Iterator::` or when following a type hint), it calls `find_or_load_class`. This method tries these phases in order, returning as soon as one succeeds:
 
 ```
 find_or_load_class("Iterator")
 │
+├── Stub paths: ExternalStubIndex (FQN → stub file)
+│   The `[stubs]` paths and the editor's stub directory. A name
+│   one of them declares means that declaration, over every other
+│   (see "Stub Paths" below).
+│   ↓ miss
+│
 ├── Phase 0: fqn_class_index (O(1) hash hit)
 │   Direct lookup by FQN. This is where cached results from
 │   previous phases are found on subsequent lookups.
+│   ↓ miss
+│
+├── Phase 0.5: built-in global names → embedded stubs
+│   A global name the embedded stubs know is a PHP built-in, so a
+│   conditional polyfill in vendor cannot shadow it.
 │   ↓ miss
 │
 ├── Phase 1: fqn_uri_index (FQN → file URI)
@@ -611,6 +672,13 @@ Built-in PHP functions (e.g. `array_map`, `date_create`, `str_contains`) are res
 ```
 find_or_load_function(["str_contains", "App\\str_contains"])
 │
+├── Stub paths: ExternalStubIndex (FQN → stub file)
+│   Parses the stub file with update_ast the first time, then
+│   returns the declaration that file makes, even where another
+│   file's declaration of the name is the one global_functions
+│   resolves to.
+│   ↓ miss
+│
 ├── Phase 1: global_functions (user code + cached stubs)
 │   Checks all candidate names against the global_functions map.
 │   Keys are always FQNs: "array_map" for global functions,
@@ -663,6 +731,14 @@ The `function_loader` closures in both `server.rs` (completion) and `definition/
 
 User-defined functions in `global_functions` always take precedence over stubs because Phase 1 is checked first — stubs use `entry().or_insert()` to avoid overwriting existing entries.
 
+### Stub Paths
+
+The `[stubs] paths` of `.phpantom.toml`, the stub packages Composer installed, and the directory an editor extension passes as `initializationOptions.stubs.path` (`indexing/stub_paths.rs`) are the one place a declaration is meant to win over every other: project code, vendor code, and the embedded stubs. A stub package is recognised from `installed.json` by name or package type (`composer/installed.rs`) when its Composer project's paths are registered, which a `composer.lock` change repeats. Discovery scans them into an `ExternalStubIndex` (the `[stubs]` paths in order, then each Composer project's stub packages, then the editor's directory, first declaration wins; a phpstorm-stubs checkout is read from its `PhpStormStubsMap.php`), and the class, function and constant lookups each consult it before any other phase (`resolution/external_stubs.rs`). Embedded-stub loading checks it too, so the embedded copy of an overridden built-in is never read.
+
+A stub file is an ordinary `file://` file in every other respect: it is parsed and cached like any other, so go-to-definition lands in it and the watcher's re-parse covers it, and its scanned names are merged into the discovery indexes so they complete before anything loads them. What keeps it out of analysis, rename and find-references is its registration as library code, inside the workspace or not. The parse-time skip of a redeclared built-in function, the constant publisher's last-writer-wins, and the third-party class patches all exempt a stub file. A phpstorm-stubs checkout has the gaps the embedded copy has, so it gets the same `stub_patches` corrections.
+
+The index is rebuilt whole by `refresh_stub_paths` at the end of discovery, when the paths change (`DiscoveryInputs`), when a watched file under one changes, and after a Composer rescan, whose replacement of the vendor tree also drops the discovery entries of the stub packages inside it. A rebuild first drops everything parsed from a file under the old or new paths, so a removed path stops overriding at once and an added one is re-parsed in its new role.
+
 #### Function Completion: Namespace Awareness
 
 `build_function_completions` handles two modes:
@@ -696,6 +772,10 @@ Class stub patches work the same way but are applied by `apply_class_stub_patche
 ### Runtime Lookup — Constants
 
 The `stub_constant_index` (`HashMap<&'static str, &'static str>`) is built at construction time from `STUB_CONSTANT_MAP`, mapping constant names like `PHP_EOL`, `PHP_INT_MAX`, `SORT_ASC` to their stub file source. It is consulted by the constant-value loader (`Backend::constant_loader`) during variable type resolution: when a variable is assigned from a global constant (e.g. `$eol = PHP_EOL`), the loader extracts the constant's initializer value from the stub source and the type is inferred from the literal (`string`, `int`, `float`, `bool`, `null`, or `array`). The same lookup chain also serves hover, completion of standalone constant names, and go-to-definition.
+
+### Go-to-Definition on Built-ins
+
+An embedded stub has no file to open, so a jump to a built-in class, member, function, or constant finds nothing unless a stub path declares it. The usual one is the project's own `jetbrains/phpstorm-stubs`: as a Composer stub package it is a stub path, so the built-in resolves to its file and the jump is an ordinary one.
 
 ### Version-Aware Filtering
 
@@ -859,7 +939,7 @@ The indexing strategy is configurable via `[indexing] strategy` in `.phpantom.to
 
 The merged pipeline works in three steps: (1) load `autoload_classmap.php` into a `HashMap<String, PathBuf>`, (2) collect the classmap's file paths into a `HashSet<PathBuf>` skip set, (3) self-scan all PSR-4 and vendor directories, skipping files already in the skip set. The result is a merged index: classmap entries for everything Composer already knew about, plus self-scanned entries for everything it missed. When the classmap is complete (the common case), the self-scanner walks directories but skips every file, finishing almost instantly. When the classmap is empty or absent, it falls back to a full self-scan. When the classmap is partial (e.g. vendor classes only), vendor files are skipped and only user code is scanned. Every state of the classmap helps.
 
-When self-scanning with a `composer.json` present, the scanner reads `autoload.psr-4`, `autoload-dev.psr-4`, `autoload.classmap`, and `autoload-dev.classmap` to determine which directories to walk. PSR-4 directories are filtered: only classes whose FQN matches the namespace prefix plus the relative file path are included. Vendor packages are discovered from `vendor/composer/installed.json` (both Composer 1 and 2 formats); the JSON packages array is borrowed rather than cloned to avoid allocating a copy of the entire vendor manifest. All directory walkers (full-scan, PSR-4 scanner, vendor package scanner, and go-to-implementation file collector) use the `ignore` crate for gitignore-aware traversal. Hidden directories are skipped automatically, and `.gitignore` rules are respected at every level. Paths listed under `[indexing] include` in `.phpantom.toml` are scanned at the end of every discovery pipeline with the gitignore and hidden-entry filters disabled. `[indexing] exclude` still prunes below an included directory, but no exclude applies to a named path itself, including the built-in laravel-ide-helper skip, which is compiled into a matcher of its own so a `!` in `exclude` cannot cancel it. `IndexFilters` carries the named paths so the watcher and eviction honour the same exemption. Because they run last, included paths fill gaps rather than displacing what discovery found. An included path inside the workspace is project code: the full background index parses it, so function-only files reach find-references and workspace symbols, and `analyze` reports on it. One outside the workspace is registered like a vendor directory, so it resolves but is never analysed, renamed into, or searched for references. When no `composer.json` exists at all, the scanner falls back to walking all `.php` files under the workspace root.
+When self-scanning with a `composer.json` present, the scanner reads `autoload.psr-4`, `autoload-dev.psr-4`, `autoload.classmap`, and `autoload-dev.classmap` to determine which directories to walk. PSR-4 directories are filtered: only classes whose FQN matches the namespace prefix plus the relative file path are included. Vendor packages are discovered from `vendor/composer/installed.json` (both Composer 1 and 2 formats); the JSON packages array is borrowed rather than cloned to avoid allocating a copy of the entire vendor manifest. All directory walkers (full-scan, PSR-4 scanner, vendor package scanner, and go-to-implementation file collector) use the `ignore` crate for gitignore-aware traversal. Hidden directories are skipped automatically, and `.gitignore` rules are respected at every level. Paths listed under `[indexing] include` in `.phpantom.toml` are scanned at the end of every discovery pipeline with the gitignore and hidden-entry filters disabled. `[indexing] exclude` still prunes below an included directory, but no exclude applies to a named path itself, including the built-in laravel-ide-helper skip, which is compiled into a matcher of its own so a `!` in `exclude` cannot cancel it. `IndexFilters` carries the named paths so the watcher and eviction honour the same exemption. Because they run last, included paths fill gaps rather than displacing what discovery found. An included path inside the workspace is project code: the full background index parses it, so function-only files reach find-references and workspace symbols, and `analyze` reports on it. One outside the workspace is registered like a vendor directory, so it resolves but is never analysed, renamed into, or searched for references. The editor's other workspace folders (from `initialize` and `workspace/didChangeWorkspaceFolders`, deduplicated by containment in `Backend::extra_roots`) are library code in the same way: they join the project root's `walk_roots` call, so a link between them is walked once, and each registration records its claimant in `library_claims` so removing a folder releases only the spellings nothing else claims before its files are evicted. When no `composer.json` exists at all, the scanner falls back to walking all `.php` files under the workspace root.
 
 **Directory symlinks.** The walkers descend into a symlinked directory, so a project that keeps its framework or a shared library outside the repository and links it into the tree gets the linked code indexed with the rest. Every path keeps the symlink spelling rather than the target's, which is what makes a file reached through the link the same file the editor opened. `LinkClaims` gives each walk one visit per target directory: the walk's own roots and its skipped trees are claimed up front, and each link claims its target the first time it is descended, so two links to one tree, a link pointing back at something the walk already covers, and a chain of directories holding several links apiece all cost one pass rather than one per route. `orchestra/testbench-core` ships `laravel/vendor -> <project>/vendor`, which is why the skipped trees are claimed and not merely pruned by path. Each link the index reached through also gets a watcher based at it (see `build_watched_file_registration`), since a workspace-relative watcher pattern never covers a path outside the workspace folders.
 
@@ -994,7 +1074,7 @@ When the user invokes "Find All References", PHPantom scans all user files for o
 Before scanning, `ensure_workspace_indexed` ensures all user files have symbol maps:
 
 1. **Phase 1: fqn_uri_index files (user only)** — files already known from `update_ast` calls. Vendor and stub URIs are skipped.
-2. **Phase 2: `.gitignore`-aware workspace walk** — uses the `ignore` crate's `WalkBuilder` to recursively discover PHP plus YAML/XML resource files under the workspace root, respecting `.gitignore` rules (including nested and global gitignore files). This automatically skips generated/cached directories like `storage/framework/views/` (Laravel blade cache), `var/cache/` (Symfony), and `node_modules/`. The vendor directory is always skipped regardless of `.gitignore` content. Hidden directories are skipped by default.
+2. **Phase 2: `.gitignore`-aware workspace walk** — uses the `ignore` crate's `WalkBuilder` to recursively discover PHP plus YAML/XML resource files (and, in a Symfony project, XLIFF catalogues, and in a project that uses Twig, its `.twig`, `.html`, and `.htm` files, which root discovery reads before any template is indexed) under the workspace root, respecting `.gitignore` rules (including nested and global gitignore files). This automatically skips generated/cached directories like `storage/framework/views/` (Laravel blade cache), `var/cache/` (Symfony), and `node_modules/`. The vendor directory is always skipped regardless of `.gitignore` content. Hidden directories are skipped by default.
 
 PHP files are parsed in parallel using `std::thread::scope`. The work is split into chunks (one per CPU core) and each thread reads a file from disk and calls `update_ast`, which acquires write locks briefly to store results while the expensive parsing step runs without any locks held. Batches of 2 or fewer files skip threading overhead. YAML/XML files take the lightweight schema-free scanner and publish synthetic class/member symbol maps into the same reference index.
 
@@ -1287,6 +1367,12 @@ streams for one source of truth, which clients may merge, replace, or
 deduplicate differently. The server therefore treats push as a compatibility
 fallback for older clients rather than mixing both transports for the same
 native diagnostic set.
+
+The `diagnosticProvider` capability itself is advertised to every client,
+so a tool that inspects the server's capabilities without declaring pull
+support sees it. Push delivery still caches each published set with a
+`resultId`, so a pull from a push client answers with what was last
+published instead of an empty set.
 
 Each worker is created during `initialized` via `clone_for_blocking`, which hands it a `Backend` sharing the main one's `BackendState`, so every worker sees all mutations the main `Backend` makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.
 

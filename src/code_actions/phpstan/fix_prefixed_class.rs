@@ -35,7 +35,7 @@
 //! recomputes the workspace edit on demand when the user picks the
 //! action.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
@@ -74,7 +74,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -87,7 +87,7 @@ impl Backend {
                 continue;
             }
 
-            let info = match parse_prefixed_diagnostic(&diag.message) {
+            let info = match parse_prefixed_diagnostic(crate::util::message_text(&diag.message)) {
                 Some(i) => i,
                 None => continue,
             };
@@ -146,7 +146,7 @@ impl Backend {
 
         let edit = build_fix_prefixed_edit(content, diag_line, prefixed, corrected)?;
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 }

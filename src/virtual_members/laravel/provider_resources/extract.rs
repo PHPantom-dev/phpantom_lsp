@@ -209,14 +209,30 @@ fn record_resource_loader(
             Some(arg) => extract_string_literal(arg, content).map(|(namespace, _, _)| namespace),
             None => None,
         };
-        if !args.is_empty()
-            && let Some(namespace) = namespace
-            && let Some(path) = resolve_path_arg(args[0].value(), content, &file.paths)
-        {
-            target.push(ProviderResource {
+        let path = args
+            .first()
+            .and_then(|arg| resolve_path_arg(arg.value(), content, &file.paths));
+        match (namespace, path) {
+            (Some(namespace), Some(path)) => target.push(ProviderResource {
                 path,
                 namespace: namespace.to_string(),
-            });
+            }),
+            // The diagnostic that judges config keys needs to know that a
+            // namespace exists even when its file cannot be enumerated.
+            (Some(namespace), None) if method == b"mergeconfigfrom" && !args.is_empty() => {
+                resources
+                    .unread_config_namespaces
+                    .push(namespace.to_string());
+            }
+            (None, _)
+                if method == b"mergeconfigfrom"
+                    && args.get(1).is_some_and(|arg| {
+                        !matches!(arg.value(), Expression::Literal(Literal::Null(_)))
+                    }) =>
+            {
+                resources.open_config_namespace = true;
+            }
+            _ => {}
         }
     } else if method == b"loadviewsfrom" {
         if args.len() >= 2

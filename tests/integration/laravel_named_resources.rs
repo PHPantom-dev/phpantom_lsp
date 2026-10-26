@@ -4,8 +4,8 @@ use crate::common::{
     completion_response, create_psr4_workspace, goto_definition_at, open_php, position_after,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^12.0" },
@@ -62,11 +62,13 @@ fn position_of_config_key(content: &str, key: &str) -> Position {
     position_at_offset(content, offset)
 }
 
-fn definition_location(response: GotoDefinitionResponse) -> Location {
+fn definition_location(response: DefinitionResponse) -> Location {
     match response {
-        GotoDefinitionResponse::Scalar(location) => location,
-        GotoDefinitionResponse::Array(mut locations) => locations.remove(0),
-        GotoDefinitionResponse::Link(mut links) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => location,
+        DefinitionResponse::Definition(Definition::LocationList(mut locations)) => {
+            locations.remove(0)
+        }
+        DefinitionResponse::DefinitionLinkList(mut links) => {
             let link = links.remove(0);
             Location::new(link.target_uri, link.target_selection_range)
         }
@@ -89,37 +91,28 @@ fn text_in_range(content: &str, range: Range) -> &str {
     &content[start..end]
 }
 
-async fn open_workspace(source: &str) -> (Backend, tempfile::TempDir, Url) {
+async fn open_workspace(source: &str) -> (Backend, tempfile::TempDir, Uri) {
     let files = workspace_files(source);
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
     open_php(&backend, &uri, source).await;
     (backend, dir, uri)
 }
 
-async fn completion_items(backend: &Backend, uri: &Url, position: Position) -> Vec<CompletionItem> {
+async fn completion_items(backend: &Backend, uri: &Uri, position: Position) -> Vec<CompletionItem> {
     let response = completion_response(backend, uri, position.line, position.character, None).await;
     match response {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     }
 }
 
 fn hover_text(hover: Hover) -> String {
     match hover.contents {
-        HoverContents::Markup(markup) => markup.value,
-        HoverContents::Scalar(MarkedString::String(text)) => text,
-        HoverContents::Scalar(MarkedString::LanguageString(text)) => text.value,
-        HoverContents::Array(parts) => parts
-            .into_iter()
-            .map(|part| match part {
-                MarkedString::String(text) => text,
-                MarkedString::LanguageString(text) => text.value,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Contents::MarkupContent(markup) => markup.value,
+        other => panic!("expected a markup hover, got {other:?}"),
     }
 }
 
@@ -202,7 +195,7 @@ class AttributeTargets {
         assert!(
             items
                 .iter()
-                .all(|item| item.kind == Some(CompletionItemKind::PROPERTY))
+                .all(|item| item.kind == Some(CompletionItemKind::Property))
         );
     }
 
@@ -212,7 +205,7 @@ class AttributeTargets {
         position_after(source, "middleware('auth:web, a"),
     )
     .await;
-    let Some(CompletionTextEdit::Edit(edit)) = &middleware[0].text_edit else {
+    let Some(CompletionItemTextEdit::TextEdit(edit)) = &middleware[0].text_edit else {
         panic!("middleware completion should carry an exact text edit");
     };
     assert_eq!(text_in_range(source, edit.range), " a");
@@ -450,7 +443,7 @@ function auth(?string $guard = null): object { return new \stdClass(); }
         .collect::<Vec<_>>();
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
     open_php(&backend, &uri, source).await;
     let position = position_after(source, "auth('we");
 
@@ -503,7 +496,7 @@ class Route { public static function middleware(string $name): void {} }
         .collect::<Vec<_>>();
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
     open_php(&backend, &uri, source).await;
 
     for prefix in ["\\Cache::store('red", "\\Route::middleware('auth:we"] {
@@ -532,7 +525,7 @@ class Route { public static function middleware(string $name): void {} }
     assert!(diagnostics.iter().all(|diagnostic| {
         !matches!(
             &diagnostic.code,
-            Some(NumberOrString::String(code)) if code.starts_with("invalid_laravel_")
+            Some(Code::String(code)) if code.starts_with("invalid_laravel_")
         )
     }));
 }
@@ -670,7 +663,7 @@ Broadcast::connection('missing-broadcast');
     let invalid = diagnostics
         .iter()
         .filter_map(|diagnostic| match &diagnostic.code {
-            Some(NumberOrString::String(code)) if code.starts_with("invalid_laravel_") => {
+            Some(Code::String(code)) if code.starts_with("invalid_laravel_") => {
                 Some((code.as_str(), text_in_range(source, diagnostic.range)))
             }
             _ => None,
@@ -752,7 +745,7 @@ config('cache.stores.redis');
         .find(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code == "invalid_laravel_cache_store"
+                Some(Code::String(code)) if code == "invalid_laravel_cache_store"
             )
         })
         .expect("invalid parameter attribute should be diagnosed");
@@ -812,7 +805,7 @@ Queue::connection('null');
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code.starts_with("invalid_laravel_")
+                Some(Code::String(code)) if code.starts_with("invalid_laravel_")
             )
         })
         .collect::<Vec<_>>();
@@ -842,7 +835,7 @@ async fn generic_config_diagnostics_accept_only_exact_segment_prefixes() {
         ],
     );
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
     open_php(&backend, &uri, source).await;
 
     let mut diagnostics = Vec::new();
@@ -852,7 +845,7 @@ async fn generic_config_diagnostics_accept_only_exact_segment_prefixes() {
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code == "invalid_laravel_config"
+                Some(Code::String(code)) if code == "invalid_laravel_config"
             )
         })
         .collect::<Vec<_>>();
@@ -885,7 +878,7 @@ Cache::store('r');
 "#;
     let (backend, dir) = create_psr4_workspace(PACKAGE_COMPOSER_JSON, &workspace_files(source));
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
     open_php(&backend, &uri, source).await;
 
     let mut diagnostics = Vec::new();
@@ -895,7 +888,7 @@ Cache::store('r');
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code.starts_with("invalid_laravel_")
+                Some(Code::String(code)) if code.starts_with("invalid_laravel_")
             )
         })
         .collect::<Vec<_>>();
@@ -967,7 +960,7 @@ config('external.unknown');
     files.push(("app/ResourceConfiguration.php", writer));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
     open_php(&backend, &uri, source).await;
 
     let mut diagnostics = Vec::new();
@@ -977,7 +970,7 @@ config('external.unknown');
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code.starts_with("invalid_laravel_")
+                Some(Code::String(code)) if code.starts_with("invalid_laravel_")
             )
         })
         .map(|diagnostic| text_in_range(source, diagnostic.range))
@@ -1039,7 +1032,7 @@ config('auth.guards.token.driver');
     files.push(("vendor/acme/guards/src/GuardServiceProvider.php", provider));
     let (backend, dir) = create_psr4_workspace(composer, &files);
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
     open_php(&backend, &uri, source).await;
 
     let mut diagnostics = Vec::new();
@@ -1049,7 +1042,7 @@ config('auth.guards.token.driver');
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code.starts_with("invalid_laravel_")
+                Some(Code::String(code)) if code.starts_with("invalid_laravel_")
             )
         })
         .map(|diagnostic| text_in_range(source, diagnostic.range))
@@ -1073,7 +1066,7 @@ Cache::store('provided-at-runtime');
         ],
     );
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
     open_php(&backend, &uri, source).await;
 
     let mut diagnostics = Vec::new();
@@ -1081,7 +1074,7 @@ Cache::store('provided-at-runtime');
     assert!(diagnostics.iter().all(|diagnostic| {
         !matches!(
             &diagnostic.code,
-            Some(NumberOrString::String(code)) if code == "invalid_laravel_cache_store"
+            Some(Code::String(code)) if code == "invalid_laravel_cache_store"
         )
     }));
 }
@@ -1139,7 +1132,7 @@ config('cache.stores.redis');
     for marker in ["Cache::store('red", "config('cache.stores.red"] {
         let edit = backend
             .rename(RenameParams {
-                text_document_position: TextDocumentPositionParams {
+                text_document_position_params: TextDocumentPositionParams {
                     text_document: TextDocumentIdentifier { uri: uri.clone() },
                     position: position_after(source, marker),
                 },

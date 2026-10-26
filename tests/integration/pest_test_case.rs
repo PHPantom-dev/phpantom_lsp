@@ -1,3 +1,4 @@
+use crate::common::message_text;
 use crate::common::{
     complete_at, create_psr4_workspace, method_names, unknown_member_diagnostics_with_scope_cache,
     workspace_uri,
@@ -109,7 +110,7 @@ fn unknown_members_in(backend: &Backend, path: &str, text: &str) -> Vec<String> 
     let uri = workspace_uri(backend, path);
     unknown_member_diagnostics_with_scope_cache(backend, uri.as_str(), text)
         .into_iter()
-        .map(|d| d.message)
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 
@@ -333,8 +334,10 @@ it('opens the basket', function (): void {
 /// after a lookup found the directory without one.
 #[tokio::test]
 async fn a_pest_php_created_on_disk_is_read() {
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::{DidChangeWatchedFilesParams, FileChangeType, FileEvent, Url};
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::{
+        DidChangeWatchedFilesParams, FileChangeType, FileEvent, Uri,
+    };
 
     let files = [
         ("vendor/pest/Functions.php", PEST_FUNCTIONS),
@@ -368,8 +371,8 @@ it('opens the basket', function (): void {
     backend
         .did_change_watched_files(DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
-                uri: Url::from_file_path(&pest_path).unwrap(),
-                typ: FileChangeType::CREATED,
+                uri: Uri::from_file_path(&pest_path).unwrap(),
+                kind: FileChangeType::Created,
             }],
         })
         .await;

@@ -1,5 +1,5 @@
 use crate::common::{completion_response, create_psr4_workspace, create_test_backend, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Basic: $var->prop-> ────────────────────────────────────────────────────
 
@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::*;
 async fn test_var_property_chain_simple() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_prop_chain.php").unwrap();
+    let uri = Uri::parse("file:///var_prop_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -37,7 +37,7 @@ async fn test_var_property_chain_simple() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -61,7 +61,7 @@ async fn test_var_property_chain_simple() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -73,7 +73,7 @@ async fn test_var_property_chain_simple() {
 async fn test_var_property_chain_deep() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///deep_chain.php").unwrap();
+    let uri = Uri::parse("file:///deep_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -104,7 +104,7 @@ async fn test_var_property_chain_deep() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("street")),
@@ -128,7 +128,7 @@ async fn test_var_property_chain_deep() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -140,7 +140,7 @@ async fn test_var_property_chain_deep() {
 async fn test_var_property_chain_from_parameter() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///param_chain.php").unwrap();
+    let uri = Uri::parse("file:///param_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -164,7 +164,7 @@ async fn test_var_property_chain_from_parameter() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -177,7 +177,7 @@ async fn test_var_property_chain_from_parameter() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -188,7 +188,7 @@ async fn test_var_property_chain_from_parameter() {
 async fn test_var_property_chain_nullsafe() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nullsafe_chain.php").unwrap();
+    let uri = Uri::parse("file:///nullsafe_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Engine {\n",
@@ -212,7 +212,7 @@ async fn test_var_property_chain_nullsafe() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("horsepower")),
@@ -225,7 +225,7 @@ async fn test_var_property_chain_nullsafe() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -236,7 +236,7 @@ async fn test_var_property_chain_nullsafe() {
 async fn test_var_property_chain_from_docblock_var() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///docblock_chain.php").unwrap();
+    let uri = Uri::parse("file:///docblock_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Settings {\n",
@@ -262,7 +262,7 @@ async fn test_var_property_chain_from_docblock_var() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("debug")),
@@ -275,7 +275,7 @@ async fn test_var_property_chain_from_docblock_var() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -287,7 +287,7 @@ async fn test_var_property_chain_from_docblock_var() {
 async fn test_var_method_then_property_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_prop_chain.php").unwrap();
+    let uri = Uri::parse("file:///method_prop_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -315,7 +315,7 @@ async fn test_var_method_then_property_chain() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -323,7 +323,7 @@ async fn test_var_method_then_property_chain() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -335,7 +335,7 @@ async fn test_var_method_then_property_chain() {
 async fn test_var_property_chain_inside_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inside_class.php").unwrap();
+    let uri = Uri::parse("file:///inside_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -361,7 +361,7 @@ async fn test_var_property_chain_inside_class() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("log")),
@@ -369,7 +369,7 @@ async fn test_var_property_chain_inside_class() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -381,7 +381,7 @@ async fn test_var_property_chain_inside_class() {
 async fn test_var_property_chain_docblock_property_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///docblock_prop_type.php").unwrap();
+    let uri = Uri::parse("file:///docblock_prop_type.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Renderer {\n",
@@ -406,7 +406,7 @@ async fn test_var_property_chain_docblock_property_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("render")),
@@ -414,7 +414,7 @@ async fn test_var_property_chain_docblock_property_type() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -425,7 +425,7 @@ async fn test_var_property_chain_docblock_property_type() {
 async fn test_var_property_chain_inherited_property() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inherited_prop.php").unwrap();
+    let uri = Uri::parse("file:///inherited_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Connection {\n",
@@ -452,7 +452,7 @@ async fn test_var_property_chain_inherited_property() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("query")),
@@ -465,7 +465,7 @@ async fn test_var_property_chain_inherited_property() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -518,7 +518,7 @@ async fn test_var_property_chain_cross_file_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///src/Controller.php").unwrap();
+    let uri = Uri::parse("file:///src/Controller.php").unwrap();
     open_php(&backend, &uri, controller_php).await;
 
     let result = completion_response(&backend, &uri, 5, 24, None).await;
@@ -528,7 +528,7 @@ async fn test_var_property_chain_cross_file_psr4() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -546,7 +546,7 @@ async fn test_var_property_chain_cross_file_psr4() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -557,7 +557,7 @@ async fn test_var_property_chain_cross_file_psr4() {
 async fn test_var_property_chain_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///top_level_chain.php").unwrap();
+    let uri = Uri::parse("file:///top_level_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Point {\n",
@@ -580,7 +580,7 @@ async fn test_var_property_chain_top_level() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("x")),
@@ -593,7 +593,7 @@ async fn test_var_property_chain_top_level() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -605,7 +605,7 @@ async fn test_var_property_chain_top_level() {
 async fn test_var_property_chain_from_method_return() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///return_chain.php").unwrap();
+    let uri = Uri::parse("file:///return_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Stats {\n",
@@ -634,7 +634,7 @@ async fn test_var_property_chain_from_method_return() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("count")),
@@ -647,7 +647,7 @@ async fn test_var_property_chain_from_method_return() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -659,7 +659,7 @@ async fn test_var_property_chain_from_method_return() {
 async fn test_var_property_chain_nonexistent_property() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///no_prop.php").unwrap();
+    let uri = Uri::parse("file:///no_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -690,7 +690,7 @@ async fn test_var_property_chain_nonexistent_property() {
 async fn test_var_property_chain_foreach_value() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_chain.php").unwrap();
+    let uri = Uri::parse("file:///foreach_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -719,7 +719,7 @@ async fn test_var_property_chain_foreach_value() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -727,7 +727,7 @@ async fn test_var_property_chain_foreach_value() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -738,7 +738,7 @@ async fn test_var_property_chain_foreach_value() {
 async fn test_var_property_chain_promoted_property() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///promoted_chain.php").unwrap();
+    let uri = Uri::parse("file:///promoted_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Formatter {\n",
@@ -764,7 +764,7 @@ async fn test_var_property_chain_promoted_property() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("format")),
@@ -772,7 +772,7 @@ async fn test_var_property_chain_promoted_property() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -784,7 +784,7 @@ async fn test_var_property_chain_promoted_property() {
 async fn test_var_property_chain_no_static_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///no_static.php").unwrap();
+    let uri = Uri::parse("file:///no_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Cache {\n",
@@ -810,7 +810,7 @@ async fn test_var_property_chain_no_static_members() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("get")),
@@ -824,7 +824,7 @@ async fn test_var_property_chain_no_static_members() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -836,7 +836,7 @@ async fn test_var_property_chain_no_static_members() {
 async fn test_this_property_chain_still_works() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///this_regression.php").unwrap();
+    let uri = Uri::parse("file:///this_regression.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -859,7 +859,7 @@ async fn test_this_property_chain_still_works() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("info")),
@@ -867,6 +867,6 @@ async fn test_this_property_chain_still_works() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }

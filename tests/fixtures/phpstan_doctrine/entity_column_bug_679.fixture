@@ -1,0 +1,7 @@
+// test: An enum column's values given as the enum's cases
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testBug679.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/bug-679.php
+---

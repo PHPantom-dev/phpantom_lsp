@@ -534,6 +534,30 @@ fn extract_call_subject(chars: &[char], paren_end: usize) -> Option<String> {
             return Some(clone_inner);
         }
 
+        // ── Call result invocation: `make()()`, `$r->find(...)()` ──
+        // A group that is a call's argument list makes the callee the
+        // value that call returns, spelled the way the AST side spells
+        // it: the call in parentheses, or for a partial application the
+        // call it wraps (`$r->find(...)($id)` is `$r->find($id)` and
+        // `$r->find(?, 1)($id)` is `$r->find($id, 1)`).
+        if open > 0
+            && chars[open - 1] == ')'
+            && let Some(inner_open) = skip_balanced_parens_back(chars, open)
+            && inner_open > 0
+            && (chars[inner_open - 1].is_alphanumeric()
+                || matches!(chars[inner_open - 1], '_' | ')'))
+            && let Some(inner_call) = extract_call_subject(chars, open)
+        {
+            if let Some(wrapped) = inner_call.strip_suffix("(...)") {
+                return Some(format!("{}({})", wrapped, args_text));
+            }
+            if let Some((wrapped, bound)) = split_partial_application(&inner_call) {
+                let args = crate::call_args::bind_partial_text_arguments(bound, args_text);
+                return Some(format!("{}({})", wrapped, args));
+            }
+            return Some(format!("({})({})", inner_call, args_text));
+        }
+
         // ── Parenthesized expression invocation: `(expr)()` ─────
         // When a balanced `(…)` group immediately precedes the call
         // parens, the inner expression is the callee (e.g.
@@ -639,6 +663,17 @@ fn extract_call_subject(chars: &[char], paren_end: usize) -> Option<String> {
     // Standalone function call: preserve arguments for conditional
     // return-type resolution (e.g. `app(A::class)` instead of `app()`).
     Some(rhs)
+}
+
+/// Split a partial application with bound arguments (`$r->find(?, 1)`) into
+/// the call it wraps and the text of its arguments, or `None` for a call
+/// with no placeholder.
+fn split_partial_application(call: &str) -> Option<(&str, &str)> {
+    let (wrapped, args) = crate::type_engine::subject_expr::split_call_subject_raw(call)?;
+    crate::text_scan::split_top_level_commas(args)
+        .into_iter()
+        .any(|arg| arg.trim() == "..." || crate::call_args::text_arg_value(arg) == "?")
+        .then_some((wrapped, args))
 }
 
 /// Extract a simple `$variable` or bare identifier ending at position

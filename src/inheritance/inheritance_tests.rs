@@ -372,6 +372,7 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
             is_pure: false,
             is_impure: false,
             reads_func_args: false,
+            is_no_discard: false,
             extras: None,
         })]
         .into(),

@@ -545,15 +545,22 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
             let inner = i.parameter.as_ref().map(|p| convert(src, &p.entry.inner));
             PhpType::interface_string(inner)
         }
-        // The bare keywords are string refinements like any other. The
-        // parameterised forms have no representation of their own yet, so
-        // they stay raw rather than lose the class they name.
-        cst::Type::EnumString(e) if e.parameter.is_none() => PhpType::named(atom(
-            &normalize_keyword_casing(bytes_to_str(e.keyword.value)),
-        )),
-        cst::Type::TraitString(t) if t.parameter.is_none() => PhpType::named(atom(
-            &normalize_keyword_casing(bytes_to_str(t.keyword.value)),
-        )),
+        // String refinements like any other; the parameterised form keeps
+        // the class it names as a generic argument.
+        cst::Type::EnumString(e) => {
+            let name = normalize_keyword_casing(bytes_to_str(e.keyword.value));
+            match &e.parameter {
+                Some(p) => PhpType::generic(&name, vec![convert(src, &p.entry.inner)]),
+                None => PhpType::named(atom(&name)),
+            }
+        }
+        cst::Type::TraitString(t) => {
+            let name = normalize_keyword_casing(bytes_to_str(t.keyword.value));
+            match &t.parameter {
+                Some(p) => PhpType::generic(&name, vec![convert(src, &p.entry.inner)]),
+                None => PhpType::named(atom(&name)),
+            }
+        }
 
         // -- key-of / value-of ------------------------------------------------
         // Evaluated as soon as the operand is concrete: `key-of<array{a: int}>`

@@ -1,6 +1,6 @@
 //! What the connected client supports.
 
-use tower_lsp::lsp_types::{ClientCapabilities, ResourceOperationKind};
+use tower_lsp_server::gen_lsp_types::{ClientCapabilities, ResourceOperationKind};
 
 /// The capabilities the client advertised in its `initialize` request,
 /// set once there and read wherever a feature depends on one.

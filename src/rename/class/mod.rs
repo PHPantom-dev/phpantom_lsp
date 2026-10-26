@@ -17,7 +17,7 @@ mod siblings;
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{document_changes_edit, multi_file_edit};
@@ -78,13 +78,13 @@ impl Backend {
     /// declaring file moves with the class, the same changes carried as
     /// document changes alongside the file rename.
     fn class_rename_workspace_edit(
-        changes: HashMap<Url, Vec<TextEdit>>,
-        file_move: Option<(Url, Url)>,
+        changes: HashMap<Uri, Vec<TextEdit>>,
+        file_move: Option<(Uri, Uri)>,
     ) -> WorkspaceEdit {
         let Some((old_uri, new_uri)) = file_move else {
             return multi_file_edit(changes);
         };
-        let rename = ResourceOp::Rename(RenameFile {
+        let rename = DocumentChange::RenameFile(RenameFile {
             old_uri: old_uri.clone(),
             new_uri: new_uri.clone(),
             options: None,
@@ -129,7 +129,7 @@ impl Backend {
 
         let locations_by_file = group_locations_by_file(locations);
 
-        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
 
         for (file_uri_str, file_locations) in &locations_by_file {
             let blocks = self.file_rewrites(file_uri_str, old_fqn_normalized);
@@ -184,6 +184,8 @@ impl Backend {
                 changes.entry(target_uri).or_default().extend(file_edits);
             }
         }
+
+        self.collect_framework_class_edits(old_fqn_normalized, &new_fqn, &mut changes);
 
         if changes.is_empty() {
             return None;

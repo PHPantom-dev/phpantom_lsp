@@ -6,6 +6,15 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct DiagnosticsConfig {
+    /// Show diagnostics in the editor at all.
+    ///
+    /// On by default. Set to `false` and PHPantom reports nothing: no
+    /// native diagnostics (syntax errors included), no external tool
+    /// runs, and no workspace pass. Every other key in this section is
+    /// then moot. The `analyze` CLI ignores it, since running it is an
+    /// explicit request for diagnostics.
+    pub enabled: Option<bool>,
+
     /// Report member access on a subject whose type cannot answer for it.
     ///
     /// Off by default. When enabled, PHPantom emits a hint-level
@@ -39,6 +48,19 @@ pub struct DiagnosticsConfig {
     /// behaviour.
     #[serde(rename = "report-magic-properties")]
     pub report_magic_properties: Option<bool>,
+
+    /// Report a member that only some classes of a union declare.
+    ///
+    /// Off by default. The unknown-member check stays silent as long as
+    /// any class the subject may hold declares the member. When enabled,
+    /// PHPantom also reports the access when some of those classes do
+    /// not, since the access fails whenever one of them arrives. This
+    /// matches PHPStan's `checkUnionTypes` (level 7), and is only as
+    /// precise as the inferred union: a variable whose classes are
+    /// correlated with something the type engine does not track will
+    /// be reported too.
+    #[serde(rename = "partial-union-members")]
+    pub partial_union_members: Option<bool>,
 
     /// Compute diagnostics for the whole workspace in the background.
     ///
@@ -114,6 +136,13 @@ pub struct IgnoreRule {
 }
 
 impl DiagnosticsConfig {
+    /// Whether the editor is shown any diagnostics.
+    ///
+    /// Defaults to `true` (on) when not explicitly set.
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+
     /// Whether the unresolved-member-access diagnostic is enabled.
     ///
     /// Defaults to `false` (off) when not explicitly set.
@@ -135,11 +164,19 @@ impl DiagnosticsConfig {
         self.report_magic_properties.unwrap_or(false)
     }
 
-    /// Whether background workspace diagnostics are enabled.
+    /// Whether the partial-union-members diagnostic is enabled.
     ///
     /// Defaults to `false` (off) when not explicitly set.
+    pub fn partial_union_members_enabled(&self) -> bool {
+        self.partial_union_members.unwrap_or(false)
+    }
+
+    /// Whether background workspace diagnostics are enabled.
+    ///
+    /// Defaults to `false` (off) when not explicitly set, and is off
+    /// whenever diagnostics as a whole are switched off.
     pub fn workspace_enabled(&self) -> bool {
-        self.workspace.unwrap_or(false)
+        self.enabled() && self.workspace.unwrap_or(false)
     }
 
     /// Whether project-wide external tool runs are enabled.

@@ -881,6 +881,55 @@ fn class_name_literal_reads_as_its_class_string() {
 }
 
 #[test]
+fn enum_case_reads_as_its_enum() {
+    let hearts = PhpType::enum_case(atom("App\\Suit"), atom("Hearts"));
+    let suit = PhpType::named(atom("App\\Suit"));
+    assert_eq!(hearts.as_enum_case(), Some(("App\\Suit", "Hearts")));
+    assert_eq!(hearts.to_string(), "App\\Suit::Hearts");
+    assert_eq!(hearts.shorten().to_string(), "Suit::Hearts");
+    assert!(matches!(hearts.kind(), TypeKind::Named(name) if *name == "App\\Suit"));
+    assert_eq!(hearts.enum_cases_as_enums(), suit);
+}
+
+#[test]
+fn enum_case_is_a_subtype_of_its_enum_and_of_no_other_case() {
+    let hearts = PhpType::enum_case(atom("Suit"), atom("Hearts"));
+    let spades = PhpType::enum_case(atom("Suit"), atom("Spades"));
+    let suit = PhpType::named(atom("Suit"));
+    assert!(hearts.is_subtype_of(&suit));
+    assert!(hearts.is_subtype_of(&hearts));
+    assert!(!hearts.is_subtype_of(&spades));
+    assert!(!suit.is_subtype_of(&hearts));
+    let either = PhpType::union(vec![hearts.clone(), spades.clone()]);
+    assert!(hearts.is_subtype_of(&either));
+    assert!(either.is_subtype_of(&suit));
+    assert!(!suit.is_subtype_of(&either));
+    assert!(hearts.is_subset_of(&suit));
+    assert!(!hearts.equivalent(&spades));
+}
+
+#[test]
+fn enum_cases_stay_apart_in_a_union_until_their_enum_joins_it() {
+    let hearts = PhpType::enum_case(atom("Suit"), atom("Hearts"));
+    let spades = PhpType::enum_case(atom("Suit"), atom("Spades"));
+    let suit = PhpType::named(atom("Suit"));
+    let either = PhpType::union(vec![hearts.clone(), spades.clone(), hearts.clone()]);
+    assert_eq!(either.to_string(), "Suit::Hearts|Suit::Spades");
+    assert_eq!(either.simplified().to_string(), "Suit::Hearts|Suit::Spades");
+    let with_enum = PhpType::union(vec![hearts, suit.clone(), spades]);
+    assert_eq!(with_enum, suit);
+}
+
+#[test]
+fn class_string_of_an_enum_case_names_the_enum() {
+    let hearts = PhpType::enum_case(atom("Suit"), atom("Hearts"));
+    assert_eq!(
+        PhpType::class_string(Some(hearts)).to_string(),
+        "class-string<Suit>"
+    );
+}
+
+#[test]
 fn shape_value_type_nullable() {
     let ty = PhpType::parse("?array{name: string}");
     assert_eq!(ty.shape_value_type("name"), Some(&PhpType::string()));

@@ -11,13 +11,13 @@ use mago_syntax::cst::argument::Argument;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::literal::Literal;
 use mago_syntax::walker::Walker;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::class_lookup::{
     Fqn, ResolvedClassLoader, first_rejected_callable_param, missing_required_shape_keys,
-    shape_breaks_list_order,
+    shape_breaks_list_order, undeclared_shape_keys,
 };
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
@@ -781,7 +781,7 @@ impl ArgumentCheck<'_> {
         {
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 "invalid_laravel_view",
                 format!("Unknown view: '{view}'"),
             ));
@@ -817,7 +817,7 @@ impl ArgumentCheck<'_> {
             if !found && let Some(range) = self.range(*lit_start, *lit_end) {
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::Error,
                     TYPE_MISMATCH_ARGUMENT_CODE,
                     format!(
                         "'{}' is not a known property of {}",
@@ -930,6 +930,18 @@ impl ArgumentCheck<'_> {
                     .join(", "),
             ));
         }
+        let undeclared_keys = undeclared_shape_keys(arg_type, param_type, self.class_loader);
+        if !undeclared_keys.is_empty() {
+            message.push_str(&format!(
+                " (undeclared key{} {})",
+                if undeclared_keys.len() == 1 { "" } else { "s" },
+                undeclared_keys
+                    .iter()
+                    .map(|key| format!("'{key}'"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
+        }
         // The two types printed above can look interchangeable when
         // the only thing separating them is the order of the keys,
         // so say that that is the complaint.
@@ -974,9 +986,9 @@ impl ArgumentCheck<'_> {
         // than a type gap. Projects can opt into treating that
         // narrower case as a warning.
         let severity = if only_null_unsatisfied && self.downgrade_nullable_mismatch {
-            DiagnosticSeverity::WARNING
+            DiagnosticSeverity::Warning
         } else {
-            DiagnosticSeverity::ERROR
+            DiagnosticSeverity::Error
         };
         (message, severity)
     }

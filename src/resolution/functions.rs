@@ -55,6 +55,11 @@ impl Backend {
 
         let index_generation = self.symbols.function_index_generation();
 
+        // ── Stub paths: a declaration there wins over every other ──
+        if let Some(function) = self.load_external_stub_function(candidates) {
+            return Some(function);
+        }
+
         // ── Phase 1: Check global_functions (user code + already-cached stubs) ──
         {
             let fmap = self.symbols.global_functions.read();

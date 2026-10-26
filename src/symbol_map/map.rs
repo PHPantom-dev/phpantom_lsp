@@ -185,9 +185,9 @@ pub(crate) enum VarDefKind {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SymbolMap {
     pub spans: Vec<SymbolSpan>,
-    /// Laravel string spans gated by cross-file function/class membership.
+    /// String-key spans gated by cross-file function/class membership.
     /// Empty for ordinary PHP files and never consulted by request handlers.
-    pub conditional_laravel_spans: Vec<ConditionalLaravelStringSpan>,
+    pub conditional_string_key_spans: Vec<ConditionalStringKeySpan>,
     /// Member-access span indices keyed by member name.
     ///
     /// This lets references/rename jump straight to relevant `->name` /
@@ -252,6 +252,11 @@ pub(crate) struct SymbolMap {
     /// Used by signature help to find the innermost call containing the
     /// cursor and to compute the active parameter index from AST data.
     pub call_sites: CallSites,
+    /// `(start, args_start)` of every call written as a statement of its
+    /// own, whose result is therefore thrown away, sorted by `args_start`.
+    /// A call cast to `(void)`, or used in any other way, is not one of
+    /// these.
+    pub discarded_calls: Vec<(u32, u32)>,
     /// Breakable block boundaries `(start_offset, end_offset)` where
     /// `break` is valid (loops and `switch`).
     pub breakable_scopes: Vec<(u32, u32)>,
@@ -273,12 +278,12 @@ pub(crate) struct SymbolMap {
     /// parameters.  Used by inlay hints to show inferred parameter types
     /// and return types from the enclosing callable signature.
     pub untyped_closure_sites: Vec<UntypedClosureSite>,
-    /// Render sites whose receiver only a type settles, sorted by `start`.
+    /// String keys whose receiver only a type settles, sorted by `start`.
     ///
-    /// Empty for all but the handful of files that call a view factory or
-    /// a mailable through something other than the spellings
-    /// [`SymbolKind::LaravelStringKey`] is emitted for.
-    pub view_receiver_sites: Vec<ViewReceiverSite>,
+    /// Empty for all but the files that call a view factory, a mailable,
+    /// or a Symfony container through something other than the spellings
+    /// [`SymbolKind::StringKey`] is emitted for.
+    pub typed_receiver_sites: Vec<TypedReceiverSite>,
     /// Literal comparisons whose receivers and columns must be confirmed
     /// as Eloquent morph type columns, sorted by `start`.
     pub morph_column_sites: Vec<MorphColumnSite>,
@@ -286,6 +291,13 @@ pub(crate) struct SymbolMap {
     /// its ability span by [`GateSubject::ability_start`].  Empty for every
     /// file that performs no authorization checks.
     pub gate_subjects: Vec<GateSubject>,
+    /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
+    /// register.  Empty for every file that declares none.
+    pub messenger_handlers: Vec<MessengerHandlerSite>,
+    /// The classes, aliases, and values the file's service and container
+    /// parameter declarations give, sorted by `start`.  Empty for every file
+    /// that declares none.
+    pub container_values: Vec<ContainerValueSite>,
     /// Byte length of the source text this map was extracted from, or
     /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit
     /// in the `u32` fields above anyway).

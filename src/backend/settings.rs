@@ -15,6 +15,13 @@ impl Backend {
         self.workspace.config.lock().clone()
     }
 
+    /// Whether the editor is shown any diagnostics at all; see
+    /// [`DiagnosticsConfig::enabled`](config::DiagnosticsConfig::enabled).
+    /// Reads the one flag without cloning the whole config.
+    pub(crate) fn diagnostics_enabled(&self) -> bool {
+        self.workspace.config.lock().diagnostics.enabled()
+    }
+
     /// The directory symlinks the workspace walks have indexed through.
     ///
     /// Walks report into it as they discover links; the watcher
@@ -108,9 +115,13 @@ impl Backend {
     ///
     /// Also filters `stub_function_index`, `stub_index`, and
     /// `stub_constant_index` to remove entries that do not exist in
-    /// the given PHP version.
+    /// the given PHP version, and rebuilds the stub-path index, which is
+    /// filtered the same way.
     pub fn set_php_version(&self, version: types::PhpVersion) {
-        *self.workspace.php_version.lock() = version;
+        let previous = std::mem::replace(&mut *self.workspace.php_version.lock(), version);
+        if previous != version && self.has_external_stubs() {
+            self.refresh_stub_paths();
+        }
         // Every symbol a stub file declares shares that file's `&'static str`,
         // so each file is scanned once for its removed declarations and the
         // filter below is a set lookup per symbol.

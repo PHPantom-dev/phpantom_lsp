@@ -1,5 +1,5 @@
 use crate::common::{completion_response, create_test_backend, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// `$this->` inside a method of a class declared within a top-level `if`
 /// version guard must resolve to the class's own members. Such classes are a
@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::*;
 async fn test_completion_this_inside_conditional_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///conditional_class_this.php").unwrap();
+    let uri = Uri::parse("file:///conditional_class_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "if (\\PHP_VERSION_ID >= 80000) {\n",
@@ -29,8 +29,8 @@ async fn test_completion_this_inside_conditional_class() {
     let result = completion_response(&backend, &uri, 6, 19, None).await;
 
     let items = match result.expect("should return completion results") {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
 
     let labels: Vec<&str> = items

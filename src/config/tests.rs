@@ -164,6 +164,24 @@ fn report_magic_properties_defaults_to_false() {
 }
 
 #[test]
+fn parses_partial_union_members() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(CONFIG_FILE_NAME);
+    std::fs::write(&path, "[diagnostics]\npartial-union-members = true\n").unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(config.diagnostics.partial_union_members_enabled());
+}
+
+#[test]
+fn partial_union_members_defaults_to_false() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(CONFIG_FILE_NAME);
+    std::fs::write(&path, "[diagnostics]\n").unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(!config.diagnostics.partial_union_members_enabled());
+}
+
+#[test]
 fn parses_downgrade_nullable_argument_mismatch() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(CONFIG_FILE_NAME);
@@ -787,6 +805,27 @@ fn phpcs_defaults() {
     assert!(config.phpcs.timeout.is_none());
     assert_eq!(config.phpcs.timeout_ms(), 30_000);
     assert!(!config.phpcs.is_disabled());
+}
+
+#[test]
+fn diagnostics_default_to_on() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(CONFIG_FILE_NAME), "[diagnostics]\n").unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(config.diagnostics.enabled());
+}
+
+#[test]
+fn switching_diagnostics_off_switches_the_workspace_pass_off() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(CONFIG_FILE_NAME),
+        "[diagnostics]\nenabled = false\nworkspace = true\n",
+    )
+    .unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert!(!config.diagnostics.enabled());
+    assert!(!config.diagnostics.workspace_enabled());
 }
 
 #[test]

@@ -13,8 +13,8 @@ mod tests {
         template_diagnostics,
     };
     use phpantom_lsp::Backend;
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     const PROVIDERS_PHP: &str =
         "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n";
@@ -57,7 +57,7 @@ class Post
 
     /// A workspace whose provider registers one `Blade::directive()` and one
     /// `Blade::if()`, with `page.blade.php` holding `template`.
-    async fn start(template: &str) -> (Backend, tempfile::TempDir, Url) {
+    async fn start(template: &str) -> (Backend, tempfile::TempDir, Uri) {
         let (backend, dir) = create_psr4_workspace(
             LARAVEL_APP_COMPOSER,
             &[
@@ -69,7 +69,7 @@ class Post
         );
         backend.initialized(InitializedParams {}).await;
 
-        let uri = Url::from_file_path(dir.path().join(TEMPLATE)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(TEMPLATE)).unwrap();
         open_document(&backend, &uri, "blade", template).await;
         (backend, dir, uri)
     }
@@ -150,8 +150,8 @@ class Post
             .await
             .expect("directive completion should answer");
         let items = match response {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
 
@@ -190,7 +190,7 @@ class Post
         );
 
         let provider_path = dir.path().join("app/Providers/AppServiceProvider.php");
-        let provider_uri = Url::from_file_path(&provider_path).unwrap();
+        let provider_uri = Uri::from_file_path(&provider_path).unwrap();
         let edited = PROVIDER.replace(
             "Blade::if('admin'",
             "Blade::directive('money', fn ($e) => $e);\n\n        Blade::if('admin'",
@@ -199,14 +199,14 @@ class Post
         backend
             .did_change(DidChangeTextDocumentParams {
                 text_document: VersionedTextDocumentIdentifier {
-                    uri: provider_uri,
+                    text_document_identifier: TextDocumentIdentifier { uri: provider_uri },
                     version: 2,
                 },
-                content_changes: vec![TextDocumentContentChangeEvent {
-                    range: None,
-                    range_length: None,
-                    text: edited,
-                }],
+                content_changes: vec![
+                    TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                        TextDocumentContentChangeWholeDocument { text: edited },
+                    ),
+                ],
             })
             .await;
 

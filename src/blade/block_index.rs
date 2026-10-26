@@ -21,7 +21,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use tower_lsp::lsp_types::Location;
+use tower_lsp_server::gen_lsp_types::Location;
 
 use crate::Backend;
 

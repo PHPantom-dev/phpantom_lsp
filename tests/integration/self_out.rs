@@ -1,9 +1,10 @@
 //! Integration tests for `@psalm-this-out` / `@phpstan-self-out`: a method
 //! call that changes the type the walker tracks for its receiver, the way
 //! an assignment changes a variable's type.
+use crate::common::message_text;
 
 use crate::common::{create_test_backend, hover_at, hover_last, hover_text};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -126,14 +127,14 @@ function f(MutableBox $box): void {{
     // ...and calling a Pencil-only method on the result must not be reported.
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, &content, &mut diags);
-    let unknown_members: Vec<&String> = diags
+    let unknown_members: Vec<&str> = diags
         .iter()
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| &d.message)
+        .map(|d| message_text(&d.message))
         .collect();
     assert!(
         unknown_members.is_empty(),

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_span::HasSpan;
-use tower_lsp::lsp_types::Url;
+use tower_lsp_server::gen_lsp_types::Uri;
 
 use crate::Backend;
 use crate::text_position::LineIndex;
@@ -35,7 +35,7 @@ pub(super) struct ScanPaths<'a> {
     pub(super) program: &'a Program<'a>,
     /// The file the walk is currently reading, which is where the route names
     /// it finds are declared.
-    pub(super) uri: &'a Arc<Url>,
+    pub(super) uri: &'a Arc<Uri>,
     /// That file's line table, for the position of each declaration.
     pub(super) lines: &'a LineIndex<'a>,
 }
@@ -47,7 +47,7 @@ impl<'a> ScanPaths<'a> {
         open: &'a RefCell<HashSet<PathBuf>>,
         macros: &'a MacroScope,
         program: &'a Program<'a>,
-        uri: &'a Arc<Url>,
+        uri: &'a Arc<Uri>,
         lines: &'a LineIndex<'a>,
     ) -> Self {
         Self {
@@ -167,7 +167,7 @@ impl MacroScope {
 pub(super) struct OpenMacro<'a> {
     name: String,
     pub(super) content: Arc<str>,
-    pub(super) uri: Arc<Url>,
+    pub(super) uri: Arc<Uri>,
     pub(super) path: PathBuf,
     /// Byte offset of the closure within `content`.
     pub(super) offset: u32,

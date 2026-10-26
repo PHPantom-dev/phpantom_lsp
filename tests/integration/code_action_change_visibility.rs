@@ -17,7 +17,7 @@ use crate::common::{
     find_actions_containing, get_code_actions_at, inject_phpstan_diag_with_data, lsp_pos_to_offset,
     resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -63,10 +63,7 @@ class Foo {
         .iter()
         .find(|a| a.title == "Make protected")
         .expect("should have Make protected action");
-    assert_eq!(
-        make_protected.kind,
-        Some(CodeActionKind::new("refactor.rewrite"))
-    );
+    assert_eq!(make_protected.kind, Some(CodeActionKind::RefactorRewrite));
 
     let resolved = resolve_action(&backend, uri, content, make_protected);
     assert_eq!(extract_edit_text(&resolved), "protected");
@@ -735,7 +732,7 @@ class Child extends Base {
     assert_eq!(vis_actions.len(), 1, "parent filtering leaves only public");
     let action = vis_actions[0];
     assert_eq!(action.title, "Make public");
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
     assert!(
         action.diagnostics.is_some(),
@@ -775,7 +772,7 @@ class Child extends Base {
         .iter()
         .find(|a| a.title == "Make protected")
         .expect("should have Make protected");
-    assert_eq!(make_protected.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(make_protected.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(make_protected.is_preferred, Some(true));
     assert!(make_protected.diagnostics.is_some());
 
@@ -783,7 +780,7 @@ class Child extends Base {
         .iter()
         .find(|a| a.title == "Make public")
         .expect("should have Make public");
-    assert_eq!(make_public.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(make_public.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(make_public.is_preferred, Some(false));
     assert!(make_public.diagnostics.is_some());
 }
@@ -816,7 +813,7 @@ class Child extends Base {
 
     assert_eq!(vis_actions.len(), 1);
     assert_eq!(vis_actions[0].title, "Make public");
-    assert_eq!(vis_actions[0].kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(vis_actions[0].kind, Some(CodeActionKind::QuickFix));
 
     let attached = vis_actions[0]
         .diagnostics
@@ -885,7 +882,7 @@ class Child extends Base {
     for action in &vis_actions {
         assert_eq!(
             action.kind,
-            Some(CodeActionKind::new("refactor.rewrite")),
+            Some(CodeActionKind::RefactorRewrite),
             "without PHPStan diag, kind should be refactor.rewrite for '{}'",
             action.title
         );
@@ -922,10 +919,10 @@ class Child extends Base {
             start: Position::new(5, 0),
             end: Position::new(5, 80),
         },
-        severity: Some(DiagnosticSeverity::ERROR),
-        code: Some(NumberOrString::String("method.visibility".to_string())),
+        severity: Some(DiagnosticSeverity::Error),
+        code: Some(Code::String("method.visibility".to_string())),
         source: Some("PHPStan".to_string()),
-        message: "Private method Child::foo() overriding public method Base::foo() should also be public.".to_string(),
+        message: "Private method Child::foo() overriding public method Base::foo() should also be public.".to_string().into(),
         data: Some(serde_json::json!({ "ignorable": false })),
         ..Default::default()
     };
@@ -1079,7 +1076,7 @@ class Child extends Base {
     let vis_foo = find_actions(&actions_foo, "Make ");
     assert_eq!(vis_foo.len(), 1);
     assert_eq!(vis_foo[0].title, "Make public");
-    assert_eq!(vis_foo[0].kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(vis_foo[0].kind, Some(CodeActionKind::QuickFix));
 
     // Line 7 (bar): "Make protected" (preferred) and "Make public"
     let actions_bar = get_code_actions_at(&backend, uri, content, 7, 10);
@@ -1156,7 +1153,7 @@ class Child extends Base {
         "should offer Make public from the attribute line"
     );
     assert_eq!(vis_actions[0].title, "Make public");
-    assert_eq!(vis_actions[0].kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(vis_actions[0].kind, Some(CodeActionKind::QuickFix));
     assert!(
         vis_actions[0].diagnostics.is_some(),
         "diagnostic must be attached so it gets cleared on resolve"
@@ -1228,7 +1225,7 @@ class Child extends Base {
     );
     assert_eq!(
         vis_actions[0].kind,
-        Some(CodeActionKind::QUICKFIX),
+        Some(CodeActionKind::QuickFix),
         "should be quickfix when PHPStan diagnostic is attached"
     );
 }
@@ -1267,7 +1264,7 @@ class Child extends Base {
 
     assert_eq!(vis_actions.len(), 1);
     assert_eq!(vis_actions[0].title, "Make public");
-    assert_eq!(vis_actions[0].kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(vis_actions[0].kind, Some(CodeActionKind::QuickFix));
     assert!(
         vis_actions[0].diagnostics.is_some(),
         "diagnostic should be attached when reported on the signature line"

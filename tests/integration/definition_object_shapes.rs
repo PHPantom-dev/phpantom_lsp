@@ -5,7 +5,7 @@
 //! property key inside the docblock annotation that defines the shape.
 
 use crate::common::{assert_location, create_test_backend, goto_definition_at, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // §1  Object shape from @return annotation
@@ -16,7 +16,7 @@ use tower_lsp::lsp_types::*;
 #[tokio::test]
 async fn test_gtd_object_shape_return_type_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     //                                                          line
     let text = concat!(
         "<?php\n",                                               // 0
@@ -66,7 +66,7 @@ async fn test_gtd_object_shape_return_type_property() {
 #[tokio::test]
 async fn test_gtd_object_shape_inline_var_annotation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                         // 0
         "class Demo {\n",                                                  // 1
@@ -103,7 +103,7 @@ async fn test_gtd_object_shape_inline_var_annotation() {
 #[tokio::test]
 async fn test_gtd_object_shape_key_after_non_ascii_key() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                  // 0
         "function demo(): void {\n",                                // 1
@@ -115,7 +115,7 @@ async fn test_gtd_object_shape_key_after_non_ascii_key() {
     );
     open_php(&backend, &uri, text).await;
 
-    let Some(GotoDefinitionResponse::Scalar(location)) =
+    let Some(DefinitionResponse::Definition(Definition::Location(location))) =
         goto_definition_at(&backend, &uri, 4, 12).await
     else {
         panic!("Should resolve object shape property 'name'");
@@ -131,7 +131,7 @@ async fn test_gtd_object_shape_key_after_non_ascii_key() {
 #[tokio::test]
 async fn test_gtd_object_shape_param_annotation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                 // 0
         "class Server {\n",                                        // 1
@@ -173,7 +173,7 @@ async fn test_gtd_object_shape_param_annotation() {
 #[tokio::test]
 async fn test_gtd_object_shape_property_with_class_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                       // 0
         "class Pen { public function write(): void {} }\n",              // 1
@@ -218,7 +218,7 @@ async fn test_gtd_object_shape_property_with_class_type() {
 #[tokio::test]
 async fn test_gtd_nullable_object_shape() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                 // 0
         "class Fetcher {\n",                                       // 1
@@ -252,7 +252,7 @@ async fn test_gtd_nullable_object_shape() {
 #[tokio::test]
 async fn test_gtd_object_shape_optional_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                      // 0
         "class Builder {\n",                                            // 1
@@ -297,7 +297,7 @@ async fn test_gtd_object_shape_optional_property() {
 #[tokio::test]
 async fn test_gtd_object_shape_class_property_var() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "class App {\n",                                     // 1
@@ -337,7 +337,7 @@ async fn test_gtd_object_shape_class_property_var() {
 #[tokio::test]
 async fn test_gtd_object_shape_closest_match() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                    // 0
         "class First {\n",                                            // 1
@@ -375,7 +375,7 @@ async fn test_gtd_object_shape_closest_match() {
 #[tokio::test]
 async fn test_gtd_nested_object_shape_first_level() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                    // 0
         "class Api {\n",                                                              // 1
@@ -419,7 +419,7 @@ async fn test_gtd_nested_object_shape_first_level() {
 #[tokio::test]
 async fn test_gtd_object_shape_this_method_return() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                            // 0
         "class ShapeDemo {\n",                                                // 1
@@ -457,7 +457,7 @@ async fn test_gtd_object_shape_this_method_return() {
 #[tokio::test]
 async fn test_gtd_object_shape_chain_first_property() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                     // 0
         "class Pen {\n",                                                               // 1

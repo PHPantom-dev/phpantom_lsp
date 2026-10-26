@@ -11,12 +11,17 @@ use super::path_aliases;
 use crate::Backend;
 use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::composer;
-use crate::workspace_env::ComposerProjectPaths;
+use crate::workspace_env::{ComposerProjectPaths, LibraryClaim, LibraryClaimant};
 
 impl Backend {
     /// Register a vendor directory path and its URI prefix for
     /// vendor-file detection.
     pub(crate) fn add_vendor_dir(&self, vendor_path: &Path) {
+        self.add_library_dir(LibraryClaimant::Composer, vendor_path);
+    }
+
+    /// Register a directory as library code on behalf of `claimant`.
+    pub(super) fn add_library_dir(&self, claimant: LibraryClaimant, dir: &Path) {
         // Keep both filesystem spellings. Walkers normally yield the raw
         // workspace spelling, while Composer package discovery canonicalizes
         // its files; on macOS those can be `/var` and `/private/var` for the
@@ -27,19 +32,78 @@ impl Backend {
         // references, rename), and keep both forms for the same reason, so
         // macOS `/tmp` vs `/private/tmp` style aliases do not leak vendor
         // files into workspace indexing.
-        let aliases = path_aliases(vendor_path);
+        let aliases = path_aliases(dir);
         let uri_prefixes = aliases
             .iter()
             .map(|path| crate::util::dir_uri_prefix(path))
             .collect();
-        self.register_vendor_location(aliases, uri_prefixes);
+        self.register_vendor_location(claimant, aliases, uri_prefixes);
     }
 
-    /// Record the spellings of a vendor location and the URI prefixes that
-    /// mark a file under it, skipping any already registered.
-    pub(super) fn register_vendor_location(&self, paths: Vec<PathBuf>, uri_prefixes: Vec<String>) {
+    /// Record the spellings of a library location and the URI prefixes
+    /// that mark a file under it, skipping any already registered.
+    pub(super) fn register_vendor_location(
+        &self,
+        claimant: LibraryClaimant,
+        paths: Vec<PathBuf>,
+        uri_prefixes: Vec<String>,
+    ) {
+        let mut claims = self.workspace.library_claims.lock();
+        let known = claims.iter().any(|claim| {
+            claim.claimant == claimant && claim.paths == paths && claim.uri_prefixes == uri_prefixes
+        });
+        if !known {
+            claims.push(LibraryClaim {
+                claimant,
+                paths: paths.clone(),
+                uri_prefixes: uri_prefixes.clone(),
+            });
+        }
         push_new(&mut self.workspace.vendor_dir_paths.lock(), paths);
         push_new(&mut self.workspace.vendor_uri_prefixes.lock(), uri_prefixes);
+    }
+
+    /// Withdraw every location `claimant` registered, keeping the
+    /// spellings another source still claims, and return the path
+    /// spellings it had registered.
+    pub(super) fn release_library_claimant(&self, claimant: &LibraryClaimant) -> Vec<PathBuf> {
+        let mut claims = self.workspace.library_claims.lock();
+        let (released, kept): (Vec<LibraryClaim>, Vec<LibraryClaim>) = std::mem::take(&mut *claims)
+            .into_iter()
+            .partition(|claim| claim.claimant == *claimant);
+        *claims = kept;
+        if released.is_empty() {
+            return Vec::new();
+        }
+
+        let still_claimed_path =
+            |path: &PathBuf| claims.iter().any(|claim| claim.paths.contains(path));
+        let still_claimed_prefix = |prefix: &String| {
+            claims
+                .iter()
+                .any(|claim| claim.uri_prefixes.contains(prefix))
+        };
+        let gone_paths: Vec<&PathBuf> = released
+            .iter()
+            .flat_map(|claim| &claim.paths)
+            .filter(|path| !still_claimed_path(path))
+            .collect();
+        let gone_prefixes: Vec<&String> = released
+            .iter()
+            .flat_map(|claim| &claim.uri_prefixes)
+            .filter(|prefix| !still_claimed_prefix(prefix))
+            .collect();
+        self.workspace
+            .vendor_dir_paths
+            .lock()
+            .retain(|path| !gone_paths.contains(&path));
+        self.workspace
+            .vendor_uri_prefixes
+            .lock()
+            .retain(|prefix| !gone_prefixes.contains(&prefix));
+        drop(claims);
+
+        released.into_iter().flat_map(|claim| claim.paths).collect()
     }
 
     /// Rebuild the vendor-derived indexes after a `composer.json` /
@@ -74,6 +138,12 @@ impl Backend {
                 }
             }
         }
+
+        // After the rescans above, whose `replace_tree` over the vendor
+        // directory also dropped the discovery entries of the stub
+        // packages inside it, and which re-read which stub packages are
+        // installed.
+        self.refresh_stub_paths();
 
         // Clear all cached class info since vendor classes may have
         // changed versions.  The negative-cache clear comes last of the
@@ -139,7 +209,7 @@ impl Backend {
 
     /// Register where a Composer project keeps its code: the PSR-4
     /// mappings from its `composer.json` and from its path repositories,
-    /// and its vendor directory.
+    /// its vendor directory, and the stub packages it installed.
     ///
     /// A subproject's own mappings are made absolute; the workspace root's
     /// stay relative to it.  Returns the vendor directory both as
@@ -169,13 +239,19 @@ impl Backend {
         let vendor_path = project_root.join(&vendor_dir);
         self.add_vendor_dir(&vendor_path);
 
+        let installed = composer::read_installed_packages(project_root, &vendor_dir);
         // Include PSR-4 mappings from path-repository packages (local
         // packages symlinked into vendor/, e.g. internachi/modular modules).
-        mappings.extend(composer::extract_path_repo_psr4_mappings(
-            project_root,
-            &vendor_dir,
-        ));
+        if let Some(installed) = &installed {
+            mappings.extend(composer::path_repo_psr4_mappings(project_root, installed));
+        }
         self.set_project_psr4_mappings(project_root, mappings);
+        let stub_packages = installed
+            .as_ref()
+            .map(composer::stub_package_roots)
+            .unwrap_or_default();
+        composer_project_entry(&mut self.workspace.composer_projects.write(), project_root)
+            .stub_packages = stub_packages;
 
         (vendor_dir, vendor_path)
     }

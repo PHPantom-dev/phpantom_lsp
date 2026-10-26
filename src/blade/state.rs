@@ -23,10 +23,10 @@ pub(crate) struct BladeState {
     /// class `$this` is bound to.  Lets re-inference passes skip templates
     /// whose scope is unchanged.
     pub(crate) injected_vars: RwLock<HashMap<String, super::call_site_inference::BladeScope>>,
-    /// Per-file view spans whose render site only the receiver's *type*
+    /// Per-file string-key spans whose call only the receiver's *type*
     /// settles, computed on first use and dropped when the file is
     /// re-parsed (see [`crate::blade::typed_receiver`]).  Only files whose
     /// symbol map recorded a candidate site ever get an entry.
-    pub(crate) typed_receiver_view_spans_cache:
+    pub(crate) typed_receiver_spans_cache:
         RwLock<HashMap<String, super::typed_receiver::TypedReceiverSpans>>,
 }

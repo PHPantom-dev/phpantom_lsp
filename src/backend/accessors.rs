@@ -179,7 +179,7 @@ impl Backend {
     /// to inject PHPStan diagnostics without running PHPStan).
     pub fn phpstan_last_diags(
         &self,
-    ) -> &Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>> {
+    ) -> &Arc<Mutex<HashMap<String, Vec<tower_lsp_server::gen_lsp_types::Diagnostic>>>> {
         &self.phpstan_tool.last_diags
     }
 
@@ -187,7 +187,7 @@ impl Backend {
     /// to inject PHPCS diagnostics without running PHPCS).
     pub fn phpcs_last_diags(
         &self,
-    ) -> &Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>> {
+    ) -> &Arc<Mutex<HashMap<String, Vec<tower_lsp_server::gen_lsp_types::Diagnostic>>>> {
         &self.phpcs_tool.last_diags
     }
 

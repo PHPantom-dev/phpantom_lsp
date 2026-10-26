@@ -1,0 +1,8 @@
+// test: An update query builder with a dynamic argument
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testUpdateIssue.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/query-builder-dql-update.php
+// expect_diagnostic: 31: Could not analyse QueryBuilder with dynamic arguments. // SKIP: DQL and query builder strings are not checked
+---

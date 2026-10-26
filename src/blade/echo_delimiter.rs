@@ -3,8 +3,8 @@
 //! never spells out and the second to a bare `echo`, so neither has PHP of
 //! its own for a request on it to land on.
 
-use tower_lsp::lsp_types::{
-    Hover, HoverContents, Location, MarkupContent, MarkupKind, Position, Range,
+use tower_lsp_server::gen_lsp_types::{
+    Contents, Hover, Location, MarkupContent, MarkupKind, Position, Range,
 };
 
 use super::directive_completion::{Mode, mode_at};
@@ -128,12 +128,12 @@ impl crate::Backend {
     }
 
     /// Build hover content for `{{ }}` (escaped echo via `e()`).
-    fn blade_escaped_echo_contents(&self) -> HoverContents {
+    fn blade_escaped_echo_contents(&self) -> Contents {
         // Try to resolve the actual `e()` function from the project/stubs.
         if let Some(func) = self.find_or_load_function(&["e"]) {
             crate::hover::hover_for_function(&func, None, None, false).contents
         } else {
-            HoverContents::Markup(MarkupContent {
+            Contents::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
                 value: "Blade escaped echo. Output is passed through `e()` (`htmlspecialchars`).\n\n\
                     ```php\n<?php\nfunction e(mixed $value, bool $doubleEncode = true): string;\n```"
@@ -144,8 +144,8 @@ impl crate::Backend {
 }
 
 /// Build hover content for `{!! !!}` (raw echo, with no `e()` around it).
-fn blade_raw_echo_contents() -> HoverContents {
-    HoverContents::Markup(MarkupContent {
+fn blade_raw_echo_contents() -> Contents {
+    Contents::MarkupContent(MarkupContent {
         kind: MarkupKind::Markdown,
         value: "Blade raw echo. Output is not escaped: unlike `{{ }}`, it is not passed through \
             `e()` (`htmlspecialchars`)."

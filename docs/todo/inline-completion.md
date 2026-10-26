@@ -100,9 +100,8 @@ artifact, not bundled in the main LSP binary.
 
 **Complexity:** Medium (per pattern group)
 **Dependencies:** None beyond existing type resolution, but
-`textDocument/inlineCompletion` is an LSP 3.18 request. Check whether
-our `lsp-types` (0.94.1, pinned by `tower-lsp` 0.20) carries it; if
-not, this needs F20 or a custom method.
+`textDocument/inlineCompletion` is an LSP 3.18 request, and
+`tower-lsp-server` exposes it as `LanguageServer::inline_completion`.
 
 Some templates overlap shipped features: getter/setter and
 constructor-assignment bodies duplicate the `generate_getter_setter`

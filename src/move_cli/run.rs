@@ -4,9 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use tower_lsp::lsp_types::{
-    DocumentChangeOperation, DocumentChanges, OneOf, ResourceOp, TextEdit, Url, WorkspaceEdit,
-};
+use tower_lsp_server::gen_lsp_types::{DocumentChange, Edit, TextEdit, Uri, WorkspaceEdit};
 
 use crate::analyse::dispatch_report;
 use crate::{Backend, composer, config};
@@ -282,44 +280,27 @@ fn build_plan(root: &Path, edit: WorkspaceEdit) -> Result<MovePlan, String> {
                 .extend(file_edits);
         }
     }
-    if let Some(document_changes) = edit.document_changes {
-        match document_changes {
-            DocumentChanges::Edits(document_edits) => {
-                for document in document_edits {
-                    let path = uri_path(&document.text_document.uri, root)?;
-                    edits
-                        .entry(path)
-                        .or_default()
-                        .extend(document.edits.into_iter().map(|edit| match edit {
-                            OneOf::Left(edit) => edit,
-                            OneOf::Right(edit) => edit.text_edit,
-                        }));
+    for operation in edit.document_changes.into_iter().flatten() {
+        match operation {
+            DocumentChange::TextDocumentEdit(document) => {
+                let path = uri_path(&document.text_document.text_document_identifier.uri, root)?;
+                let file_edits = edits.entry(path).or_default();
+                for edit in document.edits {
+                    file_edits.push(match edit {
+                        Edit::TextEdit(edit) => edit,
+                        Edit::AnnotatedTextEdit(edit) => edit.text_edit,
+                        Edit::SnippetTextEdit(_) => {
+                            return Err("the move plan contains an unsupported snippet edit".into());
+                        }
+                    });
                 }
             }
-            DocumentChanges::Operations(operations) => {
-                for operation in operations {
-                    match operation {
-                        DocumentChangeOperation::Edit(document) => {
-                            let path = uri_path(&document.text_document.uri, root)?;
-                            edits
-                                .entry(path)
-                                .or_default()
-                                .extend(document.edits.into_iter().map(|edit| match edit {
-                                    OneOf::Left(edit) => edit,
-                                    OneOf::Right(edit) => edit.text_edit,
-                                }));
-                        }
-                        DocumentChangeOperation::Op(ResourceOp::Rename(rename)) => moves.push((
-                            uri_path(&rename.old_uri, root)?,
-                            uri_path(&rename.new_uri, root)?,
-                        )),
-                        DocumentChangeOperation::Op(_) => {
-                            return Err(
-                                "the move plan contains an unsupported file operation".into()
-                            );
-                        }
-                    }
-                }
+            DocumentChange::RenameFile(rename) => moves.push((
+                uri_path(&rename.old_uri, root)?,
+                uri_path(&rename.new_uri, root)?,
+            )),
+            DocumentChange::CreateFile(_) | DocumentChange::DeleteFile(_) => {
+                return Err("the move plan contains an unsupported file operation".into());
             }
         }
     }
@@ -335,7 +316,7 @@ fn build_plan(root: &Path, edit: WorkspaceEdit) -> Result<MovePlan, String> {
     Ok(MovePlan { writes, moves })
 }
 
-fn uri_path(uri: &Url, root: &Path) -> Result<PathBuf, String> {
+fn uri_path(uri: &Uri, root: &Path) -> Result<PathBuf, String> {
     let path =
         crate::util::url_to_path(uri).ok_or_else(|| format!("unsupported non-file URI: {uri}"))?;
     if !path.starts_with(root) {

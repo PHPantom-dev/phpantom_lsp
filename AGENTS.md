@@ -184,8 +184,11 @@ edit and must be fixed before moving on.
 
 **Framework-specific demos.** Laravel demos live in `examples/laravel/`
 (a standalone project with `composer.json`, models, config, routes,
-views, and translations). `vendor/` is git-ignored, so run `composer
-install` there before verifying Laravel demos on a fresh clone. Put new
+views, and translations), and Symfony demos in `examples/symfony/` (a
+standalone project with `composer.json`, controllers, YAML/XML/PHP
+configuration, Twig templates, and translation catalogues). `vendor/`
+is git-ignored in both, so run `composer install` there before
+verifying framework demos on a fresh clone. Put new
 framework-specific features in the matching `examples/<framework>/`
 project, not in `examples/php/`. If a feature affects Laravel-specific
 resolution (Eloquent, config, views, routes, translations), also update
@@ -198,6 +201,21 @@ accessor existence). Add a matching assertion there when demo code
 depends on a specific runtime behaviour, and run
 `php examples/laravel/assertions.php`.
 
+If a feature affects Symfony-specific resolution (services, routes,
+translations, templates, forms, validation, bundle configuration,
+events, Messenger, Doctrine mappings), put the demo in the matching
+file under `examples/symfony/`, with a "Try:" comment at the site and a
+line in its `README.md`. Lint with
+`find examples/symfony/src examples/symfony/config -name '*.php' -print0 | xargs -0 -n1 php -l`.
+`examples/symfony/assertions.php` is the Symfony equivalent: it loads
+the demo's configuration with Symfony's own loaders (routing, container,
+translator, Twig, form factory, validator) and checks that every name
+the demo declares, and every claim its "Try:" comments make, holds at
+runtime. Add a matching check there for each new name or claim, and run
+`php examples/symfony/assertions.php`. Then run
+`phpantom_lsp analyze --project-root examples/symfony --no-colour`,
+which must report `[OK] No errors`.
+
 ## Updating docs/todo.md
 
 Remove completed items entirely from both `docs/todo.md` **and** the
@@ -207,12 +225,14 @@ domain document they link to (e.g. `docs/todo/bugs.md`,
 has shipped" comment. The changelog is the sole record of what was
 completed; the todo files are a backlog of what remains. If a section in
 a domain document becomes empty, replace its content with a short "no
-outstanding items" note rather than deleting the file.
+outstanding items" note rather than deleting the file. An item can be
+listed in more than one sprint or feature set; remove every row that
+names it.
 
 **Sprint structure is not yours to delete.** Only remove rows that have
 a numbered ID (e.g. `PM1`, `D8`, `A36`). Never remove release markers
-(`**Release 0.7.0**`), sprint headings (`## Sprint N — …`), or
-un-numbered process rows such as "Clear refactoring gate" — the
+(`**Release 0.7.0**`), sprint headings (`## Sprint N — …`), feature set
+headings (`## WordPress`), or un-numbered process rows such as "Clear refactoring gate" — the
 maintainer controls those and clears them when cutting a release.
 
 **Deferring sub-steps.** If a task has multiple deliverables and you

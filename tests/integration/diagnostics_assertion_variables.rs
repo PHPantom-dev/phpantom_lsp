@@ -4,17 +4,18 @@
 //! truthy check on `$ok` must narrow `$x` exactly as the original
 //! `instanceof` expression would.
 
+use crate::common::message_text;
 use crate::common::{create_test_backend, unknown_member_diagnostics_with_scope_cache};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 fn argument_diagnostics(backend: &phpantom_lsp::Backend, uri: &str, text: &str) -> Vec<Diagnostic> {
     backend.update_ast(uri, text);
     let mut out = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut out);
     out.retain(|d| {
-        d.code.as_ref().is_some_and(
-            |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-        )
+        d.code
+            .as_ref()
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
     });
     out
 }
@@ -308,7 +309,7 @@ class C {{
     );
     let diags = argument_diagnostics(&backend, uri, &text);
     assert!(
-        diags.len() == 1 && diags[0].message.contains("got Repro\\Renderable"),
+        diags.len() == 1 && message_text(&diags[0].message).contains("got Repro\\Renderable"),
         "An `||` chain naming two subjects proves nothing about either, so \
          `$raw` stays `Renderable`, got: {diags:?}"
     );

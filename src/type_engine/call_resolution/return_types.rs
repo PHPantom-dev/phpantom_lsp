@@ -394,9 +394,12 @@ impl Backend {
             SubjectExpr::FunctionCall(func_name) => {
                 Self::return_types_of_function_call(func_name, text_args, ctx, return_type_hint_out)
             }
-            SubjectExpr::Variable(var_name) => {
-                Self::return_types_of_variable_invocation(var_name, ctx, return_type_hint_out)
-            }
+            SubjectExpr::Variable(var_name) => Self::return_types_of_variable_invocation(
+                var_name,
+                text_args,
+                ctx,
+                return_type_hint_out,
+            ),
             SubjectExpr::NewExpr { class_name } => Self::return_types_of_constructor_call(
                 class_name,
                 text_args,
@@ -456,6 +459,30 @@ impl Backend {
                 &tpl,
             )
         };
+        // A `static` nested inside the return type (`NodeBuilder<static>`)
+        // names the receiver with its own type arguments.  Resolving it
+        // against the owner's bare FQN would specialise the returned class
+        // with the un-parameterised owner, so the next call in the chain
+        // loses them.  Only done when the call's template values cover every
+        // class-level parameter, i.e. when the receiver's type is known.
+        let receiver_type = (!class_info.template_params.is_empty()
+            && class_info
+                .template_params
+                .iter()
+                .all(|p| template_subs.contains_key(p.as_str())))
+        .then(|| {
+            receiver_type_for_condition(
+                class_info.fqn().as_str(),
+                &class_info.template_params,
+                template_subs,
+            )
+        });
+        let bind_receiver = |ty: PhpType| -> PhpType {
+            match &receiver_type {
+                Some(receiver) if ty.contains_self_ref() => ty.replace_self_with_type(receiver),
+                _ => ty,
+            }
+        };
         // Helper: try to resolve a method's conditional return type, falling
         // back to template-substituted return type, then plain return type.
         let resolve_method = |method: &MethodInfo| -> Vec<Arc<ClassInfo>> {
@@ -475,7 +502,7 @@ impl Backend {
             ) {
                 let classes: Vec<Arc<ClassInfo>> =
                     crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
-                        &effective,
+                        &bind_receiver(effective),
                         &class_info.fqn(),
                         all_classes,
                         class_loader,
@@ -494,7 +521,7 @@ impl Backend {
             {
                 let substituted = ret.substitute(template_subs);
                 if &substituted != ret {
-                    let substituted = decide_nested(method, substituted);
+                    let substituted = bind_receiver(decide_nested(method, substituted));
                     let classes: Vec<Arc<ClassInfo>> =
                         crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             &substituted,
@@ -546,7 +573,7 @@ impl Backend {
                     return vec![Arc::new(class_info.clone())];
                 }
                 return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
-                    &decide_nested(method, ret.clone()),
+                    &bind_receiver(decide_nested(method, ret.clone())),
                     &class_info.fqn(),
                     all_classes,
                     class_loader,

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::class_lookup::{Fqn, ResolvedClassLoader, SourceClassLoader};

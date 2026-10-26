@@ -211,6 +211,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             is_pure: false,
             is_impure: false,
             reads_func_args: false,
+            is_no_discard: false,
             extras: MethodExtras {
                 template_params,
                 template_param_bounds,

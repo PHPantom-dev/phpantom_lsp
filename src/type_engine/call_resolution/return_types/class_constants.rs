@@ -15,7 +15,7 @@ use super::literals::qualify_class_keyword;
 
 /// Resolve a `ClassName::Member` expression to a type.
 ///
-/// Handles enum cases (`MyEnum::Case` → `MyEnum`) and class constants
+/// Handles enum cases (`MyEnum::Case` → that case) and class constants
 /// (`Foo::BAR` → the constant's type hint, or the type inferred from
 /// the constant's initializer value for untyped constants).  Of the
 /// expressions that continue past the member with `->`, only a case's
@@ -38,16 +38,15 @@ pub(crate) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
 
     let cls = static_access_class(class_part, ctx)?;
 
-    // Enum cases resolve to the enum type itself.  A constant declared on
-    // the enum is read like any other class constant below.
-    if cls.kind == ClassLikeKind::Enum
-        && cls
-            .constants
-            .iter()
-            .find(|c| c.name == _member)
-            .is_none_or(|c| c.is_enum_case)
-    {
-        return Some(PhpType::named(cls.fqn()));
+    // An enum case is its own type, one of the enum's.  A constant declared
+    // on the enum is read like any other class constant below, and a member
+    // the enum does not declare is still something the enum holds.
+    if cls.kind == ClassLikeKind::Enum {
+        match cls.constants.iter().find(|c| c.name == _member) {
+            Some(c) if c.is_enum_case => return Some(PhpType::enum_case(cls.fqn(), c.name)),
+            None => return Some(PhpType::named(cls.fqn())),
+            Some(_) => {}
+        }
     }
 
     // Class constants: use the declared type hint when available,

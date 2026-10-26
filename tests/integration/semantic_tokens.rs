@@ -5,7 +5,7 @@
 
 use crate::common::create_test_backend;
 use phpantom_lsp::config::{Config, SemanticTokensMode};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: open a file in the backend and return semantic tokens.
 fn get_tokens(php: &str) -> Vec<SemanticToken> {
@@ -23,7 +23,7 @@ fn get_tokens_with_mode(php: &str, mode: Option<SemanticTokensMode>) -> Vec<Sema
     backend.update_ast(uri, php);
     let result = backend.handle_semantic_tokens_full(uri, php);
     match result {
-        Some(SemanticTokensResult::Tokens(tokens)) => tokens.data,
+        Some(tokens) => tokens.data,
         _ => vec![],
     }
 }
@@ -1396,7 +1396,7 @@ fn get_blade_tokens(blade: &str) -> Vec<DecodedToken> {
     backend.update_ast(uri, blade);
     let result = backend.handle_semantic_tokens_full(uri, blade);
     match result {
-        Some(SemanticTokensResult::Tokens(tokens)) => decode_tokens(&tokens.data),
+        Some(tokens) => decode_tokens(&tokens.data),
         _ => vec![],
     }
 }

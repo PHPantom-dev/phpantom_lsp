@@ -1,0 +1,8 @@
+// test: Gedmo writes only an entity's properties
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, MissingGedmoPropertyAssignRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Properties/data/gedmo-property-assign-non-entity.php
+// expect_diagnostic: 10: Property MissingGedmoWrittenPropertyAssign\NonEntityWithAGemdoLocaleField::$locale is unused. // SKIP: private properties nothing reads or writes are not reported
+---

@@ -26,7 +26,7 @@ mod see_refs;
 mod templates;
 mod variable;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
@@ -270,8 +270,8 @@ impl Backend {
             SymbolKind::ConstantReference { name, .. } => {
                 self.hover_constant_reference(&site, symbol.start, name)
             }
-            SymbolKind::LaravelStringKey { kind, key, .. } => {
-                if !self.resolved_class_cache.read().laravel().is_enabled() {
+            SymbolKind::StringKey { kind, key, .. } => {
+                if !self.string_key_kind_enabled(*kind) {
                     return None;
                 }
                 self.hover_laravel_string_key(kind, key, uri)

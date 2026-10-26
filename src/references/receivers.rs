@@ -14,7 +14,7 @@ use super::*;
 
 use std::cell::OnceCell;
 
-use tower_lsp::lsp_types::Range;
+use tower_lsp_server::gen_lsp_types::Range;
 
 use crate::atom::Atom;
 use crate::references::member_scope::MemberScope;

@@ -105,6 +105,7 @@ impl PhpType {
             TypeKind::TemplateParam(_, bound) => bound.kind(),
             TypeKind::UnsealedShape(unsealed) => &unsealed.widened.0,
             TypeKind::ClassNameLiteral(class_string) => &class_string.0,
+            TypeKind::EnumCase(enum_type, _) => &enum_type.0,
             kind => kind,
         }
     }
@@ -123,6 +124,33 @@ impl PhpType {
             },
             _ => None,
         }
+    }
+
+    /// The enum and the name of the one case of it this type is, when it is
+    /// an [`EnumCase`](TypeKind::EnumCase).
+    #[inline]
+    pub fn as_enum_case(&self) -> Option<(&str, &str)> {
+        let TypeKind::EnumCase(enum_type, case) = &*self.0 else {
+            return None;
+        };
+        match enum_type.kind() {
+            TypeKind::Named(name) => Some((name.as_str(), case.as_str())),
+            _ => None,
+        }
+    }
+
+    /// Whether this type is one exact value of the wider type
+    /// [`kind`](PhpType::kind) reads it as: `Foo::class` of
+    /// `class-string<Foo>`, or `Suit::Hearts` of `Suit`.
+    ///
+    /// Rebuilding such a type through `kind()` keeps only the wider type,
+    /// so a transform that cannot carry the marker has to leave it alone.
+    #[inline]
+    pub(crate) fn is_exact_value_marker(&self) -> bool {
+        matches!(
+            &*self.0,
+            TypeKind::ClassNameLiteral(_) | TypeKind::EnumCase(..)
+        )
     }
 
     /// The unsealed shape this type is, when it is a
@@ -424,6 +452,18 @@ pub enum TypeKind {
     /// [`PhpType::as_class_name_literal`], since knowing the one name it
     /// holds is what lets the write name the entry it lands on.
     ClassNameLiteral(PhpType),
+
+    /// `Suit::Hearts`: the one case of the enum `Suit` it names, a subtype
+    /// of the enum that no other case is.
+    ///
+    /// Invisible to [`PhpType::kind`], which sees the enum's `Named` type,
+    /// so member lookup, class resolution and everything else that only
+    /// asks about the class treats the case as the enum it belongs to. The
+    /// display spells the case, and the code that tells cases apart asks
+    /// through [`PhpType::as_enum_case`]: subtyping (no case is a subtype of
+    /// another), dedup, the narrowing that subtracts cases, and the
+    /// `->name`/`->value` reads that know the case's own literals.
+    EnumCase(PhpType, Atom),
 }
 
 /// Payload of [`TypeKind::UnsealedShape`].

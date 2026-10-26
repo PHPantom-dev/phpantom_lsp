@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::completion::named_args::{
@@ -209,7 +209,7 @@ fn build_signature(
         let start = offset as u32;
         let end = (offset + pl.len()) as u32;
         param_infos.push(ParameterInformation {
-            label: ParameterLabel::LabelOffsets([start, end]),
+            label: ParameterInformationLabel::Tuple((start, end)),
             documentation: build_param_documentation(param),
         });
         offset += pl.len();
@@ -256,18 +256,30 @@ use crate::atom::bytes_to_str;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-/// A first-class callable assignment (`$fn = target(...)`) recorded by
-/// [`collect_fcc_assignments`].
+/// A partial application assignment (`$fn = target(...)`, `$fn =
+/// target(?, 1)`) recorded by [`collect_fcc_assignments`], or a later
+/// assignment of some other value to a variable that held one.
 pub(crate) struct FccAssignment {
     /// The assigned variable, with its `$` prefix.
     var_name: Box<str>,
     /// Where the assignment expression ends.
     end: u32,
-    /// The callable target text (`makePen`, `$obj->method`, `Foo::bar`).
-    target: Box<str>,
+    /// The partial application assigned, or `None` when the variable is
+    /// assigned some other value and no longer holds it.
+    callable: Option<AssignedCallable>,
     /// The span of the innermost function or method the assignment sits
     /// in, or `None` at file scope.  It is only visible from inside it.
     scope: Option<(u32, u32)>,
+}
+
+/// The partial application a variable holds.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct AssignedCallable {
+    /// The callable target text (`makePen`, `$obj->method`, `Foo::bar`).
+    pub(crate) target: String,
+    /// The argument text a partial application with placeholders was
+    /// written with (`1, ?`), or `None` for a first-class callable.
+    pub(crate) bound: Option<String>,
 }
 
 /// Every first-class callable assignment in `statements`, in source
@@ -284,14 +296,14 @@ pub(crate) fn collect_fcc_assignments(
     out
 }
 
-/// The target of the last first-class callable assignment to `var_name`
-/// (with `$` prefix) that ends before `cursor_offset` and is visible from
-/// it.
+/// The partial application `var_name` (with `$` prefix) holds at
+/// `cursor_offset`: the last assignment to it that ends before the cursor
+/// and is visible from it, when that assigns one.
 fn find_fcc_target(
     assignments: &[FccAssignment],
     var_name: &str,
     cursor_offset: u32,
-) -> Option<String> {
+) -> Option<AssignedCallable> {
     assignments
         .iter()
         .rev()
@@ -300,8 +312,9 @@ fn find_fcc_target(
                 && a.end <= cursor_offset
                 && a.scope
                     .is_none_or(|(start, end)| cursor_offset >= start && cursor_offset <= end)
-        })
-        .map(|a| a.target.to_string())
+        })?
+        .callable
+        .clone()
 }
 
 /// Recursively collect first-class callable assignments from a statement
@@ -326,7 +339,12 @@ fn collect_fcc_targets(
 
     match stmt {
         Statement::Expression(expr_stmt) => {
-            if let Some(found) = fcc_assignment_in_expr(expr_stmt.expression, scope, content) {
+            if let Some(found) = fcc_assignment_in_expr(expr_stmt.expression, scope, content)
+                // Another value only matters to a variable that held a
+                // callable, so the rest are not recorded.
+                && (found.callable.is_some()
+                    || out.iter().any(|a| a.var_name == found.var_name))
+            {
                 out.push(found);
             }
         }
@@ -342,8 +360,8 @@ fn collect_fcc_targets(
     }
 }
 
-/// The first-class callable assignment `expr` makes (`$fn = target(...)`),
-/// if it is one.
+/// The assignment to a variable `expr` makes, recording the partial
+/// application it assigns (`$fn = target(...)`), if any.
 fn fcc_assignment_in_expr(
     expr: &Expression<'_>,
     scope: Option<(u32, u32)>,
@@ -355,13 +373,26 @@ fn fcc_assignment_in_expr(
     let Expression::Variable(Variable::Direct(dv)) = assignment.lhs else {
         return None;
     };
-    let Expression::PartialApplication(pa) = assignment.rhs else {
-        return None;
+    let callable = match assignment.rhs {
+        Expression::PartialApplication(pa) => Some(AssignedCallable {
+            target: extract_callable_text_from_partial(pa, content)?,
+            bound: (!pa.is_first_class_callable())
+                .then(|| {
+                    let list = pa.get_argument_list();
+                    content.get(
+                        list.left_parenthesis.end.offset as usize
+                            ..list.right_parenthesis.start.offset as usize,
+                    )
+                })
+                .flatten()
+                .map(|text| text.trim().to_string()),
+        }),
+        _ => None,
     };
     Some(FccAssignment {
         var_name: bytes_to_str(dv.name).into(),
         end: assignment.span().end.offset,
-        target: extract_callable_text_from_partial(pa, content)?.into(),
+        callable,
         scope,
     })
 }
@@ -489,10 +520,10 @@ impl Backend {
         Some(SignatureHelp {
             signatures: vec![sig],
             active_signature: Some(0),
-            active_parameter: Some(clamp_active_param(
+            active_parameter: Some(ActiveParameter::Int(clamp_active_param(
                 site.active_parameter,
                 &resolved.parameters,
-            )),
+            ))),
         })
     }
 
@@ -511,23 +542,49 @@ impl Backend {
             .map(ResolvedCallable::from)
     }
 
-    /// Find the callable target for a first-class callable assignment
-    /// like `$fn = someTarget(...)` and return the callable target string
-    /// (e.g. `"makePen"`, `"$obj->method"`, `"ClassName::method"`).
+    /// Find the partial application a variable holds, from an assignment
+    /// like `$fn = someTarget(...)`: its callable target string (e.g.
+    /// `"makePen"`, `"$obj->method"`, `"ClassName::method"`) and the
+    /// arguments it binds.
     ///
     /// This enables signature help for first-class callable invocations:
     /// `$fn = makePen(...); $fn()` shows `makePen`'s parameters.
     ///
-    /// Looks the assignment up among the file's first-class callable
+    /// Looks the assignment up among the file's partial application
     /// assignments, which the active parse cache collects once per pass.
     pub(crate) fn extract_callable_target_from_variable(
         var_name: &str,
         content: &str,
         cursor_offset: u32,
-    ) -> Option<String> {
+    ) -> Option<AssignedCallable> {
         crate::parser::with_fcc_assignments(content, |assignments| {
             find_fcc_target(assignments, var_name, cursor_offset)
         })
+    }
+
+    /// The call invoking `var_name` with `call_args` at `cursor_offset`
+    /// makes, as source text, when the variable holds a partial application
+    /// of a named function or method: `$fn = $r->make(1, ?); $fn($class)`
+    /// calls `$r->make(1, $class)`.
+    ///
+    /// `None` for a partial application of another callable value, whose
+    /// type already says what invoking it returns.
+    pub(crate) fn invoked_partial_application_call(
+        var_name: &str,
+        content: &str,
+        cursor_offset: u32,
+        call_args: &str,
+    ) -> Option<String> {
+        let assigned =
+            Self::extract_callable_target_from_variable(var_name, content, cursor_offset)?;
+        if assigned.target.starts_with('$') && !assigned.target.contains("->") {
+            return None;
+        }
+        let args = match assigned.bound.as_deref() {
+            Some(bound) => crate::call_args::bind_partial_text_arguments(bound, call_args),
+            None => call_args.to_string(),
+        };
+        Some(format!("{}({})", assigned.target, args))
     }
 
     /// Insert `);` at the cursor position so that an unclosed call

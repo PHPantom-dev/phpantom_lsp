@@ -7,7 +7,7 @@
 //! checks that a call whose argument cannot be pinned down keeps both.
 
 use crate::common::{assert_assigned_types, create_test_backend_with_full_stubs, hover_at};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Assert the type of each assignment in `content`, keyed by the variable it
 /// assigns to. Line numbers are found by scanning for `$name = `.
@@ -300,7 +300,7 @@ final class Excerpt {
         };
         let hover = hover_at(&backend, uri, content, line as u32, col as u32 + 1)
             .unwrap_or_else(|| panic!("no hover on line {line}"));
-        let HoverContents::Markup(markup) = &hover.contents else {
+        let Contents::MarkupContent(markup) = &hover.contents else {
             panic!("Expected MarkupContent");
         };
         let got = markup

@@ -1,0 +1,22 @@
+// test: Column types and nullability that disagree with the entity's properties
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/MyBrokenEntity.php
+// expect_diagnostic: 23: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$one type mapping mismatch: database can contain string|null but property expects string. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 29: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$two type mapping mismatch: property can contain string|null but database expects string. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 35: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$three type mapping mismatch: database can contain DateTime but property expects DateTimeImmutable. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 41: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$four type mapping mismatch: database can contain DateTimeImmutable but property expects DateTime. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 41: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$four type mapping mismatch: property can contain DateTime but database expects DateTimeImmutable. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 68: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$uuidInvalidType type mapping mismatch: database can contain Ramsey\Uuid\UuidInterface but property expects int. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 68: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$uuidInvalidType type mapping mismatch: property can contain int but database expects Ramsey\Uuid\UuidInterface|string. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 92: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$arrayOrNull type mapping mismatch: property can contain array|null but database expects array. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 98: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$arrayOfIntegersOrNull type mapping mismatch: property can contain array|null but database expects array. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 122: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$numericString type mapping mismatch: database can contain string but property expects numeric-string. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 128: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$invalidCarbon type mapping mismatch: database can contain Carbon\Carbon but property expects Carbon\CarbonImmutable. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 134: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$invalidCarbonImmutable type mapping mismatch: database can contain Carbon\CarbonImmutable but property expects Carbon\Carbon. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 152: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$incompatibleJsonValueObject type mapping mismatch: property can contain PHPStan\Rules\Doctrine\ORM\EmptyObject but database expects array|bool|float|int|JsonSerializable|stdClass|string|null. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 158: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$invalidSimpleArray type mapping mismatch: database can contain list<string> but property expects array<int>. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 158: Property PHPStan\Rules\Doctrine\ORM\MyBrokenEntity::$invalidSimpleArray type mapping mismatch: property can contain array<int> but database expects array<string>. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

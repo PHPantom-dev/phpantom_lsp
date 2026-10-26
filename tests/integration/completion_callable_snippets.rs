@@ -1,23 +1,23 @@
 use crate::common::{complete_at, create_test_backend, create_test_backend_with_function_stubs};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
 fn find_method<'a>(items: &'a [CompletionItem], name: &str) -> Option<&'a CompletionItem> {
     items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::METHOD) && i.filter_text.as_deref() == Some(name)
+        i.kind == Some(CompletionItemKind::Method) && i.filter_text.as_deref() == Some(name)
     })
 }
 
 fn find_function<'a>(items: &'a [CompletionItem], name: &str) -> Option<&'a CompletionItem> {
     items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION) && i.filter_text.as_deref() == Some(name)
+        i.kind == Some(CompletionItemKind::Function) && i.filter_text.as_deref() == Some(name)
     })
 }
 
 fn find_class<'a>(items: &'a [CompletionItem], name: &str) -> Option<&'a CompletionItem> {
     items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::CLASS)
+        i.kind == Some(CompletionItemKind::Class)
             && (i.label == name || i.detail.as_deref() == Some(name))
     })
 }
@@ -28,7 +28,7 @@ fn find_class<'a>(items: &'a [CompletionItem], name: &str) -> Option<&'a Complet
 #[tokio::test]
 async fn test_snippet_method_no_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_no_params.php").unwrap();
+    let uri = Uri::parse("file:///snip_no_params.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -43,14 +43,14 @@ async fn test_snippet_method_no_params() {
     let item = find_method(&items, "doStuff").expect("Should find doStuff");
 
     assert_eq!(item.insert_text.as_deref(), Some("doStuff()$0"));
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// A method with one required param should get `(${1:\$name})$0`.
 #[tokio::test]
 async fn test_snippet_method_one_required_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_one_req.php").unwrap();
+    let uri = Uri::parse("file:///snip_one_req.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Greeter {\n",
@@ -65,14 +65,14 @@ async fn test_snippet_method_one_required_param() {
     let item = find_method(&items, "greet").expect("Should find greet");
 
     assert_eq!(item.insert_text.as_deref(), Some("greet(${1:\\$name})$0"));
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// A method with two required params should get `(${1:\$a}, ${2:\$b})$0`.
 #[tokio::test]
 async fn test_snippet_method_two_required_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_two_req.php").unwrap();
+    let uri = Uri::parse("file:///snip_two_req.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Math {\n",
@@ -90,14 +90,14 @@ async fn test_snippet_method_two_required_params() {
         item.insert_text.as_deref(),
         Some("add(${1:\\$a}, ${2:\\$b})$0")
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// Optional params are excluded — only required params appear in the snippet.
 #[tokio::test]
 async fn test_snippet_method_mixed_required_and_optional() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_mixed.php").unwrap();
+    let uri = Uri::parse("file:///snip_mixed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Editor {\n",
@@ -116,14 +116,14 @@ async fn test_snippet_method_mixed_required_and_optional() {
         Some("replace(${1:\\$search}, ${2:\\$replace})$0"),
         "Optional $caseSensitive should be excluded from snippet"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// All-optional params should produce empty parens `()$0`.
 #[tokio::test]
 async fn test_snippet_method_all_optional() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_all_opt.php").unwrap();
+    let uri = Uri::parse("file:///snip_all_opt.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -142,14 +142,14 @@ async fn test_snippet_method_all_optional() {
         Some("setup()$0"),
         "All-optional params should produce empty parens"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// Variadic params are not required — they should be excluded from the snippet.
 #[tokio::test]
 async fn test_snippet_method_variadic_excluded() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_variadic.php").unwrap();
+    let uri = Uri::parse("file:///snip_variadic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -182,7 +182,7 @@ async fn test_snippet_method_variadic_excluded() {
 #[tokio::test]
 async fn test_snippet_filter_text_is_plain_name() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_filter.php").unwrap();
+    let uri = Uri::parse("file:///snip_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -207,7 +207,7 @@ async fn test_snippet_filter_text_is_plain_name() {
 #[tokio::test]
 async fn test_snippet_static_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_static.php").unwrap();
+    let uri = Uri::parse("file:///snip_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -224,14 +224,14 @@ async fn test_snippet_static_method() {
     let item = find_method(&items, "create").expect("Should find create");
 
     assert_eq!(item.insert_text.as_deref(), Some("create(${1:\\$type})$0"));
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// Methods accessed via a variable type-hinted by a class should get snippets.
 #[tokio::test]
 async fn test_snippet_method_via_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_var.php").unwrap();
+    let uri = Uri::parse("file:///snip_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Mailer {\n",
@@ -251,14 +251,14 @@ async fn test_snippet_method_via_variable() {
         item.insert_text.as_deref(),
         Some("send(${1:\\$to}, ${2:\\$subject})$0")
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// Reference parameters should still appear in the snippet.
 #[tokio::test]
 async fn test_snippet_method_reference_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_ref.php").unwrap();
+    let uri = Uri::parse("file:///snip_ref.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Parser {\n",
@@ -285,7 +285,7 @@ async fn test_snippet_method_reference_param() {
 #[tokio::test]
 async fn test_snippet_user_function_with_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_func.php").unwrap();
+    let uri = Uri::parse("file:///snip_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function makeText(string $text, $long = false): string {}\n",
@@ -300,21 +300,21 @@ async fn test_snippet_user_function_with_params() {
         Some("makeText(${1:\\$text})$0"),
         "Only the required $text param should be in the snippet"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// User-defined functions with no params should get `()$0`.
 #[tokio::test]
 async fn test_snippet_user_function_no_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_func_no.php").unwrap();
+    let uri = Uri::parse("file:///snip_func_no.php").unwrap();
     let text = concat!("<?php\n", "function getVersion(): string {}\n", "getVe\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 5).await;
     let item = find_function(&items, "getVersion").expect("Should find getVersion");
 
     assert_eq!(item.insert_text.as_deref(), Some("getVersion()$0"));
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// Stub functions (built-in PHP functions) get `name()$0` — we know they're
@@ -322,12 +322,12 @@ async fn test_snippet_user_function_no_params() {
 #[tokio::test]
 async fn test_snippet_stub_function_empty_parens() {
     let backend = create_test_backend_with_function_stubs();
-    let uri = Url::parse("file:///snip_stub.php").unwrap();
+    let uri = Uri::parse("file:///snip_stub.php").unwrap();
     let text = concat!("<?php\n", "json_d\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 6).await;
     let item = items.iter().find(|i| {
-        i.kind == Some(CompletionItemKind::FUNCTION)
+        i.kind == Some(CompletionItemKind::Function)
             && i.filter_text.as_deref() == Some("json_decode")
     });
     let item = item.expect("Should find json_decode");
@@ -339,7 +339,7 @@ async fn test_snippet_stub_function_empty_parens() {
     );
     assert_eq!(
         item.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Stub functions should use snippet format"
     );
 }
@@ -348,7 +348,7 @@ async fn test_snippet_stub_function_empty_parens() {
 #[tokio::test]
 async fn test_snippet_user_function_multiple_required() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_func_multi.php").unwrap();
+    let uri = Uri::parse("file:///snip_func_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function clamp(int $value, int $min, int $max): int {}\n",
@@ -362,7 +362,7 @@ async fn test_snippet_user_function_multiple_required() {
         item.insert_text.as_deref(),
         Some("clamp(${1:\\$value}, ${2:\\$min}, ${3:\\$max})$0")
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 // ─── `new ClassName` Snippet Tests ──────────────────────────────────────────
@@ -372,7 +372,7 @@ async fn test_snippet_user_function_multiple_required() {
 #[tokio::test]
 async fn test_snippet_new_class_non_namespaced_with_constructor_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_new.php").unwrap();
+    let uri = Uri::parse("file:///snip_new.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class MoneyFactory {\n",
@@ -389,7 +389,7 @@ async fn test_snippet_new_class_non_namespaced_with_constructor_params() {
         Some("MoneyFactory(${1:\\$amount})$0"),
         "Non-namespaced class in same file has constructor info available"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// Same-namespace classes are found via ast_map (source 2), so the
@@ -397,7 +397,7 @@ async fn test_snippet_new_class_non_namespaced_with_constructor_params() {
 #[tokio::test]
 async fn test_snippet_new_class_namespaced_gets_constructor_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_new_ns.php").unwrap();
+    let uri = Uri::parse("file:///snip_new_ns.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -415,14 +415,14 @@ async fn test_snippet_new_class_namespaced_gets_constructor_params() {
         Some("MoneyFactory(${1:\\$amount})$0"),
         "Same-namespace class should include constructor required params"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// `new` context with a class that has no constructor.
 #[tokio::test]
 async fn test_snippet_new_class_no_constructor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_new_noctor.php").unwrap();
+    let uri = Uri::parse("file:///snip_new_noctor.php").unwrap();
     let text = concat!("<?php\n", "class SimpleObj {}\n", "new Sim\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 7).await;
@@ -433,14 +433,14 @@ async fn test_snippet_new_class_no_constructor() {
         Some("SimpleObj()$0"),
         "Class with no constructor should still get empty parens"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// Same-namespace class with mixed required and optional constructor params.
 #[tokio::test]
 async fn test_snippet_new_class_mixed_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_new_mixed.php").unwrap();
+    let uri = Uri::parse("file:///snip_new_mixed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -458,14 +458,14 @@ async fn test_snippet_new_class_mixed_params() {
         Some("Connection(${1:\\$host})$0"),
         "Only required $host should appear, optional $port and $ssl excluded"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// Same-namespace class with all optional constructor params.
 #[tokio::test]
 async fn test_snippet_new_class_all_optional_constructor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_new_allopt.php").unwrap();
+    let uri = Uri::parse("file:///snip_new_allopt.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -483,14 +483,14 @@ async fn test_snippet_new_class_all_optional_constructor() {
         Some("Options()$0"),
         "All-optional constructor should produce empty parens"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// Same-namespace class with multiple required constructor params.
 #[tokio::test]
 async fn test_snippet_new_class_multiple_required() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_new_multi.php").unwrap();
+    let uri = Uri::parse("file:///snip_new_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Geo;\n",
@@ -507,14 +507,14 @@ async fn test_snippet_new_class_multiple_required() {
         item.insert_text.as_deref(),
         Some("Point(${1:\\$x}, ${2:\\$y}, ${3:\\$z})$0")
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// Outside `new` context, class name completion should NOT add parens.
 #[tokio::test]
 async fn test_snippet_class_name_no_new_context() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_no_new.php").unwrap();
+    let uri = Uri::parse("file:///snip_no_new.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -530,7 +530,7 @@ async fn test_snippet_class_name_no_new_context() {
     let items = complete_at(&backend, &uri, text, 6, 27).await;
     let widget = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::CLASS) && i.label == "App\\Widget");
+        .find(|i| i.kind == Some(CompletionItemKind::Class) && i.label == "App\\Widget");
 
     if let Some(item) = widget {
         // When not in `new` context, insert_text should be the plain class name
@@ -541,7 +541,7 @@ async fn test_snippet_class_name_no_new_context() {
         );
         assert_ne!(
             item.insert_text_format,
-            Some(InsertTextFormat::SNIPPET),
+            Some(InsertTextFormat::Snippet),
             "Outside `new` context, should not use snippet format"
         );
     }
@@ -553,7 +553,7 @@ async fn test_snippet_class_name_no_new_context() {
 #[tokio::test]
 async fn test_snippet_inherited_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_inherit.php").unwrap();
+    let uri = Uri::parse("file:///snip_inherit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -574,14 +574,14 @@ async fn test_snippet_inherited_method() {
         Some("save(${1:\\$path})$0"),
         "Inherited methods should also get parameter snippets"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// parent:: constructor calls should also get parameter snippets.
 #[tokio::test]
 async fn test_snippet_parent_constructor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_parent.php").unwrap();
+    let uri = Uri::parse("file:///snip_parent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -602,7 +602,7 @@ async fn test_snippet_parent_constructor() {
         Some("__construct(${1:\\$name})$0"),
         "parent::__construct should include required params"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 // ─── `new` Context Inside Class Method ──────────────────────────────────────
@@ -612,7 +612,7 @@ async fn test_snippet_parent_constructor() {
 #[tokio::test]
 async fn test_snippet_new_inside_method_same_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_new_method.php").unwrap();
+    let uri = Uri::parse("file:///snip_new_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -633,7 +633,7 @@ async fn test_snippet_new_inside_method_same_namespace() {
         item.insert_text.as_deref(),
         Some("Logger(${1:\\$channel})$0"),
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// `new ClassName` for a non-namespaced class in the same file has
@@ -641,7 +641,7 @@ async fn test_snippet_new_inside_method_same_namespace() {
 #[tokio::test]
 async fn test_snippet_new_inside_method_non_namespaced() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_new_noname.php").unwrap();
+    let uri = Uri::parse("file:///snip_new_noname.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -662,7 +662,7 @@ async fn test_snippet_new_inside_method_non_namespaced() {
         Some("Logger(${1:\\$channel})$0"),
         "Non-namespaced class in same file has constructor info available"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 // ─── Properties and Constants (no snippets) ─────────────────────────────────
@@ -671,7 +671,7 @@ async fn test_snippet_new_inside_method_non_namespaced() {
 #[tokio::test]
 async fn test_no_snippet_for_properties() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_prop.php").unwrap();
+    let uri = Uri::parse("file:///snip_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Box {\n",
@@ -685,7 +685,7 @@ async fn test_no_snippet_for_properties() {
     let items = complete_at(&backend, &uri, text, 4, 15).await;
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "width")
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "width")
         .expect("Should find width property");
 
     assert_eq!(
@@ -695,7 +695,7 @@ async fn test_no_snippet_for_properties() {
     );
     assert_ne!(
         prop.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Properties should not use snippet format"
     );
 }
@@ -704,7 +704,7 @@ async fn test_no_snippet_for_properties() {
 #[tokio::test]
 async fn test_no_snippet_for_constants() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_const.php").unwrap();
+    let uri = Uri::parse("file:///snip_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Status {\n",
@@ -720,13 +720,13 @@ async fn test_no_snippet_for_constants() {
     let items = complete_at(&backend, &uri, text, 6, 16).await;
     let c = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::CONSTANT) && i.label == "ACTIVE")
+        .find(|i| i.kind == Some(CompletionItemKind::Constant) && i.label == "ACTIVE")
         .expect("Should find ACTIVE constant");
 
     assert_eq!(c.insert_text.as_deref(), Some("ACTIVE"));
     assert_ne!(
         c.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Constants should not use snippet format"
     );
 }
@@ -739,7 +739,7 @@ async fn test_no_snippet_for_constants() {
 #[tokio::test]
 async fn test_snippet_throw_new_context() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_throw.php").unwrap();
+    let uri = Uri::parse("file:///snip_throw.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AppException extends \\Exception {\n",
@@ -762,7 +762,7 @@ async fn test_snippet_throw_new_context() {
         );
         assert_eq!(
             item.insert_text_format,
-            Some(InsertTextFormat::SNIPPET),
+            Some(InsertTextFormat::Snippet),
             "throw new context should use snippet format"
         );
     }
@@ -776,7 +776,7 @@ async fn test_snippet_throw_new_context() {
 #[tokio::test]
 async fn test_snippet_suppressed_when_parens_follow_cursor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_paren_follows.php").unwrap();
+    let uri = Uri::parse("file:///snip_paren_follows.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Gadget {\n",
@@ -799,7 +799,7 @@ async fn test_snippet_suppressed_when_parens_follow_cursor() {
     );
     // Format should NOT be snippet (or should be absent).
     assert!(
-        item.insert_text_format != Some(InsertTextFormat::SNIPPET),
+        item.insert_text_format != Some(InsertTextFormat::Snippet),
         "should not use snippet format when parens already follow"
     );
 }
@@ -809,7 +809,7 @@ async fn test_snippet_suppressed_when_parens_follow_cursor() {
 #[tokio::test]
 async fn test_snippet_suppressed_when_parens_follow_partial_identifier() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_paren_partial.php").unwrap();
+    let uri = Uri::parse("file:///snip_paren_partial.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -829,7 +829,7 @@ async fn test_snippet_suppressed_when_parens_follow_partial_identifier() {
         "should insert plain name when parens follow partial identifier"
     );
     assert!(
-        item.insert_text_format != Some(InsertTextFormat::SNIPPET),
+        item.insert_text_format != Some(InsertTextFormat::Snippet),
         "should not use snippet format when parens follow partial identifier"
     );
 }
@@ -839,7 +839,7 @@ async fn test_snippet_suppressed_when_parens_follow_partial_identifier() {
 #[tokio::test]
 async fn test_snippet_preserved_when_no_parens_follow() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///snip_no_paren.php").unwrap();
+    let uri = Uri::parse("file:///snip_no_paren.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Gizmo {\n",
@@ -859,7 +859,7 @@ async fn test_snippet_preserved_when_no_parens_follow() {
     );
     assert_eq!(
         item.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "should use snippet format when no parens follow"
     );
 }
@@ -871,7 +871,7 @@ async fn test_snippet_preserved_when_no_parens_follow() {
 #[tokio::test]
 async fn test_snippet_suppressed_for_function_when_parens_follow() {
     let backend = create_test_backend_with_function_stubs();
-    let uri = Url::parse("file:///func_paren_follows.php").unwrap();
+    let uri = Uri::parse("file:///func_paren_follows.php").unwrap();
     let text = concat!("<?php\n", "array_m()\n",);
 
     // Cursor after `array_m`, before `()`.
@@ -884,7 +884,7 @@ async fn test_snippet_suppressed_for_function_when_parens_follow() {
         "should insert plain function name when parens already follow"
     );
     assert!(
-        item.insert_text_format != Some(InsertTextFormat::SNIPPET),
+        item.insert_text_format != Some(InsertTextFormat::Snippet),
         "should not use snippet format for function when parens already follow"
     );
 }
@@ -894,7 +894,7 @@ async fn test_snippet_suppressed_for_function_when_parens_follow() {
 #[tokio::test]
 async fn test_snippet_preserved_for_function_when_no_parens_follow() {
     let backend = create_test_backend_with_function_stubs();
-    let uri = Url::parse("file:///func_no_paren.php").unwrap();
+    let uri = Uri::parse("file:///func_no_paren.php").unwrap();
     let text = concat!("<?php\n", "array_m\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 7).await;
@@ -902,7 +902,7 @@ async fn test_snippet_preserved_for_function_when_no_parens_follow() {
 
     assert_eq!(
         item.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "should use snippet format for function when no parens follow"
     );
     assert!(
@@ -918,7 +918,7 @@ async fn test_snippet_preserved_for_function_when_no_parens_follow() {
 #[tokio::test]
 async fn test_snippet_suppressed_for_new_when_parens_follow() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///new_paren_follows.php").unwrap();
+    let uri = Uri::parse("file:///new_paren_follows.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Gadget {\n",
@@ -937,7 +937,7 @@ async fn test_snippet_suppressed_for_new_when_parens_follow() {
         "should insert plain class name when parens already follow in new expression"
     );
     assert!(
-        item.insert_text_format != Some(InsertTextFormat::SNIPPET),
+        item.insert_text_format != Some(InsertTextFormat::Snippet),
         "should not use snippet format for new when parens already follow"
     );
 }
@@ -947,7 +947,7 @@ async fn test_snippet_suppressed_for_new_when_parens_follow() {
 #[tokio::test]
 async fn test_snippet_preserved_for_new_when_no_parens_follow() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///new_no_paren.php").unwrap();
+    let uri = Uri::parse("file:///new_no_paren.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Gadget {\n",
@@ -961,7 +961,7 @@ async fn test_snippet_preserved_for_new_when_no_parens_follow() {
 
     assert_eq!(
         item.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "should use snippet format for new when no parens follow"
     );
     assert!(
@@ -976,7 +976,7 @@ async fn test_snippet_preserved_for_new_when_no_parens_follow() {
 #[tokio::test]
 async fn test_snippet_suppressed_for_throw_new_when_parens_follow() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throw_paren_follows.php").unwrap();
+    let uri = Uri::parse("file:///throw_paren_follows.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class MyException extends \\Exception {}\n",
@@ -995,7 +995,7 @@ async fn test_snippet_suppressed_for_throw_new_when_parens_follow() {
         "should insert plain class name for throw new when parens already follow"
     );
     assert!(
-        item.insert_text_format != Some(InsertTextFormat::SNIPPET),
+        item.insert_text_format != Some(InsertTextFormat::Snippet),
         "should not use snippet format for throw new when parens already follow"
     );
 }
@@ -1006,7 +1006,7 @@ async fn test_snippet_suppressed_for_throw_new_when_parens_follow() {
 #[tokio::test]
 async fn test_snippet_suppressed_for_static_call_when_parens_follow() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///static_paren_follows.php").unwrap();
+    let uri = Uri::parse("file:///static_paren_follows.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Gadget {\n",
@@ -1025,7 +1025,7 @@ async fn test_snippet_suppressed_for_static_call_when_parens_follow() {
         "should insert plain name for static call when parens already follow"
     );
     assert!(
-        item.insert_text_format != Some(InsertTextFormat::SNIPPET),
+        item.insert_text_format != Some(InsertTextFormat::Snippet),
         "should not use snippet format for static call when parens already follow"
     );
 }
@@ -1036,7 +1036,7 @@ async fn test_snippet_suppressed_for_static_call_when_parens_follow() {
 #[tokio::test]
 async fn test_snippet_new_self_with_constructor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///new_self.php").unwrap();
+    let uri = Uri::parse("file:///new_self.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -1050,7 +1050,7 @@ async fn test_snippet_new_self_with_constructor() {
     let items = complete_at(&backend, &uri, text, 4, 22).await;
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "self")
+        .find(|i| i.kind == Some(CompletionItemKind::Keyword) && i.label == "self")
         .expect("Should find 'self' keyword");
 
     assert_eq!(
@@ -1058,7 +1058,7 @@ async fn test_snippet_new_self_with_constructor() {
         Some("self(${1:\\$host}, ${2:\\$port})$0"),
         "self should include constructor parameters"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
     assert!(
         item.detail
             .as_ref()
@@ -1071,7 +1071,7 @@ async fn test_snippet_new_self_with_constructor() {
 #[tokio::test]
 async fn test_snippet_new_static_with_constructor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///new_static.php").unwrap();
+    let uri = Uri::parse("file:///new_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -1085,7 +1085,7 @@ async fn test_snippet_new_static_with_constructor() {
     let items = complete_at(&backend, &uri, text, 4, 22).await;
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "static")
+        .find(|i| i.kind == Some(CompletionItemKind::Keyword) && i.label == "static")
         .expect("Should find 'static' keyword");
 
     assert_eq!(
@@ -1093,14 +1093,14 @@ async fn test_snippet_new_static_with_constructor() {
         Some("static(${1:\\$options})$0"),
         "static should include required constructor parameters only"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// `new parent` should be offered with parent constructor snippet when inside a child class.
 #[tokio::test]
 async fn test_snippet_new_parent_with_constructor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///new_parent.php").unwrap();
+    let uri = Uri::parse("file:///new_parent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -1116,7 +1116,7 @@ async fn test_snippet_new_parent_with_constructor() {
     let items = complete_at(&backend, &uri, text, 6, 19).await;
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "parent")
+        .find(|i| i.kind == Some(CompletionItemKind::Keyword) && i.label == "parent")
         .expect("Should find 'parent' keyword");
 
     assert_eq!(
@@ -1124,7 +1124,7 @@ async fn test_snippet_new_parent_with_constructor() {
         Some("parent(${1:\\$name}, ${2:\\$age})$0"),
         "parent should include parent class constructor parameters"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
     assert!(item.detail.as_ref().unwrap().contains("Animal"));
 }
 
@@ -1132,7 +1132,7 @@ async fn test_snippet_new_parent_with_constructor() {
 #[tokio::test]
 async fn test_snippet_new_self_no_constructor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///new_self_noctor.php").unwrap();
+    let uri = Uri::parse("file:///new_self_noctor.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Simple {\n",
@@ -1145,7 +1145,7 @@ async fn test_snippet_new_self_no_constructor() {
     let items = complete_at(&backend, &uri, text, 3, 22).await;
     let item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "self")
+        .find(|i| i.kind == Some(CompletionItemKind::Keyword) && i.label == "self")
         .expect("Should find 'self' keyword");
 
     assert_eq!(
@@ -1153,14 +1153,14 @@ async fn test_snippet_new_self_no_constructor() {
         Some("self()$0"),
         "self without constructor should have empty parens"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 /// `parent` should not be offered when class has no parent.
 #[tokio::test]
 async fn test_snippet_new_parent_not_offered_without_parent() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///new_no_parent.php").unwrap();
+    let uri = Uri::parse("file:///new_no_parent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Standalone {\n",
@@ -1173,7 +1173,7 @@ async fn test_snippet_new_parent_not_offered_without_parent() {
     let items = complete_at(&backend, &uri, text, 3, 20).await;
     let parent_item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "parent");
+        .find(|i| i.kind == Some(CompletionItemKind::Keyword) && i.label == "parent");
 
     assert!(
         parent_item.is_none(),
@@ -1185,7 +1185,7 @@ async fn test_snippet_new_parent_not_offered_without_parent() {
 #[tokio::test]
 async fn test_snippet_new_keywords_not_offered_outside_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///new_outside_class.php").unwrap();
+    let uri = Uri::parse("file:///new_outside_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "function test(): void {\n",
@@ -1196,10 +1196,10 @@ async fn test_snippet_new_keywords_not_offered_outside_class() {
     let items = complete_at(&backend, &uri, text, 2, 16).await;
     let self_item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "self");
+        .find(|i| i.kind == Some(CompletionItemKind::Keyword) && i.label == "self");
     let static_item = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::KEYWORD) && i.label == "static");
+        .find(|i| i.kind == Some(CompletionItemKind::Keyword) && i.label == "static");
 
     assert!(
         self_item.is_none(),

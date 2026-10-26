@@ -5,11 +5,12 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::common::message_text;
     use crate::common::{
         LARAVEL_APP_COMPOSER, USER_MODEL_STUB, create_psr4_workspace, open_document,
     };
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     const ADMIN_CLASS: &str =
         "<?php\nnamespace App\\Models;\nclass Admin extends User { public string $role = ''; }\n";
@@ -41,7 +42,7 @@ mod tests {
 
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         open_document(&backend, &uri, "blade", &text).await;
 
         let effective = backend.blade_virtual_php(uri.as_str()).unwrap_or(text);
@@ -50,12 +51,12 @@ mod tests {
         diags
             .into_iter()
             .filter_map(|d| match &d.code {
-                Some(NumberOrString::String(code))
+                Some(Code::String(code))
                     if code == "blade_signature_widens_layout"
                         || code == "duplicate_blade_signature"
                         || code == "invalid_laravel_view" =>
                 {
-                    Some((code.clone(), d.message))
+                    Some((code.clone(), message_text(&d.message).to_string()))
                 }
                 _ => None,
             })

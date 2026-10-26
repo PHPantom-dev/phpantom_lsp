@@ -1,0 +1,7 @@
+// test: Reading an option the command does not define
+// feature: diagnostics
+// Ported from PHPStan's Symfony extension, UndefinedOptionRuleTest::testGetArgument.
+// project: phpstan_symfony
+// file: rules/Symfony/ExampleCommand.php
+// expect_diagnostic: 49: Command "example-rule" does not define option "bbb". // SKIP: console arguments and options are not read from configure()
+---

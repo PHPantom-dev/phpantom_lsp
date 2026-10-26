@@ -604,8 +604,10 @@ fn enum_case_produces_member_declaration() {
     if let SymbolKind::MemberDeclaration {
         ref name,
         is_static,
+        is_method,
     } = hit.unwrap().kind
     {
+        assert!(!is_method, "An enum case is not a method");
         assert_eq!(name, "Red");
         assert!(is_static, "Enum cases are accessed statically");
     } else {
@@ -622,8 +624,10 @@ fn enum_case_produces_member_declaration() {
     if let SymbolKind::MemberDeclaration {
         ref name,
         is_static,
+        is_method,
     } = hit.unwrap().kind
     {
+        assert!(!is_method, "An enum case is not a method");
         assert_eq!(name, "Blue");
         assert!(is_static, "Enum cases are accessed statically");
     } else {
@@ -648,8 +652,10 @@ fn backed_enum_case_produces_member_declaration() {
     if let SymbolKind::MemberDeclaration {
         ref name,
         is_static,
+        is_method,
     } = hit.unwrap().kind
     {
+        assert!(!is_method, "An enum case is not a method");
         assert_eq!(name, "Issue");
         assert!(is_static, "Enum cases are accessed statically");
     } else {
@@ -1210,10 +1216,16 @@ fn static_method_tag_with_parenthesised_return_type() {
     let offset = php.find("getArray").unwrap() as u32;
     match map.lookup(offset) {
         Some(SymbolSpan {
-            kind: SymbolKind::MemberDeclaration { name, is_static },
+            kind:
+                SymbolKind::MemberDeclaration {
+                    name,
+                    is_static,
+                    is_method,
+                },
             ..
         }) => {
             assert_eq!(name, "getArray");
+            assert!(is_method, "an `@method` tag declares a method");
             assert!(is_static, "the `static` modifier must be recorded");
         }
         other => panic!("expected a static MemberDeclaration, got {other:?}"),
@@ -4708,8 +4720,8 @@ fn storage_disk_keys(map: &SymbolMap) -> Vec<(String, bool, bool)> {
     map.spans
         .iter()
         .filter_map(|span| match &span.kind {
-            SymbolKind::LaravelStringKey {
-                kind: LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk),
+            SymbolKind::StringKey {
+                kind: StringKeyKind::ConfigResource(LaravelConfigResource::StorageDisk),
                 key,
                 is_write,
                 is_optional,
@@ -4950,8 +4962,8 @@ class Service {}
     let map = parse_and_extract(php);
     assert!(map.spans.iter().any(|span| matches!(
         &span.kind,
-        SymbolKind::LaravelStringKey {
-            kind: LaravelStringKind::Config,
+        SymbolKind::StringKey {
+            kind: StringKeyKind::Config,
             key,
             is_write: false,
             is_optional: false,
@@ -4971,8 +4983,8 @@ class Service {}
         .spans
         .iter()
         .filter_map(|span| match &span.kind {
-            SymbolKind::LaravelStringKey {
-                kind: LaravelStringKind::Config,
+            SymbolKind::StringKey {
+                kind: StringKeyKind::Config,
                 key,
                 ..
             } => Some(key.as_str()),
@@ -4988,8 +5000,8 @@ fn resource_keys(map: &SymbolMap, resource: LaravelConfigResource) -> Vec<(Strin
     map.spans
         .iter()
         .filter_map(|span| match &span.kind {
-            SymbolKind::LaravelStringKey {
-                kind: LaravelStringKind::ConfigResource(span_resource),
+            SymbolKind::StringKey {
+                kind: StringKeyKind::ConfigResource(span_resource),
                 key,
                 is_write,
                 is_optional,
@@ -5116,8 +5128,8 @@ class Service {}
     let map = parse_and_extract(php);
     assert!(map.spans.iter().all(|span| !matches!(
         &span.kind,
-        SymbolKind::LaravelStringKey {
-            kind: LaravelStringKind::ConfigResource(_),
+        SymbolKind::StringKey {
+            kind: StringKeyKind::ConfigResource(_),
             ..
         }
     )));
@@ -5154,8 +5166,8 @@ Route::middleware(
     );
     assert!(map.spans.iter().any(|span| matches!(
         &span.kind,
-        SymbolKind::LaravelStringKey {
-            kind: LaravelStringKind::GateAbility,
+        SymbolKind::StringKey {
+            kind: StringKeyKind::GateAbility,
             key,
             ..
         } if key == "update"
@@ -5352,8 +5364,8 @@ fn container_keys(map: &SymbolMap) -> Vec<(String, bool)> {
     map.spans
         .iter()
         .filter_map(|span| match &span.kind {
-            SymbolKind::LaravelStringKey {
-                kind: LaravelStringKind::ContainerBinding,
+            SymbolKind::StringKey {
+                kind: StringKeyKind::ContainerBinding,
                 key,
                 is_write,
                 ..
@@ -5506,8 +5518,8 @@ fn ability_keys(map: &SymbolMap) -> Vec<String> {
     map.spans
         .iter()
         .filter_map(|span| match &span.kind {
-            SymbolKind::LaravelStringKey {
-                kind: LaravelStringKind::GateAbility,
+            SymbolKind::StringKey {
+                kind: StringKeyKind::GateAbility,
                 key,
                 ..
             } => Some(key.clone()),
@@ -5701,8 +5713,8 @@ fn the_can_middleware_parameter_is_read_from_its_string() {
             .find(|s| {
                 matches!(
                     &s.kind,
-                    SymbolKind::LaravelStringKey {
-                        kind: LaravelStringKind::GateAbility,
+                    SymbolKind::StringKey {
+                        kind: StringKeyKind::GateAbility,
                         ..
                     }
                 )
@@ -5749,15 +5761,15 @@ fn a_gate_definition_is_recorded_as_a_write() {
         .find(|s| {
             matches!(
                 &s.kind,
-                SymbolKind::LaravelStringKey {
-                    kind: LaravelStringKind::GateAbility,
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::GateAbility,
                     ..
                 }
             )
         })
         .expect("the definition should record its ability");
     match &span.kind {
-        SymbolKind::LaravelStringKey { is_write, .. } => {
+        SymbolKind::StringKey { is_write, .. } => {
             assert!(*is_write, "a definition declares the ability it names")
         }
         other => panic!("expected a Laravel string key, got {other:?}"),
@@ -5771,11 +5783,11 @@ fn a_gate_definition_is_recorded_as_a_write() {
 // ── Broadened Laravel call sites ────────────────────────────────────
 
 /// Every key of `kind` the map records, in source order.
-fn string_keys_of(map: &SymbolMap, wanted: LaravelStringKind) -> Vec<String> {
+fn string_keys_of(map: &SymbolMap, wanted: StringKeyKind) -> Vec<String> {
     map.spans
         .iter()
         .filter_map(|span| match &span.kind {
-            SymbolKind::LaravelStringKey { kind, key, .. } if *kind == wanted => Some(key.clone()),
+            SymbolKind::StringKey { kind, key, .. } if *kind == wanted => Some(key.clone()),
             _ => None,
         })
         .collect()
@@ -5800,7 +5812,7 @@ fn a_route_name_is_read_from_every_helper_that_takes_one() {
     ] {
         let map = parse_and_extract(&format!("<?php\n{call};\n"));
         assert_eq!(
-            string_keys_of(&map, LaravelStringKind::Route),
+            string_keys_of(&map, StringKeyKind::Route),
             vec!["orders.show".to_string()],
             "`{call}` should name a route"
         );
@@ -5818,7 +5830,7 @@ fn a_route_method_on_an_unrelated_receiver_names_nothing() {
     ] {
         let map = parse_and_extract(&format!("<?php\n{call};\n"));
         assert!(
-            string_keys_of(&map, LaravelStringKind::Route).is_empty(),
+            string_keys_of(&map, StringKeyKind::Route).is_empty(),
             "`{call}` should name no route"
         );
     }
@@ -5831,18 +5843,18 @@ fn a_route_method_on_an_unrelated_receiver_names_nothing() {
 fn every_argument_of_a_route_check_names_a_route() {
     let map = parse_and_extract("<?php\nRoute::is('admin.*', 'account.index');\n");
     assert_eq!(
-        string_keys_of(&map, LaravelStringKind::Route),
+        string_keys_of(&map, StringKeyKind::Route),
         vec!["admin.*".to_string(), "account.index".to_string()]
     );
 
     let map = parse_and_extract("<?php\n$request->routeIs('admin.*');\n");
     assert_eq!(
-        string_keys_of(&map, LaravelStringKind::Route),
+        string_keys_of(&map, StringKeyKind::Route),
         vec!["admin.*".to_string()]
     );
 
     let map = parse_and_extract("<?php\n$request->is('admin/*');\n");
-    assert!(string_keys_of(&map, LaravelStringKind::Route).is_empty());
+    assert!(string_keys_of(&map, StringKeyKind::Route).is_empty());
 }
 
 /// A form request's `#[RedirectToRoute]` names the route a failed validation
@@ -5852,20 +5864,20 @@ fn a_redirect_to_route_attribute_names_a_route() {
     let imported = "<?php\nuse Illuminate\\Foundation\\Http\\Attributes\\RedirectToRoute;\n\
                     #[RedirectToRoute('login')]\nclass StoreRequest {}\n";
     assert_eq!(
-        string_keys_of(&parse_and_extract(imported), LaravelStringKind::Route),
+        string_keys_of(&parse_and_extract(imported), StringKeyKind::Route),
         vec!["login".to_string()]
     );
 
     let qualified = "<?php\n#[\\Illuminate\\Foundation\\Http\\Attributes\\RedirectToRoute('login')]\n\
                      class StoreRequest {}\n";
     assert_eq!(
-        string_keys_of(&parse_and_extract(qualified), LaravelStringKind::Route),
+        string_keys_of(&parse_and_extract(qualified), StringKeyKind::Route),
         vec!["login".to_string()]
     );
 
     let unrelated = "<?php\n#[RedirectToRoute('login')]\nclass StoreRequest {}\n";
     assert!(
-        string_keys_of(&parse_and_extract(unrelated), LaravelStringKind::Route).is_empty(),
+        string_keys_of(&parse_and_extract(unrelated), StringKeyKind::Route).is_empty(),
         "an attribute of the same name from elsewhere names no route"
     );
 }
@@ -5876,13 +5888,13 @@ fn a_redirect_to_route_attribute_names_a_route() {
 fn get_many_names_every_config_key_it_lists() {
     let map = parse_and_extract("<?php\nConfig::getMany(['app.name', 'app.timezone' => 'UTC']);\n");
     assert_eq!(
-        string_keys_of(&map, LaravelStringKind::Config),
+        string_keys_of(&map, StringKeyKind::Config),
         vec!["app.name".to_string(), "app.timezone".to_string()]
     );
 
     let map = parse_and_extract("<?php\nconfig()->getMany(['app.name']);\n");
     assert_eq!(
-        string_keys_of(&map, LaravelStringKind::Config),
+        string_keys_of(&map, StringKeyKind::Config),
         vec!["app.name".to_string()]
     );
 }
@@ -5893,8 +5905,8 @@ fn config_keys_written(map: &SymbolMap) -> Vec<(String, bool)> {
     map.spans
         .iter()
         .filter_map(|span| match &span.kind {
-            SymbolKind::LaravelStringKey {
-                kind: LaravelStringKind::Config,
+            SymbolKind::StringKey {
+                kind: StringKeyKind::Config,
                 key,
                 is_write,
                 ..
@@ -5961,7 +5973,7 @@ fn runtime_config_writes_can_establish_an_entire_root() {
 fn has_for_locale_names_a_translation_key() {
     let map = parse_and_extract("<?php\nLang::hasForLocale('messages.saved', 'da');\n");
     assert_eq!(
-        string_keys_of(&map, LaravelStringKind::Trans),
+        string_keys_of(&map, StringKeyKind::Trans),
         vec!["messages.saved".to_string()]
     );
 }
@@ -5977,7 +5989,7 @@ fn an_environment_variable_is_read_from_both_spellings() {
     ] {
         let map = parse_and_extract(&format!("<?php\n{call};\n"));
         assert_eq!(
-            string_keys_of(&map, LaravelStringKind::Env),
+            string_keys_of(&map, StringKeyKind::Env),
             vec!["APP_NAME".to_string()],
             "`{call}` should name an environment variable"
         );

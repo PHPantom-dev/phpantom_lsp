@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::symbol_map::{LaravelStringKind, SymbolKind};
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 use crate::virtual_members::laravel::canonical_view_name;
 
 use super::call_site_inference::{BladeCallerSnapshot, BladeScope, ViewCallerSnapshot};
@@ -164,8 +164,8 @@ impl Backend {
                 map.spans
                     .iter()
                     .filter_map(|span| match &span.kind {
-                        SymbolKind::LaravelStringKey {
-                            kind: LaravelStringKind::View,
+                        SymbolKind::StringKey {
+                            kind: StringKeyKind::View,
                             key,
                             ..
                         } => Some(key.clone()),
@@ -251,14 +251,14 @@ impl Backend {
         let Some(map) = self.symbol_map_for(caller_uri) else {
             return;
         };
-        let extra = self.typed_receiver_view_spans_for(caller_uri, &map);
+        let extra = self.typed_receiver_spans_for(caller_uri, &map);
         let mut names: Vec<&str> = map
             .spans
             .iter()
             .chain(extra.iter())
             .filter_map(|span| match &span.kind {
-                SymbolKind::LaravelStringKey {
-                    kind: LaravelStringKind::View,
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::View,
                     key,
                     ..
                 } => Some(key.as_str()),
@@ -275,7 +275,7 @@ impl Backend {
         for name in names {
             for location in crate::virtual_members::laravel::resolve_laravel_string_key(
                 self,
-                &LaravelStringKind::View,
+                &StringKeyKind::View,
                 name,
                 caller_uri,
             ) {
@@ -318,7 +318,7 @@ impl Backend {
             for name in self.blade_rendered_view_names(&caller_uri, &anonymous) {
                 for location in crate::virtual_members::laravel::resolve_laravel_string_key(
                     self,
-                    &LaravelStringKind::View,
+                    &StringKeyKind::View,
                     &name,
                     &caller_uri,
                 ) {

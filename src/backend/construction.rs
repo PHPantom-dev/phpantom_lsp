@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
-use tower_lsp::Client;
+use tower_lsp_server::Client;
 
 use crate::backend::external_tool_worker::ExternalToolWorker;
 use crate::backend::requests::WholeFileCoalesce;
@@ -14,8 +14,8 @@ use crate::ci_map::CiMap;
 use crate::symbol_index::SymbolIndex;
 use crate::workspace_env::WorkspaceEnv;
 use crate::{
-    Backend, BackendState, blade, composer, reference_counts, reference_index, resolution, stubs,
-    virtual_members,
+    Backend, BackendState, blade, composer, framework, reference_counts, reference_index,
+    resolution, stubs, virtual_members,
 };
 
 /// The Laravel alias slot and the resolved-class cache that reads it.
@@ -81,11 +81,14 @@ impl BackendState {
             client_name: Mutex::new(String::new()),
             open_files: Arc::new(RwLock::new(HashMap::new())),
             files: Arc::new(RwLock::new(HashMap::new())),
+            framework_references: framework::new_framework_reference_index(),
+            framework_doctrine_repositories: framework::new_doctrine_repository_index(),
             reference_index: reference_index::new_reference_index(),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace,
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
+            parsed_for_diagnostics: Mutex::new(None),
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
@@ -94,10 +97,17 @@ impl BackendState {
             stub_index: Arc::new(RwLock::new(stubs.classes)),
             stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(stubs.functions))),
             stub_constant_index: Arc::new(RwLock::new(stubs.constants)),
+            external_stubs: Arc::new(RwLock::new(Arc::default())),
+            has_external_stubs: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             resolved_class_cache,
             laravel: crate::backend::laravel::LaravelState::new(laravel_aliases),
             blade: blade::state::BladeState::default(),
             is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            is_doctrine: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            is_symfony: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            symfony: crate::symfony::SymfonyState::default(),
+            is_twig: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            twig: crate::twig::TwigState::default(),
             pest_configs: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             diag: crate::diagnostics::state::DiagnosticState::new(),

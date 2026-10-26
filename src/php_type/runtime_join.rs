@@ -96,10 +96,11 @@ impl PhpType {
 ///
 /// Only scalar value domains take part; see [`is_runtime_scalar_value_domain`].
 pub(crate) fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -> bool {
-    // `kind()` reads an unsealed shape as the array it widens to, and an
-    // exact class name as the `class-string<T>` it is one of, so either
-    // would take in the wider type it is read as and drop it from a join.
-    if supertype.as_unsealed_shape().is_some() || supertype.as_class_name_literal().is_some() {
+    // `kind()` reads an unsealed shape as the array it widens to, an exact
+    // class name as the `class-string<T>` it is one of, and an enum case as
+    // its enum, so any of them would take in the wider type it is read as
+    // and drop it from a join.
+    if supertype.as_unsealed_shape().is_some() || supertype.is_exact_value_marker() {
         return subtype == supertype;
     }
     // `array{}` is the empty array, and every array type that does not

@@ -48,7 +48,7 @@ mod target;
 pub(crate) use inference::enrichment_return_type;
 pub(in crate::code_actions::phpstan) use target::{Anchor, target_function};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
@@ -107,7 +107,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -120,12 +120,15 @@ impl Backend {
 
             match identifier {
                 RETURN_VOID_ID => {
-                    if !diag.message.ends_with(RETURN_VOID_MSG_SUFFIX) {
+                    if !crate::util::message_text(&diag.message).ends_with(RETURN_VOID_MSG_SUFFIX) {
                         continue;
                     }
-                    let Some(target) =
-                        target_function(content, diag_line, Anchor::Return, &diag.message)
-                    else {
+                    let Some(target) = target_function(
+                        content,
+                        diag_line,
+                        Anchor::Return,
+                        crate::util::message_text(&diag.message),
+                    ) else {
                         continue;
                     };
 
@@ -155,7 +158,8 @@ impl Backend {
                     // from a void function is not a type mismatch, it's
                     // just a habit.  The "Remove return statement" fix above
                     // handles it.
-                    if let Some(actual_type) = extract_actual_type(&diag.message)
+                    if let Some(actual_type) =
+                        extract_actual_type(crate::util::message_text(&diag.message))
                         && !actual_type.is_null()
                     {
                         // Verify the change-type fix is applicable (the
@@ -183,21 +187,22 @@ impl Backend {
                     }
                 }
                 RETURN_EMPTY_ID => {
-                    if !diag.message.contains(RETURN_EMPTY_MSG_FRAGMENT) {
+                    if !crate::util::message_text(&diag.message).contains(RETURN_EMPTY_MSG_FRAGMENT)
+                    {
                         continue;
                     }
 
                     // Verify the fix is applicable.
-                    let applies =
-                        target_function(content, diag_line, Anchor::Return, &diag.message)
-                            .is_some_and(|target| {
-                                build_change_return_type_edits_to(
-                                    content,
-                                    &target,
-                                    &PhpType::void(),
-                                )
-                                .is_some()
-                            });
+                    let applies = target_function(
+                        content,
+                        diag_line,
+                        Anchor::Return,
+                        crate::util::message_text(&diag.message),
+                    )
+                    .is_some_and(|target| {
+                        build_change_return_type_edits_to(content, &target, &PhpType::void())
+                            .is_some()
+                    });
                     if !applies {
                         continue;
                     }
@@ -224,9 +229,15 @@ impl Backend {
                     // Just verify the message is parseable and names a
                     // function the fix can edit — defer the inference to
                     // Phase 2.
-                    if extract_return_type_actual(&diag.message).is_none()
-                        || target_function(content, diag_line, Anchor::Return, &diag.message)
-                            .is_none()
+                    if extract_return_type_actual(crate::util::message_text(&diag.message))
+                        .is_none()
+                        || target_function(
+                            content,
+                            diag_line,
+                            Anchor::Return,
+                            crate::util::message_text(&diag.message),
+                        )
+                        .is_none()
                     {
                         continue;
                     }
@@ -252,9 +263,12 @@ impl Backend {
                     // be expensive and the collect phase runs on every
                     // cursor move.  Just validate that the function has
                     // no return type yet, and a body to infer one from.
-                    let Some(target) =
-                        target_function(content, diag_line, Anchor::Declaration, &diag.message)
-                    else {
+                    let Some(target) = target_function(
+                        content,
+                        diag_line,
+                        Anchor::Declaration,
+                        crate::util::message_text(&diag.message),
+                    ) else {
                         continue;
                     };
                     if target.has_return_type() || target.body_end.is_none() {
@@ -301,7 +315,7 @@ impl Backend {
         };
         let target = target_function(content, diag_line, anchor, diag_msg)?;
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
 
         match data.action_kind.as_str() {
             ACTION_KIND_STRIP_EXPR => {

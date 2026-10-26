@@ -10,7 +10,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
@@ -302,14 +302,14 @@ impl Backend {
 
                 CompletionItem {
                     label: ns.clone(),
-                    kind: Some(CompletionItemKind::MODULE),
+                    kind: Some(CompletionItemKind::Module),
                     detail,
                     insert_text: Some(ns.clone()),
                     filter_text: Some(ns.clone()),
                     sort_text: Some(sort_text),
                     preselect: Some(preselect),
                     text_edit: replace_range.map(|range| {
-                        CompletionTextEdit::Edit(TextEdit {
+                        CompletionItemTextEdit::TextEdit(TextEdit {
                             range,
                             new_text: ns,
                         })

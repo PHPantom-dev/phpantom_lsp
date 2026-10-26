@@ -2,8 +2,8 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use std::hint::black_box;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -54,12 +54,12 @@ async fn setup_laravel_backend() -> Backend {
     Backend::new_test_with_stubs(stubs)
 }
 
-async fn open_file(backend: &Backend, uri_str: &str, content: &str) -> Url {
-    let uri = Url::parse(uri_str).unwrap();
+async fn open_file(backend: &Backend, uri_str: &str, content: &str) -> Uri {
+    let uri = Uri::parse(uri_str).unwrap();
     let params = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
             uri: uri.clone(),
-            language_id: "php".to_string(),
+            language_id: "php".to_string().into(),
             version: 1,
             text: content.to_string(),
         },
@@ -96,7 +96,7 @@ fn bench_custom_builder_completion(c: &mut Criterion) {
             runtime.block_on(async {
                 backend.clear_completion_cache();
                 let params = CompletionParams {
-                    text_document_position: TextDocumentPositionParams {
+                    text_document_position_params: TextDocumentPositionParams {
                         text_document: TextDocumentIdentifier { uri: uri.clone() },
                         position: Position {
                             line,
@@ -106,7 +106,7 @@ fn bench_custom_builder_completion(c: &mut Criterion) {
                     work_done_progress_params: WorkDoneProgressParams::default(),
                     partial_result_params: PartialResultParams::default(),
                     context: Some(CompletionContext {
-                        trigger_kind: CompletionTriggerKind::INVOKED,
+                        trigger_kind: CompletionTriggerKind::Invoked,
                         trigger_character: None,
                     }),
                 };

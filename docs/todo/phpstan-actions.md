@@ -93,10 +93,13 @@ if needed). Same docblock insertion pattern as `add_throws.rs`.
 **Identifier:** `match.unhandled`
 **Message:** `Match expression does not handle remaining value(s): {types}`
 
-Parse the remaining value(s) from the message:
-`does not handle remaining value\(s\): (.+)$`
+The native `unhandled_match` diagnostic uses the same message, so the
+action can attach to both.
 
-The value list is comma-separated. Each value can be:
+Parse the remaining value(s) from the message:
+`does not handle remaining values?: (.+)$`
+
+The value list is separated by `|`. Each value can be:
 - An enum case: `Foo::Bar` — generate `Foo::Bar => TODO`
 - A string literal: `'foo'` — generate `'foo' => TODO`
 - An int literal: `42` — generate `42 => TODO`

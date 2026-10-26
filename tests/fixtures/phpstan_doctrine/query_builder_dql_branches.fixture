@@ -1,0 +1,13 @@
+// test: A query builder's DQL on each branch that builds it
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testRuleBranches.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/query-builder-branches-dql.php
+// expect_diagnostic: 31: QueryBuilder: [Semantical Error] line 0, col 58 near 'p.id = 1': Error: 'p' is not defined. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 45: QueryBuilder: [Semantical Error] line 0, col 58 near 'p.id = 1': Error: 'p' is not defined. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 59: QueryBuilder: [Semantical Error] line 0, col 58 near 'p.id = 1': Error: 'p' is not defined. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 90: QueryBuilder: [Semantical Error] line 0, col 93 near 't.id = 1': Error: 't' is not defined. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 107: QueryBuilder: [Semantical Error] line 0, col 95 near 'foo = 1': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named foo // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 107: QueryBuilder: [Semantical Error] line 0, col 93 near 't.id = 1': Error: 't' is not defined. // SKIP: DQL and query builder strings are not checked
+---

@@ -4,8 +4,8 @@ use phpantom_lsp::Backend;
 use phpantom_lsp::composer::parse_autoload_classmap;
 use std::collections::HashMap;
 use std::fs;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Cross-file / PSR-4 resolution tests ────────────────────────────────────
 
@@ -34,7 +34,7 @@ async fn test_cross_file_double_colon_psr4() {
     );
 
     // The "current" file references Acme\Service via ::
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -53,15 +53,15 @@ async fn test_cross_file_double_colon_psr4() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
             // :: shows static method + constants
@@ -80,7 +80,7 @@ async fn test_cross_file_double_colon_psr4() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -108,7 +108,7 @@ async fn test_cross_file_new_variable_psr4() {
     );
 
     // The "current" file creates a new Acme\Widget and calls ->
-    let uri = Url::parse("file:///page.php").unwrap();
+    let uri = Uri::parse("file:///page.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Page {\n",
@@ -128,15 +128,15 @@ async fn test_cross_file_new_variable_psr4() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.label.as_str())
                 .collect();
             assert!(
@@ -150,7 +150,7 @@ async fn test_cross_file_new_variable_psr4() {
                 prop_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -178,7 +178,7 @@ async fn test_cross_file_param_type_hint_psr4() {
     );
 
     // The "current" file has a method with an Acme\Logger parameter
-    let uri = Url::parse("file:///handler.php").unwrap();
+    let uri = Uri::parse("file:///handler.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Handler {\n",
@@ -197,10 +197,10 @@ async fn test_cross_file_param_type_hint_psr4() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -214,7 +214,7 @@ async fn test_cross_file_param_type_hint_psr4() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -243,7 +243,7 @@ async fn test_cross_file_caches_parsed_class() {
         )],
     );
 
-    let uri = Url::parse("file:///controller.php").unwrap();
+    let uri = Uri::parse("file:///controller.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Controller {\n",
@@ -255,7 +255,7 @@ async fn test_cross_file_caches_parsed_class() {
     open_php(&backend, &uri, text).await;
 
     let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
+        text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position {
                 line: 3,
@@ -276,10 +276,10 @@ async fn test_cross_file_caches_parsed_class() {
     assert!(result2.is_some(), "Second call should also resolve");
 
     match result2.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -288,7 +288,7 @@ async fn test_cross_file_caches_parsed_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -306,7 +306,7 @@ async fn test_cross_file_no_psr4_mapping_falls_back() {
         &[], // no files on disk
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -346,7 +346,7 @@ async fn test_cross_file_nested_namespace_psr4() {
         )],
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Test {\n",
@@ -361,10 +361,10 @@ async fn test_cross_file_nested_namespace_psr4() {
     assert!(result.is_some(), "Should resolve deeply nested namespace");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -373,7 +373,7 @@ async fn test_cross_file_nested_namespace_psr4() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -406,7 +406,7 @@ async fn test_cross_file_use_statement_new_variable() {
         )],
     );
 
-    let uri = Url::parse("file:///order.php").unwrap();
+    let uri = Uri::parse("file:///order.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Klarna\\Rest\\Checkout;\n",
@@ -430,15 +430,15 @@ async fn test_cross_file_use_statement_new_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.label.as_str())
                 .collect();
             assert!(
@@ -452,7 +452,7 @@ async fn test_cross_file_use_statement_new_variable() {
                 prop_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -480,7 +480,7 @@ async fn test_cross_file_use_statement_double_colon() {
         )],
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -503,15 +503,15 @@ async fn test_cross_file_use_statement_double_colon() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
             assert!(
@@ -525,7 +525,7 @@ async fn test_cross_file_use_statement_double_colon() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -552,7 +552,7 @@ async fn test_cross_file_use_statement_aliased() {
         )],
     );
 
-    let uri = Url::parse("file:///runner.php").unwrap();
+    let uri = Uri::parse("file:///runner.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use Acme\\Service as Svc;\n",
@@ -574,10 +574,10 @@ async fn test_cross_file_use_statement_aliased() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -586,7 +586,7 @@ async fn test_cross_file_use_statement_aliased() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -613,7 +613,7 @@ async fn test_cross_file_use_statement_param_type_hint() {
         )],
     );
 
-    let uri = Url::parse("file:///notify.php").unwrap();
+    let uri = Uri::parse("file:///notify.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -636,10 +636,10 @@ async fn test_cross_file_use_statement_param_type_hint() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -648,7 +648,7 @@ async fn test_cross_file_use_statement_param_type_hint() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -706,12 +706,12 @@ async fn test_cross_file_classmap_resolution() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
     // Open a file that uses Legacy\Widget via ->
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -731,10 +731,10 @@ async fn test_cross_file_classmap_resolution() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -748,7 +748,7 @@ async fn test_cross_file_classmap_resolution() {
                 "Should include static 'create' on -> access (PHP allows static calls via instance)"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -799,11 +799,11 @@ async fn test_cross_file_classmap_double_colon() {
     {
         let mut idx = backend.fqn_uri_index().write();
         for (fqn, path) in &classmap {
-            idx.insert(fqn.clone(), Url::from_file_path(path).unwrap().to_string());
+            idx.insert(fqn.clone(), Uri::from_file_path(path).unwrap().to_string());
         }
     }
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class App {\n",
@@ -822,15 +822,15 @@ async fn test_cross_file_classmap_double_colon() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
             assert!(
@@ -848,7 +848,7 @@ async fn test_cross_file_classmap_double_colon() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -877,7 +877,7 @@ async fn test_cross_file_namespace_relative_resolution() {
         )],
     );
 
-    let uri = Url::parse("file:///main.php").unwrap();
+    let uri = Uri::parse("file:///main.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Acme;\n",
@@ -899,10 +899,10 @@ async fn test_cross_file_namespace_relative_resolution() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -911,7 +911,7 @@ async fn test_cross_file_namespace_relative_resolution() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -937,7 +937,7 @@ async fn test_unqualified_class_in_namespace_does_not_fall_back_to_global() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo;\n",
@@ -953,9 +953,9 @@ async fn test_unqualified_class_in_namespace_does_not_fall_back_to_global() {
     let result = completion_response(&backend, &uri, 5, 13, None).await;
 
     let has_pdo_methods = match &result {
-        Some(CompletionResponse::Array(items)) => items
+        Some(CompletionResponse::CompletionItemList(items)) => items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::METHOD)),
+            .any(|i| i.kind == Some(CompletionItemKind::Method)),
         _ => false,
     };
     assert!(
@@ -975,7 +975,7 @@ async fn test_fqn_class_in_namespace_resolves_globally() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo;\n",
@@ -992,10 +992,10 @@ async fn test_fqn_class_in_namespace_resolves_globally() {
 
     assert!(result.is_some(), "\\PDO:: should resolve to global PDO");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -1004,7 +1004,7 @@ async fn test_fqn_class_in_namespace_resolves_globally() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1018,7 +1018,7 @@ async fn new_pdo_member_completions(class_spelling: &str) -> Vec<String> {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let line = format!("        (new {class_spelling}())->");
     let text = format!(
         "<?php\nnamespace Demo;\n\nclass Foo {{\n    function test() {{\n{line}\n    }}\n}}\n"
@@ -1028,9 +1028,9 @@ async fn new_pdo_member_completions(class_spelling: &str) -> Vec<String> {
     let result = completion_response(&backend, &uri, 5, line.len() as u32, None).await;
 
     match result {
-        Some(CompletionResponse::Array(items)) => items
+        Some(CompletionResponse::CompletionItemList(items)) => items
             .into_iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .filter_map(|i| i.filter_text)
             .collect(),
         _ => Vec::new(),
@@ -1069,7 +1069,7 @@ async fn test_imported_class_in_namespace_resolves_via_use() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo;\n",
@@ -1091,10 +1091,10 @@ async fn test_imported_class_in_namespace_resolves_via_use() {
         "PDO:: with `use PDO;` should resolve to global PDO"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -1103,7 +1103,7 @@ async fn test_imported_class_in_namespace_resolves_via_use() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1117,7 +1117,7 @@ async fn test_unqualified_class_in_global_scope_resolves() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!("<?php\n", "PDO::\n",);
     open_php(&backend, &uri, text).await;
 
@@ -1128,10 +1128,10 @@ async fn test_unqualified_class_in_global_scope_resolves() {
         "PDO:: in global scope should resolve to PDO"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -1140,7 +1140,7 @@ async fn test_unqualified_class_in_global_scope_resolves() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1169,7 +1169,7 @@ async fn test_fqn_namespaced_class_resolves_globally() {
         )],
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Other;\n",
@@ -1186,10 +1186,10 @@ async fn test_fqn_namespaced_class_resolves_globally() {
 
     assert!(result.is_some(), "\\Acme\\Service:: should resolve via FQN");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -1198,7 +1198,7 @@ async fn test_fqn_namespaced_class_resolves_globally() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1212,7 +1212,7 @@ async fn test_aliased_import_resolves_in_namespace() {
     );
     let backend = Backend::new_test_with_stubs(stubs);
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo;\n",
@@ -1234,10 +1234,10 @@ async fn test_aliased_import_resolves_in_namespace() {
         "DB:: with `use PDO as DB;` should resolve to global PDO"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -1246,7 +1246,7 @@ async fn test_aliased_import_resolves_in_namespace() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1276,7 +1276,7 @@ async fn test_cross_file_variable_in_standalone_function() {
     );
 
     // ── Test 1: inside a class method (known working baseline) ──
-    let uri_class = Url::parse("file:///test_class.php").unwrap();
+    let uri_class = Uri::parse("file:///test_class.php").unwrap();
     let text_class = concat!(
         "<?php\n",
         "use Acme\\Widget;\n",
@@ -1290,9 +1290,9 @@ async fn test_cross_file_variable_in_standalone_function() {
     open_php(&backend, &uri_class, text_class).await;
     let result_class = completion_response(&backend, &uri_class, 5, 12, None).await;
     let class_methods: Vec<&str> = match result_class.as_ref() {
-        Some(CompletionResponse::Array(items)) => items
+        Some(CompletionResponse::CompletionItemList(items)) => items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
             .collect(),
         _ => vec![],
@@ -1304,7 +1304,7 @@ async fn test_cross_file_variable_in_standalone_function() {
     );
 
     // ── Test 2: inside a standalone function ──
-    let uri_func = Url::parse("file:///test_func.php").unwrap();
+    let uri_func = Uri::parse("file:///test_func.php").unwrap();
     let text_func = concat!(
         "<?php\n",
         "use Acme\\Widget;\n",
@@ -1316,9 +1316,9 @@ async fn test_cross_file_variable_in_standalone_function() {
     open_php(&backend, &uri_func, text_func).await;
     let result_func = completion_response(&backend, &uri_func, 4, 8, None).await;
     let func_methods: Vec<&str> = match result_func.as_ref() {
-        Some(CompletionResponse::Array(items)) => items
+        Some(CompletionResponse::CompletionItemList(items)) => items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
             .collect(),
         _ => vec![],
@@ -1381,7 +1381,7 @@ async fn test_cross_file_static_chain_variable_in_standalone_function() {
     );
 
     // ── Inline chain baseline (no variable) ──
-    let uri_inline = Url::parse("file:///test_inline.php").unwrap();
+    let uri_inline = Uri::parse("file:///test_inline.php").unwrap();
     let text_inline = concat!(
         "<?php\n",
         "use Acme\\Factory;\n",
@@ -1392,15 +1392,15 @@ async fn test_cross_file_static_chain_variable_in_standalone_function() {
     open_php(&backend, &uri_inline, text_inline).await;
     let result_inline = completion_response(&backend, &uri_inline, 3, 33, None).await;
     let inline_methods: Vec<&str> = match result_inline.as_ref() {
-        Some(CompletionResponse::Array(items)) => items
+        Some(CompletionResponse::CompletionItemList(items)) => items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
             .collect(),
         _ => vec![],
     };
     // ── Variable assignment from static chain in standalone function ──
-    let uri_func = Url::parse("file:///test_chain_func.php").unwrap();
+    let uri_func = Uri::parse("file:///test_chain_func.php").unwrap();
     let text_func = concat!(
         "<?php\n",
         "use Acme\\Factory;\n",
@@ -1412,15 +1412,15 @@ async fn test_cross_file_static_chain_variable_in_standalone_function() {
     open_php(&backend, &uri_func, text_func).await;
     let result_func = completion_response(&backend, &uri_func, 4, 8, None).await;
     let func_methods: Vec<&str> = match result_func.as_ref() {
-        Some(CompletionResponse::Array(items)) => items
+        Some(CompletionResponse::CompletionItemList(items)) => items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
             .collect(),
         _ => vec![],
     };
     // ── Top-level variable assignment (no enclosing function) ──
-    let uri_top = Url::parse("file:///test_chain_top.php").unwrap();
+    let uri_top = Uri::parse("file:///test_chain_top.php").unwrap();
     let text_top = concat!(
         "<?php\n",
         "use Acme\\Factory;\n",
@@ -1430,9 +1430,9 @@ async fn test_cross_file_static_chain_variable_in_standalone_function() {
     open_php(&backend, &uri_top, text_top).await;
     let result_top = completion_response(&backend, &uri_top, 3, 4, None).await;
     let top_methods: Vec<&str> = match result_top.as_ref() {
-        Some(CompletionResponse::Array(items)) => items
+        Some(CompletionResponse::CompletionItemList(items)) => items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
             .collect(),
         _ => vec![],
@@ -1460,7 +1460,7 @@ async fn test_cross_file_static_chain_variable_in_standalone_function() {
 #[tokio::test]
 async fn test_unqualified_ancestor_in_namespace_does_not_fall_back_to_global() {
     let backend = crate::common::create_test_backend();
-    let uri = Url::parse("file:///no_global_ancestor.php").unwrap();
+    let uri = Uri::parse("file:///no_global_ancestor.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace {\n",

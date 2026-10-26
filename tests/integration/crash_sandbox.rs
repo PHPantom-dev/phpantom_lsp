@@ -1,5 +1,6 @@
+use crate::common::message_text;
 use crate::common::{create_test_backend, hover_at, with_parse_worker_stack};
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 /// Regression test: parse the exact sandbox.php content through
 /// update_ast (the did_open code path) to verify it does not crash
@@ -673,7 +674,9 @@ class SiteTreeService {
     // `getId()` exists on Category, so no unknown-member diagnostic
     // should be emitted for it.
     assert!(
-        !diags.iter().any(|d| d.message.contains("getId")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getId")),
         "getId should be known on Category, got: {:?}",
         diags
     );

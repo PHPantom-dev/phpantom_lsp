@@ -1,0 +1,8 @@
+// test: A column of a type no descriptor knows
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testUnknownType.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/EntityWithUnknownType.php
+// expect_diagnostic: 22: Property PHPStan\Rules\Doctrine\ORM\EntityWithUnknownType::$foo: Doctrine type "unknown" does not have any registered descriptor. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

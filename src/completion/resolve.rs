@@ -25,7 +25,7 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::Fqn;
@@ -75,11 +75,11 @@ pub(crate) struct CompletionItemData {
 
 /// Extract the markdown string from a `Hover` value.
 ///
-/// The hover methods always produce `HoverContents::Markup`, so this
+/// The hover methods always produce `Contents::MarkupContent`, so this
 /// just unwraps the inner `MarkupContent::value`.
 fn extract_hover_markdown(hover: Hover) -> Option<String> {
     match hover.contents {
-        HoverContents::Markup(mc) => Some(mc.value),
+        Contents::MarkupContent(mc) => Some(mc.value),
         _ => None,
     }
 }

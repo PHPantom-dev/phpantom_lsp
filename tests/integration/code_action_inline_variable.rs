@@ -11,7 +11,7 @@ use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_at, position_of,
     resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -245,7 +245,7 @@ function foo() {
     let actions = get_code_actions_at(&backend, uri, content, position.line, position.character);
     let action = find_action(&actions, "Inline variable").expect("action should be offered");
 
-    assert_eq!(action.kind, Some(CodeActionKind::REFACTOR_INLINE));
+    assert_eq!(action.kind, Some(CodeActionKind::RefactorInline));
     // Phase 1: no edit, has data.
     assert!(action.edit.is_none(), "Phase 1 should not compute edits");
     assert!(action.data.is_some(), "Phase 1 should attach resolve data");

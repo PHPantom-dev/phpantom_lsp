@@ -5,7 +5,7 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use phpantom_lsp::Backend;
 use std::hint::black_box;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Generate a large project with `num_classes` classes.
 /// Half of them extend a base class.

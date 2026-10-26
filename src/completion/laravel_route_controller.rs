@@ -20,7 +20,7 @@
 
 use std::ops::ControlFlow;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use mago_syntax::cst::*;
 
@@ -271,7 +271,7 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::lsp_types::Position;
+    use tower_lsp_server::gen_lsp_types::Position;
 
     #[test]
     fn detects_route_patch_second_arg() {

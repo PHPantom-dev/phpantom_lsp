@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
@@ -40,7 +40,7 @@ impl Backend {
         uri: &str,
         _content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         // Look at all cached PHPStan diagnostics for the file; overlap
         // with the requested range is checked per-diagnostic below.
@@ -114,7 +114,7 @@ impl Backend {
             // Parse the identifier and line from the message.
             // PHPStan message format:
             //   "No error with identifier <id> is reported on line <N>."
-            let ignore_id = parse_unmatched_identifier(&diag.message);
+            let ignore_id = parse_unmatched_identifier(crate::util::message_text(&diag.message));
             out.push(deferred_quickfix(
                 match ignore_id {
                     Some(ref id) => format!("Remove unnecessary @phpstan-ignore ({})", id),
@@ -144,7 +144,7 @@ impl Backend {
 
         let edit = build_add_ignore_edit(content, line, line_text, identifier);
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 
@@ -166,7 +166,7 @@ impl Backend {
         let edit =
             build_remove_ignore_edit(content, message_line, diagnostic_line, ignore_id.as_deref())?;
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 }
@@ -836,11 +836,11 @@ mod tests {
                     character: u32::MAX,
                 },
             },
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("method.visibility".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("method.visibility".to_string())),
             code_description: None,
             source: Some("phpstan".to_string()),
-            message: "some error".to_string(),
+            message: "some error".to_string().into(),
             related_information: None,
             tags: None,
             data,

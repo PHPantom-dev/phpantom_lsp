@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolMap;
@@ -153,9 +153,9 @@ impl Backend {
             }
             items.push(CompletionItem {
                 label: var_name.clone(),
-                kind: Some(CompletionItemKind::VARIABLE),
+                kind: Some(CompletionItemKind::Variable),
                 detail: Some("variable".to_string()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range: replace_range,
                     new_text: var_name.clone(),
                 })),
@@ -175,15 +175,15 @@ impl Backend {
             }
             items.push(CompletionItem {
                 label: name.to_string(),
-                kind: Some(CompletionItemKind::VARIABLE),
+                kind: Some(CompletionItemKind::Variable),
                 detail: Some("PHP superglobal".to_string()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range: replace_range,
                     new_text: name.to_string(),
                 })),
                 filter_text: Some(name.to_string()),
                 sort_text: Some(format!("z_{}", name.to_lowercase())),
-                tags: Some(vec![CompletionItemTag::DEPRECATED]),
+                tags: Some(vec![CompletionItemTag::Deprecated]),
                 ..CompletionItem::default()
             });
         }

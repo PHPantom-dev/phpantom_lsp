@@ -10,7 +10,7 @@ use crate::common::{
     create_test_backend, extract_edits, find_action, find_action_containing, find_actions,
     get_code_actions_at, get_code_actions_in_range, position_after, position_of, resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── Offering the action and the edits it generates ──────────────────────────
 
@@ -35,7 +35,7 @@ fn extract_variable_action_offered_for_selection() {
     let extract_action =
         find_action(&actions, "Extract variable").expect("expected extract variable action");
 
-    assert_eq!(extract_action.kind, Some(CodeActionKind::REFACTOR_EXTRACT));
+    assert_eq!(extract_action.kind, Some(CodeActionKind::RefactorExtract));
 }
 
 #[test]

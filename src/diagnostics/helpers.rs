@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::ResolvedClassLoader;
@@ -93,7 +93,7 @@ pub(crate) fn collect_type_check<S>(
             let range = backend.offset_range_to_lsp_range(uri, content, start, end)?;
             Some(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 code,
                 message,
             ))
@@ -322,7 +322,7 @@ fn find_method_name_in_members<'a>(
 pub(crate) fn is_position_independent_call_expression(expr: &str) -> bool {
     // An invoked value (`($this->handler)`) depends on its inner expression.
     let expr = expr.trim_start_matches('(');
-    if expr.starts_with('$') {
+    if expr.starts_with('$') || expr.starts_with("new $") {
         return false;
     }
     if expr.starts_with("self::") || expr.starts_with("static::") || expr.starts_with("parent::") {
@@ -373,6 +373,33 @@ impl<'a> CallTargetCache<'a> {
     }
 }
 
+/// The classes `new $var` builds at the context's offset, when `$var` can
+/// only hold strings spelling them (`'Foo'`, `'\\Foo'`).
+///
+/// `None` when it may hold anything else. A `class-string<Foo>` holds some
+/// class extending `Foo`, so the checks that judge the class `new` builds
+/// (its kind, its constructor) cannot judge it by `Foo`.
+pub(crate) fn classes_instantiated_by_variable(
+    var_name: &str,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+) -> Option<Vec<Arc<ClassInfo>>> {
+    let values = crate::type_engine::resolver::resolve_target_classes_expr(
+        &crate::type_engine::subject_expr::SubjectExpr::Variable(var_name.to_string()),
+        crate::types::AccessKind::Arrow,
+        rctx,
+    );
+    let mut classes = Vec::new();
+    for value in &values {
+        let spelled =
+            crate::type_engine::variable::class_string_resolution::classes_spelled_exactly_by(
+                &value.type_string,
+                rctx.file.class_loader,
+            )?;
+        ClassInfo::extend_unique_arc(&mut classes, spelled);
+    }
+    (!classes.is_empty()).then_some(classes)
+}
+
 /// Build a standard diagnostic with the common fields pre-filled.
 ///
 /// Most diagnostic collectors build `Diagnostic` values with `source`
@@ -390,8 +417,8 @@ pub(crate) fn make_diagnostic(
 /// [`make_diagnostic`], carrying a `DiagnosticTag`.
 ///
 /// The tag is what makes an editor render the range as dimmed
-/// ([`DiagnosticTag::UNNECESSARY`]) or struck through
-/// ([`DiagnosticTag::DEPRECATED`]) rather than underlining it.
+/// ([`DiagnosticTag::Unnecessary`]) or struck through
+/// ([`DiagnosticTag::Deprecated`]) rather than underlining it.
 pub(crate) fn make_tagged_diagnostic(
     range: Range,
     severity: DiagnosticSeverity,
@@ -402,10 +429,10 @@ pub(crate) fn make_tagged_diagnostic(
     Diagnostic {
         range,
         severity: Some(severity),
-        code: Some(NumberOrString::String(code.to_string())),
+        code: Some(Code::String(code.to_string())),
         code_description: None,
         source: Some("phpantom".to_string()),
-        message,
+        message: message.into(),
         related_information: None,
         tags: tag.map(|t| vec![t]),
         data: None,

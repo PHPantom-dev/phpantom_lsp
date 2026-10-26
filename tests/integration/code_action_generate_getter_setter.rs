@@ -14,13 +14,13 @@ use crate::common::{
     create_test_backend, extract_edits, find_action_titled, find_actions,
     get_code_actions_in_range, position_of,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /// The titles of the getter/setter actions among `actions`, for
 /// assertion messages.
-fn generate_titles(actions: &[CodeActionOrCommand]) -> Vec<String> {
+fn generate_titles(actions: &[CodeActionResponse]) -> Vec<String> {
     find_actions(actions, "Generate getter")
         .into_iter()
         .chain(find_actions(actions, "Generate setter"))
@@ -33,7 +33,7 @@ fn actions_at(
     backend: &phpantom_lsp::Backend,
     content: &str,
     needle: &str,
-) -> Vec<CodeActionOrCommand> {
+) -> Vec<CodeActionResponse> {
     let pos = position_of(content, needle);
     get_code_actions_in_range(backend, "file:///test.php", content, Range::new(pos, pos))
 }

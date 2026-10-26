@@ -39,11 +39,11 @@ mod members;
 mod receivers;
 mod variables;
 
-pub(crate) use members::MemberDeclarationReferenceQuery;
+pub(crate) use members::{MemberDeclarationReferenceQuery, MemberRefKind};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Location, Position, Range, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Position, Range, Uri};
 
 use crate::Backend;
 use crate::names::resolve_to_fqn;
@@ -460,7 +460,7 @@ pub(super) fn member_candidate_keys(
 pub(super) struct CandidateFile<'a> {
     backend: &'a Backend,
     uri: &'a str,
-    url: std::cell::OnceCell<Option<Url>>,
+    url: std::cell::OnceCell<Option<Uri>>,
     content: std::cell::OnceCell<Option<Arc<String>>>,
     line_starts: std::cell::OnceCell<Vec<usize>>,
 }
@@ -483,7 +483,7 @@ impl<'a> CandidateFile<'a> {
 
     /// The file's URI as a location carries it, or `None` when it does not
     /// parse.
-    pub(super) fn url(&self) -> Option<Url> {
+    pub(super) fn url(&self) -> Option<Uri> {
         self.url
             .get_or_init(|| crate::util::parse_url(self.uri))
             .clone()
@@ -530,7 +530,7 @@ impl<'a> CandidateFile<'a> {
 /// [`sort_locations_for_references`], when the search is done.
 pub(crate) fn push_location(
     locations: &mut Vec<Location>,
-    uri: &Url,
+    uri: &Uri,
     start: Position,
     end: Position,
 ) {

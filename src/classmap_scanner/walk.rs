@@ -44,7 +44,8 @@ pub(crate) fn collect_php_files_gitignore(
 }
 
 /// Collect the PHP and schema-free YAML/XML inputs used by the full workspace
-/// index in one `.gitignore`-aware walk.
+/// index in one `.gitignore`-aware walk, with every file that can be a Twig
+/// template.
 pub(crate) fn collect_workspace_index_files_gitignore(
     root: &Path,
     vendor_dir_paths: &[PathBuf],
@@ -56,7 +57,9 @@ pub(crate) fn collect_workspace_index_files_gitignore(
     visit_workspace_files_gitignore(root, vendor_dir_paths, filters, followed, |path| {
         if filters.is_php_file(path) {
             php_files.push(path.to_path_buf());
-        } else if crate::resource_navigation::is_resource_path(path) {
+        } else if crate::resource_navigation::is_resource_path(path)
+            || crate::twig::roots::is_candidate_path(path)
+        {
             resource_files.push(path.to_path_buf());
         }
     });

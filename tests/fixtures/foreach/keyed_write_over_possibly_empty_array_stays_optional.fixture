@@ -1,0 +1,16 @@
+// test: a loop that may not run leaves every key it writes optional
+// feature: hover
+// expect: $out = array{dk?: Translation, en?: Translation}
+---
+<?php
+
+class Translation {}
+
+/** @param array<'dk'|'en', string> $texts */
+function f(array $texts): void {
+    $out = [];
+    foreach ($texts as $market => $text) {
+        $out[$market] = new Translation();
+    }
+    $<>out;
+}

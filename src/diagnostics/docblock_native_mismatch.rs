@@ -33,7 +33,7 @@ use mago_syntax::cst::function_like::r#return::FunctionLikeReturnTypeHint;
 use mago_syntax::cst::statement::Statement;
 use mago_syntax::cst::*;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -89,7 +89,7 @@ impl Backend {
             {
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::WARNING,
+                    DiagnosticSeverity::Warning,
                     DOCBLOCK_NATIVE_MISMATCH_CODE,
                     finding.message,
                 ));

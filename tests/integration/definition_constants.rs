@@ -1,5 +1,5 @@
 use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── DefineInfo value extraction correctness ────────────────────────────────
 
@@ -142,7 +142,7 @@ async fn test_const_declaration_value_clean() {
 async fn test_goto_definition_constant_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///constants.php").unwrap();
+    let uri = Uri::parse("file:///constants.php").unwrap();
     let text = concat!(
         "<?php\n",                           // 0
         "define('APP_VERSION', '1.0.0');\n", // 1
@@ -161,7 +161,7 @@ async fn test_goto_definition_constant_same_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -182,7 +182,7 @@ async fn test_goto_definition_constant_same_file() {
 async fn test_goto_definition_constant_same_file_second_constant() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///constants2.php").unwrap();
+    let uri = Uri::parse("file:///constants2.php").unwrap();
     let text = concat!(
         "<?php\n",                           // 0
         "define('APP_VERSION', '1.0.0');\n", // 1
@@ -201,7 +201,7 @@ async fn test_goto_definition_constant_same_file_second_constant() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -217,7 +217,7 @@ async fn test_goto_definition_constant_same_file_second_constant() {
 async fn test_goto_definition_constant_double_quoted() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_dq.php").unwrap();
+    let uri = Uri::parse("file:///const_dq.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "define(\"DB_HOST\", 'localhost');\n", // 1
@@ -235,7 +235,7 @@ async fn test_goto_definition_constant_double_quoted() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 1, "DB_HOST is defined on line 1");
         }
@@ -249,7 +249,7 @@ async fn test_goto_definition_constant_double_quoted() {
 async fn test_goto_definition_constant_indented_define() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_indent.php").unwrap();
+    let uri = Uri::parse("file:///const_indent.php").unwrap();
     let text = concat!(
         "<?php\n",                           // 0
         "if (!defined('DEBUG_MODE')) {\n",   // 1
@@ -266,7 +266,7 @@ async fn test_goto_definition_constant_indented_define() {
     assert!(result.is_some(), "Should resolve indented define constant");
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -315,14 +315,14 @@ async fn test_goto_definition_constant_cross_file() {
 
     // Open the constants file first so define() calls are registered
     let constants_path = _dir.path().join("src/constants.php");
-    let constants_uri = Url::from_file_path(&constants_path).unwrap();
+    let constants_uri = Uri::from_file_path(&constants_path).unwrap();
     let constants_text = std::fs::read_to_string(&constants_path).unwrap();
 
     open_php(&backend, &constants_uri, &constants_text).await;
 
     // Open the service file
     let service_path = _dir.path().join("src/Service.php");
-    let service_uri = Url::from_file_path(&service_path).unwrap();
+    let service_uri = Uri::from_file_path(&service_path).unwrap();
     let service_text = std::fs::read_to_string(&service_path).unwrap();
 
     open_php(&backend, &service_uri, &service_text).await;
@@ -335,7 +335,7 @@ async fn test_goto_definition_constant_cross_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, constants_uri, "Should jump to constants.php");
             assert_eq!(
                 location.range.start.line, 2,
@@ -377,14 +377,14 @@ async fn test_goto_definition_constant_cross_file_first_constant() {
 
     // Open the constants file first
     let constants_path = _dir.path().join("src/constants.php");
-    let constants_uri = Url::from_file_path(&constants_path).unwrap();
+    let constants_uri = Uri::from_file_path(&constants_path).unwrap();
     let constants_text = std::fs::read_to_string(&constants_path).unwrap();
 
     open_php(&backend, &constants_uri, &constants_text).await;
 
     // Open the worker file
     let worker_path = _dir.path().join("src/Worker.php");
-    let worker_uri = Url::from_file_path(&worker_path).unwrap();
+    let worker_uri = Uri::from_file_path(&worker_path).unwrap();
     let worker_text = std::fs::read_to_string(&worker_path).unwrap();
 
     open_php(&backend, &worker_uri, &worker_text).await;
@@ -397,7 +397,7 @@ async fn test_goto_definition_constant_cross_file_first_constant() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, constants_uri, "Should jump to constants.php");
             assert_eq!(
                 location.range.start.line, 1,
@@ -415,7 +415,7 @@ async fn test_goto_definition_constant_cross_file_first_constant() {
 async fn test_goto_definition_constant_in_function_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_arg.php").unwrap();
+    let uri = Uri::parse("file:///const_arg.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "define('LOG_LEVEL', 'info');\n",              // 1
@@ -434,7 +434,7 @@ async fn test_goto_definition_constant_in_function_arg() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -450,7 +450,7 @@ async fn test_goto_definition_constant_in_function_arg() {
 async fn test_goto_definition_constant_inside_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_class.php").unwrap();
+    let uri = Uri::parse("file:///const_class.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "define('BASE_URL', 'https://example.com');\n", // 1
@@ -472,7 +472,7 @@ async fn test_goto_definition_constant_inside_class() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -488,7 +488,7 @@ async fn test_goto_definition_constant_inside_class() {
 async fn test_goto_definition_constant_unknown_returns_none() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_unknown.php").unwrap();
+    let uri = Uri::parse("file:///const_unknown.php").unwrap();
     let text = concat!(
         "<?php\n",                  // 0
         "echo UNKNOWN_CONSTANT;\n", // 1
@@ -509,7 +509,7 @@ async fn test_goto_definition_constant_unknown_returns_none() {
 async fn test_goto_definition_constant_in_array_index() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_array.php").unwrap();
+    let uri = Uri::parse("file:///const_array.php").unwrap();
     let text = concat!(
         "<?php\n",                        // 0
         "define('KEY_NAME', 'name');\n",  // 1
@@ -528,7 +528,7 @@ async fn test_goto_definition_constant_in_array_index() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -545,7 +545,7 @@ async fn test_goto_definition_constant_in_array_index() {
 async fn test_goto_definition_constant_multiple_defines() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multi_const.php").unwrap();
+    let uri = Uri::parse("file:///multi_const.php").unwrap();
     let text = concat!(
         "<?php\n",                // 0
         "define('FIRST', 1);\n",  // 1
@@ -565,7 +565,7 @@ async fn test_goto_definition_constant_multiple_defines() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -582,7 +582,7 @@ async fn test_goto_definition_constant_multiple_defines() {
 async fn test_goto_definition_constant_spaces_in_define() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_spaces.php").unwrap();
+    let uri = Uri::parse("file:///const_spaces.php").unwrap();
     let text = concat!(
         "<?php\n",                         // 0
         "define( 'SPACED_CONST', 42 );\n", // 1
@@ -600,7 +600,7 @@ async fn test_goto_definition_constant_spaces_in_define() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -618,7 +618,7 @@ async fn test_goto_definition_constant_spaces_in_define() {
 async fn test_goto_definition_constant_in_comparison() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_cmp.php").unwrap();
+    let uri = Uri::parse("file:///const_cmp.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "define('STATUS_ACTIVE', 1);\n",            // 1
@@ -639,7 +639,7 @@ async fn test_goto_definition_constant_in_comparison() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -660,7 +660,7 @@ async fn test_goto_definition_constant_in_comparison() {
 async fn test_goto_definition_constant_inside_class_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_in_method.php").unwrap();
+    let uri = Uri::parse("file:///const_in_method.php").unwrap();
     let text = concat!(
         "<?php\n",                                   // 0
         "class Demo {\n",                            // 1
@@ -681,7 +681,7 @@ async fn test_goto_definition_constant_inside_class_method() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -699,7 +699,7 @@ async fn test_goto_definition_constant_inside_class_method() {
 async fn test_goto_definition_constant_inside_namespace_class_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///const_ns_method.php").unwrap();
+    let uri = Uri::parse("file:///const_ns_method.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // 0
         "namespace Demo {\n",                            // 1
@@ -722,7 +722,7 @@ async fn test_goto_definition_constant_inside_namespace_class_method() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 4,
@@ -759,13 +759,13 @@ async fn test_goto_definition_namespaced_constant_every_spelling() {
         (12, 19, "\\App\\Config\\GRADES"),
     ] {
         let backend = create_test_backend();
-        let uri = Url::parse("file:///ns_const.php").unwrap();
+        let uri = Uri::parse("file:///ns_const.php").unwrap();
         open_php(&backend, &uri, text).await;
 
         let result = goto_definition_at(&backend, &uri, line, character).await;
 
         match result {
-            Some(GotoDefinitionResponse::Scalar(location)) => assert_eq!(
+            Some(DefinitionResponse::Definition(Definition::Location(location))) => assert_eq!(
                 location.range.start.line, 3,
                 "`{spelling}` should land on the declaration"
             ),

@@ -186,7 +186,7 @@ pub fn build_scope_methods_for_builder(
     // `static` means the model, so substituting `static` → `User`
     // produces `\...\Builder<User>`, keeping the chain on the builder.
     let model_type = PhpType::named(atom(model_name));
-    let subs = super::self_ref_subs(model_type);
+    let subs = super::self_ref_subs(model_type.clone());
 
     let mut methods = Vec::new();
 
@@ -212,6 +212,26 @@ pub fn build_scope_methods_for_builder(
             let [instance_method, _static_method] = build_scope_methods(method);
 
             let mut m = instance_method;
+
+            // On the Builder, `self` in a parameter would otherwise name
+            // the Builder instead of the model that declares the scope.
+            if m.parameters.iter().any(|p| {
+                p.type_hint.as_ref().is_some_and(PhpType::contains_self_ref)
+                    || p.native_type_hint
+                        .as_ref()
+                        .is_some_and(PhpType::contains_self_ref)
+            }) {
+                let mut parameters = m.parameters.to_vec();
+                for p in &mut parameters {
+                    for hint in [&mut p.type_hint, &mut p.native_type_hint]
+                        .into_iter()
+                        .flatten()
+                    {
+                        *hint = hint.replace_self_with_type(&model_type);
+                    }
+                }
+                m.parameters = parameters.into();
+            }
 
             if let Some(ref mut ret) = m.return_type {
                 *ret = ret.substitute(&subs);

@@ -7,7 +7,7 @@
 use crate::common::{
     create_test_backend, extract_edit_text, find_action_containing, get_code_actions_at,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Check whether the docblock text contains a `@param` tag with the given
 /// type and name, allowing arbitrary whitespace between them (for column
@@ -53,7 +53,7 @@ class Foo {
     let action = find_action_containing(&actions, "Update docblock")
         .expect("should offer Update docblock action");
 
-    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.kind, Some(CodeActionKind::QuickFix));
     assert_eq!(action.is_preferred, Some(true));
 
     let new_text = extract_edit_text(action);

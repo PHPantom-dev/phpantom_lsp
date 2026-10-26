@@ -341,6 +341,7 @@ impl Backend {
                 &mut defines,
                 content,
                 None,
+                None,
             );
             defines
         })

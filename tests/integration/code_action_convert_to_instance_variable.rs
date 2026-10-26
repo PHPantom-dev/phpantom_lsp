@@ -12,7 +12,7 @@ use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_in_range,
     position_of, resolve_action,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: given PHP source with a cursor marker `/*|*/`, run the
 /// convert-to-instance-variable action and return the resulting edits.

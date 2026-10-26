@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
@@ -40,7 +40,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -54,10 +54,11 @@ impl Backend {
             }
 
             // Extract the type name from the message (validation only).
-            let type_name = match extract_throws_type(&diag.message, identifier) {
-                Some(t) => t,
-                None => continue,
-            };
+            let type_name =
+                match extract_throws_type(crate::util::message_text(&diag.message), identifier) {
+                    Some(t) => t,
+                    None => continue,
+                };
 
             let type_name_str = type_name.to_string();
             let short_name = short_name(&type_name_str);
@@ -133,7 +134,7 @@ impl Backend {
             &block.namespace,
         )?;
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(
             doc_uri,
             vec![throws_edit],

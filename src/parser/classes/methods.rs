@@ -6,7 +6,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::{Atom, AtomMap, atom, atom_bytes, bytes_to_str};
 use crate::docblock;
-use crate::parser::signature::{Signature, extract_signature};
+use crate::parser::signature::{Signature, extract_signature, template_bounds_in_scope};
 use crate::parser::{DocblockCtx, extract_hint_type, extract_visibility, merge_deprecation_info};
 use crate::php_type::PhpType;
 use crate::types::*;
@@ -36,6 +36,7 @@ pub(super) fn extract_method<'a>(
         } else {
             &[]
         },
+        class_template_param_bounds,
     )?;
     if is_constructor {
         push_promoted_properties(
@@ -52,7 +53,6 @@ pub(super) fn extract_method<'a>(
         native_return_type,
         return_type,
         conditional_return,
-        docblock_text: method_docblock_text,
         docblock: method_docblock_info,
         template_params: method_template_params,
         template_param_bounds: method_template_param_bounds,
@@ -143,6 +143,7 @@ pub(super) fn extract_method<'a>(
         is_pure: info.is_some_and(docblock::declares_pure),
         is_impure: info.is_some_and(docblock::declares_impure),
         reads_func_args,
+        is_no_discard: crate::parser::has_no_discard_attribute(&method.attribute_lists, doc_ctx),
         extras: MethodExtras {
             return_description: info.and_then(docblock::extract_return_description_from_info),
             links: info
@@ -174,7 +175,7 @@ pub(super) fn extract_method<'a>(
             throws: info
                 .map(docblock::extract_throws_tags_from_info)
                 .unwrap_or_default(),
-            if_this_is: method_docblock_text.and_then(crate::docblock::extract_if_this_is_type),
+            if_this_is: info.and_then(docblock::extract_if_this_is_type_from_info),
             // `@psalm-this-out` / `@phpstan-self-out`, so the forward
             // walker can re-bind the receiver's template arguments after a
             // call, the way an assignment re-binds a variable's type.
@@ -198,7 +199,7 @@ fn push_promoted_properties<'a>(
     doc_ctx: Option<&DocblockCtx<'a>>,
     class_template_params: &[Atom],
     class_template_param_bounds: &AtomMap<PhpType>,
-    signature: &mut Signature<'a>,
+    signature: &mut Signature,
     properties: &mut Vec<PropertyInfo>,
 ) {
     for param in method.parameter_list.parameters.iter() {
@@ -285,25 +286,6 @@ fn push_promoted_properties<'a>(
             source: None,
         });
     }
-}
-
-/// The `@template` bounds a method signature sees: the class's, with the
-/// method's own templates shadowing any of the same name, bounded or not.
-fn template_bounds_in_scope<'b>(
-    class_bounds: &'b AtomMap<PhpType>,
-    method_params: &[Atom],
-    method_bounds: &'b AtomMap<PhpType>,
-) -> std::borrow::Cow<'b, AtomMap<PhpType>> {
-    if class_bounds.is_empty() {
-        return std::borrow::Cow::Borrowed(method_bounds);
-    }
-    if method_params.is_empty() {
-        return std::borrow::Cow::Borrowed(class_bounds);
-    }
-    let mut merged = class_bounds.clone();
-    merged.retain(|name, _| !method_params.contains(name));
-    merged.extend(method_bounds.iter().map(|(n, b)| (*n, b.clone())));
-    std::borrow::Cow::Owned(merged)
 }
 
 /// Carry a promoted constructor parameter's inline `@var` over to the

@@ -45,7 +45,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::context::DocblockContext;
 use crate::class_lookup::{ResolvedClassLoader, SourceClassLoader};
@@ -138,10 +138,10 @@ pub fn try_generate_docblock(
 
     let item = CompletionItem {
         label: "/** PHPDoc Block */".to_string(),
-        kind: Some(CompletionItemKind::SNIPPET),
+        kind: Some(CompletionItemKind::Snippet),
         detail: Some("Generate PHPDoc block".to_string()),
-        insert_text_format: Some(InsertTextFormat::SNIPPET),
-        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+        insert_text_format: Some(InsertTextFormat::Snippet),
+        text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
             range: trigger_range,
             new_text: snippet,
         })),
@@ -157,7 +157,7 @@ pub fn try_generate_docblock(
         ..CompletionItem::default()
     };
 
-    Some(CompletionResponse::Array(vec![item]))
+    Some(CompletionResponse::CompletionItemList(vec![item]))
 }
 
 /// Handle `textDocument/onTypeFormatting` after Enter inside a freshly

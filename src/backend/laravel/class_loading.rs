@@ -18,6 +18,7 @@ pub(crate) const CLASS_LOAD_HOOKS: ClassLoadHooks = ClassLoadHooks {
     claim_name: claim_laravel_name,
     fallback: Backend::resolve_laravel_alias,
     refine: refine_laravel_class,
+    refine_generation: laravel_refine_generation,
 };
 
 /// The class a name only Laravel gives a meaning names, or `None` when the
@@ -43,11 +44,27 @@ fn claim_laravel_name(backend: &Backend, name: &str) -> Option<Option<Arc<ClassI
     None
 }
 
+/// The sum of the generations of every index [`refine_laravel_class`] reads.
+/// Each only grows, so the sum moves whenever any one of them does.
+fn laravel_refine_generation(backend: &Backend) -> u64 {
+    let laravel = &backend.laravel;
+    // Rebuilding bumps the index's generation, so this comes first.
+    if laravel.pivots.is_dirty() && laravel.pivots.take_dirty() {
+        backend.rebuild_laravel_pivot_index();
+    }
+    laravel
+        .config_facts_generation()
+        .wrapping_add(laravel.aliases.generation())
+        .wrapping_add(laravel.macros.generation())
+        .wrapping_add(laravel.pivots.generation())
+}
+
 /// `loaded` with what the project's Laravel facts add to it.
 ///
-/// These stay outside the loader's memo: each depends on an index of its
-/// own (the configured auth model, registered macros, many-to-many
-/// targets) that keeps changing as files are indexed.
+/// These stay outside the name-search memo: each depends on an index of
+/// its own (the configured auth model, registered macros, many-to-many
+/// targets) that keeps changing as files are indexed.  The loader memoises
+/// the result against [`laravel_refine_generation`] instead.
 fn refine_laravel_class(backend: &Backend, mut loaded: Arc<ClassInfo>) -> Arc<ClassInfo> {
     match loaded.fqn().as_str() {
         // Refine the auth entry points' `user()` return type to the
@@ -69,7 +86,8 @@ fn refine_laravel_class(backend: &Backend, mut loaded: Arc<ClassInfo>) -> Arc<Cl
     // resolved-class cache rather than from here.  Building it now, while
     // the `Backend` is in hand, is what puts it there: this runs before the
     // facade is ever fully resolved, because full resolution reloads the
-    // class through this loader first.
+    // class through this loader first.  Invalidating the table moves the
+    // refinement generation, so a memoised facade comes back through here.
     if loaded
         .laravel()
         .is_some_and(|l| matches!(l.facade_accessor, Some(FacadeAccessor::Alias(_))))
@@ -100,13 +118,11 @@ impl Backend {
     /// Add Eloquent pivot accessors to `class` when it is the target of a
     /// many-to-many relationship somewhere in the project.
     ///
-    /// The reverse index is rebuilt lazily when a pivot-bearing file has
-    /// changed (the index is marked dirty), then a cheap atomic gates the lock so
-    /// the hot loader path is untouched when the project has no such relations.
+    /// The reverse index is brought up to date by
+    /// [`laravel_refine_generation`], which the loader reads first; a cheap
+    /// atomic gates the lock so the hot loader path is untouched when the
+    /// project has no such relations.
     fn inject_laravel_pivot(&self, class: Arc<ClassInfo>) -> Arc<ClassInfo> {
-        if self.laravel.pivots.take_dirty() {
-            self.rebuild_laravel_pivot_index();
-        }
         if !self.laravel.pivots.has_any() {
             return class;
         }

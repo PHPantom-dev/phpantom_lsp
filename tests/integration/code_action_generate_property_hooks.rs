@@ -17,7 +17,7 @@ use crate::common::{
     create_test_backend, extract_edit_text, find_action_titled, find_actions_containing,
     get_code_actions_in_range, position_of,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── Which actions are offered ───────────────────────────────────────────────
 

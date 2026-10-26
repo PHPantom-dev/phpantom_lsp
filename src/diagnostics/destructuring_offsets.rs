@@ -17,7 +17,7 @@ use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::literal::Literal;
 use mago_syntax::walker::Walker;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::literal_bytes_to_str;
@@ -121,7 +121,7 @@ impl Backend {
             };
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 "unknown_offset",
                 format!(
                     "Offset {} does not exist on {}",

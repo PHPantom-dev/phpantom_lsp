@@ -9,6 +9,7 @@ use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, with_keyword_
 use crate::types::{ClassInfo, ResolvedType};
 use crate::virtual_members::ResolvedClassCache;
 
+use super::arithmetic::OverloadedNumber;
 use super::scalar_fold;
 
 /// The type a unary prefix expression produces, for the operators whose
@@ -39,11 +40,20 @@ pub(crate) fn unary_prefix_result_type(
     let base = match operator {
         UnaryPrefixOperator::Negation(_) | UnaryPrefixOperator::Plus(_) => {
             let negated = matches!(operator, UnaryPrefixOperator::Negation(_));
-            return Some(signed_numeric_type(&resolve_operand(), negated));
+            let resolved = resolve_operand();
+            // PHP compiles a sign as a multiplication by `-1` or `1`, which
+            // `GMP` and `BcMath\Number` overload.
+            if let Some(class) = OverloadedNumber::of_operand(&resolved) {
+                return Some(class.to_type());
+            }
+            return Some(signed_numeric_type(&resolved, negated));
         }
         UnaryPrefixOperator::ObjectCast(..) => return Some(object_cast_type(resolve_operand())),
         UnaryPrefixOperator::BitwiseNot(_) => {
             let resolved = resolve_operand();
+            if OverloadedNumber::of_operand(&resolved) == Some(OverloadedNumber::Gmp) {
+                return Some(OverloadedNumber::Gmp.to_type());
+            }
             if let Some(scalar_fold::Scalar::Int(value)) = scalar_fold::single_scalar(&resolved) {
                 return Some(PhpType::literal_int((!value).to_string()));
             }

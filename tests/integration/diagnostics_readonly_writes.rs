@@ -1,6 +1,8 @@
+use crate::common::message_text;
 use crate::common::{collect_diagnostics_with, create_test_backend};
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use phpantom_lsp::types::PhpVersion;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -11,15 +13,18 @@ fn collect(php: &str) -> Vec<Diagnostic> {
         Backend::collect_slow_diagnostics,
     );
     out.retain(|d| {
-        d.code.as_ref().is_some_and(
-            |c| matches!(c, NumberOrString::String(s) if s == "invalid_readonly_write"),
-        )
+        d.code
+            .as_ref()
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "invalid_readonly_write"))
     });
     out
 }
 
 fn messages(php: &str) -> Vec<String> {
-    collect(php).into_iter().map(|d| d.message).collect()
+    collect(php)
+        .into_iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
 }
 
 // ─── Writes from outside the declaring class ────────────────────────────────
@@ -67,8 +72,18 @@ class Mutator {
     assert!(msgs[0].contains("Box::$value"), "message: {}", msgs[0]);
 }
 
+fn messages_on_php(php: &str, version: PhpVersion) -> Vec<String> {
+    let backend = create_test_backend();
+    backend.set_php_version(version);
+    collect_diagnostics_with(&backend, php, Backend::collect_slow_diagnostics)
+        .into_iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_readonly_write"))
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
+}
+
 #[test]
-fn a_subclass_initializing_its_parents_readonly_property_is_flagged() {
+fn a_subclass_initializing_its_parents_readonly_property_is_flagged_before_php_8_4() {
     let php = r#"<?php
 class Base {
     public readonly int $value;
@@ -81,9 +96,12 @@ class Child extends Base {
     }
 }
 "#;
-    let msgs = messages(php);
+    let msgs = messages_on_php(php, PhpVersion::new(8, 3));
     assert_eq!(msgs.len(), 1, "expected one diagnostic, got {msgs:?}");
     assert!(msgs[0].contains("Base::$value"), "message: {}", msgs[0]);
+
+    // PHP 8.4 made a readonly property `protected(set)`.
+    assert!(messages_on_php(php, PhpVersion::new(8, 4)).is_empty());
 }
 
 #[test]
@@ -599,6 +617,88 @@ function mystery() {}
 
 $thing = mystery();
 $thing->value = 2;
+"#;
+    assert!(collect(php).is_empty());
+}
+
+// ─── Writes inside the constructor after it initialized the property ───────
+
+#[test]
+fn a_second_constructor_assignment_is_flagged() {
+    let php = r#"<?php
+final class Box {
+    public readonly int $value;
+
+    public function __construct(int $value)
+    {
+        $this->value = $value;
+        $this->value = 17;
+    }
+}
+"#;
+    assert_eq!(
+        messages(php),
+        vec![
+            "Cannot modify readonly property Box::$value after the constructor has already initialized it"
+        ]
+    );
+}
+
+#[test]
+fn a_conditional_write_after_the_constructor_initialized_it_is_flagged() {
+    let php = r#"<?php
+final class Box {
+    public readonly int $value;
+
+    public function __construct(int $value, bool $reset)
+    {
+        $this->value = $value;
+        if ($reset) {
+            unset($this->value);
+        }
+    }
+}
+"#;
+    assert_eq!(
+        messages(php),
+        vec![
+            "Cannot unset readonly property Box::$value after the constructor has already initialized it"
+        ]
+    );
+}
+
+#[test]
+fn a_conditional_first_assignment_does_not_make_a_later_one_an_error() {
+    let php = r#"<?php
+final class Box {
+    public readonly int $value;
+
+    public function __construct(?int $value)
+    {
+        if ($value !== null) {
+            $this->value = $value;
+            return;
+        }
+        $this->value = 0;
+    }
+}
+"#;
+    assert!(collect(php).is_empty());
+}
+
+#[test]
+fn reading_the_property_in_its_own_assignment_is_not_a_second_write() {
+    let php = r#"<?php
+final class Box {
+    public readonly int $value;
+    public readonly int $double;
+
+    public function __construct(int $value)
+    {
+        $this->value = $value;
+        $this->double = $this->value * 2;
+    }
+}
 "#;
     assert!(collect(php).is_empty());
 }

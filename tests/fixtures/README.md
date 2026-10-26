@@ -29,7 +29,7 @@ $f-><>
 | Directive | Required | Repeatable | Description |
 |---|---|---|---|
 | `// test:` | yes | no | Human-readable test name. Shown in test output. |
-| `// feature:` | yes | no | One of `completion`, `hover`, `definition`, `signature_help`. |
+| `// feature:` | yes | no | One of `completion`, `hover`, `definition`, `signature_help`, `diagnostics`. |
 | `// expect:` | depends | yes | **Completion/hover:** a label prefix (completion) or substring (hover) that must appear. |
 | `// expect_absent:` | no | yes | **Completion:** a label prefix that must NOT appear. **Hover:** a substring that must NOT appear. |
 | `// expect_hover:` | no | yes | `symbol => substring` fires a hover on `symbol` and checks the response contains `substring`. |
@@ -38,6 +38,10 @@ $f-><>
 | `// expect_sig_active:` | no | no | **Signature help:** the expected active parameter index (0-based). |
 | `// expect_sig_param:` | no | yes | **Signature help:** expected parameter labels in order. |
 | `// ignore:` | no | no | Mark the test as ignored with a reason (e.g. `// ignore: needs todo.md §2`). |
+| `// project:` | diagnostics | no | **Diagnostics:** the fixture project the files are analysed in, relative to `tests/`. |
+| `// file:` | diagnostics | yes | **Diagnostics:** a file of the project to analyse, relative to the project. |
+| `// codes:` | no | no | **Diagnostics:** comma-separated diagnostic codes the comparison covers. |
+| `// expect_diagnostic:` | no | yes | **Diagnostics:** `[FILE:]LINE: message` that must be reported. |
 
 Lines that don't match any directive are silently ignored, so you can add
 plain comments:
@@ -127,6 +131,41 @@ Use any combination of:
 - `// expect_sig_param: int $age`
 
 At least one signature help assertion is required.
+
+### `diagnostics`
+
+A diagnostics fixture has no body and no cursor. It analyses files of a
+fixture project (`tests/phpstan_symfony/`, `tests/phpstan_doctrine/`), the
+way the PHPStan extensions' rule tests analyse their data files, with the
+project's classes and configuration indexed first:
+
+```
+// test: A controller reading the query bag calls only methods that exist
+// feature: diagnostics
+// project: phpstan_symfony
+// file: rules/data/input_bag.php
+// codes: unknown_member
+---
+```
+
+Only the diagnostics whose code `// codes:` names are compared, against the
+`// expect_diagnostic:` lines: each one must be reported on its line (1-based)
+with exactly its message, and nothing else with those codes may be. `FILE`
+defaults to the first `// file:`, and `\n` in a message stands for a line
+break.
+
+A trailing `// SKIP: reason` marks an expectation PHPantom does not meet yet:
+it is not required, and a diagnostic on its line is not held against the
+fixture.
+
+```
+// expect_diagnostic: 42: Command "example-rule" does not define argument "undefined". // SKIP: console arguments and options are not read from configure()
+```
+
+The ported rule tests keep the upstream message and mark the gap
+this way rather than loosening the comparison. A fixture whose rule has no
+PHPantom counterpart yet names no codes and compares nothing; it records
+what to check once one exists.
 
 ## Directory layout
 

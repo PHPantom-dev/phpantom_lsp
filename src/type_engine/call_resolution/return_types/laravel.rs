@@ -18,7 +18,8 @@ use crate::types::{AccessKind, ClassInfo, ResolvedType};
 
 /// The class a Laravel helper function call returns when it is more
 /// specific than the declared return type: a container string binding,
-/// the configured date class, or the concrete view.
+/// the configured date class, the concrete view, or the response a
+/// `response()` call with content builds.
 pub(super) fn laravel_helper_call_class(
     func_name: &str,
     text_args: &str,
@@ -68,6 +69,14 @@ pub(super) fn laravel_helper_call_class(
             .unwrap_or(""),
     ) && let Some(cls) =
         (ctx.file.class_loader)(Fqn::new(crate::virtual_members::laravel::VIEW_FQN))
+    {
+        return Some(cls);
+    }
+
+    // ── response($content) → Illuminate\Http\Response ────
+    if crate::virtual_members::laravel::response_helper_returns_response(normalized_func, text_args)
+        && let Some(cls) =
+            (ctx.file.class_loader)(Fqn::new(crate::virtual_members::laravel::RESPONSE_FQN))
     {
         return Some(cls);
     }

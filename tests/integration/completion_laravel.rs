@@ -1,9 +1,10 @@
+use crate::common::message_text;
 use crate::common::{
     completion_response, create_psr4_workspace, create_test_backend, hover_response, method_names,
     open_php, position_after, property_names,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Shared stubs ───────────────────────────────────────────────────────────
 
@@ -590,7 +591,7 @@ async fn phpstan_model_type_operators_resolve_custom_types_and_relations() {
             method_names(&items)
         );
     }
-    let uri = Url::from_file_path(dir.path().join("src/Models/Service.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/Service.php")).unwrap();
     let mut diagnostics = Vec::new();
     backend.collect_argument_type_diagnostics(uri.as_str(), service, &mut diagnostics);
     let mismatches = crate::common::messages_with_code(&diagnostics, "type_mismatch_argument");
@@ -853,7 +854,7 @@ async fn complete_at(
     line: u32,
     character: u32,
 ) -> Vec<CompletionItem> {
-    let uri = Url::from_file_path(dir.path().join(relative_path)).unwrap();
+    let uri = Uri::from_file_path(dir.path().join(relative_path)).unwrap();
     crate::common::complete_at(backend, &uri, content, line, character).await
 }
 
@@ -1820,7 +1821,7 @@ class User extends Model {
     let posts_props: Vec<&CompletionItem> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::PROPERTY)
+            i.kind == Some(CompletionItemKind::Property)
                 && i.filter_text.as_deref().unwrap_or(&i.label) == "posts"
         })
         .collect();
@@ -2133,7 +2134,7 @@ class User extends Model {
     let profile_props: Vec<&CompletionItem> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::PROPERTY)
+            i.kind == Some(CompletionItemKind::Property)
                 && i.filter_text.as_deref().unwrap_or(&i.label) == "profile"
         })
         .collect();
@@ -2420,7 +2421,7 @@ async fn test_same_file_relationship_property_with_plain_backend() {
     // is set to the full FQN via the use statement.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///laravel_same_file.php").unwrap();
+    let uri = Uri::parse("file:///laravel_same_file.php").unwrap();
     // We define stub classes without a namespace. The parser stores them
     // by their short name. We place them so that `User extends Model` and
     // `Model` has FQN `Illuminate\Database\Eloquent\Model` via the
@@ -2457,8 +2458,8 @@ class User extends Model {
     let result = completion_response(&backend, &uri, 17, 15, None).await;
 
     match result {
-        Some(CompletionResponse::Array(items))
-        | Some(CompletionResponse::List(CompletionList { items, .. })) => {
+        Some(CompletionResponse::CompletionItemList(items))
+        | Some(CompletionResponse::CompletionList(CompletionList { items, .. })) => {
             let props = property_names(&items);
             // The parent class is `App\Models\Model` which extends
             // `\Illuminate\Database\Eloquent\Model`. Since the class loader
@@ -2709,12 +2710,12 @@ class User extends Model {
     );
 
     // Hover must be the concrete model, not Model|stdClass / Eloquent|stdClass.
-    let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
     let hover = hover_response(&backend, &uri, 13, 10)
         .await
         .expect("hover on $user");
     let hover_text = match hover.contents {
-        HoverContents::Markup(m) => m.value,
+        Contents::MarkupContent(m) => m.value,
         _ => panic!("expected markup hover"),
     };
     assert!(
@@ -2790,12 +2791,12 @@ class User extends Model {
     }
 
     // Hover must name the concrete model, not `Model` or `TModel`.
-    let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
     let hover = hover_response(&backend, &uri, 11, 10)
         .await
         .expect("hover on $user");
     let hover_text = match hover.contents {
-        HoverContents::Markup(m) => m.value,
+        Contents::MarkupContent(m) => m.value,
         _ => panic!("expected markup hover"),
     };
     assert!(
@@ -2909,12 +2910,12 @@ class User extends Model {
         methods
     );
 
-    let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
     let hover = hover_response(&backend, &uri, 10, 10)
         .await
         .expect("hover on $user");
     let hover_text = match hover.contents {
-        HoverContents::Markup(m) => m.value,
+        Contents::MarkupContent(m) => m.value,
         _ => panic!("expected markup hover"),
     };
     assert!(
@@ -3093,7 +3094,7 @@ class User extends Model {
     let where_methods: Vec<&CompletionItem> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::METHOD)
+            i.kind == Some(CompletionItemKind::Method)
                 && i.filter_text.as_deref().unwrap_or(&i.label) == "where"
         })
         .collect();
@@ -3315,7 +3316,7 @@ class User extends Model {
     let posts_props: Vec<&CompletionItem> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::PROPERTY)
+            i.kind == Some(CompletionItemKind::Property)
                 && i.filter_text.as_deref().unwrap_or(&i.label) == "posts"
         })
         .collect();
@@ -3493,7 +3494,7 @@ async fn test_builder_chain_single_file_with_inline_stubs() {
     // in separate namespace blocks in the same file.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inline_stubs.php").unwrap();
+    let uri = Uri::parse("file:///inline_stubs.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo {\n",
@@ -3684,7 +3685,7 @@ async fn test_builder_chain_single_file_with_inline_stubs() {
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: uri.clone(),
-                language_id: "php".to_string(),
+                language_id: "php".to_string().into(),
                 version: 2,
                 text: text_with_triggers.to_string(),
             },
@@ -3699,10 +3700,10 @@ async fn test_builder_chain_single_file_with_inline_stubs() {
         "Should return completion results for $q->"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let methods: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3729,7 +3730,7 @@ async fn test_builder_chain_single_file_with_inline_stubs() {
                 methods
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3741,7 +3742,7 @@ async fn test_inline_chain_after_static_builder_single_file() {
     // and then offer Builder methods after "->".
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inline_chain.php").unwrap();
+    let uri = Uri::parse("file:///inline_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo {\n",
@@ -3845,10 +3846,10 @@ async fn test_inline_chain_after_static_builder_single_file() {
         "Should return completion results for BlogAuthor::where(...)->"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let methods: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -3883,7 +3884,7 @@ async fn test_inline_chain_after_static_builder_single_file() {
                 methods
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3895,7 +3896,7 @@ async fn test_inline_orderby_chain_after_static_builder_single_file() {
     // (not Query\Builder).
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inline_orderby.php").unwrap();
+    let uri = Uri::parse("file:///inline_orderby.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo {\n",
@@ -3999,10 +4000,10 @@ async fn test_inline_orderby_chain_after_static_builder_single_file() {
         "Should return completion results for BlogAuthor::orderBy('name')->"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let methods: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -4032,7 +4033,7 @@ async fn test_inline_orderby_chain_after_static_builder_single_file() {
                 methods
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4475,7 +4476,7 @@ class Order extends Model {
 async fn test_custom_collection_same_file_plain_backend() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///custom_coll.php").unwrap();
+    let uri = Uri::parse("file:///custom_coll.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Illuminate\\Database\\Eloquent {\n",
@@ -4549,8 +4550,8 @@ async fn test_custom_collection_same_file_plain_backend() {
     let result = completion_response(&backend, &uri, 61, 20, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         _ => Vec::new(),
     };
     let methods = method_names(&items);
@@ -4575,7 +4576,7 @@ async fn test_custom_collection_same_file_plain_backend() {
 async fn test_accessor_on_variable_same_file_inline_stubs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///accessor_var.php").unwrap();
+    let uri = Uri::parse("file:///accessor_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo {\n",
@@ -4616,8 +4617,8 @@ async fn test_accessor_on_variable_same_file_inline_stubs() {
     let result = completion_response(&backend, &uri, 18, 16, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         _ => Vec::new(),
     };
     let props = property_names(&items);
@@ -4837,7 +4838,7 @@ class User extends Model {
     // Helper: find a completion item by its filter_text / label
     let find_prop = |name: &str| -> Option<&CompletionItem> {
         items.iter().find(|i| {
-            i.kind == Some(CompletionItemKind::PROPERTY)
+            i.kind == Some(CompletionItemKind::Property)
                 && i.filter_text.as_deref().unwrap_or(&i.label) == name
         })
     };
@@ -6000,7 +6001,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 15).await;
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "is_admin");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "is_admin");
     assert!(prop.is_some(), "should find is_admin property");
     assert!(
         prop.unwrap()
@@ -6314,7 +6315,7 @@ class User extends Model {
     );
     let shared = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "shared");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "shared");
     assert!(shared.is_some());
     assert!(
         shared
@@ -6491,7 +6492,7 @@ class User extends BaseModel {
 async fn test_casts_same_file_plain_backend() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///casts_same_file.php").unwrap();
+    let uri = Uri::parse("file:///casts_same_file.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Illuminate\\Database\\Eloquent {\n",
@@ -6517,8 +6518,8 @@ async fn test_casts_same_file_plain_backend() {
     let result = completion_response(&backend, &uri, 13, 19, None).await;
 
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         _ => Vec::new(),
     };
     let props = property_names(&items);
@@ -6985,7 +6986,7 @@ class User extends Model {
     let detail = |name: &str| {
         items
             .iter()
-            .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == name)
+            .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == name)
             .and_then(|i| i.detail.clone())
             .unwrap_or_default()
     };
@@ -7569,7 +7570,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 15).await;
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "role");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "role");
     assert!(prop.is_some(), "should find role property");
     assert!(
         prop.unwrap()
@@ -7603,7 +7604,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 15).await;
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "is_active");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "is_active");
     assert!(prop.is_some(), "should find is_active property");
     assert!(
         prop.unwrap()
@@ -7725,7 +7726,7 @@ class User extends Model {
     // Verify is_active has cast type (bool), not attributes type (int)
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "is_active");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "is_active");
     assert!(prop.is_some());
     assert!(
         prop.unwrap()
@@ -7993,7 +7994,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 7, 15).await;
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "name");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "name");
     assert!(prop.is_some(), "should find name property");
     assert!(
         prop.unwrap()
@@ -8146,7 +8147,7 @@ class User extends Model {
     let email_count = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::PROPERTY)
+            i.kind == Some(CompletionItemKind::Property)
                 && (i.filter_text.as_deref().unwrap_or(&i.label) == "email")
         })
         .count();
@@ -8195,7 +8196,7 @@ class User extends Model {
     // is_admin should have bool type from casts, not mixed from fillable.
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "is_admin");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "is_admin");
     assert!(prop.is_some());
     assert!(
         prop.unwrap()
@@ -8247,7 +8248,7 @@ class User extends Model {
     // role should have string type from attributes, not mixed from fillable.
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "role");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "role");
     assert!(prop.is_some());
     assert!(
         prop.unwrap()
@@ -8296,7 +8297,7 @@ class User extends Model {
     // Verify priority: casts > attributes > fillable
     let is_admin = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "is_admin")
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "is_admin")
         .unwrap();
     assert!(
         is_admin.detail.as_deref().unwrap_or("").contains("bool"),
@@ -8306,7 +8307,7 @@ class User extends Model {
 
     let role = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "role")
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "role")
         .unwrap();
     assert!(
         role.detail.as_deref().unwrap_or("").contains("string"),
@@ -8316,7 +8317,7 @@ class User extends Model {
 
     let email = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "email")
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "email")
         .unwrap();
     assert!(
         email.detail.as_deref().unwrap_or("").contains("mixed"),
@@ -8479,7 +8480,7 @@ class User extends Model {
     // Verify they have mixed type (no type info from $appends)
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "full_name");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "full_name");
     assert!(
         prop.unwrap()
             .detail
@@ -8521,7 +8522,7 @@ class User extends Model {
     // email appears in both $fillable and $appends — should appear only once.
     let email_count = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "email")
+        .filter(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "email")
         .count();
     assert_eq!(
         email_count, 1,
@@ -8568,7 +8569,7 @@ class User extends Model {
     // is_verified should have bool type from casts, not mixed from appends.
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "is_verified")
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "is_verified")
         .unwrap();
     assert!(
         prop.detail.as_deref().unwrap_or("").contains("bool"),
@@ -8818,16 +8819,14 @@ class DraftFactoryHarness extends DraftFactory {}
     backend.initialized(InitializedParams {}).await;
 
     let content = "<?php\nnamespace App;\nuse App\\Models\\Draft;\nuse Database\\Factories\\DraftFactoryHarness;\nclass Service {\n    public function makeOneDraft(Draft $article): Draft {\n        return Draft::factory()->makeOne(\n            $article->only(['title', 'body', 'user_id'])\n        );\n    }\n    public function createOneDraft(): Draft {\n        return Draft::factory()->createOne();\n    }\n    public function makeDraft(): Draft {\n        return Draft::factory()->make();\n    }\n    public function createDraft(): Draft {\n        return Draft::factory()->create();\n    }\n    public function makeFromHarness(DraftFactoryHarness $factory): Draft {\n        return $factory->makeOne();\n    }\n}\n";
-    let uri = Url::from_file_path(dir.path().join("src/Service.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Service.php")).unwrap();
     open_php(&backend, &uri, content).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diags);
     let return_mismatches: Vec<_> = diags
         .into_iter()
-        .filter(|d| {
-            matches!(&d.code, Some(NumberOrString::String(code)) if code == "type_mismatch_return")
-        })
+        .filter(|d| matches!(&d.code, Some(Code::String(code)) if code == "type_mismatch_return"))
         .collect();
     assert!(
         return_mismatches.is_empty(),
@@ -9000,7 +8999,7 @@ async fn test_factory_model_property_resolves_single_model_returns_through_base(
     }
 
     let content = "<?php\nnamespace App\\Services;\nuse App\\Models\\Documents\\Draft;\nuse Database\\Factories\\DraftFactory;\nclass DraftService {\n    public function makeOneDraft(): Draft {\n        return Draft::factory()->makeOne();\n    }\n    public function createOneDraft(): Draft {\n        return Draft::factory()->createOne();\n    }\n    public function makeDraft(): Draft {\n        return Draft::factory()->make();\n    }\n    public function createDraft(): Draft {\n        return Draft::factory()->create();\n    }\n    public function incorrectlyReturnsFactory(): DraftFactory {\n        return Draft::factory()->makeOne();\n    }\n}\n";
-    let uri = Url::from_file_path(dir.path().join("src/DraftService.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/DraftService.php")).unwrap();
     open_php(&backend, &uri, content).await;
 
     let mut diagnostics = Vec::new();
@@ -9010,7 +9009,7 @@ async fn test_factory_model_property_resolves_single_model_returns_through_base(
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code == "type_mismatch_return"
+                Some(Code::String(code)) if code == "type_mismatch_return"
             )
         })
         .collect();
@@ -9020,7 +9019,7 @@ async fn test_factory_model_property_resolves_single_model_returns_through_base(
         "all four build methods should satisfy Draft return types, while makeOne() must still fail a DraftFactory return, got: {return_mismatches:?}"
     );
     assert_eq!(
-        return_mismatches[0].message,
+        message_text(&return_mismatches[0].message),
         "Return type App\\Models\\Documents\\Draft is incompatible with declared return type Database\\Factories\\DraftFactory",
         "the mismatch should name the built model rather than Eloquent's base Model"
     );
@@ -9273,17 +9272,15 @@ async fn factory_argument_mismatches(body: &str) -> Vec<String> {
     let content = format!(
         "<?php\nuse App\\Models\\User;\nfunction needsUser(User $user): void {{}}\n{body}\n"
     );
-    let uri = Url::from_file_path(dir.path().join("src/test.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/test.php")).unwrap();
     open_php(&backend, &uri, &content).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), &content, &mut diags);
     diags
         .into_iter()
-        .filter(|d| {
-            matches!(&d.code, Some(NumberOrString::String(code)) if code == "type_mismatch_argument")
-        })
-        .map(|d| d.message)
+        .filter(|d| matches!(&d.code, Some(Code::String(code)) if code == "type_mismatch_argument"))
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 
@@ -10736,7 +10733,7 @@ class ProductService {
     ]);
 
     // Open the model file first so it's indexed
-    let model_uri = Url::from_file_path(dir.path().join("src/Models/Product.php")).unwrap();
+    let model_uri = Uri::from_file_path(dir.path().join("src/Models/Product.php")).unwrap();
     open_php(&backend, &model_uri, product_php).await;
 
     // "$q->" at line 6, character 12
@@ -10795,7 +10792,7 @@ class SomeModel extends Model {
     ]);
 
     // Open NotAModel first so it's indexed
-    let uri = Url::from_file_path(dir.path().join("src/Models/NotAModel.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/NotAModel.php")).unwrap();
     open_php(&backend, &uri, not_a_model_php).await;
 
     // "$q->" at line 10, character 12
@@ -11338,7 +11335,7 @@ async fn test_chunk_closure_param_inferred_via_local_collection() {
     // This isolates the callable-param-inference machinery from Laravel's
     // Builder-as-static forwarding and cross-file resolution.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/chunk_local.php").unwrap();
+    let uri = Uri::parse("file:///test/chunk_local.php").unwrap();
 
     let src = "\
 <?php
@@ -11383,8 +11380,8 @@ class Service {
 
     // line 33: "            $orders->"  cursor after ->
     let items = match completion_response(&backend, &uri, 33, 22, None).await {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
     let methods = method_names(&items);
@@ -11941,7 +11938,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 14).await;
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect();
 
@@ -11976,7 +11973,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect();
 
@@ -12010,7 +12007,7 @@ class User extends Model {
     let of_type: Vec<&CompletionItem> = items
         .iter()
         .filter(|i| {
-            i.kind == Some(CompletionItemKind::METHOD)
+            i.kind == Some(CompletionItemKind::Method)
                 && i.filter_text.as_deref().unwrap_or(&i.label) == "ofType"
         })
         .collect();
@@ -12045,7 +12042,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 10, 40).await;
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect();
 
@@ -12080,7 +12077,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 10, 12).await;
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect();
 
@@ -12114,7 +12111,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 10, 14).await;
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect();
 
@@ -12151,7 +12148,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 8, 14).await;
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect();
 
@@ -12197,7 +12194,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 7, 14).await;
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect();
 
@@ -12232,7 +12229,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 9, 16).await;
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect();
 
@@ -12287,7 +12284,7 @@ class Demo {
     let items = complete_at(&backend, &dir, "src/Demo/Demo.php", demo_php, 6, 15).await;
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
         .collect();
 
@@ -12742,7 +12739,7 @@ class Decimal {
     let is_active = items
         .iter()
         .find(|i| {
-            i.kind == Some(CompletionItemKind::PROPERTY)
+            i.kind == Some(CompletionItemKind::Property)
                 && i.filter_text.as_deref() == Some("is_active")
         })
         .expect("is_active should appear as a property on Setting");
@@ -14408,7 +14405,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 7, 15).await;
     let prop = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "deleted_at");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "deleted_at");
     assert!(prop.is_some(), "should find deleted_at property");
     assert!(
         prop.unwrap()
@@ -14443,7 +14440,7 @@ class User extends Model {
     let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
     let matching: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "deleted_at")
+        .filter(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "deleted_at")
         .collect();
     assert_eq!(matching.len(), 1, "should not duplicate the property");
     assert!(
@@ -14512,7 +14509,7 @@ class User extends Model {
 
     let matching: Vec<_> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "deleted_at")
+        .filter(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "deleted_at")
         .collect();
     assert_eq!(matching.len(), 1, "should not duplicate the property");
     assert!(
@@ -14528,7 +14525,7 @@ class User extends Model {
     // The other column from $fillable should still appear as mixed
     let name = items
         .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == "name");
+        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "name");
     assert!(name.is_some(), "should still have 'name' from $fillable");
 }
 
@@ -15156,7 +15153,7 @@ class WarehouseBuilder extends \Illuminate\Database\Eloquent\Builder {
             "$q->warehouseCustom()->warehouseOnly()->firstOrFail()->warehouseName();"
         };
         let content = format!("{header}{}", call.replace("BODY", body));
-        let uri = Url::from_file_path(dir.path().join("audit.php")).unwrap();
+        let uri = Uri::from_file_path(dir.path().join("audit.php")).unwrap();
         let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
             &backend,
             uri.as_str(),
@@ -15171,7 +15168,7 @@ class WarehouseBuilder extends \Illuminate\Database\Eloquent\Builder {
             &content,
         );
         assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
-        assert!(diagnostics[0].message.contains("missingWarehouseMethod"));
+        assert!(message_text(&diagnostics[0].message).contains("missingWarehouseMethod"));
     }
 }
 
@@ -15179,9 +15176,9 @@ class WarehouseBuilder extends \Illuminate\Database\Eloquent\Builder {
 async fn test_morph_callback_candidates_reach_completion_and_diagnostics() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = create_test_backend();
-    let uri = Url::parse("file:///morph-callbacks.php").unwrap();
+    let uri = Uri::parse("file:///morph-callbacks.php").unwrap();
     // Diagnose only the call under test; the fixture supplies its classes.
-    let fixture_uri = Url::parse("file:///builder-relations-fixture.php").unwrap();
+    let fixture_uri = Uri::parse("file:///builder-relations-fixture.php").unwrap();
     crate::common::open_php(&backend, &fixture_uri, fixture).await;
     for call in [
         "Comment::whereHasMorph('commentable', Team::class, function ($morphQuery, $type) { BODY });",
@@ -15229,7 +15226,7 @@ async fn test_morph_callback_candidates_reach_completion_and_diagnostics() {
             &content,
         );
         assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
-        assert!(diagnostics[0].message.contains("missingMorphModelMethod"));
+        assert!(message_text(&diagnostics[0].message).contains("missingMorphModelMethod"));
     }
 }
 
@@ -15237,9 +15234,9 @@ async fn test_morph_callback_candidates_reach_completion_and_diagnostics() {
 async fn test_eager_callback_union_reaches_completion_and_diagnostics() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = create_test_backend();
-    let uri = Url::parse("file:///eager-callbacks.php").unwrap();
+    let uri = Uri::parse("file:///eager-callbacks.php").unwrap();
     // Diagnose only the call under test; the fixture supplies its classes.
-    let fixture_uri = Url::parse("file:///builder-relations-fixture.php").unwrap();
+    let fixture_uri = Uri::parse("file:///builder-relations-fixture.php").unwrap();
     crate::common::open_php(&backend, &fixture_uri, fixture).await;
     for call in [
         "Stock::withWhereHas('team', fn ($eagerQuery) => BODY);",
@@ -15281,7 +15278,7 @@ async fn test_eager_callback_union_reaches_completion_and_diagnostics() {
             &content,
         );
         assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
-        assert!(diagnostics[0].message.contains("missingEagerModelMethod"));
+        assert!(message_text(&diagnostics[0].message).contains("missingEagerModelMethod"));
     }
 }
 
@@ -15289,9 +15286,9 @@ async fn test_eager_callback_union_reaches_completion_and_diagnostics() {
 async fn test_relation_callback_arguments_reach_completion_and_diagnostics() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = create_test_backend();
-    let uri = Url::parse("file:///relation-arguments.php").unwrap();
+    let uri = Uri::parse("file:///relation-arguments.php").unwrap();
     // Diagnose only the call under test; the fixture supplies its classes.
-    let fixture_uri = Url::parse("file:///builder-relations-fixture.php").unwrap();
+    let fixture_uri = Uri::parse("file:///builder-relations-fixture.php").unwrap();
     crate::common::open_php(&backend, &fixture_uri, fixture).await;
     for call in [
         "Stock::whereHas($name, fn ($argumentQuery) => BODY);",
@@ -15347,11 +15344,7 @@ async fn test_relation_callback_arguments_reach_completion_and_diagnostics() {
             &content,
         );
         assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
-        assert!(
-            diagnostics[0]
-                .message
-                .contains("missingRelationArgumentMethod")
-        );
+        assert!(message_text(&diagnostics[0].message).contains("missingRelationArgumentMethod"));
     }
 }
 
@@ -16230,7 +16223,7 @@ final class DivisionFactory
     // The forward walker seeds the closure for every consumer, so the
     // same binding has to carry hover and go-to-definition, not just the
     // completion list.
-    let uri = Url::from_file_path(dir.path().join("src/Models/DivisionFactory.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Models/DivisionFactory.php")).unwrap();
     let on_method = position_after(caller, "$q->eagle");
     let targets = crate::common::definition_locations(
         crate::common::goto_definition_at(&backend, &uri, on_method.line, on_method.character)
@@ -16250,7 +16243,7 @@ final class DivisionFactory
         .await
         .expect("hover on the closure parameter");
     let text = match hover.contents {
-        HoverContents::Markup(markup) => markup.value,
+        Contents::MarkupContent(markup) => markup.value,
         other => panic!("expected markup hover, got {other:?}"),
     };
     assert!(
@@ -16342,9 +16335,9 @@ class Team extends Model {
 async fn test_relation_callback_context_reaches_completion_and_diagnostics() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = create_test_backend();
-    let uri = Url::parse("file:///relation-context.php").unwrap();
+    let uri = Uri::parse("file:///relation-context.php").unwrap();
     // Diagnose only the call under test; the fixture supplies its classes.
-    let fixture_uri = Url::parse("file:///builder-relations-fixture.php").unwrap();
+    let fixture_uri = Uri::parse("file:///builder-relations-fixture.php").unwrap();
     crate::common::open_php(&backend, &fixture_uri, fixture).await;
     for (call, expected, direct) in [
         (
@@ -16498,7 +16491,7 @@ namespace BuilderRelationAudit {{
             );
             assert_eq!(diagnostics.len(), errors, "{call}: {diagnostics:?}");
             if errors != 0 {
-                assert!(diagnostics[0].message.contains("missingContextMethod"));
+                assert!(message_text(&diagnostics[0].message).contains("missingContextMethod"));
             }
         }
     }
@@ -16507,7 +16500,7 @@ namespace BuilderRelationAudit {{
 #[tokio::test]
 async fn test_dynamic_callback_calls_preserve_explicit_parameter_types() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///dynamic-callbacks.php").unwrap();
+    let uri = Uri::parse("file:///dynamic-callbacks.php").unwrap();
     for call in [
         "$callable(function (Item $item) { BODY });",
         "$object->{$method}(function (Item $item) { BODY });",
@@ -16532,7 +16525,7 @@ async fn test_dynamic_callback_calls_preserve_explicit_parameter_types() {
             );
             assert_eq!(diagnostics.len(), errors, "{call}: {diagnostics:?}");
             if errors != 0 {
-                assert!(diagnostics[0].message.contains("missing"));
+                assert!(message_text(&diagnostics[0].message).contains("missing"));
             }
         }
     }

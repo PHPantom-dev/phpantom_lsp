@@ -36,7 +36,7 @@ impl Backend {
 
 fn locale_detail(
     locale: &str,
-    uri: &tower_lsp::lsp_types::Url,
+    uri: &tower_lsp_server::gen_lsp_types::Uri,
     line: u32,
     value: Option<&str>,
 ) -> String {

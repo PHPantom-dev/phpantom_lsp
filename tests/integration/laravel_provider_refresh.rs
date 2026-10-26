@@ -8,8 +8,8 @@
 
 use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace, open_php};
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -126,16 +126,21 @@ async fn start(extra: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
 
 /// Edit a file the way an editor does: open it, then replace its contents.
 async fn edit(backend: &Backend, path: std::path::PathBuf, before: &str, after: &str) {
-    let uri = Url::from_file_path(&path).unwrap();
+    let uri = Uri::from_file_path(&path).unwrap();
     open_php(backend, &uri, before).await;
     backend
         .did_change(DidChangeTextDocumentParams {
-            text_document: VersionedTextDocumentIdentifier { uri, version: 2 },
-            content_changes: vec![TextDocumentContentChangeEvent {
-                range: None,
-                range_length: None,
-                text: after.to_string(),
-            }],
+            text_document: VersionedTextDocumentIdentifier {
+                text_document_identifier: TextDocumentIdentifier { uri },
+                version: 2,
+            },
+            content_changes: vec![
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                    TextDocumentContentChangeWholeDocument {
+                        text: after.to_string(),
+                    },
+                ),
+            ],
         })
         .await;
 }
@@ -145,7 +150,7 @@ async fn hover_key(backend: &Backend, dir: &tempfile::TempDir, key: &str) -> Str
     let text = consumer(key);
     let path = dir.path().join("src/Consumer.php");
     std::fs::write(&path, &text).unwrap();
-    let uri = Url::from_file_path(&path).unwrap();
+    let uri = Uri::from_file_path(&path).unwrap();
     open_php(backend, &uri, &text).await;
 
     let idx = text.rfind("$x;").expect("consumer should use $x");
@@ -154,7 +159,7 @@ async fn hover_key(backend: &Backend, dir: &tempfile::TempDir, key: &str) -> Str
     let character = prefix.rsplit('\n').next().unwrap().len() as u32 - 1;
     match backend.handle_hover(uri.as_str(), &text, Position { line, character }) {
         Some(hover) => match &hover.contents {
-            HoverContents::Markup(markup) => markup.value.clone(),
+            Contents::MarkupContent(markup) => markup.value.clone(),
             _ => panic!("expected MarkupContent"),
         },
         None => String::new(),

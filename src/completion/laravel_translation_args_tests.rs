@@ -37,7 +37,7 @@ fn complete(source: &str) -> Option<Vec<CompletionItem>> {
         &code,
         &ctx,
     )? {
-        CompletionResponse::Array(items) => Some(items),
+        CompletionResponse::CompletionItemList(items) => Some(items),
         _ => panic!("expected array"),
     }
 }
@@ -116,7 +116,7 @@ fn translation_argument_placeholders_follow_bound_replacement_array() {
     assert!(labels("<?php __('messages.dynamic', ['|']);").is_empty());
     let items = complete("<?php __('messages.hello', ['n|me' => 1]);").unwrap();
     assert_eq!(items.len(), 1);
-    let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+    let Some(CompletionItemTextEdit::TextEdit(edit)) = &items[0].text_edit else {
         panic!("edit")
     };
     assert_eq!(edit.new_text, "name");

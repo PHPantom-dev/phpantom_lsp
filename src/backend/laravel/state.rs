@@ -2,6 +2,7 @@
 //! framework's state sits apart from the language server's own.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::RwLock;
 
@@ -32,6 +33,9 @@ pub(crate) struct LaravelState {
     /// when a `config/` file or a `Storage::extend()` registration changes, so
     /// an edit takes effect without a restart.
     pub(crate) storage_disk_type_cache: RwLock<Option<Option<PhpType>>>,
+    /// Moves with every write to the two caches above; see
+    /// [`config_facts_generation`](Self::config_facts_generation).
+    config_facts_generation: AtomicU64,
     /// `Storage::extend('driver', closure)` registrations discovered from
     /// project and vendor service-provider source, keyed by driver name.
     ///
@@ -157,6 +161,7 @@ impl LaravelState {
         Self {
             auth_user_type_cache: RwLock::new(HashMap::new()),
             storage_disk_type_cache: RwLock::new(None),
+            config_facts_generation: AtomicU64::new(0),
             storage_drivers: RwLock::default(),
             aliases,
             macros: GatedIndex::default(),
@@ -176,5 +181,25 @@ impl LaravelState {
             schema_index: RwLock::default(),
             morph_column_spans_cache: RwLock::default(),
         }
+    }
+
+    /// A stamp that moves whenever the auth model or the disk type a class
+    /// load reads may have changed.  Read it before reading either cache.
+    pub(crate) fn config_facts_generation(&self) -> u64 {
+        self.config_facts_generation.load(Ordering::Acquire)
+    }
+
+    /// Record a write to the auth-model or disk-type cache, once it is done.
+    pub(crate) fn note_config_facts_change(&self) {
+        self.config_facts_generation.fetch_add(1, Ordering::Release);
+    }
+
+    /// Forget everything derived from the project's `config/` files and
+    /// providers that class loading reads, so the next load recomputes it.
+    pub(crate) fn clear_config_facts(&self) {
+        self.auth_user_type_cache.write().clear();
+        *self.storage_disk_type_cache.write() = None;
+        self.note_config_facts_change();
+        self.aliases.invalidate();
     }
 }

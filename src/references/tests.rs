@@ -1,9 +1,10 @@
 use crate::Backend;
+use crate::references::MemberRefKind;
 use crate::virtual_members::laravel::extract_macro_registrations;
 use std::sync::atomic::Ordering;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
-fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
+fn seed_macro_index(backend: &Backend, uri: &Uri, text: &str) {
     let mut index = backend.laravel.macros.write();
     index.files.set_file(
         uri.to_string(),
@@ -26,7 +27,7 @@ fn macro_targets_leave_the_macro_index_free_while_loading_ancestors() {
         "Countable",
         "<?php interface Countable {}",
     )]));
-    let provider_uri = Url::parse("file:///Provider.php").unwrap();
+    let provider_uri = Uri::parse("file:///Provider.php").unwrap();
     let provider_text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -802,7 +803,13 @@ function persist(Service $service): void {
     parse_file(&backend, CONSUMER_URI, CONSUMER);
 
     let save_offset = SERVICE.find("save").unwrap() as u32;
-    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    let locations = backend.member_declaration_references(
+        SERVICE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
 
     assert_eq!(
         locations.len(),
@@ -852,7 +859,13 @@ class Child extends Base {
     parse_file(&backend, CHILD_URI, CHILD);
 
     let save_offset = BASE.find("save").unwrap() as u32;
-    let locations = backend.member_declaration_references(BASE_URI, save_offset, "save", false);
+    let locations = backend.member_declaration_references(
+        BASE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
 
     assert_eq!(
         locations.len(),
@@ -885,8 +898,13 @@ fn a_static_access_on_a_namesake_class_is_ruled_out() {
     parse_file(&backend, CALLER_URI, CALLER);
 
     let flush_offset = REGISTRY.find("flush").unwrap() as u32;
-    let locations =
-        backend.member_declaration_references(REGISTRY_URI, flush_offset, "flush", true);
+    let locations = backend.member_declaration_references(
+        REGISTRY_URI,
+        flush_offset,
+        "flush",
+        true,
+        MemberRefKind::Method,
+    );
 
     assert_eq!(
         locations.len(),
@@ -922,7 +940,13 @@ class Unrelated {
     parse_file(&backend, UNRELATED_URI, UNRELATED);
 
     let save_offset = SERVICE.find("save").unwrap() as u32;
-    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    let locations = backend.member_declaration_references(
+        SERVICE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
 
     assert!(
         locations.is_empty(),
@@ -964,7 +988,13 @@ function elsewhere(Service $service): void {
     parse_file(&backend, CONSUMER_URI, CONSUMER);
 
     let save_offset = SERVICE.find("save").unwrap() as u32;
-    backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    backend.member_declaration_references(
+        SERVICE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
 
     let entry = backend
         .resolved_member_file(CONSUMER_URI, &symbol_map_of(&backend, CONSUMER_URI))
@@ -1017,7 +1047,13 @@ function run(Service $service): void {
     );
 
     let save_offset = SERVICE.find("save").unwrap() as u32;
-    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    let locations = backend.member_declaration_references(
+        SERVICE_URI,
+        save_offset,
+        "save",
+        false,
+        MemberRefKind::Method,
+    );
     assert_eq!(locations.len(), 1, "the consumer calls Service::save");
 
     assert!(
@@ -1147,7 +1183,13 @@ function run(Service $service, Other $other): void {
         if warm {
             backend.warm_member_receivers(CONSUMER_URI);
         }
-        backend.member_declaration_references(SERVICE_URI, save_offset, "save", false)
+        backend.member_declaration_references(
+            SERVICE_URI,
+            save_offset,
+            "save",
+            false,
+            MemberRefKind::Method,
+        )
     };
 
     let cold = references(false);

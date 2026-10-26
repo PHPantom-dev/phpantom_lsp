@@ -1,0 +1,7 @@
+// test: Properties Gedmo writes are not unused
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, MissingGedmoPropertyAssignRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Properties/data/gedmo-property-assign.php
+---

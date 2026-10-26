@@ -6,12 +6,13 @@
 //! Both forms must be followed, along with the group prefixes they apply,
 //! or every `route('…')` call naming one of those routes is reported as
 //! unknown.
+use crate::common::message_text;
 
 use crate::common::{
     LARAVEL_SRC_COMPOSER, create_initialized_psr4_workspace, create_psr4_workspace,
     goto_definition_at, open_initialized_php,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const PROVIDERS_PHP: &str =
     "<?php\nreturn [\n    App\\Providers\\RouteServiceProvider::class,\n];\n";
@@ -94,12 +95,10 @@ async fn routes_outside_the_routes_directory_are_not_reported_as_unknown() {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER, &mut diags);
 
-    let messages: Vec<&String> = diags
+    let messages: Vec<&str> = diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_route"),
-        )
-        .map(|d| &d.message)
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_route"))
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert_eq!(
@@ -141,12 +140,10 @@ async fn a_package_with_no_route_files_does_not_flag_route_calls() {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), PACKAGE_CONSUMER, &mut diags);
 
-    let messages: Vec<&String> = diags
+    let messages: Vec<&str> = diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_route"),
-        )
-        .map(|d| &d.message)
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_route"))
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert!(
@@ -166,9 +163,11 @@ async fn goto_definition_reaches_a_route_outside_the_routes_directory() {
         .expect("route('kiosk.register') should resolve to its ->name('register')");
 
     let target = match result {
-        GotoDefinitionResponse::Scalar(location) => location.uri,
-        GotoDefinitionResponse::Array(locations) => locations[0].uri.clone(),
-        GotoDefinitionResponse::Link(links) => links[0].target_uri.clone(),
+        DefinitionResponse::Definition(Definition::Location(location)) => location.uri,
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => {
+            locations[0].uri.clone()
+        }
+        DefinitionResponse::DefinitionLinkList(links) => links[0].target_uri.clone(),
     };
     assert!(
         target
@@ -226,12 +225,10 @@ async fn routes_under_a_dynamic_group_prefix_are_not_flagged() {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER_DYNAMIC, &mut diags);
 
-    let messages: Vec<&String> = diags
+    let messages: Vec<&str> = diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_route"),
-        )
-        .map(|d| &d.message)
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_route"))
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert_eq!(
@@ -289,12 +286,10 @@ async fn routes_under_a_wholly_unknown_group_name_are_not_flagged() {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER_BARE_DYNAMIC, &mut diags);
 
-    let messages: Vec<&String> = diags
+    let messages: Vec<&str> = diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_route"),
-        )
-        .map(|d| &d.message)
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_route"))
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert_eq!(

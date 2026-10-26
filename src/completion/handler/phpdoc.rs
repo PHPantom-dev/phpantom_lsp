@@ -6,9 +6,9 @@
 use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionList, CompletionResponse, CompletionTextEdit,
-    NumberOrString, Position, Range, TextEdit,
+use tower_lsp_server::gen_lsp_types::{
+    Code, CompletionItem, CompletionItemKind, CompletionItemTextEdit, CompletionList,
+    CompletionResponse, Position, Range, TextEdit,
 };
 
 use crate::Backend;
@@ -103,7 +103,7 @@ impl Backend {
         let cache = self.phpstan_tool.last_diags.lock();
         if let Some(diags) = cache.get(uri) {
             for diag in diags {
-                let Some(NumberOrString::String(code)) = &diag.code else {
+                let Some(Code::String(code)) = &diag.code else {
                     continue;
                 };
                 if code.is_empty() || code == "phpstan" || code.starts_with("ignore.unmatched") {
@@ -119,7 +119,7 @@ impl Backend {
             .enumerate()
             .map(|(idx, id)| CompletionItem {
                 label: id.clone(),
-                kind: Some(CompletionItemKind::VALUE),
+                kind: Some(CompletionItemKind::Value),
                 detail: Some("PHPStan error identifier".to_string()),
                 insert_text: Some(id),
                 sort_text: Some(format!("0_{idx:03}")),
@@ -127,7 +127,7 @@ impl Backend {
             })
             .collect();
 
-        CompletionResponse::Array(items)
+        CompletionResponse::CompletionItemList(items)
     }
 
     // ─── Strategy: PHPDoc tag completion ─────────────────────────────────
@@ -194,7 +194,7 @@ impl Backend {
             &ctx.namespace,
             &smart,
         );
-        CompletionResponse::Array(items)
+        CompletionResponse::CompletionItemList(items)
     }
 
     // ─── Strategy: docblock type / variable completion ───────────────────
@@ -237,9 +237,11 @@ impl Backend {
                     return if class_items.is_empty() {
                         None
                     } else {
-                        Some(CompletionResponse::List(CompletionList {
+                        Some(CompletionResponse::CompletionList(CompletionList {
                             is_incomplete: class_incomplete,
                             items: class_items,
+                            apply_kind: None,
+                            item_defaults: None,
                         }))
                     };
                 }
@@ -253,7 +255,7 @@ impl Backend {
                     .enumerate()
                     .map(|(idx, t)| CompletionItem {
                         label: t.to_string(),
-                        kind: Some(CompletionItemKind::KEYWORD),
+                        kind: Some(CompletionItemKind::Keyword),
                         detail: Some("PHP built-in type".to_string()),
                         insert_text: Some(t.to_string()),
                         filter_text: Some(t.to_string()),
@@ -278,9 +280,11 @@ impl Backend {
                 if items.is_empty() {
                     None
                 } else {
-                    Some(CompletionResponse::List(CompletionList {
+                    Some(CompletionResponse::CompletionList(CompletionList {
                         is_incomplete: class_incomplete,
                         items,
+                        apply_kind: None,
+                        item_defaults: None,
                     }))
                 }
             }
@@ -316,9 +320,9 @@ impl Backend {
                             .unwrap_or_else(|| PhpType::mixed().to_string());
                         CompletionItem {
                             label: name.clone(),
-                            kind: Some(CompletionItemKind::VARIABLE),
+                            kind: Some(CompletionItemKind::Variable),
                             detail: Some(detail),
-                            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                            text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                                 range: replace_range,
                                 new_text: name.clone(),
                             })),
@@ -331,7 +335,7 @@ impl Backend {
                 if items.is_empty() {
                     None
                 } else {
-                    Some(CompletionResponse::Array(items))
+                    Some(CompletionResponse::CompletionItemList(items))
                 }
             }
             None => {

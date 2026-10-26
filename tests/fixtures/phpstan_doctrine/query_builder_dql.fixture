@@ -1,0 +1,24 @@
+// test: Query builders whose DQL does not parse or names unknown fields
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, QueryBuilderDqlRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/query-builder-dql.php
+// expect_diagnostic: 31: QueryBuilder: [Syntax Error] line 0, col 66: Error: Expected end of string, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = 1) // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 43: QueryBuilder: [Syntax Error] line 0, col 68: Error: Expected end of string, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = :id) // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 55: QueryBuilder: [Syntax Error] line 0, col 68: Error: Expected end of string, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = :id) // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 62: QueryBuilder: [Semantical Error] line 0, col 60 near 'transient = ': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named transient // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 71: QueryBuilder: [Semantical Error] line 0, col 14 near 'Foo e': Error: Class 'Foo' is not defined. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 99: Could not analyse QueryBuilder with dynamic arguments. // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 107: QueryBuilder: [Semantical Error] line 0, col 60 near 'transient = ': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named transient // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 129: QueryBuilder: [Syntax Error] line 0, col 82: Error: Expected end of string, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = 1 ORDER BY e.name) ASC // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 139: QueryBuilder: [Semantical Error] line 0, col 78 near 'name ASC': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named name // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 160: QueryBuilder: [Semantical Error] line 0, col 78 near 'name ASC': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named name // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 170: QueryBuilder: [Semantical Error] line 0, col 60 near 'transient = 1': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named transient // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 194: QueryBuilder: [Semantical Error] line 0, col 72 near 'nickname LIKE': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named nickname // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 206: QueryBuilder: [Semantical Error] line 0, col 72 near 'nickname IS ': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named nickname // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 218: QueryBuilder: [Syntax Error] line 0, col 80: Error: Expected =, <, <=, <>, >, >=, !=, got ')'\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE e.id = 1 OR e.nickname) IS NULL // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 234: QueryBuilder: [Semantical Error] line 0, col 60 near 'transient = ': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named transient // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 251: QueryBuilder: [Semantical Error] line 0, col 60 near 'nonexistent =': Error: Class PHPStan\Rules\Doctrine\ORM\MyEntity has no field or association named nonexistent // SKIP: DQL and query builder strings are not checked
+// expect_diagnostic: 281: QueryBuilder: [Syntax Error] line 0, col -1: Error: Expected =, <, <=, <>, >, >=, !=, got end of string.\nDQL: SELECT e FROM PHPStan\Rules\Doctrine\ORM\MyEntity e WHERE foo // SKIP: DQL and query builder strings are not checked
+---

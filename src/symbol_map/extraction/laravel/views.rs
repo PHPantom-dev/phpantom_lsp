@@ -22,15 +22,15 @@ pub(in crate::symbol_map::extraction) fn try_emit_blade_block_span(
     use crate::blade::markers::{
         PUSH_IF as PUSH_IF_MARKER, SECTION as SECTION_MARKER, STACK as STACK_MARKER,
     };
-    use crate::symbol_map::LaravelStringKind;
+    use crate::symbol_map::StringKeyKind;
 
     let (kind, index) = if name.eq_ignore_ascii_case(SECTION_MARKER) {
-        (LaravelStringKind::Section, 0)
+        (StringKeyKind::Section, 0)
     } else if name.eq_ignore_ascii_case(STACK_MARKER) {
-        (LaravelStringKind::Stack, 0)
+        (StringKeyKind::Stack, 0)
     } else if name.eq_ignore_ascii_case(PUSH_IF_MARKER) {
         (
-            LaravelStringKind::Stack,
+            StringKeyKind::Stack,
             argument_list.arguments.len().saturating_sub(1),
         )
     } else {
@@ -52,7 +52,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_view_span_at(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let kind = crate::symbol_map::LaravelStringKind::View;
+    let kind = crate::symbol_map::StringKeyKind::View;
     let Some(arg) = argument_list.arguments.iter().nth(index) else {
         return;
     };
@@ -101,7 +101,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_mailable_content_view_spans(
         };
         if names_view {
             push_laravel_string_span(
-                crate::symbol_map::LaravelStringKind::View,
+                crate::symbol_map::StringKeyKind::View,
                 false,
                 false,
                 argument.value(),
@@ -175,7 +175,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_render_each_view_spans(
     for index in RENDER_EACH_VIEW_ARGS {
         if names_a_render_each_template(index, argument_list, content) {
             try_emit_laravel_string_span_at(
-                crate::symbol_map::LaravelStringKind::View,
+                crate::symbol_map::StringKeyKind::View,
                 index,
                 argument_list,
                 content,
@@ -216,7 +216,7 @@ fn names_a_render_each_template(
 /// lowercasing each one would be a real cost.
 pub(in crate::symbol_map::extraction) fn view_receiver_method(
     member_name: &str,
-) -> Option<(ViewReceiverClass, &'static [usize])> {
+) -> Option<(ReceiverClass, &'static [usize])> {
     const FIRST: &[usize] = &[0];
     const SECOND: &[usize] = &[1];
     // Every name below starts with one of these, so a method call that
@@ -231,37 +231,37 @@ pub(in crate::symbol_map::extraction) fn view_receiver_method(
         || member_name.eq_ignore_ascii_case("first")
         || member_name.eq_ignore_ascii_case("exists")
     {
-        return Some((ViewReceiverClass::Factory, FIRST));
+        return Some((ReceiverClass::ViewFactory, FIRST));
     }
     if member_name.eq_ignore_ascii_case("view") || member_name.eq_ignore_ascii_case("markdown") {
-        return Some((ViewReceiverClass::MailTemplate, FIRST));
+        return Some((ReceiverClass::MailTemplate, FIRST));
     }
     if member_name.eq_ignore_ascii_case("text") {
-        return Some((ViewReceiverClass::Mailable, FIRST));
+        return Some((ReceiverClass::Mailable, FIRST));
     }
     if member_name.eq_ignore_ascii_case("renderWhen")
         || member_name.eq_ignore_ascii_case("renderUnless")
     {
-        return Some((ViewReceiverClass::Factory, SECOND));
+        return Some((ReceiverClass::ViewFactory, SECOND));
     }
     if is_render_each_method(member_name) {
-        return Some((ViewReceiverClass::Factory, &RENDER_EACH_VIEW_ARGS));
+        return Some((ReceiverClass::ViewFactory, &RENDER_EACH_VIEW_ARGS));
     }
     None
 }
 
 /// Record every template a method call names, for the lazy pass that
-/// settles what its receiver is (see [`ViewReceiverSite`]).
+/// settles what its receiver is (see [`TypedReceiverSite`]).
 ///
 /// The names are read exactly as the confirmed spellings read them, so a
 /// site that turns out to be a render contributes the same spans a
 /// syntactically recognised one would.
 pub(in crate::symbol_map::extraction) fn record_view_receiver_sites(
-    receiver: ViewReceiverClass,
+    receiver: ReceiverClass,
     name_indices: &[usize],
     argument_list: &ArgumentList<'_>,
     content: &str,
-    sites: &mut Vec<ViewReceiverSite>,
+    sites: &mut Vec<TypedReceiverSite>,
 ) {
     let mut spans = Vec::new();
     for index in name_indices {
@@ -270,16 +270,17 @@ pub(in crate::symbol_map::extraction) fn record_view_receiver_sites(
         }
     }
     for span in spans {
-        let SymbolKind::LaravelStringKey {
+        let SymbolKind::StringKey {
             key, is_optional, ..
         } = span.kind
         else {
             continue;
         };
-        sites.push(ViewReceiverSite {
+        sites.push(TypedReceiverSite {
             start: span.start,
             end: span.end,
             key,
+            is_write: false,
             is_optional,
             receiver,
         });

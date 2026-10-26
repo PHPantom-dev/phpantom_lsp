@@ -1,9 +1,9 @@
 //! JSON translation declarations with their source positions.
 
-use tower_lsp::lsp_types::{Location, Position};
+use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
-use crate::symbol_map::LaravelStringKind;
+use crate::symbol_map::StringKeyKind;
 use crate::text_position::position_to_offset;
 
 use super::trans_keys::TransKeyMatch;
@@ -88,9 +88,9 @@ pub(crate) fn find_json_trans_references(
     let declaration = collect_json_trans_declarations(content)
         .into_iter()
         .find(|declaration| declaration.start <= offset && offset <= declaration.end)?;
-    let kind = LaravelStringKind::Trans;
+    let kind = StringKeyKind::Trans;
     let snapshot = backend.user_file_symbol_maps_for_reference_keys(&[
-        crate::reference_index::ReferenceIndexKey::LaravelString {
+        crate::reference_index::ReferenceIndexKey::StringKey {
             kind,
             key: declaration.key.clone(),
         },

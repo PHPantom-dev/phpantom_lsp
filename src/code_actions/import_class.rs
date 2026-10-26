@@ -11,7 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::completion::use_edit::{build_use_edit, use_import_conflicts};
@@ -64,8 +64,8 @@ impl Backend {
     #[allow(clippy::too_many_arguments)]
     fn push_import_actions(
         &self,
-        out: &mut Vec<CodeActionOrCommand>,
-        doc_uri: &Url,
+        out: &mut Vec<CodeActionResponse>,
+        doc_uri: &Uri,
         candidates: &[String],
         file_use_map: &HashMap<String, String>,
         use_block: &crate::completion::use_edit::UseBlockInfo,
@@ -86,9 +86,9 @@ impl Backend {
                 None => continue,
             };
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: format!("Import `{}`", fqn),
-                kind: Some(CodeActionKind::QUICKFIX),
+                kind: Some(CodeActionKind::QuickFix),
                 diagnostics: diagnostics
                     .filter(|d| !d.is_empty())
                     .map(<[Diagnostic]>::to_vec),
@@ -100,6 +100,7 @@ impl Backend {
                 is_preferred: (candidates.len() == 1).then_some(true),
                 disabled: None,
                 data: None,
+                tags: None,
             }));
         }
     }
@@ -147,7 +148,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         // Convert LSP range to byte offsets for comparison with symbol spans.
         let request_start =
@@ -194,7 +195,7 @@ impl Backend {
             }
 
             let use_block = self.use_block_for(uri, content, block.range);
-            let doc_uri: Url = match uri.parse() {
+            let doc_uri: Uri = match uri.parse() {
                 Ok(u) => u,
                 Err(_) => continue,
             };
@@ -210,7 +211,7 @@ impl Backend {
                 .filter(|d| {
                     matches!(
                         &d.code,
-                        Some(NumberOrString::String(code)) if code == UNKNOWN_CLASS_CODE
+                        Some(Code::String(code)) if code == UNKNOWN_CLASS_CODE
                     )
                 })
                 .cloned()

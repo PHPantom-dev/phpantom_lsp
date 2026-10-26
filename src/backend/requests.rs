@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
+use tower_lsp_server::jsonrpc::Result;
 
 use parking_lot::Mutex;
 
@@ -99,9 +99,7 @@ impl Backend {
         // map, so a file passes through here once; a file the parser panics
         // on publishes nothing and is retried, which is the same work its
         // next keystroke would do anyway.
-        if !crate::resource_navigation::is_resource_document(uri)
-            && self.symbol_map_for(uri).is_none()
-        {
+        if !self.is_resource_uri(uri) && self.symbol_map_for(uri).is_none() {
             let content = self.get_file_content(uri)?;
             self.update_ast(uri, &content);
         }

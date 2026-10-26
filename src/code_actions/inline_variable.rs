@@ -18,7 +18,7 @@
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -300,7 +300,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let cursor_offset = position_to_byte_offset(content, params.range.start) as u32;
 
@@ -322,9 +322,9 @@ impl Backend {
             return;
         }
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title: format!("Inline variable {}", info.var_name),
-            kind: Some(CodeActionKind::REFACTOR_INLINE),
+            kind: Some(CodeActionKind::RefactorInline),
             diagnostics: None,
             edit: None,
             command: None,
@@ -336,6 +336,7 @@ impl Backend {
                 &params.range,
                 serde_json::json!({}),
             )),
+            tags: None,
         }));
     }
 
@@ -367,7 +368,7 @@ impl Backend {
         let rhs_text = &content[info.rhs_start..info.rhs_end];
 
         // ── 4. Build the workspace edit ─────────────────────────────
-        let doc_uri: Url = match data.uri.parse() {
+        let doc_uri: Uri = match data.uri.parse() {
             Ok(u) => u,
             Err(_) => return None,
         };

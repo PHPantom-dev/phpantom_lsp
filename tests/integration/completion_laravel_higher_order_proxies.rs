@@ -3,11 +3,12 @@
 //! `$users->map->email` and `$users->filter->isActive()` go through
 //! `HigherOrderCollectionProxy`, whose `__get` / `__call` run the proxied
 //! collection method with a closure that performs the access on every item.
+use crate::common::message_text;
 
 use crate::common::create_psr4_workspace;
 use crate::common::{completion_response, open_php};
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Framework stubs ────────────────────────────────────────────────────────
 
@@ -260,7 +261,7 @@ fn hover_markdown(collection_type: &str, expression: &str) -> String {
         )
         .expect("hover returned nothing");
     match hover.contents {
-        HoverContents::Markup(markup) => markup.value,
+        Contents::MarkupContent(markup) => markup.value,
         _ => panic!("expected markup hover"),
     }
 }
@@ -516,7 +517,7 @@ fn completion_labels(collection_type: &str, prefix_expression: &str) -> Vec<Stri
         collection_type, prefix_expression
     );
     let uri = format!("file://{}/src/Probe.php", dir.path().display());
-    let url = Url::parse(&uri).unwrap();
+    let url = Uri::parse(&uri).unwrap();
 
     let response = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -535,8 +536,12 @@ fn completion_labels(collection_type: &str, prefix_expression: &str) -> Vec<Stri
         });
 
     match response {
-        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-        Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
+        Some(CompletionResponse::CompletionItemList(items)) => {
+            items.into_iter().map(|i| i.label).collect()
+        }
+        Some(CompletionResponse::CompletionList(list)) => {
+            list.items.into_iter().map(|i| i.label).collect()
+        }
         None => Vec::new(),
     }
 }
@@ -571,9 +576,9 @@ fn unknown_member_messages(expression: &str) -> Vec<String> {
         .filter(|d| {
             d.code
                 .as_ref()
-                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
+                .is_some_and(|c| matches!(c, Code::String(s) if s == "unknown_member"))
         })
-        .map(|d| d.message)
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 

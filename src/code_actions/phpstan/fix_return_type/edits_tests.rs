@@ -1,6 +1,6 @@
 use super::*;
 use crate::docblock::type_strings::split_type_token;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use super::super::target::{Anchor, target_function};
 

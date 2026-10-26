@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::cursor_context::{ClassLikeContextKind, CursorContext, find_cursor_context};
 use super::make_code_action_data;
@@ -29,7 +29,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         // The action creates a file, which only a client that accepts the
         // `create` resource operation can apply.
@@ -83,15 +83,16 @@ impl Backend {
             serde_json::Value::Null,
         );
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title: "Extract interface".to_string(),
-            kind: Some(CodeActionKind::REFACTOR_EXTRACT),
+            kind: Some(CodeActionKind::RefactorExtract),
             diagnostics: None,
             edit: None,
             command: None,
             is_preferred: Some(false),
             disabled: None,
             data: Some(data),
+            tags: None,
         }));
     }
 

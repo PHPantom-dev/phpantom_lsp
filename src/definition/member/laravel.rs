@@ -2,7 +2,7 @@
 //! attributes and their array entries, scopes, timestamp constants,
 //! Builder and facade forwarding, and macro registration sites.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::{MemberKind, MemberLookup};
 use crate::Backend;

@@ -14,7 +14,7 @@ use std::borrow::Borrow;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::{Class, Program};
-use tower_lsp::lsp_types::TextEdit;
+use tower_lsp_server::gen_lsp_types::TextEdit;
 
 use crate::code_actions::cursor_context::{FunctionKinds, find_enclosing_function};
 use crate::docblock::strip_docblock_line_delimiters;

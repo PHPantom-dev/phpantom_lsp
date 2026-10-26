@@ -7,7 +7,7 @@
 //! the template with the scanner in [`super::use_directive`], and the
 //! import is written in that syntax.
 
-use tower_lsp::lsp_types::{Position, Range, TextEdit};
+use tower_lsp_server::gen_lsp_types::{Position, Range, TextEdit};
 
 use super::directives::{DirectiveHead, directive_head};
 use super::source_map::BladeSourceMap;

@@ -96,6 +96,28 @@ pub(crate) fn missing_required_shape_keys(arg_type: &PhpType, param_type: &PhpTy
         .collect()
 }
 
+/// The keys the argument's array shape lists that a sealed parameter shape
+/// does not declare, in the order the argument lists them.
+///
+/// Empty unless both sides are shapes and the parameter's has no `...`.
+pub(crate) fn undeclared_shape_keys(
+    arg_type: &PhpType,
+    param_type: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Vec<String> {
+    let (Some(arg), Some(param)) = (arg_type.shape_parts(), param_type.shape_parts()) else {
+        return Vec::new();
+    };
+    if param.tail.is_some() {
+        return Vec::new();
+    }
+    let param_keys = shape_keys(param.entries);
+    shape_keys(arg.entries)
+        .into_iter()
+        .filter(|key| !param_keys.contains(key) && !may_be_listed(key, &param_keys, class_loader))
+        .collect()
+}
+
 /// Whether the parameter demands a list: an array whose keys run
 /// `0, 1, 2, …` in that order, which is what `array_is_list()` answers
 /// `true` for.
@@ -207,11 +229,11 @@ fn shape_keys(entries: &[ShapeEntry]) -> Vec<String> {
 /// every key the array has; the caller reports it for a literal, which does
 /// enumerate them all.
 ///
-/// Extra keys on the argument are harmless, since PHP array shapes are open
-/// by convention in most codebases.  The exception is an unsealed
-/// parameter, whose tail says what such an entry looks like: every entry
-/// the parameter does not list, and the tail of an unsealed argument, have
-/// to fit it.
+/// A shape written without `...` declares every key it handles, so an
+/// entry the argument lists and the parameter does not rules it out.  An
+/// unsealed parameter's tail says what such an entry looks like instead:
+/// every entry the parameter does not list, and the tail of an unsealed
+/// argument, have to fit it.
 fn shape_is_compatible(
     arg: &ShapeParts<'_>,
     param: &ShapeParts<'_>,
@@ -240,7 +262,9 @@ fn shape_is_compatible(
         return false;
     }
     let Some((tail_key, tail_value)) = param.tail else {
-        return true;
+        return arg_keys
+            .iter()
+            .all(|key| param_keys.contains(key) || may_be_listed(key, &param_keys, class_loader));
     };
 
     // The tail is judged the way the type arguments of an array are: its
@@ -264,6 +288,26 @@ fn shape_is_compatible(
         && arg.tail.is_none_or(|(arg_tail_key, arg_tail_value)| {
             (any_key || key_fits(arg_tail_key)) && value_fits(arg_tail_value)
         })
+}
+
+/// Whether `key`, which `listed` does not hold as spelled, may still be one
+/// of its keys: either side may spell a key as `Foo::CONSTANT`, which is
+/// the key the constant evaluates to, or any key at all when it cannot be
+/// evaluated.
+fn may_be_listed(key: &str, listed: &[String], class_loader: &ResolvedClassLoader<'_>) -> bool {
+    let evaluate = |key: &str| {
+        crate::php_type::class_constant_key(key)
+            .map(|_| crate::class_lookup::evaluate_constant_shape_key(key, class_loader))
+    };
+    let key = match evaluate(key) {
+        None => std::borrow::Cow::Borrowed(key),
+        Some(Some(evaluated)) => std::borrow::Cow::Owned(evaluated),
+        Some(None) => return true,
+    };
+    listed.iter().any(|other| match evaluate(other) {
+        None => *other == *key,
+        Some(evaluated) => evaluated.is_none_or(|evaluated| evaluated == *key),
+    })
 }
 
 /// Whether an array shape, sealed or unsealed, passes where a typed array is

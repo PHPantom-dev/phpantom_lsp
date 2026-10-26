@@ -15,8 +15,8 @@ use crate::common::{
     find_action, find_references, get_code_actions_in_range, markup_hover_at, messages_with_code,
     open_blade_template, open_php_file, position_of, workspace_path,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const ITEM_CLASS: &str =
     "<?php\nnamespace App;\nclass Item { public string $name = ''; public int $price = 0; }\n";
@@ -61,7 +61,7 @@ async fn open_callers_then_template(
     backend: &phpantom_lsp::Backend,
     callers: &[&str],
     template: &str,
-) -> Url {
+) -> Uri {
     for caller in callers {
         open_php_file(backend, caller).await;
     }
@@ -69,7 +69,7 @@ async fn open_callers_then_template(
 }
 
 /// The `invalid_laravel_view` messages the slow pass reports on `uri`.
-fn view_diagnostics(backend: &phpantom_lsp::Backend, uri: &Url, content: &str) -> Vec<String> {
+fn view_diagnostics(backend: &phpantom_lsp::Backend, uri: &Uri, content: &str) -> Vec<String> {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), content, &mut diags);
     messages_with_code(&diags, "invalid_laravel_view")
@@ -233,7 +233,7 @@ async fn a_view_only_the_published_directory_holds_is_known() {
 /// create.
 fn created_view_path(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     content: &str,
     line: u32,
 ) -> std::path::PathBuf {
@@ -245,13 +245,11 @@ fn created_view_path(
     );
     let action = find_action(&actions, "Create missing view").expect("should offer the action");
     let edit = action.edit.as_ref().expect("action should carry an edit");
-    let Some(DocumentChanges::Operations(ops)) = edit.document_changes.as_ref() else {
+    let Some(ops) = edit.document_changes.as_ref() else {
         panic!("expected resource operations, got {edit:?}");
     };
     match &ops[0] {
-        DocumentChangeOperation::Op(ResourceOp::Create(create)) => {
-            create.uri.to_file_path().unwrap()
-        }
+        DocumentChange::CreateFile(create) => create.uri.to_file_path().unwrap(),
         other => panic!("expected a CreateFile operation, got {other:?}"),
     }
 }
@@ -268,7 +266,7 @@ fn a_slash_spelled_missing_view_is_created_under_its_directories() {
             ("resources/views/welcome.blade.php", "<p>hi</p>\n"),
         ],
     );
-    let uri = Url::from_file_path(dir.path().join("app/ReportController.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/ReportController.php")).unwrap();
     backend.update_ast(uri.as_str(), &caller);
 
     let path = created_view_path(&backend, &uri, &caller, 4);
@@ -787,7 +785,7 @@ async fn a_caller_that_stops_rendering_leaves_the_other_callers_data() {
 /// occurrence of `needle` in `content`, as `(file name, line)` pairs.
 async fn view_references_at(
     backend: &phpantom_lsp::Backend,
-    uri: &Url,
+    uri: &Uri,
     content: &str,
     needle: &str,
     include_declaration: bool,
@@ -1104,7 +1102,7 @@ class Renderer
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert_eq!(labels, vec!["users.profile", "users.settings"]);
     // The edit replaces the typed prefix rather than appending to it.
-    let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+    let Some(CompletionItemTextEdit::TextEdit(edit)) = &items[0].text_edit else {
         panic!("expected a text edit, got {:?}", items[0].text_edit);
     };
     assert_eq!(edit.new_text, "users.profile");

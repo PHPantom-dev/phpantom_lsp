@@ -9,10 +9,11 @@
 //! The WASI reactor exports in [`crate::wasm_wasi`] wrap this.
 
 use serde_json::{Value, json};
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentHighlightParams, GotoDefinitionParams, HoverParams,
-    Position, RenameParams, SignatureHelpParams, TextDocumentPositionParams,
+use tower_lsp_server::gen_lsp_types::{
+    CompletionItem, CompletionParams, DefinitionParams, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentHighlightParams, HoverParams,
+    Position, RenameParams, SignatureHelpParams, TextDocumentContentChangeEvent,
+    TextDocumentPositionParams,
 };
 
 use crate::Backend;
@@ -122,7 +123,16 @@ impl LspDispatcher {
             // We advertise full sync, so the last change carries the whole
             // document.
             if let Some(change) = p.content_changes.into_iter().next_back() {
-                self.store(p.text_document.uri.to_string(), change.text);
+                let text = match change {
+                    TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(c) => {
+                        c.text
+                    }
+                    TextDocumentContentChangeEvent::TextDocumentContentChangePartial(c) => c.text,
+                };
+                self.store(
+                    p.text_document.text_document_identifier.uri.to_string(),
+                    text,
+                );
             }
         }
     }
@@ -159,7 +169,7 @@ impl LspDispatcher {
     }
 
     fn definition(&self, params: Value) -> Result<Value, (i64, String)> {
-        let params: GotoDefinitionParams = serde_json::from_value(params).map_err(bad_params)?;
+        let params: DefinitionParams = serde_json::from_value(params).map_err(bad_params)?;
         self.dispatch_position_request(
             "goto_definition",
             params.text_document_position_params,
@@ -189,8 +199,12 @@ impl LspDispatcher {
 
     fn rename(&self, params: Value) -> Result<Value, (i64, String)> {
         let params: RenameParams = serde_json::from_value(params).map_err(bad_params)?;
-        let position = params.text_document_position.position;
-        let uri = params.text_document_position.text_document.uri.to_string();
+        let position = params.text_document_position_params.position;
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
         let outcome = self
             .backend
             .handle_with_position("rename", &uri, position, |content, position| {

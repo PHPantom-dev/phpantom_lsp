@@ -7,7 +7,7 @@
 //! with interpolation).
 
 use crate::common::{complete_at_raw, create_test_backend};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Single-quoted strings — always suppress
@@ -16,7 +16,7 @@ use tower_lsp::lsp_types::*;
 #[tokio::test]
 async fn no_completion_inside_single_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_single.php").unwrap();
+    let uri = Uri::parse("file:///str_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -38,7 +38,7 @@ async fn no_completion_inside_single_quoted_string() {
 #[tokio::test]
 async fn no_completion_for_class_name_inside_single_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_single_class.php").unwrap();
+    let uri = Uri::parse("file:///str_single_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -59,7 +59,7 @@ async fn no_completion_for_class_name_inside_single_quoted_string() {
 #[tokio::test]
 async fn no_completion_for_dollar_inside_single_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_single_dollar.php").unwrap();
+    let uri = Uri::parse("file:///str_single_dollar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -85,7 +85,7 @@ async fn no_completion_for_dollar_inside_single_quoted_string() {
 #[tokio::test]
 async fn no_completion_for_plain_text_in_double_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_double_plain.php").unwrap();
+    let uri = Uri::parse("file:///str_double_plain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -107,7 +107,7 @@ async fn no_completion_for_plain_text_in_double_quoted_string() {
 #[tokio::test]
 async fn completion_works_with_braces_in_double_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_double_brace.php").unwrap();
+    let uri = Uri::parse("file:///str_double_brace.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -146,7 +146,7 @@ async fn completion_works_with_braces_in_double_quoted_string() {
 #[tokio::test]
 async fn completion_works_after_a_hash_comment_with_an_apostrophe() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_hash_comment.php").unwrap();
+    let uri = Uri::parse("file:///str_hash_comment.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -172,7 +172,7 @@ async fn completion_works_after_a_hash_comment_with_an_apostrophe() {
 #[tokio::test]
 async fn completion_works_with_simple_interpolation_in_double_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_double_simple.php").unwrap();
+    let uri = Uri::parse("file:///str_double_simple.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -201,7 +201,7 @@ async fn completion_works_with_simple_interpolation_in_double_quoted_string() {
     // methods should be filtered out.
     let has_method = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::METHOD));
+        .any(|i| i.kind == Some(CompletionItemKind::Method));
     assert!(
         !has_method,
         "Simple interpolation should NOT include methods. Got: {:?}",
@@ -215,7 +215,7 @@ async fn simple_interpolation_filters_methods_but_brace_does_not() {
     // properties while `"{$f->}"` shows both properties and methods.
     let backend = create_test_backend();
 
-    let uri_simple = Url::parse("file:///str_filter_simple.php").unwrap();
+    let uri_simple = Uri::parse("file:///str_filter_simple.php").unwrap();
     let text_simple = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -247,12 +247,12 @@ async fn simple_interpolation_filters_methods_but_brace_does_not() {
     assert!(
         !simple_items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::METHOD)),
+            .any(|i| i.kind == Some(CompletionItemKind::Method)),
         "Simple: should NOT include any methods. Got: {:?}",
         simple_labels
     );
 
-    let uri_brace = Url::parse("file:///str_filter_brace.php").unwrap();
+    let uri_brace = Uri::parse("file:///str_filter_brace.php").unwrap();
     let text_brace = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -279,7 +279,7 @@ async fn simple_interpolation_filters_methods_but_brace_does_not() {
     assert!(
         brace_items
             .iter()
-            .any(|i| i.kind == Some(CompletionItemKind::METHOD)),
+            .any(|i| i.kind == Some(CompletionItemKind::Method)),
         "Brace: should include methods. Got: {:?}",
         brace_labels
     );
@@ -293,7 +293,7 @@ async fn simple_interpolation_filters_methods_but_brace_does_not() {
 #[tokio::test]
 async fn completion_works_with_nullsafe_simple_interpolation() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_double_nullsafe.php").unwrap();
+    let uri = Uri::parse("file:///str_double_nullsafe.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -320,7 +320,7 @@ async fn completion_works_with_nullsafe_simple_interpolation() {
     // Nullsafe simple interpolation is still simple — methods filtered.
     let has_method = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::METHOD));
+        .any(|i| i.kind == Some(CompletionItemKind::Method));
     assert!(
         !has_method,
         "Nullsafe simple interpolation should NOT include methods. Got: {:?}",
@@ -335,7 +335,7 @@ async fn completion_works_with_nullsafe_simple_interpolation() {
 #[tokio::test]
 async fn no_completion_for_plain_text_in_heredoc() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_heredoc_plain.php").unwrap();
+    let uri = Uri::parse("file:///str_heredoc_plain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -359,7 +359,7 @@ async fn no_completion_for_plain_text_in_heredoc() {
 #[tokio::test]
 async fn completion_works_with_braces_in_heredoc() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_heredoc_brace.php").unwrap();
+    let uri = Uri::parse("file:///str_heredoc_brace.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -398,7 +398,7 @@ async fn completion_works_with_braces_in_heredoc() {
 #[tokio::test]
 async fn completion_works_with_simple_interpolation_in_heredoc() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_heredoc_simple.php").unwrap();
+    let uri = Uri::parse("file:///str_heredoc_simple.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -427,7 +427,7 @@ async fn completion_works_with_simple_interpolation_in_heredoc() {
     // Simple interpolation in heredoc — methods filtered.
     let has_method = items
         .iter()
-        .any(|i| i.kind == Some(CompletionItemKind::METHOD));
+        .any(|i| i.kind == Some(CompletionItemKind::Method));
     assert!(
         !has_method,
         "Simple interpolation in heredoc should NOT include methods. Got: {:?}",
@@ -442,7 +442,7 @@ async fn completion_works_with_simple_interpolation_in_heredoc() {
 #[tokio::test]
 async fn no_completion_inside_nowdoc() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_nowdoc.php").unwrap();
+    let uri = Uri::parse("file:///str_nowdoc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -466,7 +466,7 @@ async fn no_completion_inside_nowdoc() {
 #[tokio::test]
 async fn no_completion_for_dollar_arrow_inside_nowdoc() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_nowdoc_arrow.php").unwrap();
+    let uri = Uri::parse("file:///str_nowdoc_arrow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -494,7 +494,7 @@ async fn no_completion_for_dollar_arrow_inside_nowdoc() {
 #[tokio::test]
 async fn completion_works_after_single_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_after_single.php").unwrap();
+    let uri = Uri::parse("file:///str_after_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -523,7 +523,7 @@ async fn completion_works_after_single_quoted_string() {
 #[tokio::test]
 async fn completion_works_after_double_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_after_double.php").unwrap();
+    let uri = Uri::parse("file:///str_after_double.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -551,7 +551,7 @@ async fn completion_works_after_double_quoted_string() {
 #[tokio::test]
 async fn completion_works_after_heredoc() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_after_heredoc.php").unwrap();
+    let uri = Uri::parse("file:///str_after_heredoc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -581,7 +581,7 @@ async fn completion_works_after_heredoc() {
 #[tokio::test]
 async fn completion_works_after_nowdoc() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_after_nowdoc.php").unwrap();
+    let uri = Uri::parse("file:///str_after_nowdoc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -615,7 +615,7 @@ async fn completion_works_after_nowdoc() {
 #[tokio::test]
 async fn variable_completion_inside_double_quoted_string_after_dollar_var() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_double_var_no_arrow.php").unwrap();
+    let uri = Uri::parse("file:///str_double_var_no_arrow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -640,7 +640,7 @@ async fn variable_completion_inside_double_quoted_string_after_dollar_var() {
 #[tokio::test]
 async fn variable_completion_inside_double_quoted_string_bare_dollar() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_double_bare_dollar.php").unwrap();
+    let uri = Uri::parse("file:///str_double_bare_dollar.php").unwrap();
     let text = concat!("<?php\n", "$foo = 42;\n", "$s = \"hello $\";\n",);
 
     // Cursor right after `$` — the user just typed a dollar sign to start
@@ -664,7 +664,7 @@ async fn variable_completion_inside_double_quoted_string_bare_dollar() {
 #[tokio::test]
 async fn variable_completion_inside_heredoc_bare_dollar() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_heredoc_bare_dollar.php").unwrap();
+    let uri = Uri::parse("file:///str_heredoc_bare_dollar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$foo = 42;\n",
@@ -691,7 +691,7 @@ async fn variable_completion_inside_heredoc_bare_dollar() {
 #[tokio::test]
 async fn no_variable_completion_for_dollar_inside_single_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_single_bare_dollar.php").unwrap();
+    let uri = Uri::parse("file:///str_single_bare_dollar.php").unwrap();
     let text = concat!("<?php\n", "$foo = 42;\n", "$s = 'hello $';\n",);
 
     // Cursor right after `$` inside a single-quoted string — no
@@ -707,7 +707,7 @@ async fn no_variable_completion_for_dollar_inside_single_quoted_string() {
 #[tokio::test]
 async fn no_variable_completion_for_dollar_inside_nowdoc() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_nowdoc_bare_dollar.php").unwrap();
+    let uri = Uri::parse("file:///str_nowdoc_bare_dollar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "$foo = 42;\n",
@@ -728,7 +728,7 @@ async fn no_variable_completion_for_dollar_inside_nowdoc() {
 #[tokio::test]
 async fn escaped_quote_does_not_end_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_escaped_quote.php").unwrap();
+    let uri = Uri::parse("file:///str_escaped_quote.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -750,7 +750,7 @@ async fn escaped_quote_does_not_end_string() {
 #[tokio::test]
 async fn escaped_single_quote_does_not_end_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_escaped_single.php").unwrap();
+    let uri = Uri::parse("file:///str_escaped_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -775,7 +775,7 @@ async fn comment_syntax_inside_string_still_suppressed() {
     // confuse the scanner. This test ensures the string check and the
     // comment check work together.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_comment_inside.php").unwrap();
+    let uri = Uri::parse("file:///str_comment_inside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -807,7 +807,7 @@ async fn no_class_name_completion_inside_brace_interpolation() {
     // completions should not leak through — only member access and
     // variable name completions are useful there.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_brace_no_class.php").unwrap();
+    let uri = Uri::parse("file:///str_brace_no_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -833,7 +833,7 @@ async fn no_completion_for_non_interpolation_braces_in_double_quoted_string() {
     // `"{User::ADMIN_TYPE}"` is NOT interpolation because `{` is not
     // followed by `$`. PHP outputs the braces and text literally.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_double_brace_no_dollar.php").unwrap();
+    let uri = Uri::parse("file:///str_double_brace_no_dollar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -855,7 +855,7 @@ async fn no_completion_for_non_interpolation_braces_in_double_quoted_string() {
 #[tokio::test]
 async fn no_class_name_completion_inside_double_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_double_class.php").unwrap();
+    let uri = Uri::parse("file:///str_double_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -878,7 +878,7 @@ async fn concatenation_after_string_works() {
     // `$f = 'x' . new Foo(); $f->` — make sure the scanner correctly
     // exits the string at the closing quote.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_concat.php").unwrap();
+    let uri = Uri::parse("file:///str_concat.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -919,7 +919,7 @@ fn unit_classify_nested_braces_in_interpolation() {
 #[tokio::test]
 async fn multiple_strings_on_same_line() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///str_multi_same_line.php").unwrap();
+    let uri = Uri::parse("file:///str_multi_same_line.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",

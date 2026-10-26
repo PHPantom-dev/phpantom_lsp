@@ -1,5 +1,6 @@
+use crate::common::message_text;
 use crate::common::{create_psr4_workspace, definition_uri, goto_definition_at, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Shared stubs ───────────────────────────────────────────────────────────
 
@@ -135,18 +136,20 @@ async fn open_and_goto_definition(
     content: &str,
     line: u32,
     character: u32,
-) -> Option<GotoDefinitionResponse> {
-    let uri = Url::from_file_path(dir.path().join(relative_path)).unwrap();
+) -> Option<DefinitionResponse> {
+    let uri = Uri::from_file_path(dir.path().join(relative_path)).unwrap();
     open_php(backend, &uri, content).await;
     goto_definition_at(backend, &uri, line, character).await
 }
 
 /// Extract the target line number from a definition response.
-fn definition_line(response: &GotoDefinitionResponse) -> u32 {
+fn definition_line(response: &DefinitionResponse) -> u32 {
     match response {
-        GotoDefinitionResponse::Scalar(location) => location.range.start.line,
-        GotoDefinitionResponse::Array(locations) => locations[0].range.start.line,
-        GotoDefinitionResponse::Link(links) => links[0].target_range.start.line,
+        DefinitionResponse::Definition(Definition::Location(location)) => location.range.start.line,
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => {
+            locations[0].range.start.line
+        }
+        DefinitionResponse::DefinitionLinkList(links) => links[0].target_range.start.line,
     }
 }
 
@@ -1273,7 +1276,7 @@ class BrandTranslation extends Model {}
 
     // Open model file first so it's indexed
     let model_uri =
-        Url::from_file_path(dir.path().join("src/Models/BrandTranslation.php")).unwrap();
+        Uri::from_file_path(dir.path().join("src/Models/BrandTranslation.php")).unwrap();
     open_php(&backend, &model_uri, model_php).await;
 
     let test_php = "\
@@ -1329,7 +1332,7 @@ class BrandTranslation extends Model {}
     let (backend, dir) = make_workspace(&[("src/Models/BrandTranslation.php", model_php)]);
 
     let model_uri =
-        Url::from_file_path(dir.path().join("src/Models/BrandTranslation.php")).unwrap();
+        Uri::from_file_path(dir.path().join("src/Models/BrandTranslation.php")).unwrap();
     open_php(&backend, &model_uri, model_php).await;
 
     let test_php = "\
@@ -2349,8 +2352,8 @@ async fn find_references_at(
     line: u32,
     character: u32,
     include_declaration: bool,
-) -> Option<Vec<tower_lsp::lsp_types::Location>> {
-    let uri = Url::from_file_path(dir.path().join(relative_path)).unwrap();
+) -> Option<Vec<tower_lsp_server::gen_lsp_types::Location>> {
+    let uri = Uri::from_file_path(dir.path().join(relative_path)).unwrap();
     open_php(backend, &uri, content).await;
 
     backend.find_references(
@@ -2545,7 +2548,7 @@ return [
     ]);
 
     // Open service.php so it is indexed before querying from config/app.php.
-    let service_uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
+    let service_uri = Uri::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
     open_php(&backend, &service_uri, service_php).await;
 
     // Cursor on "name" key inside config/app.php — line 2, char 5.
@@ -2588,7 +2591,7 @@ return [
     ]);
 
     // Open service.php so it is indexed.
-    let service_uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
+    let service_uri = Uri::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
     open_php(&backend, &service_uri, service_php).await;
 
     // Cursor on \"secret\" key inside config/api/keys.php — line 2, char 5.
@@ -3487,7 +3490,7 @@ class Service {
         ),
     ]);
 
-    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
     open_php(&backend, &uri, service_php).await;
 
     let mut diags = Vec::new();
@@ -3495,9 +3498,7 @@ class Service {
 
     let view_diags: Vec<&Diagnostic> = diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_view"),
-        )
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_view"))
         .collect();
 
     assert_eq!(
@@ -3507,9 +3508,9 @@ class Service {
         view_diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
     assert!(
-        view_diags[0].message.contains("does.not.exist"),
+        message_text(&view_diags[0].message).contains("does.not.exist"),
         "The flagged view should be the missing one, got: {}",
-        view_diags[0].message
+        message_text(&view_diags[0].message)
     );
 }
 
@@ -3537,18 +3538,16 @@ class Service {
         ("resources/views/redirects/create.blade.php", blade),
     ]);
 
-    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
     open_php(&backend, &uri, service_php).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), service_php, &mut diags);
 
-    let messages: Vec<&String> = diags
+    let messages: Vec<&str> = diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_view"),
-        )
-        .map(|d| &d.message)
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_view"))
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert_eq!(
@@ -3574,8 +3573,8 @@ class Service {
     .await
     .expect("view('/redirects/create') should resolve to the template");
     let target = match result {
-        GotoDefinitionResponse::Scalar(location) => location.uri,
-        GotoDefinitionResponse::Array(locations) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => location.uri,
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => {
             locations.first().expect("no location returned").uri.clone()
         }
         other => panic!("expected a definition location, got: {other:?}"),
@@ -4396,7 +4395,7 @@ async fn magic_member_reference_sites(member: &str) -> Vec<(String, u32, u32)> {
         ("src/Models/BlogAuthor.php", MAGIC_AUTHOR_PHP),
         ("src/Models/Consumer.php", MAGIC_CONSUMER_PHP),
     ]);
-    let consumer_uri = Url::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
+    let consumer_uri = Uri::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
     open_php(&backend, &consumer_uri, MAGIC_CONSUMER_PHP).await;
     let (line, character) = crate::common::line_char_of(MAGIC_AUTHOR_PHP, member);
     let found = find_references_at(
@@ -4506,7 +4505,7 @@ class Consumer {
         ("src/Models/BlogPost.php", MAGIC_POST_PHP),
         ("src/Models/Consumer.php", consumer),
     ]);
-    let consumer_uri = Url::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
+    let consumer_uri = Uri::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
     open_php(&backend, &consumer_uri, consumer).await;
 
     let lines = |member: &str| {
@@ -4566,7 +4565,7 @@ class Consumer {
         ("src/Models/BlogPost.php", MAGIC_POST_PHP),
         ("src/Models/Consumer.php", consumer),
     ]);
-    let consumer_uri = Url::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
+    let consumer_uri = Uri::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
     open_php(&backend, &consumer_uri, consumer).await;
     let (line, character) = crate::common::line_char_of(author, "posts()");
     let found = find_references_at(
@@ -4595,10 +4594,75 @@ class Consumer {
 }
 
 #[tokio::test]
+async fn references_on_a_relationship_property_read_find_the_method() {
+    let author = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class BlogAuthor extends Model {
+    /** @return HasMany<BlogPost, $this> */
+    public function posts(): HasMany { return new HasMany(); }
+}
+";
+    let consumer = "\
+<?php
+namespace App\\Models;
+class Consumer {
+    public function run(BlogAuthor $author): void {
+        $author->posts;
+        $author->posts();
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        (
+            "vendor/illuminate/Eloquent/Relations/HasMany.php",
+            HAS_MANY_PHP,
+        ),
+        ("src/Models/BlogAuthor.php", author),
+        ("src/Models/BlogPost.php", MAGIC_POST_PHP),
+        ("src/Models/Consumer.php", consumer),
+    ]);
+    let author_uri = Uri::from_file_path(dir.path().join("src/Models/BlogAuthor.php")).unwrap();
+    open_php(&backend, &author_uri, author).await;
+    let (line, character) = crate::common::line_char_of(consumer, "posts;");
+    let found = find_references_at(
+        &backend,
+        &dir,
+        "src/Models/Consumer.php",
+        consumer,
+        line,
+        character + 1,
+        true,
+    )
+    .await
+    .unwrap_or_default();
+    let mut sites: Vec<(bool, (u32, u32))> = found
+        .iter()
+        .map(|l| {
+            (
+                l.uri == author_uri,
+                (l.range.start.line, l.range.start.character),
+            )
+        })
+        .collect();
+    sites.sort();
+    assert_eq!(
+        sites,
+        vec![
+            (false, crate::common::line_char_of(consumer, "posts;")),
+            (false, crate::common::line_char_of(consumer, "posts()")),
+            (true, crate::common::line_char_of(author, "posts()")),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn test_relation_argument_callback_navigates_to_custom_builder() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = crate::common::create_test_backend();
-    let uri = Url::parse("file:///relation-argument-definition.php").unwrap();
+    let uri = Uri::parse("file:///relation-argument-definition.php").unwrap();
     let expected = crate::common::position_after(fixture, "public function active");
     for relation in ["$name", "$stock->team()"] {
         let content = format!(
@@ -4621,7 +4685,7 @@ async fn test_relation_argument_callback_navigates_to_custom_builder() {
 async fn relation_context_callbacks_navigate_to_their_declared_members() {
     let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
     let backend = crate::common::create_test_backend();
-    let uri = Url::parse("file:///relation-context-definition.php").unwrap();
+    let uri = Uri::parse("file:///relation-context-definition.php").unwrap();
     for (call, member, declaration) in [
         (
             "SpecialStock::whereHas('custom', fn ($q) => $q->active());",

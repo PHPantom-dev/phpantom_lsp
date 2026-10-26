@@ -105,7 +105,7 @@ pub(in crate::symbol_map::extraction) fn receiver_is_user_like(expr: &Expression
     }
 }
 
-/// Emit a [`crate::symbol_map::LaravelStringKind::GateAbility`] span for the
+/// Emit a [`crate::symbol_map::StringKeyKind::GateAbility`] span for the
 /// argument at `ability_index`, which Laravel accepts as either a single
 /// string or an array of strings, and record the model named at
 /// `model_index` (when there is one) as the checked subject.
@@ -163,8 +163,8 @@ fn push_gate_ability_span(
     spans.push(SymbolSpan {
         start,
         end,
-        kind: SymbolKind::LaravelStringKey {
-            kind: crate::symbol_map::LaravelStringKind::GateAbility,
+        kind: SymbolKind::StringKey {
+            kind: crate::symbol_map::StringKeyKind::GateAbility,
             key: ability.to_string(),
             is_write: role == AbilityRole::Definition,
             is_optional: role == AbilityRole::Existence,
@@ -257,7 +257,7 @@ fn push_middleware_parameter_spans(
     if alias == "can" {
         let ability = parameters.split(',').next().unwrap_or(parameters);
         push_embedded_string_span(
-            crate::symbol_map::LaravelStringKind::GateAbility,
+            crate::symbol_map::StringKeyKind::GateAbility,
             ability,
             parameter_start,
             spans,
@@ -269,7 +269,7 @@ fn push_middleware_parameter_spans(
         let mut offset = parameter_start;
         for guard in parameters.split(',') {
             push_embedded_string_span(
-                crate::symbol_map::LaravelStringKind::ConfigResource(
+                crate::symbol_map::StringKeyKind::ConfigResource(
                     crate::symbol_map::LaravelConfigResource::AuthGuard,
                 ),
                 guard,
@@ -282,7 +282,7 @@ fn push_middleware_parameter_spans(
 }
 
 fn push_embedded_string_span(
-    kind: crate::symbol_map::LaravelStringKind,
+    kind: crate::symbol_map::StringKeyKind,
     key: &str,
     start: u32,
     spans: &mut Vec<SymbolSpan>,
@@ -293,7 +293,7 @@ fn push_embedded_string_span(
     spans.push(SymbolSpan {
         start,
         end: start + key.len() as u32,
-        kind: SymbolKind::LaravelStringKey {
+        kind: SymbolKind::StringKey {
             kind,
             key: key.to_string(),
             is_write: false,

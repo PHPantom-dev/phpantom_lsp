@@ -110,6 +110,10 @@ pub struct MethodInfo {
     /// Whether the body calls `func_get_args()` (or a sibling), so the
     /// callable accepts arguments beyond its declared parameters.
     pub reads_func_args: bool,
+    /// Whether the method carries `#[\NoDiscard]`, so a call that throws
+    /// its result away is reported.  PHP does not inherit the attribute:
+    /// an override without it may be called for its effect alone.
+    pub is_no_discard: bool,
     /// Docblock-derived data that most methods leave empty (`@return`
     /// descriptions, links, deprecation, method-level templates, `@throws`,
     /// assertions, conditional and `$this`-narrowing types).
@@ -445,6 +449,7 @@ impl MethodInfo {
             is_pure: false,
             is_impure: false,
             reads_func_args: false,
+            is_no_discard: false,
             extras: None,
         }
     }

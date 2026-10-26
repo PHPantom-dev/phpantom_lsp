@@ -5,13 +5,14 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::common::message_text;
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
         blade_undefined_variables, completion_response, create_psr4_workspace, goto_definition_at,
         markup_hover_at, open_blade_template, open_php_at,
     };
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     const INVOKABLE_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
         class InvokableComponentVariable {\n\
@@ -326,14 +327,16 @@ mod tests {
             0,
             10,
             Some(CompletionContext {
-                trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                trigger_kind: CompletionTriggerKind::TriggerCharacter,
                 trigger_character: Some(">".to_string()),
             }),
         )
         .await;
         let labels: Vec<String> = match result {
-            Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-            Some(CompletionResponse::List(list)) => {
+            Some(CompletionResponse::CompletionItemList(items)) => {
+                items.into_iter().map(|i| i.label).collect()
+            }
+            Some(CompletionResponse::CompletionList(list)) => {
                 list.items.into_iter().map(|i| i.label).collect()
             }
             None => Vec::new(),
@@ -377,9 +380,9 @@ mod tests {
         let uri = open_blade_template(&backend, "resources/views/livewire/counter.blade.php").await;
 
         let target = goto_definition_at(&backend, &uri, 0, 34).await;
-        let uri_of = |r: &GotoDefinitionResponse| match r {
-            GotoDefinitionResponse::Scalar(l) => l.uri.to_string(),
-            GotoDefinitionResponse::Array(ls) => ls[0].uri.to_string(),
+        let uri_of = |r: &DefinitionResponse| match r {
+            DefinitionResponse::Definition(Definition::Location(l)) => l.uri.to_string(),
+            DefinitionResponse::Definition(Definition::LocationList(ls)) => ls[0].uri.to_string(),
             other => panic!("unexpected definition response {other:?}"),
         };
         let target = target.as_ref().map(uri_of).unwrap_or_default();
@@ -421,7 +424,7 @@ mod tests {
         backend.collect_slow_diagnostics(uri.as_str(), &virtual_php, &mut diags);
         let messages: Vec<String> = diags
             .into_iter()
-            .map(|d| d.message)
+            .map(|d| message_text(&d.message).to_string())
             .filter(|m| !m.contains("Function 'e' not found"))
             .collect();
         assert_eq!(
@@ -578,11 +581,11 @@ mod tests {
         let type_errors: Vec<String> = diags
             .into_iter()
             .filter(|d| {
-                d.code.as_ref().is_some_and(
-                    |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-                )
+                d.code
+                    .as_ref()
+                    .is_some_and(|c| matches!(c, Code::String(s) if s == "type_mismatch_argument"))
             })
-            .map(|d| d.message)
+            .map(|d| message_text(&d.message).to_string())
             .collect();
         assert!(
             type_errors.is_empty(),

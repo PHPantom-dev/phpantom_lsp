@@ -38,7 +38,7 @@ impl PhpType {
         }
         // Rebuilding either marker through `kind()` would keep only the
         // wider type it reads as.
-        if self.as_unsealed_shape().is_some() || self.as_class_name_literal().is_some() {
+        if self.as_unsealed_shape().is_some() || self.is_exact_value_marker() {
             return self.clone();
         }
         match self.kind() {
@@ -411,22 +411,23 @@ fn named_value_domain(name: &str) -> Option<ValueDomain> {
 }
 
 /// Drop each `Foo::class` that sits beside the `class-string<Foo>` it is
-/// one of, which already says everything it does.
+/// one of, and each `Suit::Hearts` that sits beside its enum `Suit`, since
+/// the wider type already says everything the exact one does.
 ///
 /// The two read the same through `kind()`, so without this they would show
 /// as `class-string<Foo>|class-string<Foo>`, and dedup keeping whichever
 /// came first could leave the narrower one standing for both.
-pub(crate) fn absorb_exact_class_names(types: &mut Vec<PhpType>) {
-    if !types.iter().any(|ty| ty.as_class_name_literal().is_some()) {
+pub(crate) fn absorb_exact_values(types: &mut Vec<PhpType>) {
+    if !types.iter().any(PhpType::is_exact_value_marker) {
         return;
     }
     let wider: Vec<*const TypeKind> = types
         .iter()
-        .filter(|ty| ty.as_class_name_literal().is_none())
+        .filter(|ty| !ty.is_exact_value_marker())
         .map(|ty| std::ptr::from_ref(ty.kind()))
         .collect();
     types.retain(|ty| {
-        ty.as_class_name_literal().is_none() || !wider.contains(&std::ptr::from_ref(ty.kind()))
+        !ty.is_exact_value_marker() || !wider.contains(&std::ptr::from_ref(ty.kind()))
     });
 }
 
@@ -541,6 +542,9 @@ pub(crate) fn dedup_hash(ty: &PhpType) -> u64 {
 
 fn hash_for_dedup<H: Hasher>(ty: &PhpType, state: &mut H) {
     std::mem::discriminant(ty.kind()).hash(state);
+    if let Some((_, case)) = ty.as_enum_case() {
+        case.hash(state);
+    }
     match ty.kind() {
         TypeKind::Named(name) => hash_named_identifier(name, state),
         TypeKind::StaticType(name) | TypeKind::ThisType(name) => hash_identifier(name, state),
@@ -661,6 +665,14 @@ pub(super) fn equivalent_for_dedup(left: &PhpType, right: &PhpType) -> bool {
     }
     if left.as_class_name_literal().is_some() != right.as_class_name_literal().is_some() {
         return false;
+    }
+    if left.as_enum_case().is_some() || right.as_enum_case().is_some() {
+        return match (left.as_enum_case(), right.as_enum_case()) {
+            (Some((left_enum, left_case)), Some((right_enum, right_case))) => {
+                left_case == right_case && identifiers_equivalent(left_enum, right_enum)
+            }
+            _ => false,
+        };
     }
 
     match (left.kind(), right.kind()) {
@@ -1270,12 +1282,19 @@ pub(crate) fn absorb_scalar_refinements(types: &mut Vec<PhpType>) {
     // Preserve the first member of mutually equivalent aliases (`int` and
     // `integer`, `float` and `double`) instead of letting each absorb the
     // other. Proper subtypes are still removed regardless of order.
+    //
+    // An enum case reads as its enum's name, which would make every two
+    // cases of one enum look like aliases of each other; a case is never
+    // a scalar refinement, so it takes no part.
     for index in 0..types.len() {
         let TypeKind::Named(subtype) = types[index].kind() else {
             continue;
         };
+        if types[index].as_enum_case().is_some() {
+            continue;
+        }
         for (candidate, candidate_type) in types.iter().enumerate() {
-            if index == candidate {
+            if index == candidate || candidate_type.as_enum_case().is_some() {
                 continue;
             }
             let TypeKind::Named(supertype) = candidate_type.kind() else {

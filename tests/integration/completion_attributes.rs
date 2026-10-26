@@ -3,7 +3,7 @@ use crate::common::{
 };
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 static BUILTIN_ATTRIBUTE_STUB: &str = r#"<?php
 final class Attribute
@@ -83,7 +83,7 @@ async fn attribute_context_before_class_filters_to_attributes() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr1.php").unwrap();
+    let uri = Uri::parse("file:///test_attr1.php").unwrap();
     // Prefix "My" matches all scaffold attribute classes.
     let text = concat!(
         "<?php\n",
@@ -133,7 +133,7 @@ async fn attribute_context_excludes_non_attribute_classes() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr1b.php").unwrap();
+    let uri = Uri::parse("file:///test_attr1b.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -172,7 +172,7 @@ async fn attribute_context_before_method() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_method.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -220,7 +220,7 @@ async fn attribute_context_before_property() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_prop.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -259,7 +259,7 @@ async fn attribute_context_before_function() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_func.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -296,7 +296,7 @@ async fn attribute_context_before_class_constant() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_const.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -337,7 +337,7 @@ async fn attribute_context_after_comma() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_comma.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_comma.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -369,7 +369,7 @@ async fn attribute_context_after_comma_with_args() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_comma_args.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_comma_args.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -398,7 +398,7 @@ async fn non_attribute_context_shows_all_classes() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_non.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_non.php").unwrap();
     let text = concat!("<?php\n", "namespace Scaffold;\n", "new Plain\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 9).await;
@@ -420,7 +420,7 @@ async fn attribute_context_empty_prefix() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_empty.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_empty.php").unwrap();
     let text = concat!("<?php\n", "namespace Scaffold;\n", "#[\n", "class Foo {}\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 2).await;
@@ -451,7 +451,7 @@ async fn attribute_context_empty_prefix() {
 async fn attribute_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_same.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_same.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -478,7 +478,7 @@ async fn attribute_same_file() {
 async fn attribute_combined_targets_class_position() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_combined.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_combined.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute(\\Attribute::TARGET_CLASS | \\Attribute::TARGET_METHOD)]\n",
@@ -501,7 +501,7 @@ async fn attribute_combined_targets_class_position() {
 async fn attribute_combined_targets_method_position() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_combined2.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_combined2.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute(\\Attribute::TARGET_CLASS | \\Attribute::TARGET_METHOD)]\n",
@@ -528,7 +528,7 @@ async fn attribute_combined_targets_method_position() {
 async fn attribute_numeric_target_class_only() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_num.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_num.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute(1)]\n",
@@ -558,7 +558,7 @@ async fn attribute_context_excludes_constants_and_functions() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_no_funcs.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_no_funcs.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -571,7 +571,7 @@ async fn attribute_context_excludes_constants_and_functions() {
 
     let func_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .filter(|i| i.kind == Some(CompletionItemKind::Function))
         .collect();
     assert!(
         func_items.is_empty(),
@@ -581,7 +581,7 @@ async fn attribute_context_excludes_constants_and_functions() {
 
     let kw_items: Vec<&CompletionItem> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Keyword))
         .collect();
     assert!(
         kw_items.is_empty(),
@@ -613,7 +613,7 @@ async fn attribute_context_demotes_non_attribute_names() {
         );
     }
 
-    let uri = Url::parse("file:///test_attr_demote.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_demote.php").unwrap();
     let text = concat!("<?php\n", "#[Custom\n", "class Foo {}\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 8).await;
@@ -643,7 +643,7 @@ async fn attribute_context_demotes_non_attribute_names() {
 async fn attribute_short_form_constants() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_short.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_short.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use Attribute;\n",
@@ -674,7 +674,7 @@ async fn attribute_context_fqn_prefix() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_fqn.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_fqn.php").unwrap();
     let text = concat!("<?php\n", "#[\\Scaffold\\MyAny\n", "class Foo {}\n",);
 
     let items = complete_at(&backend, &uri, text, 1, 17).await;
@@ -701,7 +701,7 @@ async fn attribute_context_no_following_declaration_top_level() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_eof.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_eof.php").unwrap();
     let text = concat!("<?php\n", "namespace Scaffold;\n", "#[My\n",);
 
     let items = complete_at(&backend, &uri, text, 2, 4).await;
@@ -735,7 +735,7 @@ async fn attribute_context_no_following_declaration_in_class() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_eof2.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_eof2.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -784,7 +784,7 @@ async fn attribute_context_no_following_declaration_in_class() {
 async fn attribute_context_shows_builtin_override() {
     let backend = create_builtin_attribute_backend();
 
-    let uri = Url::parse("file:///test_attr_builtin.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_builtin.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo extends \\stdClass {\n",
@@ -815,7 +815,7 @@ async fn array_access_not_confused_with_attribute() {
     let backend = create_test_backend();
     load_scaffolding(&backend).await;
 
-    let uri = Url::parse("file:///test_attr_array.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_array.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Scaffold;\n",
@@ -880,7 +880,7 @@ async fn array_access_not_confused_with_attribute() {
 async fn attribute_no_constructor_inserts_bare_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_noctor.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_noctor.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -903,7 +903,7 @@ async fn attribute_no_constructor_inserts_bare_name() {
     // No snippet format — plain text insertion.
     assert!(
         item.insert_text_format.is_none()
-            || item.insert_text_format == Some(InsertTextFormat::PLAIN_TEXT),
+            || item.insert_text_format == Some(InsertTextFormat::PlainText),
         "Bare attribute should not use snippet format"
     );
 }
@@ -914,7 +914,7 @@ async fn attribute_no_constructor_inserts_bare_name() {
 async fn attribute_empty_constructor_inserts_bare_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_emptyctor.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_emptyctor.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -944,7 +944,7 @@ async fn attribute_empty_constructor_inserts_bare_name() {
 async fn attribute_required_string_param_named_arg_snippet() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_string.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_string.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute(\\Attribute::TARGET_METHOD | \\Attribute::IS_REPEATABLE)]\n",
@@ -968,7 +968,7 @@ async fn attribute_required_string_param_named_arg_snippet() {
     );
     assert_eq!(
         item.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Should use snippet format"
     );
 }
@@ -979,7 +979,7 @@ async fn attribute_required_string_param_named_arg_snippet() {
 async fn attribute_multiple_required_params() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_multi.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -1006,7 +1006,7 @@ async fn attribute_multiple_required_params() {
 async fn attribute_optional_params_omitted() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_opt.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_opt.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -1037,7 +1037,7 @@ async fn attribute_optional_params_omitted() {
 async fn attribute_all_optional_params_bare_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_allopt.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_allopt.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -1064,7 +1064,7 @@ async fn attribute_all_optional_params_bare_name() {
 async fn attribute_bool_placeholder() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_bool.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_bool.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -1087,7 +1087,7 @@ async fn attribute_bool_placeholder() {
 async fn attribute_int_placeholder() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_int.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_int.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -1110,7 +1110,7 @@ async fn attribute_int_placeholder() {
 async fn attribute_float_placeholder() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_float.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_float.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -1133,7 +1133,7 @@ async fn attribute_float_placeholder() {
 async fn attribute_array_placeholder() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_array.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_array.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -1156,7 +1156,7 @@ async fn attribute_array_placeholder() {
 async fn attribute_untyped_param_placeholder() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_attr_untyped.php").unwrap();
+    let uri = Uri::parse("file:///test_attr_untyped.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",
@@ -1181,7 +1181,7 @@ async fn attribute_cross_file_constructor_snippet() {
     let backend = create_test_backend();
 
     // File 1: attribute class with constructor.
-    let attr_uri = Url::parse("file:///attr_def.php").unwrap();
+    let attr_uri = Uri::parse("file:///attr_def.php").unwrap();
     open_php(
         &backend,
         &attr_uri,
@@ -1197,7 +1197,7 @@ async fn attribute_cross_file_constructor_snippet() {
     .await;
 
     // File 2: uses the attribute.
-    let uri = Url::parse("file:///test_cross.php").unwrap();
+    let uri = Uri::parse("file:///test_cross.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Controllers;\n",
@@ -1217,7 +1217,7 @@ async fn attribute_cross_file_constructor_snippet() {
         "Route(path: '${1:path}')$0",
         "Cross-file attribute should generate constructor snippet"
     );
-    assert_eq!(item.insert_text_format, Some(InsertTextFormat::SNIPPET),);
+    assert_eq!(item.insert_text_format, Some(InsertTextFormat::Snippet),);
 }
 
 /// Non-attribute context (`new`) still uses the `$`-prefixed variable
@@ -1226,7 +1226,7 @@ async fn attribute_cross_file_constructor_snippet() {
 async fn new_context_still_uses_variable_style_not_named_args() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_new_vs_attr.php").unwrap();
+    let uri = Uri::parse("file:///test_new_vs_attr.php").unwrap();
     let text = concat!(
         "<?php\n",
         "#[\\Attribute]\n",

@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::common::collect_diagnostics_with;
+    use crate::common::message_text;
     use phpantom_lsp::Backend;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     fn collect(php: &str) -> Vec<Diagnostic> {
         collect_diagnostics_with(
@@ -29,11 +30,11 @@ class Bar extends Foo {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("must be compatible with"));
-        assert!(diags[0].message.contains("Bar::foo()"));
-        assert!(diags[0].message.contains("Foo::foo()"));
-        assert!(diags[0].message.contains("'static'"));
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert!(message_text(&diags[0].message).contains("must be compatible with"));
+        assert!(message_text(&diags[0].message).contains("Bar::foo()"));
+        assert!(message_text(&diags[0].message).contains("Foo::foo()"));
+        assert!(message_text(&diags[0].message).contains("'static'"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -152,7 +153,7 @@ class Uses {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("RequiresFluent::fluent()"));
+        assert!(message_text(&diags[0].message).contains("RequiresFluent::fluent()"));
     }
 
     /// `never` is the bottom type, so it is a legal narrowing of any
@@ -189,7 +190,7 @@ class Impl implements Chainable {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Chainable::chain()"));
+        assert!(message_text(&diags[0].message).contains("Chainable::chain()"));
     }
 
     #[test]
@@ -210,7 +211,7 @@ class Child extends Base {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("incompatible_override".to_string()))
+            Some(Code::String("incompatible_override".to_string()))
         );
     }
 

@@ -13,7 +13,16 @@
 //!
 //! If the stubs directory doesn't exist, the build script will automatically
 //! fetch phpstorm-stubs from GitHub. This allows `cargo install` to work
-//! without any additional setup.
+//! without any additional setup.  A failed download stops the build rather
+//! than shipping a binary without its PHP standard library.
+//!
+//! ## Building without network access
+//!
+//! Set `PHPANTOM_STUBS_DIR` to an extracted phpstorm-stubs tree (the
+//! directory holding `PhpStormStubsMap.php`) and it is embedded as-is,
+//! with no download, commit check, or hash verification.  Enabling the
+//! `offline-stubs` feature instead builds without stubs when they are
+//! missing.
 //!
 //! ## Pinned version with integrity verification
 //!
@@ -137,6 +146,25 @@ fn main() {
         .unwrap_or_else(|| env::var("CARGO_PKG_VERSION").unwrap_or_default());
     println!("cargo:rustc-env=PHPANTOM_GIT_VERSION={git_version}");
 
+    // A packager whose build has no network access supplies the stubs
+    // as an extracted phpstorm-stubs tree, embedded as-is.
+    println!("cargo:rerun-if-env-changed=PHPANTOM_STUBS_DIR");
+    if let Some(dir) = env::var_os("PHPANTOM_STUBS_DIR").filter(|d| !d.is_empty()) {
+        let stubs_path = PathBuf::from(dir);
+        let map_path = stubs_path.join("PhpStormStubsMap.php");
+        if !map_path.is_file() {
+            panic!(
+                "PHPANTOM_STUBS_DIR is set to {}, which has no PhpStormStubsMap.php. \
+                 Point it at the root of an extracted phpstorm-stubs tarball.",
+                stubs_path.display()
+            );
+        }
+        println!("cargo:rerun-if-changed={}", map_path.display());
+        println!("cargo:rustc-env=PHPANTOM_STUBS_VERSION=external");
+        generate_stub_map(&stubs_path);
+        return;
+    }
+
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let lock = read_stubs_lock(&manifest_dir);
 
@@ -181,35 +209,35 @@ fn main() {
         } else {
             eprintln!("cargo:warning=Stubs not found, fetching from GitHub...");
         }
+        // Failing here is deliberate: a binary without stubs reports every
+        // built-in function and class as unknown, and a build warning is
+        // easy to miss (`cargo install` hides them), so it would ship.
         if let Err(e) = fetch_stubs(&stubs_root, &lock) {
-            eprintln!("cargo:warning=Failed to fetch stubs from GitHub: {}", e);
-            eprintln!("cargo:warning=Building without stubs (network may be unavailable).");
-            println!("cargo:rustc-env=PHPANTOM_STUBS_VERSION=none");
-            write_empty_stubs();
-            return;
+            panic!(
+                "Failed to download phpstorm-stubs: {e}\n\n\
+                 PHPantom embeds them as its PHP standard library. To build without network access, \
+                 extract https://github.com/{repo}/archive/{commit}.tar.gz and set PHPANTOM_STUBS_DIR \
+                 to the extracted directory. To build without the standard library on purpose, \
+                 enable the offline-stubs feature.",
+                repo = lock.repo,
+                commit = lock.commit,
+            );
         }
     }
-
-    let stubs_path = stubs_root.join(STUBS_DIR_REL);
-    let map_path = stubs_root.join(MAP_FILE_REL);
 
     // Emit the stubs version so the binary can log it at runtime.
     let short = &lock.commit[..lock.commit.len().min(10)];
     println!("cargo:rustc-env=PHPANTOM_STUBS_VERSION=master@{}", short);
 
-    let map_content = match fs::read_to_string(&map_path) {
-        Ok(c) => c,
-        Err(e) => {
-            // If stubs aren't installed yet, generate an empty map so the
-            // build still succeeds (just without built-in stubs).
-            eprintln!(
-                "cargo:warning=Could not read PhpStormStubsMap.php ({}); generating empty stub index",
-                e
-            );
-            write_empty_stubs();
-            return;
-        }
-    };
+    generate_stub_map(&stubs_root.join(STUBS_DIR_REL));
+}
+
+/// Generate `stub_map_generated.rs`, embedding every stub file that
+/// `PhpStormStubsMap.php` in `stubs_path` references.
+fn generate_stub_map(stubs_path: &Path) {
+    let map_path = stubs_path.join("PhpStormStubsMap.php");
+    let map_content = fs::read_to_string(&map_path)
+        .unwrap_or_else(|e| panic!("Could not read {}: {e}", map_path.display()));
 
     // ── Parse the three sections ────────────────────────────────────────
 

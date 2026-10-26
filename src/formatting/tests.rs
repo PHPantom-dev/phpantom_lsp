@@ -9,7 +9,7 @@ use super::{
     FormattingStrategy, Tool, compute_edits, compute_range_edits, execute_strategy,
     resolve_strategy,
 };
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp_server::gen_lsp_types::{Position, Range};
 
 // ── compute_edits ───────────────────────────────────────────────
 
@@ -276,6 +276,7 @@ fn strategy_both_disabled() {
         php_cs_fixer: Some(String::new()),
         phpcbf: Some(String::new()),
         pint_blade: None,
+        blade_formatter: None,
         blade_php: None,
         timeout: None,
     };
@@ -290,6 +291,7 @@ fn strategy_explicit_commands() {
         php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
         phpcbf: Some("/usr/bin/phpcbf".to_string()),
         pint_blade: None,
+        blade_formatter: None,
         blade_php: None,
         timeout: None,
     };
@@ -313,6 +315,7 @@ fn strategy_one_explicit_one_disabled() {
         php_cs_fixer: Some("/usr/bin/php-cs-fixer".to_string()),
         phpcbf: Some(String::new()),
         pint_blade: None,
+        blade_formatter: None,
         blade_php: None,
         timeout: None,
     };
@@ -640,6 +643,7 @@ fn strategy_explicit_overrides_require_dev() {
         php_cs_fixer: Some("/opt/php-cs-fixer".to_string()),
         phpcbf: Some(String::new()),
         pint_blade: None,
+        blade_formatter: None,
         blade_php: None,
         timeout: None,
     };
@@ -904,6 +908,7 @@ fn execute_disabled_returns_none() {
         php_cs_fixer: Some(String::new()),
         phpcbf: Some(String::new()),
         pint_blade: None,
+        blade_formatter: None,
         blade_php: None,
         timeout: None,
     };

@@ -18,8 +18,8 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use phpantom_lsp::Backend;
 use std::hint::black_box;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -32,12 +32,12 @@ fn rt() -> tokio::runtime::Runtime {
 }
 
 /// Open a file on the backend.
-async fn open_file(backend: &Backend, uri_str: &str, content: &str) -> Url {
-    let uri = Url::parse(uri_str).unwrap();
+async fn open_file(backend: &Backend, uri_str: &str, content: &str) -> Uri {
+    let uri = Uri::parse(uri_str).unwrap();
     let params = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
             uri: uri.clone(),
-            language_id: "php".to_string(),
+            language_id: "php".to_string().into(),
             version: 1,
             text: content.to_string(),
         },
@@ -47,9 +47,9 @@ async fn open_file(backend: &Backend, uri_str: &str, content: &str) -> Url {
 }
 
 /// Fire a completion request at the given position.
-async fn fire_completion(backend: &Backend, uri: &Url, line: u32, character: u32) {
+async fn fire_completion(backend: &Backend, uri: &Uri, line: u32, character: u32) {
     let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
+        text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position { line, character },
         },
@@ -61,7 +61,7 @@ async fn fire_completion(backend: &Backend, uri: &Url, line: u32, character: u32
 }
 
 /// Fire a hover request at the given position.
-async fn fire_hover(backend: &Backend, uri: &Url, line: u32, character: u32) {
+async fn fire_hover(backend: &Backend, uri: &Uri, line: u32, character: u32) {
     let params = HoverParams {
         text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -73,8 +73,8 @@ async fn fire_hover(backend: &Backend, uri: &Url, line: u32, character: u32) {
 }
 
 /// Fire a go-to-definition request at the given position.
-async fn fire_definition(backend: &Backend, uri: &Url, line: u32, character: u32) {
-    let params = GotoDefinitionParams {
+async fn fire_definition(backend: &Backend, uri: &Uri, line: u32, character: u32) {
+    let params = DefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position { line, character },
@@ -690,12 +690,12 @@ fn bench_reparse_after_edit(c: &mut Criterion) {
     let initial_source = generate_large_file(500);
 
     let backend = Backend::new_test();
-    let uri = Url::parse("file:///bench_reparse.php").unwrap();
+    let uri = Uri::parse("file:///bench_reparse.php").unwrap();
     runtime.block_on(async {
         let open_params = DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: uri.clone(),
-                language_id: "php".to_string(),
+                language_id: "php".to_string().into(),
                 version: 1,
                 text: initial_source.clone(),
             },
@@ -712,14 +712,16 @@ fn bench_reparse_after_edit(c: &mut Criterion) {
             runtime.block_on(async {
                 let change_params = DidChangeTextDocumentParams {
                     text_document: VersionedTextDocumentIdentifier {
-                        uri: uri.clone(),
+                        text_document_identifier: TextDocumentIdentifier { uri: uri.clone() },
                         version,
                     },
-                    content_changes: vec![TextDocumentContentChangeEvent {
-                        range: None,
-                        range_length: None,
-                        text: edited.clone(),
-                    }],
+                    content_changes: vec![
+                        TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                            TextDocumentContentChangeWholeDocument {
+                                text: edited.clone(),
+                            },
+                        ),
+                    ],
                 };
                 backend.did_change(change_params).await;
             });

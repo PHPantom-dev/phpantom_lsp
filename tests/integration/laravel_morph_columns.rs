@@ -1,12 +1,13 @@
 //! Morph-map aliases used as values of a model's actual polymorphic type columns.
 
+use crate::common::message_text;
 use crate::common::{
     completion_response, create_psr4_workspace, goto_definition_at, hover_response, open_php,
     position_after, references_response,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{
     "require": { "laravel/framework": "^12.0" },
@@ -94,7 +95,7 @@ class Consumer {{
     )
 }
 
-async fn workspace(source: &str, enforced: bool) -> (Backend, tempfile::TempDir, Url) {
+async fn workspace(source: &str, enforced: bool) -> (Backend, tempfile::TempDir, Uri) {
     let registration = provider(enforced);
     let (backend, dir) = create_psr4_workspace(
         COMPOSER,
@@ -143,39 +144,39 @@ class ColdConsumer {
         ],
     );
     backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/Consumer.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/Consumer.php")).unwrap();
     open_php(&backend, &uri, source).await;
     (backend, dir, uri)
 }
 
-async fn labels(backend: &Backend, uri: &Url, position: Position) -> Vec<String> {
+async fn labels(backend: &Backend, uri: &Uri, position: Position) -> Vec<String> {
     let response = completion_response(backend, uri, position.line, position.character, None).await;
     match response {
-        Some(CompletionResponse::Array(items)) => {
+        Some(CompletionResponse::CompletionItemList(items)) => {
             items.into_iter().map(|item| item.label).collect()
         }
-        Some(CompletionResponse::List(list)) => {
+        Some(CompletionResponse::CompletionList(list)) => {
             list.items.into_iter().map(|item| item.label).collect()
         }
         None => Vec::new(),
     }
 }
 
-async fn hover(backend: &Backend, uri: &Url, position: Position) -> Option<String> {
+async fn hover(backend: &Backend, uri: &Uri, position: Position) -> Option<String> {
     let result = hover_response(backend, uri, position.line, position.character).await?;
     match result.contents {
-        HoverContents::Markup(markup) => Some(markup.value),
+        Contents::MarkupContent(markup) => Some(markup.value),
         contents => Some(format!("{contents:?}")),
     }
 }
 
-fn morph_diagnostics(backend: &Backend, uri: &Url, source: &str) -> Vec<Diagnostic> {
+fn morph_diagnostics(backend: &Backend, uri: &Uri, source: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);
     diagnostics
         .into_iter()
         .filter(|diagnostic| {
-            matches!(&diagnostic.code, Some(NumberOrString::String(code)) if code == "invalid_laravel_morph_alias")
+            matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_morph_alias")
         })
         .collect()
 }
@@ -354,7 +355,7 @@ Other::where('commentable_type', 'ordinary');
                 assert!(
                     diagnostics
                         .iter()
-                        .any(|diagnostic| diagnostic.message.contains(missing)),
+                        .any(|diagnostic| message_text(&diagnostic.message).contains(missing)),
                     "{diagnostics:?}"
                 );
             }
@@ -370,12 +371,12 @@ async fn alias_navigation_links_model_registration_and_cold_cross_file_usages() 
     let response = goto_definition_at(&backend, &uri, position.line, position.character)
         .await
         .expect("alias definition");
-    let destinations: Vec<Url> = match response {
-        GotoDefinitionResponse::Scalar(location) => vec![location.uri],
-        GotoDefinitionResponse::Array(locations) => {
+    let destinations: Vec<Uri> = match response {
+        DefinitionResponse::Definition(Definition::Location(location)) => vec![location.uri],
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => {
             locations.into_iter().map(|location| location.uri).collect()
         }
-        GotoDefinitionResponse::Link(links) => {
+        DefinitionResponse::DefinitionLinkList(links) => {
             links.into_iter().map(|link| link.target_uri).collect()
         }
     };
@@ -388,8 +389,8 @@ async fn alias_navigation_links_model_registration_and_cold_cross_file_usages() 
         );
     }
     let registration_uri =
-        Url::from_file_path(dir.path().join("app/Providers/AppServiceProvider.php")).unwrap();
-    let cold_uri = Url::from_file_path(dir.path().join("app/ColdConsumer.php")).unwrap();
+        Uri::from_file_path(dir.path().join("app/Providers/AppServiceProvider.php")).unwrap();
+    let cold_uri = Uri::from_file_path(dir.path().join("app/ColdConsumer.php")).unwrap();
     let references = references_response(&backend, &uri, position, true)
         .await
         .unwrap_or_default();
@@ -433,21 +434,21 @@ async fn same_length_model_edits_refresh_cross_file_column_aliases() {
             .any(|label| label == "post")
     );
 
-    let model_uri = Url::from_file_path(dir.path().join("app/Models/Comment.php")).unwrap();
+    let model_uri = Uri::from_file_path(dir.path().join("app/Models/Comment.php")).unwrap();
     open_php(&backend, &model_uri, COMMENT).await;
     let edited = COMMENT.replace("commentable", "mentionable");
     assert_eq!(edited.len(), COMMENT.len());
     backend
         .did_change(DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
-                uri: model_uri,
+                text_document_identifier: TextDocumentIdentifier { uri: model_uri },
                 version: 2,
             },
-            content_changes: vec![TextDocumentContentChangeEvent {
-                range: None,
-                range_length: None,
-                text: edited,
-            }],
+            content_changes: vec![
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(
+                    TextDocumentContentChangeWholeDocument { text: edited },
+                ),
+            ],
         })
         .await;
     assert!(

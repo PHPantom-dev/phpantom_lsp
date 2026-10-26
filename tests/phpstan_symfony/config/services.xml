@@ -1,0 +1,376 @@
+<?xml version="1.0" encoding="utf-8"?>
+<container xmlns="http://symfony.com/schema/dic/services" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://symfony.com/schema/dic/services http://symfony.com/schema/dic/services/services-1.0.xsd">
+    <parameters>
+        <parameter key="app.class">Foo</parameter>
+        <parameter key="app.string">abcdef</parameter>
+        <parameter key="app.int">123</parameter>
+        <parameter key="app.int_as_string" type="string">123</parameter>
+        <parameter key="app.int_as_processor">%env(int:APP_INT)%</parameter>
+        <parameter key="app.float">123.45</parameter>
+        <parameter key="app.float_as_string" type="string">123.45</parameter>
+        <parameter key="app.float_as_processor">%env(float:APP_FLOAT)%</parameter>
+        <parameter key="app.boolean">true</parameter>
+        <parameter key="app.boolean_as_string" type="string">true</parameter>
+        <parameter key="app.boolean_as_processor">%env(bool:APP_BOOL)%</parameter>
+        <parameter key="app.list" type="collection">
+            <parameter>en</parameter>
+            <parameter>es</parameter>
+            <parameter>fr</parameter>
+        </parameter>
+        <parameter key="app.list_of_int" type="collection">
+            <parameter>123</parameter>
+            <parameter>456</parameter>
+            <parameter>789</parameter>
+        </parameter>
+        <parameter key="app.list_of_int_as_processor" type="collection">
+            <parameter>%env(int:APP_INT)%</parameter>
+            <parameter>%env(int:APP_INT)%</parameter>
+            <parameter>%env(int:APP_INT)%</parameter>
+        </parameter>
+        <parameter key="app.list_of_list" type="collection">
+            <parameter type="collection">
+                <parameter key="name">the name</parameter>
+                <parameter key="value">the value</parameter>
+            </parameter>
+            <parameter type="collection">
+                <parameter key="name">another name</parameter>
+                <parameter key="value">another value</parameter>
+            </parameter>
+        </parameter>
+        <parameter key="app.list_of_different_list" type="collection">
+            <parameter type="collection">
+                <parameter key="name">the name</parameter>
+                <parameter key="value">the value</parameter>
+            </parameter>
+            <parameter type="collection">
+                <parameter key="age">12</parameter>
+                <parameter key="size">32</parameter>
+            </parameter>
+        </parameter>
+        <parameter key="app.array_of_list" type="collection">
+            <parameter key="foo" type="collection">
+                <parameter key="name">the name</parameter>
+                <parameter key="value">the value</parameter>
+            </parameter>
+            <parameter type="collection">
+                <parameter key="name">another name</parameter>
+                <parameter key="value">another value</parameter>
+            </parameter>
+        </parameter>
+        <parameter key="app.list_of_things" type="collection">
+            <parameter key="url">%env(string:APP_STRING)%</parameter>
+            <parameter key="endpoint">%env(string:APP_STRING)%</parameter>
+            <parameter key="version">%env(string:APP_STRING)%</parameter>
+            <parameter key="payment" type="collection">
+                <parameter key="default" type="collection">
+                    <parameter key="username">%env(string:APP_STRING)%</parameter>
+                    <parameter key="password">%env(string:APP_STRING)%</parameter>
+                    <parameter key="signature">%env(string:APP_STRING)%</parameter>
+                </parameter>
+            </parameter>
+            <parameter key="api" type="collection">
+                <parameter key="mode">%env(string:APP_STRING)%</parameter>
+                <parameter key="default" type="collection">
+                    <parameter key="username">%env(string:APP_STRING)%</parameter>
+                    <parameter key="password">%env(string:APP_STRING)%</parameter>
+                    <parameter key="signature">%env(string:APP_STRING)%</parameter>
+                </parameter>
+            </parameter>
+        </parameter>
+        <parameter key="app.map" type="collection">
+            <parameter key="a">value of a</parameter>
+            <parameter key="b">value of b</parameter>
+            <parameter key="c">value of c</parameter>
+        </parameter>
+        <parameter key="app.hugemap" type="collection">
+            <parameter key="k1">v1</parameter>
+            <parameter key="k2">v2</parameter>
+            <parameter key="k3">v3</parameter>
+            <parameter key="k4">v4</parameter>
+            <parameter key="k5">v5</parameter>
+            <parameter key="k6">v6</parameter>
+            <parameter key="k7">v7</parameter>
+            <parameter key="k8">v8</parameter>
+            <parameter key="k9">v9</parameter>
+            <parameter key="k10">v10</parameter>
+            <parameter key="k11">v11</parameter>
+            <parameter key="k12">v12</parameter>
+            <parameter key="k13">v13</parameter>
+            <parameter key="k14">v14</parameter>
+            <parameter key="k15">v15</parameter>
+            <parameter key="k16">v16</parameter>
+            <parameter key="k17">v17</parameter>
+            <parameter key="k18">v18</parameter>
+            <parameter key="k19">v19</parameter>
+            <parameter key="k20">v20</parameter>
+            <parameter key="k21">v21</parameter>
+            <parameter key="k22">v22</parameter>
+            <parameter key="k23">v23</parameter>
+            <parameter key="k24">v24</parameter>
+            <parameter key="k25">v25</parameter>
+            <parameter key="k26">v26</parameter>
+            <parameter key="k27">v27</parameter>
+            <parameter key="k28">v28</parameter>
+            <parameter key="k29">v29</parameter>
+            <parameter key="k30">v30</parameter>
+            <parameter key="k31">v31</parameter>
+            <parameter key="k32">v32</parameter>
+            <parameter key="k33">v33</parameter>
+            <parameter key="k34">v34</parameter>
+            <parameter key="k35">v35</parameter>
+            <parameter key="k36">v36</parameter>
+            <parameter key="k37">v37</parameter>
+            <parameter key="k38">v38</parameter>
+            <parameter key="k39">v39</parameter>
+            <parameter key="k40">v40</parameter>
+            <parameter key="k41">v41</parameter>
+            <parameter key="k42">v42</parameter>
+            <parameter key="k43">v43</parameter>
+            <parameter key="k44">v44</parameter>
+            <parameter key="k45">v45</parameter>
+            <parameter key="k46">v46</parameter>
+            <parameter key="k47">v47</parameter>
+            <parameter key="k48">v48</parameter>
+            <parameter key="k49">v49</parameter>
+            <parameter key="k50">v50</parameter>
+            <parameter key="k51">v51</parameter>
+            <parameter key="k52">v52</parameter>
+            <parameter key="k53">v53</parameter>
+            <parameter key="k54">v54</parameter>
+            <parameter key="k55">v55</parameter>
+            <parameter key="k56">v56</parameter>
+            <parameter key="k57">v57</parameter>
+            <parameter key="k58">v58</parameter>
+            <parameter key="k59">v59</parameter>
+            <parameter key="k60">v60</parameter>
+            <parameter key="k61">v61</parameter>
+            <parameter key="k62">v62</parameter>
+            <parameter key="k63">v63</parameter>
+            <parameter key="k64">v64</parameter>
+            <parameter key="k65">v65</parameter>
+            <parameter key="k66">v66</parameter>
+            <parameter key="k67">v67</parameter>
+            <parameter key="k68">v68</parameter>
+            <parameter key="k69">v69</parameter>
+            <parameter key="k70">v70</parameter>
+            <parameter key="k71">v71</parameter>
+            <parameter key="k72">v72</parameter>
+            <parameter key="k73">v73</parameter>
+            <parameter key="k74">v74</parameter>
+            <parameter key="k75">v75</parameter>
+            <parameter key="k76">v76</parameter>
+            <parameter key="k77">v77</parameter>
+            <parameter key="k78">v78</parameter>
+            <parameter key="k79">v79</parameter>
+            <parameter key="k80">v80</parameter>
+            <parameter key="k81">v81</parameter>
+            <parameter key="k82">v82</parameter>
+            <parameter key="k83">v83</parameter>
+            <parameter key="k84">v84</parameter>
+            <parameter key="k85">v85</parameter>
+            <parameter key="k86">v86</parameter>
+            <parameter key="k87">v87</parameter>
+            <parameter key="k88">v88</parameter>
+            <parameter key="k89">v89</parameter>
+            <parameter key="k90">v90</parameter>
+            <parameter key="k91">v91</parameter>
+            <parameter key="k92">v92</parameter>
+            <parameter key="k93">v93</parameter>
+            <parameter key="k94">v94</parameter>
+            <parameter key="k95">v95</parameter>
+            <parameter key="k96">v96</parameter>
+            <parameter key="k97">v97</parameter>
+            <parameter key="k98">v98</parameter>
+            <parameter key="k99">v99</parameter>
+            <parameter key="k100">v100</parameter>
+            <parameter key="k101">v101</parameter>
+            <parameter key="k102">v102</parameter>
+            <parameter key="k103">v103</parameter>
+            <parameter key="k104">v104</parameter>
+            <parameter key="k105">v105</parameter>
+            <parameter key="k106">v106</parameter>
+            <parameter key="k107">v107</parameter>
+            <parameter key="k108">v108</parameter>
+            <parameter key="k109">v109</parameter>
+            <parameter key="k110">v110</parameter>
+            <parameter key="k111">v111</parameter>
+            <parameter key="k112">v112</parameter>
+            <parameter key="k113">v113</parameter>
+            <parameter key="k114">v114</parameter>
+            <parameter key="k115">v115</parameter>
+            <parameter key="k116">v116</parameter>
+            <parameter key="k117">v117</parameter>
+            <parameter key="k118">v118</parameter>
+            <parameter key="k119">v119</parameter>
+            <parameter key="k120">v120</parameter>
+            <parameter key="k121">v121</parameter>
+            <parameter key="k122">v122</parameter>
+            <parameter key="k123">v123</parameter>
+            <parameter key="k124">v124</parameter>
+            <parameter key="k125">v125</parameter>
+            <parameter key="k126">v126</parameter>
+            <parameter key="k127">v127</parameter>
+            <parameter key="k128">v128</parameter>
+            <parameter key="k129">v129</parameter>
+            <parameter key="k130">v130</parameter>
+            <parameter key="k131">v131</parameter>
+            <parameter key="k132">v132</parameter>
+            <parameter key="k133">v133</parameter>
+            <parameter key="k134">v134</parameter>
+            <parameter key="k135">v135</parameter>
+            <parameter key="k136">v136</parameter>
+            <parameter key="k137">v137</parameter>
+            <parameter key="k138">v138</parameter>
+            <parameter key="k139">v139</parameter>
+            <parameter key="k140">v140</parameter>
+            <parameter key="k141">v141</parameter>
+            <parameter key="k142">v142</parameter>
+            <parameter key="k143">v143</parameter>
+            <parameter key="k144">v144</parameter>
+            <parameter key="k145">v145</parameter>
+            <parameter key="k146">v146</parameter>
+            <parameter key="k147">v147</parameter>
+            <parameter key="k148">v148</parameter>
+            <parameter key="k149">v149</parameter>
+            <parameter key="k150">v150</parameter>
+            <parameter key="k151">v151</parameter>
+            <parameter key="k152">v152</parameter>
+            <parameter key="k153">v153</parameter>
+            <parameter key="k154">v154</parameter>
+            <parameter key="k155">v155</parameter>
+            <parameter key="k156">v156</parameter>
+            <parameter key="k157">v157</parameter>
+            <parameter key="k158">v158</parameter>
+            <parameter key="k159">v159</parameter>
+            <parameter key="k160">v160</parameter>
+            <parameter key="k161">v161</parameter>
+            <parameter key="k162">v162</parameter>
+            <parameter key="k163">v163</parameter>
+            <parameter key="k164">v164</parameter>
+            <parameter key="k165">v165</parameter>
+            <parameter key="k166">v166</parameter>
+            <parameter key="k167">v167</parameter>
+            <parameter key="k168">v168</parameter>
+            <parameter key="k169">v169</parameter>
+            <parameter key="k170">v170</parameter>
+            <parameter key="k171">v171</parameter>
+            <parameter key="k172">v172</parameter>
+            <parameter key="k173">v173</parameter>
+            <parameter key="k174">v174</parameter>
+            <parameter key="k175">v175</parameter>
+            <parameter key="k176">v176</parameter>
+            <parameter key="k177">v177</parameter>
+            <parameter key="k178">v178</parameter>
+            <parameter key="k179">v179</parameter>
+            <parameter key="k180">v180</parameter>
+            <parameter key="k181">v181</parameter>
+            <parameter key="k182">v182</parameter>
+            <parameter key="k183">v183</parameter>
+            <parameter key="k184">v184</parameter>
+            <parameter key="k185">v185</parameter>
+            <parameter key="k186">v186</parameter>
+            <parameter key="k187">v187</parameter>
+            <parameter key="k188">v188</parameter>
+            <parameter key="k189">v189</parameter>
+            <parameter key="k190">v190</parameter>
+            <parameter key="k191">v191</parameter>
+            <parameter key="k192">v192</parameter>
+            <parameter key="k193">v193</parameter>
+            <parameter key="k194">v194</parameter>
+            <parameter key="k195">v195</parameter>
+            <parameter key="k196">v196</parameter>
+            <parameter key="k197">v197</parameter>
+            <parameter key="k198">v198</parameter>
+            <parameter key="k199">v199</parameter>
+            <parameter key="k200">v200</parameter>
+            <parameter key="k201">v201</parameter>
+            <parameter key="k202">v202</parameter>
+            <parameter key="k203">v203</parameter>
+            <parameter key="k204">v204</parameter>
+            <parameter key="k205">v205</parameter>
+            <parameter key="k206">v206</parameter>
+            <parameter key="k207">v207</parameter>
+            <parameter key="k208">v208</parameter>
+            <parameter key="k209">v209</parameter>
+            <parameter key="k210">v210</parameter>
+            <parameter key="k211">v211</parameter>
+            <parameter key="k212">v212</parameter>
+            <parameter key="k213">v213</parameter>
+            <parameter key="k214">v214</parameter>
+            <parameter key="k215">v215</parameter>
+            <parameter key="k216">v216</parameter>
+            <parameter key="k217">v217</parameter>
+            <parameter key="k218">v218</parameter>
+            <parameter key="k219">v219</parameter>
+            <parameter key="k220">v220</parameter>
+            <parameter key="k221">v221</parameter>
+            <parameter key="k222">v222</parameter>
+            <parameter key="k223">v223</parameter>
+            <parameter key="k224">v224</parameter>
+            <parameter key="k225">v225</parameter>
+            <parameter key="k226">v226</parameter>
+            <parameter key="k227">v227</parameter>
+            <parameter key="k228">v228</parameter>
+            <parameter key="k229">v229</parameter>
+            <parameter key="k230">v230</parameter>
+            <parameter key="k231">v231</parameter>
+            <parameter key="k232">v232</parameter>
+            <parameter key="k233">v233</parameter>
+            <parameter key="k234">v234</parameter>
+            <parameter key="k235">v235</parameter>
+            <parameter key="k236">v236</parameter>
+            <parameter key="k237">v237</parameter>
+            <parameter key="k238">v238</parameter>
+            <parameter key="k239">v239</parameter>
+            <parameter key="k240">v240</parameter>
+            <parameter key="k241">v241</parameter>
+            <parameter key="k242">v242</parameter>
+            <parameter key="k243">v243</parameter>
+            <parameter key="k244">v244</parameter>
+            <parameter key="k245">v245</parameter>
+            <parameter key="k246">v246</parameter>
+            <parameter key="k247">v247</parameter>
+            <parameter key="k248">v248</parameter>
+            <parameter key="k249">v249</parameter>
+            <parameter key="k250">v250</parameter>
+            <parameter key="k251">v251</parameter>
+            <parameter key="k252">v252</parameter>
+            <parameter key="k253">v253</parameter>
+            <parameter key="k254">v254</parameter>
+            <parameter key="k255">v255</parameter>
+            <parameter key="k256">v256</parameter>
+            <parameter key="k257">v257</parameter>
+        </parameter>
+        <parameter key="app.binary" type="binary">VGhpcyBpcyBhIEJlbGwgY2hhciAH</parameter>
+        <parameter key="app.constant">Y-m-d\TH:i:sP</parameter>
+		<parameter key="test_collection" type="collection"/>
+		<parameter key="non_empty_collection" type="collection">
+			<parameter>value</parameter>
+		</parameter>
+    </parameters>
+
+    <services>
+        <service id="foo" class="Foo" public="true"></service>
+        <service id="parameterised_foo" class="%app.class%"></service>
+        <service id="parameterised_bar" class="%app.class%\Bar"></service>
+        <service id="synthetic" class="Synthetic" public="true" synthetic="true" />
+        <service id="regular_query_handler" class="MessengerHandleTrait\RegularQueryHandler">
+            <tag name="messenger.message_handler"/>
+        </service>
+        <service id="multi_query_handler" class="MessengerHandleTrait\MultiQueryHandler">
+            <tag name="messenger.message_handler"/>
+        </service>
+        <service id="tagged_handler" class="MessengerHandleTrait\TaggedHandler">
+            <tag name="messenger.message_handler" handles="MessengerHandleTrait\TaggedQuery" method="handle"/>
+        </service>
+        <service id="multi_handles_for_in_the_same_handler" class="MessengerHandleTrait\MultiHandlesForInTheSameHandler">
+            <tag name="messenger.message_handler"/>
+        </service>
+        <service id="multi_handlers_for_the_same_message_handler_1" class="MessengerHandleTrait\MultiHandlersForTheSameMessageHandler1">
+            <tag name="messenger.message_handler"/>
+        </service>
+        <service id="multi_handlers_for_the_same_message_handler_2" class="MessengerHandleTrait\MultiHandlersForTheSameMessageHandler2">
+            <tag name="messenger.message_handler"/>
+        </service>
+    </services>
+</container>

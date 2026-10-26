@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::diagnostics::class_case_mismatch::CLASS_CASE_MISMATCH_CODE;
@@ -14,7 +14,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let mismatches = self.class_case_mismatches(uri, content);
         if mismatches.is_empty() {
@@ -31,14 +31,14 @@ impl Backend {
 
             let diag = make_diagnostic(
                 m.range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 CLASS_CASE_MISMATCH_CODE,
                 m.message.clone(),
             );
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: format!("Fix case to `{}`", m.corrected),
-                kind: Some(CodeActionKind::QUICKFIX),
+                kind: Some(CodeActionKind::QuickFix),
                 diagnostics: Some(vec![diag]),
                 edit: Some(single_edit(
                     parsed_uri.clone(),

@@ -1,9 +1,10 @@
 //! Tests for the PSR-4 namespace and class-name mismatch diagnostics
 //! and their quick fixes.
 
+use crate::common::message_text;
 use crate::common::{create_psr4_workspace, create_psr4_workspace_with_exception_stubs};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER: &str = r#"{"autoload":{"psr-4":{"App\\":"src/"}}}"#;
 
@@ -16,7 +17,7 @@ fn fast_diagnostics(
     content: &str,
 ) -> (String, Vec<Diagnostic>) {
     let full = dir.join(rel_path);
-    let uri = Url::from_file_path(&full).unwrap().to_string();
+    let uri = Uri::from_file_path(&full).unwrap().to_string();
     backend.update_ast(&uri, content);
     let mut out = Vec::new();
     backend.collect_namespace_mismatch_diagnostics(&uri, content, &mut out);
@@ -27,7 +28,7 @@ fn fast_diagnostics(
 fn has_code(diags: &[Diagnostic], code: &str) -> bool {
     diags
         .iter()
-        .any(|d| d.code == Some(NumberOrString::String(code.to_string())))
+        .any(|d| d.code == Some(Code::String(code.to_string())))
 }
 
 /// The canonical `App\Models\User` declaration, written to disk so PSR-4
@@ -43,7 +44,7 @@ fn case_diagnostics(
     content: &str,
 ) -> Vec<Diagnostic> {
     let full = dir.join(rel_path);
-    let uri = Url::from_file_path(&full).unwrap().to_string();
+    let uri = Uri::from_file_path(&full).unwrap().to_string();
     backend.update_ast(&uri, content);
     let mut out = Vec::new();
     backend.collect_class_case_mismatch_diagnostics(&uri, content, &mut out);
@@ -182,7 +183,7 @@ fn fix_namespace_quick_fix_corrects_declaration() {
 
     let content = "<?php\nnamespace App\\Wrong;\nclass User {}\n";
     let full = dir.path().join("src/Models/User.php");
-    let uri = Url::from_file_path(&full).unwrap();
+    let uri = Uri::from_file_path(&full).unwrap();
     let uri_str = uri.to_string();
     backend.update_ast(&uri_str, content);
 
@@ -210,7 +211,7 @@ fn fix_namespace_quick_fix_corrects_declaration() {
 
     let actions = backend.handle_code_action(&uri_str, content, &params);
     let fix = actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with("Fix namespace") => Some(ca),
+        CodeActionResponse::CodeAction(ca) if ca.title.starts_with("Fix namespace") => Some(ca),
         _ => None,
     });
     let fix = fix.expect("expected a Fix namespace quick fix");
@@ -232,7 +233,7 @@ fn fix_class_name_quick_fix_corrects_declaration() {
 
     let content = "<?php\nnamespace App\\Models;\nclass Customer {}\n";
     let full = dir.path().join("src/Models/User.php");
-    let uri = Url::from_file_path(&full).unwrap();
+    let uri = Uri::from_file_path(&full).unwrap();
     let uri_str = uri.to_string();
     backend.update_ast(&uri_str, content);
 
@@ -260,7 +261,7 @@ fn fix_class_name_quick_fix_corrects_declaration() {
 
     let actions = backend.handle_code_action(&uri_str, content, &params);
     let fix = actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with("Fix class name") => Some(ca),
+        CodeActionResponse::CodeAction(ca) if ca.title.starts_with("Fix class name") => Some(ca),
         _ => None,
     });
     let fix = fix.expect("expected a Fix class name quick fix");
@@ -292,14 +293,14 @@ async fn class_case_mismatch_flagged_for_wrong_case_use_import() {
     // inherit their casing from the import and must not be double-flagged.
     let case_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("class_case_mismatch".to_string())))
+        .filter(|d| d.code == Some(Code::String("class_case_mismatch".to_string())))
         .collect();
     assert_eq!(
         case_diags.len(),
         1,
         "expected exactly one case diagnostic (on the use import), got: {diags:?}"
     );
-    assert!(case_diags[0].message.contains("App\\Models\\User"));
+    assert!(message_text(&case_diags[0].message).contains("App\\Models\\User"));
 }
 
 #[tokio::test]
@@ -398,7 +399,7 @@ async fn fix_class_case_quick_fix_corrects_use_import() {
 
     let content = "<?php\nnamespace App\\Consumers;\nuse App\\Models\\user;\nclass Service {\n    public function make(): user { return new user(); }\n}\n";
     let full = dir.path().join("src/Consumers/Service.php");
-    let uri = Url::from_file_path(&full).unwrap();
+    let uri = Uri::from_file_path(&full).unwrap();
     let uri_str = uri.to_string();
     backend.update_ast(&uri_str, content);
 
@@ -426,7 +427,7 @@ async fn fix_class_case_quick_fix_corrects_use_import() {
 
     let actions = backend.handle_code_action(&uri_str, content, &params);
     let fix = actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with("Fix case") => Some(ca),
+        CodeActionResponse::CodeAction(ca) if ca.title.starts_with("Fix case") => Some(ca),
         _ => None,
     });
     let fix = fix.expect("expected a Fix case quick fix on the use import");

@@ -10,7 +10,7 @@ use phpantom_lsp::atom::atom;
 use phpantom_lsp::completion::phpdoc::*;
 use phpantom_lsp::php_type::PhpType;
 use phpantom_lsp::types::ClassInfo;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ── is_inside_non_doc_comment ───────────────────────────────────────
 
@@ -1738,7 +1738,7 @@ fn completions_have_keyword_kind() {
     for item in &items {
         assert_eq!(
             item.kind,
-            Some(CompletionItemKind::KEYWORD),
+            Some(CompletionItemKind::Keyword),
             "PHPDoc tags should use KEYWORD kind"
         );
     }
@@ -2318,7 +2318,7 @@ fn smart_var_property_with_templates_has_snippet_tab_stops() {
     );
     assert_eq!(
         v.insert_text_format,
-        Some(InsertTextFormat::SNIPPET),
+        Some(InsertTextFormat::Snippet),
         "Should use snippet format when templates are present"
     );
 }
@@ -2387,7 +2387,7 @@ fn smart_var_property_with_templates_and_prefix_has_snippet_tab_stops() {
         v.insert_text.as_deref(),
         Some("var Collection<${1:TKey}, ${2:TModel}>")
     );
-    assert_eq!(v.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(v.insert_text_format, Some(InsertTextFormat::Snippet));
 }
 
 #[test]
@@ -2551,5 +2551,5 @@ fn smart_var_constant_with_templates_has_snippet_tab_stops() {
         v.insert_text.as_deref(),
         Some("var Collection<${1:TKey}, ${2:TModel}>")
     );
-    assert_eq!(v.insert_text_format, Some(InsertTextFormat::SNIPPET));
+    assert_eq!(v.insert_text_format, Some(InsertTextFormat::Snippet));
 }

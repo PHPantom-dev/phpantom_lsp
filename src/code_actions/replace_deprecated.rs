@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::diagnostics::checked_byte_range_to_lsp_range;
@@ -44,7 +44,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let request_start =
             crate::text_position::position_to_byte_offset(content, params.range.start);
@@ -226,16 +226,16 @@ fn emit_action(
     title: String,
     range: Range,
     replacement: &str,
-    out: &mut Vec<CodeActionOrCommand>,
+    out: &mut Vec<CodeActionResponse>,
 ) {
-    let doc_uri: Url = match uri.parse() {
+    let doc_uri: Uri = match uri.parse() {
         Ok(u) => u,
         Err(_) => return,
     };
 
-    out.push(CodeActionOrCommand::CodeAction(CodeAction {
+    out.push(CodeActionResponse::CodeAction(CodeAction {
         title,
-        kind: Some(CodeActionKind::QUICKFIX),
+        kind: Some(CodeActionKind::QuickFix),
         diagnostics: None,
         edit: Some(crate::code_actions::single_edit(
             doc_uri,
@@ -246,6 +246,7 @@ fn emit_action(
         is_preferred: Some(false),
         disabled: None,
         data: None,
+        tags: None,
     }));
 }
 

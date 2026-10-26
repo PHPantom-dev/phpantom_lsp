@@ -5,7 +5,7 @@
 //! adds plus the shortened replacements it makes at every usage.
 
 use crate::common::{create_test_backend, get_code_actions_in_range, position_of};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const BULK_TITLE: &str = "Import all qualified symbols and shorten usages";
 
@@ -17,7 +17,7 @@ fn actions_at(content: &str, needle: &str) -> Vec<CodeAction> {
     get_code_actions_in_range(&backend, uri, content, Range::new(pos, pos))
         .into_iter()
         .filter_map(|action| match action {
-            CodeActionOrCommand::CodeAction(action) if action.title.contains("shorten usages") => {
+            CodeActionResponse::CodeAction(action) if action.title.contains("shorten usages") => {
                 Some(action)
             }
             _ => None,

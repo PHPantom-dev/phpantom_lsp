@@ -400,6 +400,28 @@ fn parse_new_expression_fqn() {
     );
 }
 
+#[test]
+fn parse_new_on_variable_named_class() {
+    // `$class` is a variable, not the `class` keyword of an anonymous class.
+    assert_eq!(
+        SubjectExpr::parse("(new $class())"),
+        SubjectExpr::NewExpr {
+            class_name: "$class".to_string(),
+        }
+    );
+}
+
+#[test]
+fn new_expression_round_trips_through_text() {
+    for text in [
+        "(new $class)",
+        "(new $class)->name()",
+        "(new $class('a'))->name",
+    ] {
+        assert_eq!(SubjectExpr::parse(text).to_subject_text(), text);
+    }
+}
+
 // ── Variable callable: `$fn()` ──────────────────────────────────────
 
 #[test]
@@ -1196,4 +1218,23 @@ fn parse_call_array_access_with_brackets_in_a_string_argument() {
             segments: vec![BracketSegment::IntKey("0".to_string())],
         }
     );
+}
+
+#[test]
+fn parse_invoked_closure_literal_round_trips() {
+    for text in [
+        "(fn(int $x): User => new User())(1)",
+        "(function(): User { return $r->find(); })()",
+    ] {
+        let parsed = SubjectExpr::parse(text);
+        assert!(
+            matches!(
+                &parsed,
+                SubjectExpr::CallExpr { callee, .. }
+                    if matches!(callee.as_ref(), SubjectExpr::Closure(_))
+            ),
+            "{text} should parse as an invoked closure, got {parsed:?}",
+        );
+        assert_eq!(parsed.to_subject_text(), text);
+    }
 }

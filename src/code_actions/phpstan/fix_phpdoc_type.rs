@@ -26,7 +26,7 @@
 //! recomputes the workspace edit on demand when the user picks the
 //! action.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
@@ -80,7 +80,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -93,10 +93,11 @@ impl Backend {
                 continue;
             }
 
-            let mismatch = match parse_mismatch(&diag.message, identifier) {
-                Some(m) => m,
-                None => continue,
-            };
+            let mismatch =
+                match parse_mismatch(crate::util::message_text(&diag.message), identifier) {
+                    Some(m) => m,
+                    None => continue,
+                };
 
             let diag_line = diag.range.start.line as usize;
 
@@ -165,7 +166,7 @@ impl Backend {
             build_remove_tag_edit(content, &docblock, &mismatch)?
         };
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, vec![edit]))
     }
 }

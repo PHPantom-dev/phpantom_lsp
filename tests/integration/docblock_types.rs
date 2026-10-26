@@ -1,7 +1,7 @@
 use crate::common::{completion_response, create_test_backend, goto_definition_at, open_php};
 use phpantom_lsp::Backend;
 use phpantom_lsp::Fqn;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -9,11 +9,11 @@ use tower_lsp::lsp_types::*;
 /// CompletionResponse.
 fn completion_names(result: CompletionResponse) -> Vec<String> {
     match result {
-        CompletionResponse::Array(items) => items
+        CompletionResponse::CompletionItemList(items) => items
             .iter()
             .filter_map(|i| i.filter_text.clone().or_else(|| Some(i.label.clone())))
             .collect(),
-        CompletionResponse::List(list) => list
+        CompletionResponse::CompletionList(list) => list
             .items
             .iter()
             .filter_map(|i| i.filter_text.clone().or_else(|| Some(i.label.clone())))
@@ -30,7 +30,7 @@ fn completion_names(result: CompletionResponse) -> Vec<String> {
 async fn test_completion_method_return_type_from_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class Session {\n",                                    // 1
@@ -79,7 +79,7 @@ async fn test_completion_method_return_type_from_docblock() {
 async fn test_goto_definition_method_return_type_from_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "class Store {\n",                                                // 1
@@ -112,7 +112,7 @@ async fn test_goto_definition_method_return_type_from_docblock() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -128,7 +128,7 @@ async fn test_goto_definition_method_return_type_from_docblock() {
 async fn test_completion_method_return_type_fqn_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "class SessionStore {\n",                                         // 1
@@ -175,7 +175,7 @@ async fn test_completion_method_return_type_fqn_docblock() {
 async fn test_completion_property_type_from_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class Session {\n",                                    // 1
@@ -221,7 +221,7 @@ async fn test_completion_property_type_from_docblock() {
 async fn test_goto_definition_property_type_from_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "class Logger {\n",                                  // 1
@@ -251,7 +251,7 @@ async fn test_goto_definition_property_type_from_docblock() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -270,7 +270,7 @@ async fn test_goto_definition_property_type_from_docblock() {
 async fn test_docblock_overrides_object_type_hint() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "class Session {\n",                           // 1
@@ -309,7 +309,7 @@ async fn test_docblock_overrides_object_type_hint() {
 async fn test_docblock_does_not_override_scalar_type_hint() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "class Session {\n",                           // 1
@@ -348,7 +348,7 @@ async fn test_docblock_does_not_override_scalar_type_hint() {
 async fn test_docblock_does_not_override_string_type_hint() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "class Session {\n",                           // 1
@@ -387,7 +387,7 @@ async fn test_docblock_does_not_override_string_type_hint() {
 async fn test_docblock_return_overrides_mixed() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "class Session {\n",                           // 1
@@ -429,7 +429,7 @@ async fn test_docblock_return_overrides_mixed() {
 async fn test_docblock_return_does_not_override_scalar() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "class Session {\n",                           // 1
@@ -476,7 +476,7 @@ async fn test_docblock_return_does_not_override_scalar() {
 async fn test_completion_function_return_type_from_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                        // 0
         "class SessionStore {\n",                                         // 1
@@ -524,7 +524,7 @@ async fn test_completion_function_return_type_from_docblock() {
 async fn test_goto_definition_function_return_type_from_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                         // 0
         "class Application {\n",                           // 1
@@ -556,7 +556,7 @@ async fn test_goto_definition_function_return_type_from_docblock() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -574,7 +574,7 @@ async fn test_goto_definition_function_return_type_from_docblock() {
 async fn test_completion_multiline_docblock_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "class Connection {\n",                              // 1
@@ -667,7 +667,7 @@ async fn test_docblock_property_cross_file_psr4() {
     let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);
 
     // Open a file that uses @var Logger
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "namespace App;\n",                    // 1
@@ -711,7 +711,7 @@ async fn test_docblock_property_cross_file_psr4() {
 async fn test_guarded_function_docblock_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                        // 0
         "class Application {\n",                                                          // 1
@@ -749,7 +749,7 @@ async fn test_guarded_function_docblock_return_type() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -768,7 +768,7 @@ async fn test_guarded_function_docblock_return_type() {
 async fn test_docblock_return_overrides_interface_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "interface SessionInterface {\n",                        // 1
@@ -1097,7 +1097,7 @@ async fn test_parse_php_class_property_tags() {
 async fn test_completion_via_property_tag() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                   // 0
         "class UserMobileVerificationState {\n",                     // 1
@@ -1273,7 +1273,7 @@ async fn test_parse_php_property_read_tag() {
 async fn test_goto_definition_property_tag_jumps_to_docblock_line() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                   // 0
         "class VerificationState {\n",                               // 1
@@ -1303,7 +1303,7 @@ async fn test_goto_definition_property_tag_jumps_to_docblock_line() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 6,
@@ -1320,7 +1320,7 @@ async fn test_goto_definition_property_tag_jumps_to_docblock_line() {
 async fn test_goto_definition_chained_via_property_tag() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                   // 0
         "class VerificationState {\n",                               // 1
@@ -1349,7 +1349,7 @@ async fn test_goto_definition_chained_via_property_tag() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -1365,7 +1365,7 @@ async fn test_goto_definition_chained_via_property_tag() {
 async fn test_goto_definition_property_read_tag() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                              // 0
         "/**\n",                                // 1
@@ -1389,7 +1389,7 @@ async fn test_goto_definition_property_read_tag() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -1481,7 +1481,7 @@ async fn test_parse_php_class_method_tags() {
 async fn test_completion_via_method_tag() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                   // 0
         "class MockInterface {\n",                                   // 1
@@ -1527,7 +1527,7 @@ async fn test_completion_via_method_tag() {
 async fn test_completion_method_tag_on_this() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "/**\n",                                   // 1
@@ -1564,7 +1564,7 @@ async fn test_completion_method_tag_on_this() {
 async fn test_completion_static_method_tag_via_double_colon() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                          // 0
         "/**\n",                                                            // 1
@@ -1645,7 +1645,7 @@ async fn test_real_method_overrides_method_tag() {
 async fn test_goto_definition_method_tag_jumps_to_docblock_line() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "/**\n",                                   // 1
@@ -1671,7 +1671,7 @@ async fn test_goto_definition_method_tag_jumps_to_docblock_line() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -1688,7 +1688,7 @@ async fn test_goto_definition_method_tag_jumps_to_docblock_line() {
 async fn test_goto_definition_chained_via_method_tag() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                   // 0
         "class MockInterface {\n",                                   // 1
@@ -1719,7 +1719,7 @@ async fn test_goto_definition_chained_via_method_tag() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -1802,7 +1802,7 @@ async fn test_parse_php_interface_method_tags() {
 async fn test_var_leading_backslash_bypasses_same_short_name_import() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                            // 0
         "namespace App\\Facades {\n",                         // 1
@@ -1861,7 +1861,7 @@ async fn test_missing_global_class_is_not_read_through_a_same_short_name_import(
         )],
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                   // 0
         "namespace App;\n",                          // 1

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use super::path_aliases;
 use crate::Backend;
 use crate::classmap_scanner;
+use crate::workspace_env::LibraryClaimant;
 
 impl Backend {
     /// Index the extra paths named by `[indexing] include`.
@@ -33,7 +34,7 @@ impl Backend {
             .cloned()
             .partition(|path| path.starts_with(root));
         for path in &library {
-            self.add_library_path(path);
+            self.add_library_path(LibraryClaimant::Include, path);
         }
 
         let filters = self.index_filters();
@@ -58,13 +59,13 @@ impl Backend {
         );
     }
 
-    /// Register an `[indexing] include` path outside the workspace as
-    /// library code. A directory is registered exactly like a vendor
-    /// directory; a file gets its own URI as the prefix, since the
-    /// vendor prefixes end in `/`.
-    fn add_library_path(&self, path: &Path) {
+    /// Register a path as library code on behalf of `claimant`. A
+    /// directory is registered exactly like a vendor directory; a file
+    /// gets its own URI as the prefix, since the vendor prefixes end in
+    /// `/`.
+    pub(super) fn add_library_path(&self, claimant: LibraryClaimant, path: &Path) {
         if !path.is_file() {
-            self.add_vendor_dir(path);
+            self.add_library_dir(claimant, path);
             return;
         }
         let aliases = path_aliases(path);
@@ -72,6 +73,6 @@ impl Backend {
             .iter()
             .map(|alias| crate::util::path_to_uri(alias))
             .collect();
-        self.register_vendor_location(aliases, uri_prefixes);
+        self.register_vendor_location(claimant, aliases, uri_prefixes);
     }
 }

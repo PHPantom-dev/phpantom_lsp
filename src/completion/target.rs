@@ -10,7 +10,7 @@
 //! reused by the definition resolver and future features (hover,
 //! references).
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::text_position::utf16_col_to_char_index;
 use crate::text_scan::collapse_continuation_lines;

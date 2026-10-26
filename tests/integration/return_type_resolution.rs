@@ -1,7 +1,7 @@
 use crate::common::{completion_response, create_test_backend, goto_definition_at, open_php};
 use phpantom_lsp::Backend;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Function Return Type Resolution ────────────────────────────────────────
 
@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::*;
 async fn test_goto_definition_function_return_type_method_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Application {\n",
@@ -41,7 +41,7 @@ async fn test_goto_definition_function_return_type_method_call() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -60,7 +60,7 @@ async fn test_goto_definition_function_return_type_method_call() {
 async fn test_goto_definition_method_return_type_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Connection {\n",
@@ -89,7 +89,7 @@ async fn test_goto_definition_method_return_type_chain() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -108,7 +108,7 @@ async fn test_goto_definition_method_return_type_chain() {
 async fn test_goto_definition_static_method_return_type_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -137,7 +137,7 @@ async fn test_goto_definition_static_method_return_type_chain() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -156,7 +156,7 @@ async fn test_goto_definition_static_method_return_type_chain() {
 async fn test_goto_definition_variable_from_function_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Application {\n",
@@ -185,7 +185,7 @@ async fn test_goto_definition_variable_from_function_call() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -204,7 +204,7 @@ async fn test_goto_definition_variable_from_function_call() {
 async fn test_goto_definition_variable_from_method_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -233,7 +233,7 @@ async fn test_goto_definition_variable_from_method_call() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -252,7 +252,7 @@ async fn test_goto_definition_variable_from_method_call() {
 async fn test_goto_definition_variable_from_static_method_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -281,7 +281,7 @@ async fn test_goto_definition_variable_from_static_method_call() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -383,7 +383,7 @@ async fn test_goto_definition_class_from_autoload_files() {
 async fn test_completion_via_function_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Application {\n",
@@ -409,7 +409,7 @@ async fn test_completion_via_function_return_type() {
     assert!(result.is_some(), "Should return completions");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<String> = items
                 .iter()
                 .filter_map(|i| i.filter_text.clone().or_else(|| Some(i.label.clone())))
@@ -435,7 +435,7 @@ async fn test_completion_via_function_return_type() {
 async fn test_completion_via_method_return_type_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Connection {\n",
@@ -461,7 +461,7 @@ async fn test_completion_via_method_return_type_chain() {
     assert!(result.is_some(), "Should return completions");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<String> = items
                 .iter()
                 .filter_map(|i| i.filter_text.clone().or_else(|| Some(i.label.clone())))
@@ -487,7 +487,7 @@ async fn test_completion_via_method_return_type_chain() {
 async fn test_completion_via_static_method_return_type_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -513,7 +513,7 @@ async fn test_completion_via_static_method_return_type_chain() {
     assert!(result.is_some(), "Should return completions");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<String> = items
                 .iter()
                 .filter_map(|i| i.filter_text.clone().or_else(|| Some(i.label.clone())))
@@ -541,7 +541,7 @@ async fn test_completion_via_static_method_return_type_chain() {
 async fn test_goto_definition_nullable_function_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Application {\n",
@@ -569,7 +569,7 @@ async fn test_goto_definition_nullable_function_return_type() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -588,7 +588,7 @@ async fn test_goto_definition_nullable_function_return_type() {
 async fn test_goto_definition_function_with_args_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Response {\n",
@@ -617,7 +617,7 @@ async fn test_goto_definition_function_with_args_return_type() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -705,7 +705,7 @@ async fn test_goto_definition_function_return_type_cross_file() {
     }
 
     // Open a file that uses app()->abort()
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Application;\n",
@@ -727,7 +727,7 @@ async fn test_goto_definition_function_return_type_cross_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             // The abort method should be found in the Application.php file
             assert!(
                 location.uri.as_str().contains("Application.php"),
@@ -755,7 +755,7 @@ async fn test_goto_definition_function_return_type_cross_file() {
 async fn test_goto_definition_method_returning_self_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class QueryBuilder {\n",
@@ -779,7 +779,7 @@ async fn test_goto_definition_method_returning_self_chain() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 3,
@@ -798,7 +798,7 @@ async fn test_goto_definition_method_returning_self_chain() {
 async fn test_completion_variable_assigned_from_function_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Application {\n",
@@ -825,7 +825,7 @@ async fn test_completion_variable_assigned_from_function_call() {
     assert!(result.is_some(), "Should return completions");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<String> = items
                 .iter()
                 .filter_map(|i| i.filter_text.clone().or_else(|| Some(i.label.clone())))
@@ -848,7 +848,7 @@ async fn test_completion_variable_assigned_from_function_call() {
 async fn test_completion_variable_assigned_from_method_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -875,7 +875,7 @@ async fn test_completion_variable_assigned_from_method_call() {
     assert!(result.is_some(), "Should return completions");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<String> = items
                 .iter()
                 .filter_map(|i| i.filter_text.clone().or_else(|| Some(i.label.clone())))
@@ -999,7 +999,7 @@ async fn test_goto_definition_function_inside_function_exists_guard() {
     }
 
     // Open a user file that calls session()
-    let uri = Url::parse("file:///user_code.php").unwrap();
+    let uri = Uri::parse("file:///user_code.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -1025,7 +1025,7 @@ async fn test_goto_definition_function_inside_function_exists_guard() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             // The function declaration `function session(` should be found
             // in helpers.php
             let path = location.uri.to_file_path().unwrap();
@@ -1046,7 +1046,7 @@ async fn test_goto_definition_function_inside_function_exists_guard() {
 async fn test_goto_definition_guarded_function_return_type_resolution() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Application {\n",
@@ -1077,7 +1077,7 @@ async fn test_goto_definition_guarded_function_return_type_resolution() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -1097,7 +1097,7 @@ async fn test_goto_definition_guarded_function_return_type_resolution() {
 async fn test_goto_definition_inline_conditional_return_class_string() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SessionManager {\n",
@@ -1129,7 +1129,7 @@ async fn test_goto_definition_inline_conditional_return_class_string() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -1146,7 +1146,7 @@ async fn test_goto_definition_inline_conditional_return_class_string() {
 async fn test_goto_definition_inline_conditional_return_non_null() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -1180,7 +1180,7 @@ async fn test_goto_definition_inline_conditional_return_non_null() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 6,
@@ -1200,7 +1200,7 @@ async fn test_goto_definition_inline_conditional_return_non_null() {
 async fn test_completion_variable_assigned_from_chained_method_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Connection {\n",
@@ -1233,7 +1233,7 @@ async fn test_completion_variable_assigned_from_chained_method_call() {
     assert!(result.is_some(), "Should return completions");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<String> = items
                 .iter()
                 .filter_map(|i| i.filter_text.clone().or_else(|| Some(i.label.clone())))
@@ -1259,7 +1259,7 @@ async fn test_completion_variable_assigned_from_chained_method_call() {
 async fn test_goto_definition_variable_from_chained_method_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Connection {\n",
@@ -1295,7 +1295,7 @@ async fn test_goto_definition_variable_from_chained_method_call() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -1314,7 +1314,7 @@ async fn test_goto_definition_variable_from_chained_method_call() {
 async fn test_goto_definition_docblock_return_this_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                              // 0
         "class QueryBuilder {\n",                                               // 1
@@ -1340,7 +1340,7 @@ async fn test_goto_definition_docblock_return_this_chain() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 5,
@@ -1356,7 +1356,7 @@ async fn test_goto_definition_docblock_return_this_chain() {
 async fn test_goto_definition_docblock_return_this_no_native_hint() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class Builder {\n",                                    // 1
@@ -1382,7 +1382,7 @@ async fn test_goto_definition_docblock_return_this_no_native_hint() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 6,
@@ -1399,7 +1399,7 @@ async fn test_goto_definition_docblock_return_this_no_native_hint() {
 async fn test_completion_docblock_return_this_inherits_to_child() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                               // 0
         "class BaseBuilder {\n",                                                 // 1
@@ -1420,10 +1420,10 @@ async fn test_completion_docblock_return_this_inherits_to_child() {
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1438,7 +1438,7 @@ async fn test_completion_docblock_return_this_inherits_to_child() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1447,7 +1447,7 @@ async fn test_completion_docblock_return_this_inherits_to_child() {
 async fn test_completion_variable_from_return_this_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",                                                              // 0
         "class Configurator {\n",                                               // 1
@@ -1468,10 +1468,10 @@ async fn test_completion_variable_from_return_this_method() {
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1486,6 +1486,6 @@ async fn test_completion_variable_from_return_this_method() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }

@@ -3,7 +3,7 @@
 //! nothing after it).  Shared by [`super::member_access`] and
 //! [`super::named_args`].
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use crate::Backend;
 use crate::text_position::utf16_col_to_byte_offset;

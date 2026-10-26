@@ -1,6 +1,6 @@
 use crate::common::create_psr4_workspace;
 use crate::common::{open_php, references_response};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "autoload": {
@@ -42,7 +42,7 @@ return [
 
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
 
-    let app_uri = Url::from_file_path(dir.path().join("src/Test.php")).unwrap();
+    let app_uri = Uri::from_file_path(dir.path().join("src/Test.php")).unwrap();
     open_php(&backend, &app_uri, app_php).await;
 
     // Find references for 'messages.welcome' in app.php

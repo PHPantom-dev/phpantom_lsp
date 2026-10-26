@@ -16,7 +16,7 @@
 //!   (`isset`, `unset`, `empty`, `eval`, `exit`, `die`, `list`,
 //!   `print`, `echo`, `include`, `require`, etc.) are skipped.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
@@ -192,7 +192,7 @@ impl Backend {
 
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 UNKNOWN_FUNCTION_CODE,
                 message,
             ));

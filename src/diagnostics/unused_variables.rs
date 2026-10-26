@@ -14,7 +14,7 @@
 use std::collections::{HashMap, HashSet};
 
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::helpers::{SUPERGLOBALS, make_tagged_diagnostic};
 
@@ -355,10 +355,10 @@ fn check_scope(
 
             ctx.diagnostics.push(make_tagged_diagnostic(
                 range,
-                DiagnosticSeverity::HINT,
+                DiagnosticSeverity::Hint,
                 UNUSED_VARIABLE_CODE,
                 message,
-                Some(DiagnosticTag::UNNECESSARY),
+                Some(DiagnosticTag::Unnecessary),
             ));
         }
     }
@@ -430,10 +430,10 @@ fn check_catch_frame(
 
         ctx.diagnostics.push(make_tagged_diagnostic(
             range,
-            DiagnosticSeverity::HINT,
+            DiagnosticSeverity::Hint,
             UNUSED_VARIABLE_CODE,
             format!("Unused variable '{}'", var_name),
-            Some(DiagnosticTag::UNNECESSARY),
+            Some(DiagnosticTag::Unnecessary),
         ));
     }
 }

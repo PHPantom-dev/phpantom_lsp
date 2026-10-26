@@ -1,0 +1,8 @@
+// test: A promoted constructor property mapped as a relation
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityRelationRuleTest::testBug306.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/bug-306-relation.php
+// expect_diagnostic: 21: Property PHPStan\Rules\Doctrine\ORM\Bug306Relation\MyBrokenEntity::$genericCollection type mapping mismatch: property can contain Doctrine\Common\Collections\Collection but database expects Doctrine\Common\Collections\Collection&iterable<PHPStan\Rules\Doctrine\ORM\AnotherEntity>. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

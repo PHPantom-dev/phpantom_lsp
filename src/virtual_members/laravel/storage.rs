@@ -140,6 +140,7 @@ fn configured_disk_type(backend: &Backend) -> Option<PhpType> {
         .find(|(prefix, _)| prefix == "filesystems")
         .and_then(|(_, tree)| disk_union(tree, &backend.laravel.storage_drivers.read()));
     *backend.laravel.storage_disk_type_cache.write() = Some(resolved.clone());
+    backend.laravel.note_config_facts_change();
     resolved
 }
 

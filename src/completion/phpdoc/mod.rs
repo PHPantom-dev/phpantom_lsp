@@ -37,7 +37,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::php_type::PhpType;
 use crate::types::ClassInfo;

@@ -4,14 +4,14 @@ use crate::common::{
     create_test_backend_with_full_stubs, open_php,
 };
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Test parenthesized RHS expression in variable assignment completion
 #[tokio::test]
 async fn test_completion_parenthesized_rhs_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///paren_rhs.php").unwrap();
+    let uri = Uri::parse("file:///paren_rhs.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ParenDemo {\n",
@@ -32,10 +32,10 @@ async fn test_completion_parenthesized_rhs_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -47,7 +47,7 @@ async fn test_completion_parenthesized_rhs_variable() {
                 "Should include 'test' method from ParenDemo"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -56,7 +56,7 @@ async fn test_completion_parenthesized_rhs_variable() {
 async fn test_completion_error_suppression_prefix_rhs_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///suppress_rhs.php").unwrap();
+    let uri = Uri::parse("file:///suppress_rhs.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SuppressDemo {\n",
@@ -82,10 +82,10 @@ async fn test_completion_error_suppression_prefix_rhs_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -93,7 +93,7 @@ async fn test_completion_error_suppression_prefix_rhs_variable() {
                 "Should include 'foo' method from SuppressDemo despite the @ prefix"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -102,7 +102,7 @@ async fn test_completion_error_suppression_prefix_rhs_variable() {
 async fn test_completion_class_string_variable_static_access() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///classstring.php").unwrap();
+    let uri = Uri::parse("file:///classstring.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Gadget {\n",
@@ -125,7 +125,7 @@ async fn test_completion_class_string_variable_static_access() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -146,7 +146,7 @@ async fn test_completion_class_string_variable_static_access() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -155,7 +155,7 @@ async fn test_completion_class_string_variable_static_access() {
 async fn test_completion_class_string_self_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///selfclass.php").unwrap();
+    let uri = Uri::parse("file:///selfclass.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -177,7 +177,7 @@ async fn test_completion_class_string_self_class() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -193,7 +193,7 @@ async fn test_completion_class_string_self_class() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -202,7 +202,7 @@ async fn test_completion_class_string_self_class() {
 async fn test_completion_class_string_ternary() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///classstring_ternary.php").unwrap();
+    let uri = Uri::parse("file:///classstring_ternary.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Alpha {\n",
@@ -226,7 +226,7 @@ async fn test_completion_class_string_ternary() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -242,7 +242,7 @@ async fn test_completion_class_string_ternary() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -251,7 +251,7 @@ async fn test_completion_class_string_ternary() {
 async fn test_completion_class_string_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///classstring_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///classstring_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -271,7 +271,7 @@ async fn test_completion_class_string_top_level() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -287,7 +287,7 @@ async fn test_completion_class_string_top_level() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -295,7 +295,7 @@ async fn test_completion_class_string_top_level() {
 async fn test_completion_new_self_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///newself.php").unwrap();
+    let uri = Uri::parse("file:///newself.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -317,10 +317,10 @@ async fn test_completion_new_self_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -332,7 +332,7 @@ async fn test_completion_new_self_variable() {
                 "Should include static 'create' via -> (PHP allows static calls via instance)"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -340,7 +340,7 @@ async fn test_completion_new_self_variable() {
 async fn test_completion_new_static_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///newstatic.php").unwrap();
+    let uri = Uri::parse("file:///newstatic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -361,10 +361,10 @@ async fn test_completion_new_static_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -372,7 +372,7 @@ async fn test_completion_new_static_variable() {
                 "Should include non-static 'build'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -380,7 +380,7 @@ async fn test_completion_new_static_variable() {
 async fn test_completion_new_classname_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///newclass.php").unwrap();
+    let uri = Uri::parse("file:///newclass.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -401,16 +401,16 @@ async fn test_completion_new_classname_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(method_names.contains(&"render"), "Should include 'render'");
             assert!(method_names.contains(&"test"), "Should include 'test'");
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -418,7 +418,7 @@ async fn test_completion_new_classname_variable() {
 async fn test_completion_unknown_variable_shows_fallback() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unknown.php").unwrap();
+    let uri = Uri::parse("file:///unknown.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -440,7 +440,7 @@ async fn test_completion_unknown_variable_shows_fallback() {
 async fn test_completion_property_chain_self_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain.php").unwrap();
+    let uri = Uri::parse("file:///chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Node {\n",
@@ -462,16 +462,16 @@ async fn test_completion_property_chain_self_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(method_names.contains(&"value"), "Should include 'value'");
             assert!(method_names.contains(&"test"), "Should include 'test'");
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -479,7 +479,7 @@ async fn test_completion_property_chain_self_type() {
 async fn test_completion_classname_double_colon() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///classdcolon.php").unwrap();
+    let uri = Uri::parse("file:///classdcolon.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Registry {\n",
@@ -502,15 +502,15 @@ async fn test_completion_classname_double_colon() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
 
@@ -528,7 +528,7 @@ async fn test_completion_classname_double_colon() {
                 "Should include constant"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -536,7 +536,7 @@ async fn test_completion_classname_double_colon() {
 async fn test_completion_param_type_hint_resolves() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///paramhint.php").unwrap();
+    let uri = Uri::parse("file:///paramhint.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Processor {\n",
@@ -557,16 +557,16 @@ async fn test_completion_param_type_hint_resolves() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(method_names.contains(&"run"), "Should include 'run'");
             assert!(method_names.contains(&"handle"), "Should include 'handle'");
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -574,7 +574,7 @@ async fn test_completion_param_type_hint_resolves() {
 async fn test_completion_static_double_colon() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///staticdc.php").unwrap();
+    let uri = Uri::parse("file:///staticdc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -594,15 +594,15 @@ async fn test_completion_static_double_colon() {
     assert!(result.is_some(), "Completion should resolve static::");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
             // Only static method for ::
@@ -619,7 +619,7 @@ async fn test_completion_static_double_colon() {
                 "Should include constant 'MAX'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -627,7 +627,7 @@ async fn test_completion_static_double_colon() {
 async fn test_completion_parameter_uses_param_docblock_override() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///param_docblock_override.php").unwrap();
+    let uri = Uri::parse("file:///param_docblock_override.php").unwrap();
     let text = r#"<?php
 class Node {}
 class FuncCall extends Node {
@@ -653,10 +653,10 @@ class Handler {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .filter_map(|i| i.filter_text.as_deref())
                 .collect();
             assert!(
@@ -670,7 +670,7 @@ class Handler {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -690,7 +690,7 @@ async fn test_completion_new_classname_arrow() {
     );
 
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, text).await;
 
     let result = completion_response(&backend, &uri, 5, 30, None).await;
@@ -700,7 +700,7 @@ async fn test_completion_new_classname_arrow() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("callCustomCreator")),
@@ -713,7 +713,7 @@ async fn test_completion_new_classname_arrow() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -731,7 +731,7 @@ async fn test_completion_parenthesized_new_classname_arrow() {
     );
 
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     open_php(&backend, &uri, text).await;
 
     let result = completion_response(&backend, &uri, 5, 32, None).await;
@@ -741,7 +741,7 @@ async fn test_completion_parenthesized_new_classname_arrow() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("callCustomCreator")),
@@ -754,7 +754,7 @@ async fn test_completion_parenthesized_new_classname_arrow() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -782,7 +782,7 @@ async fn test_completion_new_classname_arrow_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\SessionManager;\n",
@@ -803,7 +803,7 @@ async fn test_completion_new_classname_arrow_cross_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("callCustomCreator")),
@@ -816,7 +816,7 @@ async fn test_completion_new_classname_arrow_cross_file() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -828,7 +828,7 @@ async fn test_completion_new_classname_arrow_cross_file() {
 async fn test_completion_ambiguous_variable_if_block_union() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ambiguous.php").unwrap();
+    let uri = Uri::parse("file:///ambiguous.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SessionManager {\n",
@@ -861,7 +861,7 @@ async fn test_completion_ambiguous_variable_if_block_union() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include members from SessionManager
             assert!(
@@ -881,7 +881,7 @@ async fn test_completion_ambiguous_variable_if_block_union() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -890,7 +890,7 @@ async fn test_completion_ambiguous_variable_if_block_union() {
 async fn test_completion_unconditional_reassignment_only_final_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///unconditional.php").unwrap();
+    let uri = Uri::parse("file:///unconditional.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -920,7 +920,7 @@ async fn test_completion_unconditional_reassignment_only_final_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include Bar's method (the final unconditional assignment)
             assert!(
@@ -935,7 +935,7 @@ async fn test_completion_unconditional_reassignment_only_final_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -945,7 +945,7 @@ async fn test_completion_unconditional_reassignment_only_final_type() {
 async fn test_completion_ambiguous_variable_if_else_union() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ifelse.php").unwrap();
+    let uri = Uri::parse("file:///ifelse.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Writer {\n",
@@ -986,7 +986,7 @@ async fn test_completion_ambiguous_variable_if_else_union() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // The forward walker correctly excludes Writer (dead branch before
             // the if/else), so only Printer and Sender are candidates.
@@ -1006,7 +1006,7 @@ async fn test_completion_ambiguous_variable_if_else_union() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1018,7 +1018,7 @@ async fn test_completion_ambiguous_variable_if_else_union() {
 async fn test_completion_union_return_type_shows_all_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///union_completion.php").unwrap();
+    let uri = Uri::parse("file:///union_completion.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -1051,7 +1051,7 @@ async fn test_completion_union_return_type_shows_all_members() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include members from Dog
             assert!(
@@ -1076,7 +1076,7 @@ async fn test_completion_union_return_type_shows_all_members() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1085,7 +1085,7 @@ async fn test_completion_union_return_type_shows_all_members() {
 async fn test_completion_union_parameter_type_shows_all_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///union_param.php").unwrap();
+    let uri = Uri::parse("file:///union_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Reader {\n",
@@ -1113,7 +1113,7 @@ async fn test_completion_union_parameter_type_shows_all_members() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("read")),
@@ -1126,7 +1126,7 @@ async fn test_completion_union_parameter_type_shows_all_members() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1139,7 +1139,7 @@ async fn test_completion_union_parameter_type_shows_all_members() {
 async fn test_completion_union_return_plus_conditional_reassignment_grows_union() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///union_grow.php").unwrap();
+    let uri = Uri::parse("file:///union_grow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -1178,7 +1178,7 @@ async fn test_completion_union_return_plus_conditional_reassignment_grows_union(
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include members from A (from makeAOrB union part)
             assert!(
@@ -1199,7 +1199,7 @@ async fn test_completion_union_return_plus_conditional_reassignment_grows_union(
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1212,7 +1212,7 @@ async fn test_completion_union_return_plus_conditional_reassignment_grows_union(
 async fn test_completion_conditional_return_class_string() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///conditional.php").unwrap();
+    let uri = Uri::parse("file:///conditional.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -1247,7 +1247,7 @@ async fn test_completion_conditional_return_class_string() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include members from A (resolved via class-string<T>)
             assert!(
@@ -1262,7 +1262,7 @@ async fn test_completion_conditional_return_class_string() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1273,7 +1273,7 @@ async fn test_completion_conditional_return_class_string() {
 async fn test_completion_conditional_return_null_default() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///conditional_null.php").unwrap();
+    let uri = Uri::parse("file:///conditional_null.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Application {\n",
@@ -1304,7 +1304,7 @@ async fn test_completion_conditional_return_null_default() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("version")),
@@ -1317,7 +1317,7 @@ async fn test_completion_conditional_return_null_default() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1328,7 +1328,7 @@ async fn test_completion_conditional_return_null_default() {
 async fn test_completion_conditional_return_non_null_argument() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///conditional_auth.php").unwrap();
+    let uri = Uri::parse("file:///conditional_auth.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -1363,7 +1363,7 @@ async fn test_completion_conditional_return_non_null_argument() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include members from StatefulGuard (non-null arg → else branch)
             assert!(
@@ -1383,7 +1383,7 @@ async fn test_completion_conditional_return_non_null_argument() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1394,7 +1394,7 @@ async fn test_completion_conditional_return_non_null_argument() {
 async fn test_completion_inline_conditional_return_class_string() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inline_conditional.php").unwrap();
+    let uri = Uri::parse("file:///inline_conditional.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SessionManager {\n",
@@ -1426,7 +1426,7 @@ async fn test_completion_inline_conditional_return_class_string() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include members from SessionManager
             assert!(
@@ -1440,7 +1440,7 @@ async fn test_completion_inline_conditional_return_class_string() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1451,7 +1451,7 @@ async fn test_completion_inline_conditional_return_class_string() {
 async fn test_completion_inline_conditional_return_non_null_argument() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inline_auth.php").unwrap();
+    let uri = Uri::parse("file:///inline_auth.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -1485,7 +1485,7 @@ async fn test_completion_inline_conditional_return_non_null_argument() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include members from StatefulGuard (non-null arg → else branch)
             assert!(
@@ -1505,7 +1505,7 @@ async fn test_completion_inline_conditional_return_non_null_argument() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1515,7 +1515,7 @@ async fn test_completion_inline_conditional_return_non_null_argument() {
 async fn test_completion_inline_conditional_return_null_default() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inline_null.php").unwrap();
+    let uri = Uri::parse("file:///inline_null.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Application {\n",
@@ -1545,7 +1545,7 @@ async fn test_completion_inline_conditional_return_null_default() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("version")),
@@ -1558,7 +1558,7 @@ async fn test_completion_inline_conditional_return_null_default() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1577,7 +1577,7 @@ async fn test_completion_inline_conditional_return_null_default() {
 async fn test_completion_method_conditional_return_class_string_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_conditional.php").unwrap();
+    let uri = Uri::parse("file:///method_conditional.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class CurrentCart {\n",
@@ -1617,7 +1617,7 @@ async fn test_completion_method_conditional_return_class_string_chain() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include members from CurrentCart (resolved via method conditional return)
             assert!(
@@ -1637,7 +1637,7 @@ async fn test_completion_method_conditional_return_class_string_chain() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1666,7 +1666,7 @@ async fn test_completion_method_conditional_return_class_string_chain() {
 async fn test_completion_conditional_return_class_string_at_param_index_1() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///symfony_deserialize.php").unwrap();
+    let uri = Uri::parse("file:///symfony_deserialize.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                     // 0
         "class SubmissionProducerMessage {\n",                                         // 1
@@ -1708,7 +1708,7 @@ async fn test_completion_conditional_return_class_string_at_param_index_1() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include members from SubmissionProducerMessage
             assert!(
@@ -1722,7 +1722,7 @@ async fn test_completion_conditional_return_class_string_at_param_index_1() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1732,7 +1732,7 @@ async fn test_completion_conditional_return_class_string_at_param_index_1() {
 async fn test_completion_psalm_return_conditional_class_string() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///psalm_return.php").unwrap();
+    let uri = Uri::parse("file:///psalm_return.php").unwrap();
     let text = concat!(
         "<?php\n",                                                          // 0
         "class Order {\n",                                                  // 1
@@ -1762,7 +1762,7 @@ async fn test_completion_psalm_return_conditional_class_string() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getTotal")),
@@ -1770,7 +1770,7 @@ async fn test_completion_psalm_return_conditional_class_string() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1780,7 +1780,7 @@ async fn test_completion_psalm_return_conditional_class_string() {
 async fn test_completion_inline_var_docblock_simple() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inlinevar.php").unwrap();
+    let uri = Uri::parse("file:///inlinevar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Session {\n",
@@ -1805,10 +1805,10 @@ async fn test_completion_inline_var_docblock_simple() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -1822,7 +1822,7 @@ async fn test_completion_inline_var_docblock_simple() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1830,7 +1830,7 @@ async fn test_completion_inline_var_docblock_simple() {
 async fn test_completion_inline_var_docblock_with_variable_name() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inlinevar_named.php").unwrap();
+    let uri = Uri::parse("file:///inlinevar_named.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -1855,10 +1855,10 @@ async fn test_completion_inline_var_docblock_with_variable_name() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -1872,7 +1872,7 @@ async fn test_completion_inline_var_docblock_with_variable_name() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1880,7 +1880,7 @@ async fn test_completion_inline_var_docblock_with_variable_name() {
 async fn test_completion_inline_var_docblock_wrong_variable_name_ignored() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inlinevar_wrong.php").unwrap();
+    let uri = Uri::parse("file:///inlinevar_wrong.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -1902,12 +1902,12 @@ async fn test_completion_inline_var_docblock_wrong_variable_name_ignored() {
     // Result may be None (no completions) or an array without Logger methods.
     if let Some(resp) = result {
         let items = match resp {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         let method_names: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .map(|i| i.filter_text.as_deref().unwrap())
             .collect();
         assert!(
@@ -1922,7 +1922,7 @@ async fn test_completion_inline_var_docblock_wrong_variable_name_ignored() {
 async fn test_completion_inline_var_docblock_override_blocked_by_scalar() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inlinevar_scalar.php").unwrap();
+    let uri = Uri::parse("file:///inlinevar_scalar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Session {\n",
@@ -1946,12 +1946,12 @@ async fn test_completion_inline_var_docblock_override_blocked_by_scalar() {
     // array without Session methods.
     if let Some(resp) = result {
         let items = match resp {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         let method_names: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .map(|i| i.filter_text.as_deref().unwrap())
             .collect();
         assert!(
@@ -1966,7 +1966,7 @@ async fn test_completion_inline_var_docblock_override_blocked_by_scalar() {
 async fn test_completion_inline_var_docblock_override_allowed_for_object() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inlinevar_obj.php").unwrap();
+    let uri = Uri::parse("file:///inlinevar_obj.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class BaseService {\n",
@@ -1995,10 +1995,10 @@ async fn test_completion_inline_var_docblock_override_allowed_for_object() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -2012,7 +2012,7 @@ async fn test_completion_inline_var_docblock_override_allowed_for_object() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2022,7 +2022,7 @@ async fn test_completion_inline_var_docblock_override_allowed_for_object() {
 async fn test_completion_inline_var_docblock_no_varname_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inlinevar_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///inlinevar_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -2043,7 +2043,7 @@ async fn test_completion_inline_var_docblock_no_varname_top_level() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
@@ -2059,7 +2059,7 @@ async fn test_completion_inline_var_docblock_no_varname_top_level() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2081,7 +2081,7 @@ async fn test_completion_inline_var_docblock_no_varname_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///crossfile_inlinevar.php").unwrap();
+    let uri = Uri::parse("file:///crossfile_inlinevar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Models\\User;\n",
@@ -2099,7 +2099,7 @@ async fn test_completion_inline_var_docblock_no_varname_cross_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
@@ -2115,7 +2115,7 @@ async fn test_completion_inline_var_docblock_no_varname_cross_file() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2123,7 +2123,7 @@ async fn test_completion_inline_var_docblock_no_varname_cross_file() {
 async fn test_completion_inline_var_docblock_unconditional_reassignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inlinevar_reassign.php").unwrap();
+    let uri = Uri::parse("file:///inlinevar_reassign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class First {\n",
@@ -2151,10 +2151,10 @@ async fn test_completion_inline_var_docblock_unconditional_reassignment() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -2168,7 +2168,7 @@ async fn test_completion_inline_var_docblock_unconditional_reassignment() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2180,7 +2180,7 @@ async fn test_completion_inline_var_docblock_unconditional_reassignment() {
 async fn test_completion_instanceof_narrows_to_single_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_basic.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_basic.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class Animal {\n",                         // 1
@@ -2212,10 +2212,10 @@ async fn test_completion_instanceof_narrows_to_single_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2235,7 +2235,7 @@ async fn test_completion_instanceof_narrows_to_single_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2244,7 +2244,7 @@ async fn test_completion_instanceof_narrows_to_single_class() {
 async fn test_completion_instanceof_no_narrowing_outside_block() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_outside.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_outside.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "class Alpha {\n",                              // 1
@@ -2274,10 +2274,10 @@ async fn test_completion_instanceof_no_narrowing_outside_block() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2293,7 +2293,7 @@ async fn test_completion_instanceof_no_narrowing_outside_block() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2302,7 +2302,7 @@ async fn test_completion_instanceof_no_narrowing_outside_block() {
 async fn test_completion_instanceof_elseif_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_elseif.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_elseif.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // 0
         "class Foo {\n",                              // 1
@@ -2338,10 +2338,10 @@ async fn test_completion_instanceof_elseif_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2361,7 +2361,7 @@ async fn test_completion_instanceof_elseif_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2370,7 +2370,7 @@ async fn test_completion_instanceof_elseif_narrows() {
 async fn test_completion_instanceof_different_variable_no_effect() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_other_var.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_other_var.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class TypeA {\n",                          // 1
@@ -2400,10 +2400,10 @@ async fn test_completion_instanceof_different_variable_no_effect() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2419,7 +2419,7 @@ async fn test_completion_instanceof_different_variable_no_effect() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2428,7 +2428,7 @@ async fn test_completion_instanceof_different_variable_no_effect() {
 async fn test_completion_instanceof_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Container {\n",                              // 1
@@ -2454,10 +2454,10 @@ async fn test_completion_instanceof_top_level() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2472,7 +2472,7 @@ async fn test_completion_instanceof_top_level() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2505,7 +2505,7 @@ async fn test_completion_instanceof_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///main.php").unwrap();
+    let uri = Uri::parse("file:///main.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Vehicle;\n",
@@ -2525,10 +2525,10 @@ async fn test_completion_instanceof_cross_file() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2543,7 +2543,7 @@ async fn test_completion_instanceof_cross_file() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2552,7 +2552,7 @@ async fn test_completion_instanceof_cross_file() {
 async fn test_completion_instanceof_parenthesised_condition() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_parens.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_parens.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // 0
         "class One {\n",                              // 1
@@ -2581,10 +2581,10 @@ async fn test_completion_instanceof_parenthesised_condition() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2599,7 +2599,7 @@ async fn test_completion_instanceof_parenthesised_condition() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2607,7 +2607,7 @@ async fn test_completion_instanceof_parenthesised_condition() {
 async fn test_completion_top_level_chained_method_on_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///toplevel_chain.php").unwrap();
+    let uri = Uri::parse("file:///toplevel_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -2641,10 +2641,10 @@ async fn test_completion_top_level_chained_method_on_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -2663,7 +2663,7 @@ async fn test_completion_top_level_chained_method_on_variable() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2671,7 +2671,7 @@ async fn test_completion_top_level_chained_method_on_variable() {
 async fn test_completion_chained_method_on_variable_inside_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_in_class.php").unwrap();
+    let uri = Uri::parse("file:///chain_in_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -2699,10 +2699,10 @@ async fn test_completion_chained_method_on_variable_inside_class() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -2716,7 +2716,7 @@ async fn test_completion_chained_method_on_variable_inside_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2724,7 +2724,7 @@ async fn test_completion_chained_method_on_variable_inside_class() {
 async fn test_completion_top_level_variable_new_classname() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///toplevel.php").unwrap();
+    let uri = Uri::parse("file:///toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -2746,10 +2746,10 @@ async fn test_completion_top_level_variable_new_classname() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -2765,7 +2765,7 @@ async fn test_completion_top_level_variable_new_classname() {
 
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -2774,7 +2774,7 @@ async fn test_completion_top_level_variable_new_classname() {
                 prop_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2782,7 +2782,7 @@ async fn test_completion_top_level_variable_new_classname() {
 async fn test_completion_top_level_variable_from_function_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///toplevel_func.php").unwrap();
+    let uri = Uri::parse("file:///toplevel_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -2807,10 +2807,10 @@ async fn test_completion_top_level_variable_from_function_call() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -2824,7 +2824,7 @@ async fn test_completion_top_level_variable_from_function_call() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2837,7 +2837,7 @@ async fn test_completion_top_level_variable_from_function_call() {
 async fn test_completion_instanceof_narrows_to_interface_from_mixed() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_iface.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_iface.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "interface Renderable {\n",                         // 1
@@ -2860,10 +2860,10 @@ async fn test_completion_instanceof_narrows_to_interface_from_mixed() {
         "Should return completions for interface members after instanceof narrowing"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2878,7 +2878,7 @@ async fn test_completion_instanceof_narrows_to_interface_from_mixed() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2888,7 +2888,7 @@ async fn test_completion_instanceof_narrows_to_interface_from_mixed() {
 async fn test_completion_instanceof_narrows_to_abstract_class_from_mixed() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_abstract.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_abstract.php").unwrap();
     let text = concat!(
         "<?php\n",                                                 // 0
         "abstract class Shape {\n",                                // 1
@@ -2911,10 +2911,10 @@ async fn test_completion_instanceof_narrows_to_abstract_class_from_mixed() {
         "Should return completions for abstract class members after instanceof narrowing"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2929,7 +2929,7 @@ async fn test_completion_instanceof_narrows_to_abstract_class_from_mixed() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2939,7 +2939,7 @@ async fn test_completion_instanceof_narrows_to_abstract_class_from_mixed() {
 async fn test_completion_instanceof_narrows_untyped_variable_to_interface() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_untyped.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_untyped.php").unwrap();
     let text = concat!(
         "<?php\n",                                                       // 0
         "interface Loggable {\n",                                        // 1
@@ -2965,10 +2965,10 @@ async fn test_completion_instanceof_narrows_untyped_variable_to_interface() {
         "Should return completions for Loggable members after instanceof narrowing on untyped var"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2978,7 +2978,7 @@ async fn test_completion_instanceof_narrows_untyped_variable_to_interface() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2999,7 +2999,7 @@ async fn test_completion_instanceof_narrows_to_cross_file_interface() {
         )],
     );
 
-    let uri = Url::parse("file:///handler.php").unwrap();
+    let uri = Uri::parse("file:///handler.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Contracts\\Renderable;\n",
@@ -3019,10 +3019,10 @@ async fn test_completion_instanceof_narrows_to_cross_file_interface() {
         "Should return completions for cross-file interface after instanceof narrowing"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3032,7 +3032,7 @@ async fn test_completion_instanceof_narrows_to_cross_file_interface() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3041,7 +3041,7 @@ async fn test_completion_instanceof_narrows_to_cross_file_interface() {
 async fn test_completion_instanceof_narrows_to_interface_with_magic_methods() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_magic.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_magic.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "/**\n",                                   // 1
@@ -3066,10 +3066,10 @@ async fn test_completion_instanceof_narrows_to_interface_with_magic_methods() {
         "Should return completions for interface @method members after instanceof"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3084,7 +3084,7 @@ async fn test_completion_instanceof_narrows_to_interface_with_magic_methods() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3094,7 +3094,7 @@ async fn test_completion_instanceof_narrows_to_interface_with_magic_methods() {
 async fn test_completion_instanceof_narrows_disjoint_union_to_interface() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_disjoint.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_disjoint.php").unwrap();
     let text = concat!(
         "<?php\n",                                       // 0
         "class Alpha {\n",                               // 1
@@ -3129,10 +3129,10 @@ async fn test_completion_instanceof_narrows_disjoint_union_to_interface() {
         "Should return completions for Serializable after instanceof on disjoint union"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3152,7 +3152,7 @@ async fn test_completion_instanceof_narrows_disjoint_union_to_interface() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3162,7 +3162,7 @@ async fn test_completion_instanceof_narrows_disjoint_union_to_interface() {
 async fn test_completion_guard_clause_narrows_to_interface() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_iface.php").unwrap();
+    let uri = Uri::parse("file:///guard_iface.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "interface Cacheable {\n",                      // 1
@@ -3185,10 +3185,10 @@ async fn test_completion_guard_clause_narrows_to_interface() {
         "Should return completions for Cacheable after guard clause narrowing"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3198,7 +3198,7 @@ async fn test_completion_guard_clause_narrows_to_interface() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3210,7 +3210,7 @@ async fn test_completion_guard_clause_narrows_to_interface() {
 async fn test_completion_assert_instanceof_narrows_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_instanceof_basic.php").unwrap();
+    let uri = Uri::parse("file:///assert_instanceof_basic.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class Animal {\n",                         // 1
@@ -3241,10 +3241,10 @@ async fn test_completion_assert_instanceof_narrows_type() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3264,7 +3264,7 @@ async fn test_completion_assert_instanceof_narrows_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3273,7 +3273,7 @@ async fn test_completion_assert_instanceof_narrows_type() {
 async fn test_completion_assert_instanceof_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_instanceof_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///assert_instanceof_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "class Alpha {\n",                              // 1
@@ -3297,10 +3297,10 @@ async fn test_completion_assert_instanceof_top_level() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3315,7 +3315,7 @@ async fn test_completion_assert_instanceof_top_level() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3324,7 +3324,7 @@ async fn test_completion_assert_instanceof_top_level() {
 async fn test_completion_assert_instanceof_narrows_parameter() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_instanceof_param.php").unwrap();
+    let uri = Uri::parse("file:///assert_instanceof_param.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Base {\n",                                   // 1
@@ -3347,10 +3347,10 @@ async fn test_completion_assert_instanceof_narrows_parameter() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3365,7 +3365,7 @@ async fn test_completion_assert_instanceof_narrows_parameter() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3374,7 +3374,7 @@ async fn test_completion_assert_instanceof_narrows_parameter() {
 async fn test_completion_assert_instanceof_different_variable_no_effect() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_instanceof_diffvar.php").unwrap();
+    let uri = Uri::parse("file:///assert_instanceof_diffvar.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // 0
         "class Foo {\n",                              // 1
@@ -3399,10 +3399,10 @@ async fn test_completion_assert_instanceof_different_variable_no_effect() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3418,7 +3418,7 @@ async fn test_completion_assert_instanceof_different_variable_no_effect() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3439,7 +3439,7 @@ async fn test_completion_assert_instanceof_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///assert_instanceof_cross.php").unwrap();
+    let uri = Uri::parse("file:///assert_instanceof_cross.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Models\\User;\n",
@@ -3458,10 +3458,10 @@ async fn test_completion_assert_instanceof_cross_file() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3476,7 +3476,7 @@ async fn test_completion_assert_instanceof_cross_file() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3485,7 +3485,7 @@ async fn test_completion_assert_instanceof_cross_file() {
 async fn test_completion_assert_instanceof_parenthesised() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_instanceof_parens.php").unwrap();
+    let uri = Uri::parse("file:///assert_instanceof_parens.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class X {\n",                              // 1
@@ -3513,10 +3513,10 @@ async fn test_completion_assert_instanceof_parenthesised() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3531,7 +3531,7 @@ async fn test_completion_assert_instanceof_parenthesised() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3544,7 +3544,7 @@ async fn test_completion_assert_instanceof_parenthesised() {
 async fn test_completion_assert_instanceof_self_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_instanceof_self.php").unwrap();
+    let uri = Uri::parse("file:///assert_instanceof_self.php").unwrap();
     let text = concat!(
         "<?php\n",                                                   // 0
         "class BaseCatalogFeature {\n",                              // 1
@@ -3565,10 +3565,10 @@ async fn test_completion_assert_instanceof_self_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3583,7 +3583,7 @@ async fn test_completion_assert_instanceof_self_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3593,7 +3593,7 @@ async fn test_completion_assert_instanceof_self_narrows() {
 async fn test_completion_if_instanceof_static_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_static.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_static.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "class BaseModel {\n",                               // 1
@@ -3615,10 +3615,10 @@ async fn test_completion_if_instanceof_static_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3633,7 +3633,7 @@ async fn test_completion_if_instanceof_static_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3643,7 +3643,7 @@ async fn test_completion_if_instanceof_static_narrows() {
 async fn test_completion_if_instanceof_parent_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///instanceof_parent.php").unwrap();
+    let uri = Uri::parse("file:///instanceof_parent.php").unwrap();
     let text = concat!(
         "<?php\n",                                         // 0
         "class Vehicle {\n",                               // 1
@@ -3668,10 +3668,10 @@ async fn test_completion_if_instanceof_parent_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3686,7 +3686,7 @@ async fn test_completion_if_instanceof_parent_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3696,7 +3696,7 @@ async fn test_completion_if_instanceof_parent_narrows() {
 async fn test_guard_clause_instanceof_self_excludes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_instanceof_self.php").unwrap();
+    let uri = Uri::parse("file:///guard_instanceof_self.php").unwrap();
     let text = concat!(
         "<?php\n",                                  // 0
         "class Animal {\n",                         // 1
@@ -3727,10 +3727,10 @@ async fn test_guard_clause_instanceof_self_excludes() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3745,7 +3745,7 @@ async fn test_guard_clause_instanceof_self_excludes() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3758,7 +3758,7 @@ async fn test_guard_clause_instanceof_self_excludes() {
 async fn test_completion_assert_negated_instanceof_excludes_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_neg_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///assert_neg_instanceof.php").unwrap();
     let text = concat!(
         "<?php\n",                                      // 0
         "class Alpha {\n",                              // 1
@@ -3786,10 +3786,10 @@ async fn test_completion_assert_negated_instanceof_excludes_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3804,7 +3804,7 @@ async fn test_completion_assert_negated_instanceof_excludes_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3814,7 +3814,7 @@ async fn test_completion_assert_negated_instanceof_excludes_class() {
 async fn test_completion_assert_negated_instanceof_parenthesised_excludes_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_neg_instanceof_parens.php").unwrap();
+    let uri = Uri::parse("file:///assert_neg_instanceof_parens.php").unwrap();
     let text = concat!(
         "<?php\n",                                    // 0
         "class Foo {\n",                              // 1
@@ -3842,10 +3842,10 @@ async fn test_completion_assert_negated_instanceof_parenthesised_excludes_class(
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3860,7 +3860,7 @@ async fn test_completion_assert_negated_instanceof_parenthesised_excludes_class(
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3870,7 +3870,7 @@ async fn test_completion_assert_negated_instanceof_parenthesised_excludes_class(
 async fn test_completion_if_negated_instanceof_excludes_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///if_neg_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///if_neg_instanceof.php").unwrap();
     let text = concat!(
         "<?php\n",                                 // 0
         "class Cat {\n",                           // 1
@@ -3899,10 +3899,10 @@ async fn test_completion_if_negated_instanceof_excludes_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3917,7 +3917,7 @@ async fn test_completion_if_negated_instanceof_excludes_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3927,7 +3927,7 @@ async fn test_completion_if_negated_instanceof_excludes_class() {
 async fn test_completion_if_negated_instanceof_no_inner_parens() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///if_neg_instanceof_no_parens.php").unwrap();
+    let uri = Uri::parse("file:///if_neg_instanceof_no_parens.php").unwrap();
     let text = concat!(
         "<?php\n",                                   // 0
         "class A1 {\n",                              // 1
@@ -3956,10 +3956,10 @@ async fn test_completion_if_negated_instanceof_no_inner_parens() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -3974,7 +3974,7 @@ async fn test_completion_if_negated_instanceof_no_inner_parens() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -3984,7 +3984,7 @@ async fn test_completion_if_negated_instanceof_no_inner_parens() {
 async fn test_completion_if_instanceof_else_excludes_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///if_instanceof_else.php").unwrap();
+    let uri = Uri::parse("file:///if_instanceof_else.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "class Red {\n",                               // 1
@@ -4015,10 +4015,10 @@ async fn test_completion_if_instanceof_else_excludes_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4033,7 +4033,7 @@ async fn test_completion_if_instanceof_else_excludes_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4043,7 +4043,7 @@ async fn test_completion_if_instanceof_else_excludes_class() {
 async fn test_completion_if_instanceof_then_still_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///if_instanceof_then_check.php").unwrap();
+    let uri = Uri::parse("file:///if_instanceof_then_check.php").unwrap();
     let text = concat!(
         "<?php\n",                                     // 0
         "class Red {\n",                               // 1
@@ -4074,10 +4074,10 @@ async fn test_completion_if_instanceof_then_still_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4092,7 +4092,7 @@ async fn test_completion_if_instanceof_then_still_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4102,7 +4102,7 @@ async fn test_completion_if_instanceof_then_still_narrows() {
 async fn test_completion_if_instanceof_else_excludes_with_parameter() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///if_instanceof_else_param.php").unwrap();
+    let uri = Uri::parse("file:///if_instanceof_else_param.php").unwrap();
     let text = concat!(
         "<?php\n",                                        // 0
         "class Sun {\n",                                  // 1
@@ -4128,10 +4128,10 @@ async fn test_completion_if_instanceof_else_excludes_with_parameter() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4146,7 +4146,7 @@ async fn test_completion_if_instanceof_else_excludes_with_parameter() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4156,7 +4156,7 @@ async fn test_completion_if_instanceof_else_excludes_with_parameter() {
 async fn test_completion_if_instanceof_else_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///if_instanceof_else_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///if_instanceof_else_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",                               // 0
         "class Up {\n",                          // 1
@@ -4183,10 +4183,10 @@ async fn test_completion_if_instanceof_else_top_level() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4201,7 +4201,7 @@ async fn test_completion_if_instanceof_else_top_level() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4213,7 +4213,7 @@ async fn test_completion_if_instanceof_else_top_level() {
 async fn test_completion_while_instanceof_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///while_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///while_instanceof.php").unwrap();
     let text = concat!(
         "<?php\n",                                             // 0
         "class Node {\n",                                      // 1
@@ -4238,10 +4238,10 @@ async fn test_completion_while_instanceof_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4261,7 +4261,7 @@ async fn test_completion_while_instanceof_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4270,7 +4270,7 @@ async fn test_completion_while_instanceof_narrows() {
 async fn test_completion_while_negated_instanceof_excludes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///while_neg_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///while_neg_instanceof.php").unwrap();
     let text = concat!(
         "<?php\n",                                           // 0
         "class Alpha {\n",                                   // 1
@@ -4294,10 +4294,10 @@ async fn test_completion_while_negated_instanceof_excludes() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4312,7 +4312,7 @@ async fn test_completion_while_negated_instanceof_excludes() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4323,7 +4323,7 @@ async fn test_completion_while_negated_instanceof_excludes() {
 async fn test_completion_is_a_narrows_like_instanceof() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///is_a_narrow.php").unwrap();
+    let uri = Uri::parse("file:///is_a_narrow.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Dog {\n",                                    // 1
@@ -4347,10 +4347,10 @@ async fn test_completion_is_a_narrows_like_instanceof() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4365,7 +4365,7 @@ async fn test_completion_is_a_narrows_like_instanceof() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4374,7 +4374,7 @@ async fn test_completion_is_a_narrows_like_instanceof() {
 async fn test_completion_negated_is_a_excludes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///is_a_neg.php").unwrap();
+    let uri = Uri::parse("file:///is_a_neg.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Dog {\n",                                    // 1
@@ -4398,10 +4398,10 @@ async fn test_completion_negated_is_a_excludes() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4416,7 +4416,7 @@ async fn test_completion_negated_is_a_excludes() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4425,7 +4425,7 @@ async fn test_completion_negated_is_a_excludes() {
 async fn test_completion_is_a_else_branch_excludes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///is_a_else.php").unwrap();
+    let uri = Uri::parse("file:///is_a_else.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Dog {\n",                                    // 1
@@ -4451,10 +4451,10 @@ async fn test_completion_is_a_else_branch_excludes() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4469,7 +4469,7 @@ async fn test_completion_is_a_else_branch_excludes() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4480,7 +4480,7 @@ async fn test_completion_is_a_else_branch_excludes() {
 async fn test_completion_get_class_identical_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///get_class_narrow.php").unwrap();
+    let uri = Uri::parse("file:///get_class_narrow.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -4504,10 +4504,10 @@ async fn test_completion_get_class_identical_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4522,7 +4522,7 @@ async fn test_completion_get_class_identical_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4531,7 +4531,7 @@ async fn test_completion_get_class_identical_narrows() {
 async fn test_completion_var_class_constant_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_class_narrow.php").unwrap();
+    let uri = Uri::parse("file:///var_class_narrow.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -4555,10 +4555,10 @@ async fn test_completion_var_class_constant_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4573,7 +4573,7 @@ async fn test_completion_var_class_constant_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4582,7 +4582,7 @@ async fn test_completion_var_class_constant_narrows() {
 async fn test_completion_get_class_not_identical_excludes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///get_class_neg.php").unwrap();
+    let uri = Uri::parse("file:///get_class_neg.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -4606,10 +4606,10 @@ async fn test_completion_get_class_not_identical_excludes() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4624,7 +4624,7 @@ async fn test_completion_get_class_not_identical_excludes() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4633,7 +4633,7 @@ async fn test_completion_get_class_not_identical_excludes() {
 async fn test_completion_get_class_else_branch_excludes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///get_class_else.php").unwrap();
+    let uri = Uri::parse("file:///get_class_else.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -4659,10 +4659,10 @@ async fn test_completion_get_class_else_branch_excludes() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4677,7 +4677,7 @@ async fn test_completion_get_class_else_branch_excludes() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4686,7 +4686,7 @@ async fn test_completion_get_class_else_branch_excludes() {
 async fn test_completion_get_class_reversed_order_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///get_class_reversed.php").unwrap();
+    let uri = Uri::parse("file:///get_class_reversed.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -4710,10 +4710,10 @@ async fn test_completion_get_class_reversed_order_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4728,7 +4728,7 @@ async fn test_completion_get_class_reversed_order_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4740,7 +4740,7 @@ async fn test_completion_get_class_reversed_order_narrows() {
 async fn test_completion_match_true_instanceof_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_true_narrow.php").unwrap();
+    let uri = Uri::parse("file:///match_true_narrow.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -4765,10 +4765,10 @@ async fn test_completion_match_true_instanceof_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4783,7 +4783,7 @@ async fn test_completion_match_true_instanceof_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4792,7 +4792,7 @@ async fn test_completion_match_true_instanceof_narrows() {
 async fn test_completion_match_true_is_a_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///match_true_is_a.php").unwrap();
+    let uri = Uri::parse("file:///match_true_is_a.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Dog {\n",                                    // 1
@@ -4817,10 +4817,10 @@ async fn test_completion_match_true_is_a_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4835,7 +4835,7 @@ async fn test_completion_match_true_is_a_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4844,7 +4844,7 @@ async fn test_completion_match_true_is_a_narrows() {
 async fn test_completion_assert_is_a_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_is_a.php").unwrap();
+    let uri = Uri::parse("file:///assert_is_a.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Dog {\n",                                    // 1
@@ -4867,10 +4867,10 @@ async fn test_completion_assert_is_a_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4885,7 +4885,7 @@ async fn test_completion_assert_is_a_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4894,7 +4894,7 @@ async fn test_completion_assert_is_a_narrows() {
 async fn test_completion_while_is_a_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///while_is_a.php").unwrap();
+    let uri = Uri::parse("file:///while_is_a.php").unwrap();
     let text = concat!(
         "<?php\n",                                             // 0
         "class Node {\n",                                      // 1
@@ -4919,10 +4919,10 @@ async fn test_completion_while_is_a_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4937,7 +4937,7 @@ async fn test_completion_while_is_a_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4946,7 +4946,7 @@ async fn test_completion_while_is_a_narrows() {
 async fn test_completion_var_class_constant_else_branch_excludes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_class_else.php").unwrap();
+    let uri = Uri::parse("file:///var_class_else.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -4972,10 +4972,10 @@ async fn test_completion_var_class_constant_else_branch_excludes() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -4990,7 +4990,7 @@ async fn test_completion_var_class_constant_else_branch_excludes() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -4999,7 +4999,7 @@ async fn test_completion_var_class_constant_else_branch_excludes() {
 async fn test_completion_get_class_loose_equality_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///get_class_eq.php").unwrap();
+    let uri = Uri::parse("file:///get_class_eq.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -5023,10 +5023,10 @@ async fn test_completion_get_class_loose_equality_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5041,7 +5041,7 @@ async fn test_completion_get_class_loose_equality_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5053,7 +5053,7 @@ async fn test_completion_get_class_loose_equality_narrows() {
 async fn test_completion_phpstan_assert_narrows_unconditionally() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///phpstan_assert_basic.php").unwrap();
+    let uri = Uri::parse("file:///phpstan_assert_basic.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -5080,10 +5080,10 @@ async fn test_completion_phpstan_assert_narrows_unconditionally() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5098,7 +5098,7 @@ async fn test_completion_phpstan_assert_narrows_unconditionally() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5107,7 +5107,7 @@ async fn test_completion_phpstan_assert_narrows_unconditionally() {
 async fn test_completion_phpstan_assert_negated_excludes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///phpstan_assert_neg.php").unwrap();
+    let uri = Uri::parse("file:///phpstan_assert_neg.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -5134,10 +5134,10 @@ async fn test_completion_phpstan_assert_negated_excludes() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5152,7 +5152,7 @@ async fn test_completion_phpstan_assert_negated_excludes() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5161,7 +5161,7 @@ async fn test_completion_phpstan_assert_negated_excludes() {
 async fn test_completion_psalm_assert_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///psalm_assert.php").unwrap();
+    let uri = Uri::parse("file:///psalm_assert.php").unwrap();
     let text = concat!(
         "<?php\n",                                        // 0
         "class Dog {\n",                                  // 1
@@ -5188,10 +5188,10 @@ async fn test_completion_psalm_assert_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5206,7 +5206,7 @@ async fn test_completion_psalm_assert_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5218,7 +5218,7 @@ async fn test_completion_psalm_assert_narrows() {
 async fn test_completion_phpstan_assert_if_true_narrows_in_then() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_if_true_then.php").unwrap();
+    let uri = Uri::parse("file:///assert_if_true_then.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -5246,10 +5246,10 @@ async fn test_completion_phpstan_assert_if_true_narrows_in_then() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5264,7 +5264,7 @@ async fn test_completion_phpstan_assert_if_true_narrows_in_then() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5274,7 +5274,7 @@ async fn test_completion_phpstan_assert_if_true_narrows_in_then() {
 async fn test_completion_phpstan_assert_if_true_excludes_in_else() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_if_true_else.php").unwrap();
+    let uri = Uri::parse("file:///assert_if_true_else.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -5304,10 +5304,10 @@ async fn test_completion_phpstan_assert_if_true_excludes_in_else() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5324,7 +5324,7 @@ async fn test_completion_phpstan_assert_if_true_excludes_in_else() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5335,7 +5335,7 @@ async fn test_completion_phpstan_assert_if_true_excludes_in_else() {
 async fn test_completion_phpstan_assert_if_true_negated_narrows_in_else() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_if_true_neg.php").unwrap();
+    let uri = Uri::parse("file:///assert_if_true_neg.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class User {\n",                                         // 1
@@ -5365,10 +5365,10 @@ async fn test_completion_phpstan_assert_if_true_negated_narrows_in_else() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5385,7 +5385,7 @@ async fn test_completion_phpstan_assert_if_true_negated_narrows_in_else() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5397,7 +5397,7 @@ async fn test_completion_phpstan_assert_if_true_negated_narrows_in_else() {
 async fn test_completion_phpstan_assert_if_false_narrows_in_else() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_if_false_else.php").unwrap();
+    let uri = Uri::parse("file:///assert_if_false_else.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -5427,10 +5427,10 @@ async fn test_completion_phpstan_assert_if_false_narrows_in_else() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5446,7 +5446,7 @@ async fn test_completion_phpstan_assert_if_false_narrows_in_else() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5456,7 +5456,7 @@ async fn test_completion_phpstan_assert_if_false_narrows_in_else() {
 async fn test_completion_phpstan_assert_if_false_excludes_in_then() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_if_false_then.php").unwrap();
+    let uri = Uri::parse("file:///assert_if_false_then.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -5484,10 +5484,10 @@ async fn test_completion_phpstan_assert_if_false_excludes_in_then() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5504,7 +5504,7 @@ async fn test_completion_phpstan_assert_if_false_excludes_in_then() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5514,7 +5514,7 @@ async fn test_completion_phpstan_assert_if_false_excludes_in_then() {
 async fn test_completion_phpstan_assert_if_true_in_while() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_if_true_while.php").unwrap();
+    let uri = Uri::parse("file:///assert_if_true_while.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Node {\n",                                   // 1
@@ -5543,10 +5543,10 @@ async fn test_completion_phpstan_assert_if_true_in_while() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5561,7 +5561,7 @@ async fn test_completion_phpstan_assert_if_true_in_while() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5570,7 +5570,7 @@ async fn test_completion_phpstan_assert_if_true_in_while() {
 async fn test_completion_phpstan_assert_second_parameter() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///phpstan_assert_second.php").unwrap();
+    let uri = Uri::parse("file:///phpstan_assert_second.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -5597,10 +5597,10 @@ async fn test_completion_phpstan_assert_second_parameter() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5615,7 +5615,7 @@ async fn test_completion_phpstan_assert_second_parameter() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5632,7 +5632,7 @@ async fn test_completion_phpstan_assert_second_parameter() {
 async fn test_completion_phpstan_assert_if_true_this_narrows_receiver() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_if_true_this.php").unwrap();
+    let uri = Uri::parse("file:///assert_if_true_this.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                              // 0
         "class TestApplication extends Application {\n",                                        // 1
@@ -5657,10 +5657,10 @@ async fn test_completion_phpstan_assert_if_true_this_narrows_receiver() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5670,7 +5670,7 @@ async fn test_completion_phpstan_assert_if_true_this_narrows_receiver() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5680,7 +5680,7 @@ async fn test_completion_phpstan_assert_if_true_this_narrows_receiver() {
 async fn test_completion_phpstan_assert_if_true_and_false_combined() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///assert_combined.php").unwrap();
+    let uri = Uri::parse("file:///assert_combined.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class User {\n",                                        // 1
@@ -5712,10 +5712,10 @@ async fn test_completion_phpstan_assert_if_true_and_false_combined() {
 
     assert!(result.is_some(), "Should return completions for then-body");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5725,7 +5725,7 @@ async fn test_completion_phpstan_assert_if_true_and_false_combined() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 
     // Test else-body: IfFalse → AdminUser
@@ -5733,10 +5733,10 @@ async fn test_completion_phpstan_assert_if_true_and_false_combined() {
 
     assert!(result.is_some(), "Should return completions for else-body");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5746,7 +5746,7 @@ async fn test_completion_phpstan_assert_if_true_and_false_combined() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5755,7 +5755,7 @@ async fn test_completion_phpstan_assert_if_true_and_false_combined() {
 async fn test_completion_phpstan_assert_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///phpstan_assert_top.php").unwrap();
+    let uri = Uri::parse("file:///phpstan_assert_top.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Dog {\n",                                         // 1
@@ -5781,10 +5781,10 @@ async fn test_completion_phpstan_assert_top_level() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -5799,7 +5799,7 @@ async fn test_completion_phpstan_assert_top_level() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5807,7 +5807,7 @@ async fn test_completion_phpstan_assert_top_level() {
 async fn test_completion_intersection_parameter_type_shows_all_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///intersection_param.php").unwrap();
+    let uri = Uri::parse("file:///intersection_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Loggable {\n",
@@ -5835,7 +5835,7 @@ async fn test_completion_intersection_parameter_type_shows_all_members() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getName")),
@@ -5848,7 +5848,7 @@ async fn test_completion_intersection_parameter_type_shows_all_members() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5856,7 +5856,7 @@ async fn test_completion_intersection_parameter_type_shows_all_members() {
 async fn test_completion_dnf_type_shows_all_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///dnf_param.php").unwrap();
+    let uri = Uri::parse("file:///dnf_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Serializable {\n",
@@ -5888,7 +5888,7 @@ async fn test_completion_dnf_type_shows_all_members() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("serialize")),
@@ -5906,7 +5906,7 @@ async fn test_completion_dnf_type_shows_all_members() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5914,7 +5914,7 @@ async fn test_completion_dnf_type_shows_all_members() {
 async fn test_completion_closure_param_type_hint_in_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///closure_param.php").unwrap();
+    let uri = Uri::parse("file:///closure_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Carrier {\n",
@@ -5940,7 +5940,7 @@ async fn test_completion_closure_param_type_hint_in_method() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -5953,7 +5953,7 @@ async fn test_completion_closure_param_type_hint_in_method() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -5961,7 +5961,7 @@ async fn test_completion_closure_param_type_hint_in_method() {
 async fn test_completion_closure_param_type_hint_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///closure_top.php").unwrap();
+    let uri = Uri::parse("file:///closure_top.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -5983,7 +5983,7 @@ async fn test_completion_closure_param_type_hint_top_level() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("id")),
@@ -5996,7 +5996,7 @@ async fn test_completion_closure_param_type_hint_top_level() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6004,7 +6004,7 @@ async fn test_completion_closure_param_type_hint_top_level() {
 async fn test_completion_closure_param_as_function_argument() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///closure_arg.php").unwrap();
+    let uri = Uri::parse("file:///closure_arg.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -6026,7 +6026,7 @@ async fn test_completion_closure_param_as_function_argument() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("price")),
@@ -6039,7 +6039,7 @@ async fn test_completion_closure_param_as_function_argument() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6047,7 +6047,7 @@ async fn test_completion_closure_param_as_function_argument() {
 async fn test_completion_arrow_function_param_type_hint() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///arrow_fn.php").unwrap();
+    let uri = Uri::parse("file:///arrow_fn.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -6070,7 +6070,7 @@ async fn test_completion_arrow_function_param_type_hint() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("sku")),
@@ -6083,7 +6083,7 @@ async fn test_completion_arrow_function_param_type_hint() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6091,7 +6091,7 @@ async fn test_completion_arrow_function_param_type_hint() {
 async fn test_completion_nested_closure_resolves_inner_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nested_closure.php").unwrap();
+    let uri = Uri::parse("file:///nested_closure.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Outer {\n",
@@ -6118,7 +6118,7 @@ async fn test_completion_nested_closure_resolves_inner_param() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("innerProp")),
@@ -6136,7 +6136,7 @@ async fn test_completion_nested_closure_resolves_inner_param() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6144,7 +6144,7 @@ async fn test_completion_nested_closure_resolves_inner_param() {
 async fn test_completion_closure_param_in_method_argument() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///closure_method_arg.php").unwrap();
+    let uri = Uri::parse("file:///closure_method_arg.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Task {\n",
@@ -6171,7 +6171,7 @@ async fn test_completion_closure_param_in_method_argument() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("title")),
@@ -6184,7 +6184,7 @@ async fn test_completion_closure_param_in_method_argument() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6194,7 +6194,7 @@ async fn test_completion_closure_param_in_method_argument() {
 async fn test_completion_foreach_list_generic_var_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_list.php").unwrap();
+    let uri = Uri::parse("file:///foreach_list.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -6222,7 +6222,7 @@ async fn test_completion_foreach_list_generic_var_annotation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -6235,7 +6235,7 @@ async fn test_completion_foreach_list_generic_var_annotation() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6243,7 +6243,7 @@ async fn test_completion_foreach_list_generic_var_annotation() {
 async fn test_completion_foreach_array_bracket_shorthand() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_bracket.php").unwrap();
+    let uri = Uri::parse("file:///foreach_bracket.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -6270,7 +6270,7 @@ async fn test_completion_foreach_array_bracket_shorthand() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("title")),
@@ -6283,7 +6283,7 @@ async fn test_completion_foreach_array_bracket_shorthand() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6291,7 +6291,7 @@ async fn test_completion_foreach_array_bracket_shorthand() {
 async fn test_completion_foreach_array_generic_two_params() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_array_kv.php").unwrap();
+    let uri = Uri::parse("file:///foreach_array_kv.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -6318,7 +6318,7 @@ async fn test_completion_foreach_array_generic_two_params() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("id")),
@@ -6331,7 +6331,7 @@ async fn test_completion_foreach_array_generic_two_params() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6339,7 +6339,7 @@ async fn test_completion_foreach_array_generic_two_params() {
 async fn test_completion_foreach_param_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_param.php").unwrap();
+    let uri = Uri::parse("file:///foreach_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Task {\n",
@@ -6368,7 +6368,7 @@ async fn test_completion_foreach_param_annotation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("title")),
@@ -6381,7 +6381,7 @@ async fn test_completion_foreach_param_annotation() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6389,7 +6389,7 @@ async fn test_completion_foreach_param_annotation() {
 async fn test_completion_foreach_top_level_list_generic() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_toplevel.php").unwrap();
+    let uri = Uri::parse("file:///foreach_toplevel.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -6413,7 +6413,7 @@ async fn test_completion_foreach_top_level_list_generic() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("label")),
@@ -6426,7 +6426,7 @@ async fn test_completion_foreach_top_level_list_generic() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6447,7 +6447,7 @@ async fn test_completion_foreach_cross_file_list_generic() {
         )],
     );
 
-    let uri = Url::parse("file:///foreach_cross.php").unwrap();
+    let uri = Uri::parse("file:///foreach_cross.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Models\\Customer;\n",
@@ -6468,7 +6468,7 @@ async fn test_completion_foreach_cross_file_list_generic() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -6481,7 +6481,7 @@ async fn test_completion_foreach_cross_file_list_generic() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6489,7 +6489,7 @@ async fn test_completion_foreach_cross_file_list_generic() {
 async fn test_completion_foreach_array_generic_single_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_array_single.php").unwrap();
+    let uri = Uri::parse("file:///foreach_array_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Invoice {\n",
@@ -6516,7 +6516,7 @@ async fn test_completion_foreach_array_generic_single_param() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("number")),
@@ -6529,7 +6529,7 @@ async fn test_completion_foreach_array_generic_single_param() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6537,7 +6537,7 @@ async fn test_completion_foreach_array_generic_single_param() {
 async fn test_completion_foreach_scalar_list_no_completion() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_scalar.php").unwrap();
+    let uri = Uri::parse("file:///foreach_scalar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -6556,10 +6556,10 @@ async fn test_completion_foreach_scalar_list_no_completion() {
     let result = completion_response(&backend, &uri, 6, 17, None).await;
     // list<int> → int is a scalar, so no class completion should be offered.
     // The result might be None or an empty array.
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let method_items: Vec<_> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .collect();
         assert!(
             method_items.is_empty(),
@@ -6576,7 +6576,7 @@ async fn test_completion_array_access_list_generic() {
     // `$users[0]->` should suggest User members when $users is `list<User>`
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_access_list.php").unwrap();
+    let uri = Uri::parse("file:///array_access_list.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -6599,7 +6599,7 @@ async fn test_completion_array_access_list_generic() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -6612,7 +6612,7 @@ async fn test_completion_array_access_list_generic() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6621,7 +6621,7 @@ async fn test_completion_array_access_array_generic() {
     // `$admins[0]->` should suggest AdminUser members when $admins is `array<int, AdminUser>`
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_access_generic.php").unwrap();
+    let uri = Uri::parse("file:///array_access_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -6646,7 +6646,7 @@ async fn test_completion_array_access_array_generic() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("grantPermission")),
@@ -6659,7 +6659,7 @@ async fn test_completion_array_access_array_generic() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6668,7 +6668,7 @@ async fn test_completion_array_access_bracket_shorthand() {
     // `$members[0]->` should suggest User members when $members is `User[]`
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_access_shorthand.php").unwrap();
+    let uri = Uri::parse("file:///array_access_shorthand.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -6690,7 +6690,7 @@ async fn test_completion_array_access_bracket_shorthand() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -6703,7 +6703,7 @@ async fn test_completion_array_access_bracket_shorthand() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6712,7 +6712,7 @@ async fn test_completion_array_access_variable_key() {
     // `$admins[$key]->` should work the same as `$admins[0]->`
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_access_varkey.php").unwrap();
+    let uri = Uri::parse("file:///array_access_varkey.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AdminUser {\n",
@@ -6734,7 +6734,7 @@ async fn test_completion_array_access_variable_key() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("grantPermission")),
@@ -6742,7 +6742,7 @@ async fn test_completion_array_access_variable_key() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6751,7 +6751,7 @@ async fn test_completion_variable_assigned_from_array_access() {
     // `$admin = $admins[0]; $admin->` should suggest AdminUser members
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_from_array_access.php").unwrap();
+    let uri = Uri::parse("file:///var_from_array_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -6777,7 +6777,7 @@ async fn test_completion_variable_assigned_from_array_access() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("grantPermission")),
@@ -6790,7 +6790,7 @@ async fn test_completion_variable_assigned_from_array_access() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6799,7 +6799,7 @@ async fn test_completion_variable_assigned_from_list_array_access() {
     // `$user = $users[0]; $user->` with `list<User>` annotation
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_from_list_access.php").unwrap();
+    let uri = Uri::parse("file:///var_from_list_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -6822,7 +6822,7 @@ async fn test_completion_variable_assigned_from_list_array_access() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -6835,7 +6835,7 @@ async fn test_completion_variable_assigned_from_list_array_access() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6844,7 +6844,7 @@ async fn test_completion_array_access_inside_method() {
     // Array access inside a class method body
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_access_method.php").unwrap();
+    let uri = Uri::parse("file:///array_access_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -6869,7 +6869,7 @@ async fn test_completion_array_access_inside_method() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -6882,7 +6882,7 @@ async fn test_completion_array_access_inside_method() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6891,7 +6891,7 @@ async fn test_completion_variable_assigned_from_array_access_inside_method() {
     // `$admin = $admins[0]; $admin->` inside a method
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_array_access_method.php").unwrap();
+    let uri = Uri::parse("file:///var_array_access_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AdminUser {\n",
@@ -6916,7 +6916,7 @@ async fn test_completion_variable_assigned_from_array_access_inside_method() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("grantPermission")),
@@ -6924,7 +6924,7 @@ async fn test_completion_variable_assigned_from_array_access_inside_method() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -6933,7 +6933,7 @@ async fn test_completion_array_access_scalar_no_completion() {
     // `$items[0]->` should NOT suggest anything when $items is `int[]`
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_access_scalar.php").unwrap();
+    let uri = Uri::parse("file:///array_access_scalar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/** @var int[] $items */\n",
@@ -6947,14 +6947,14 @@ async fn test_completion_array_access_scalar_no_completion() {
     // Should not get class-member completions for a scalar element type
     if let Some(response) = result {
         let items = match response {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         let method_items: Vec<_> = items
             .iter()
             .filter(|i| {
-                i.kind == Some(CompletionItemKind::METHOD)
-                    || i.kind == Some(CompletionItemKind::PROPERTY)
+                i.kind == Some(CompletionItemKind::Method)
+                    || i.kind == Some(CompletionItemKind::Property)
             })
             .collect();
         assert!(
@@ -6976,7 +6976,7 @@ async fn test_completion_array_access_scalar_no_completion() {
 async fn test_completion_foreach_key_object_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_key_object.php").unwrap();
+    let uri = Uri::parse("file:///foreach_key_object.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Request {\n",
@@ -7006,7 +7006,7 @@ async fn test_completion_foreach_key_object_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("method")),
@@ -7019,7 +7019,7 @@ async fn test_completion_foreach_key_object_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7029,7 +7029,7 @@ async fn test_completion_foreach_key_object_type() {
 async fn test_completion_foreach_key_scalar_no_completions() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_key_scalar.php").unwrap();
+    let uri = Uri::parse("file:///foreach_key_scalar.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order { public int $id; }\n",
@@ -7046,14 +7046,14 @@ async fn test_completion_foreach_key_scalar_no_completions() {
     // Should not get class-member completions for a scalar key type (int)
     if let Some(response) = result {
         let items = match response {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         let method_items: Vec<_> = items
             .iter()
             .filter(|i| {
-                i.kind == Some(CompletionItemKind::METHOD)
-                    || i.kind == Some(CompletionItemKind::PROPERTY)
+                i.kind == Some(CompletionItemKind::Method)
+                    || i.kind == Some(CompletionItemKind::Property)
             })
             .collect();
         assert!(
@@ -7072,7 +7072,7 @@ async fn test_completion_foreach_key_scalar_no_completions() {
 async fn test_completion_foreach_key_custom_generic_collection() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_key_custom.php").unwrap();
+    let uri = Uri::parse("file:///foreach_key_custom.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -7102,7 +7102,7 @@ async fn test_completion_foreach_key_custom_generic_collection() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -7115,7 +7115,7 @@ async fn test_completion_foreach_key_custom_generic_collection() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7125,7 +7125,7 @@ async fn test_completion_foreach_key_custom_generic_collection() {
 async fn test_completion_foreach_key_from_param_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_key_param.php").unwrap();
+    let uri = Uri::parse("file:///foreach_key_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -7157,7 +7157,7 @@ async fn test_completion_foreach_key_from_param_annotation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("label")),
@@ -7170,7 +7170,7 @@ async fn test_completion_foreach_key_from_param_annotation() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7180,7 +7180,7 @@ async fn test_completion_foreach_key_from_param_annotation() {
 async fn test_completion_foreach_value_still_works_without_key() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_no_key.php").unwrap();
+    let uri = Uri::parse("file:///foreach_no_key.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item { public string $name; }\n",
@@ -7200,7 +7200,7 @@ async fn test_completion_foreach_value_still_works_without_key() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -7208,7 +7208,7 @@ async fn test_completion_foreach_value_still_works_without_key() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7220,7 +7220,7 @@ async fn test_completion_foreach_value_still_works_without_key() {
 async fn test_completion_destructuring_short_syntax_function_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_short_func.php").unwrap();
+    let uri = Uri::parse("file:///destruct_short_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -7245,7 +7245,7 @@ async fn test_completion_destructuring_short_syntax_function_call() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -7258,7 +7258,7 @@ async fn test_completion_destructuring_short_syntax_function_call() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7268,7 +7268,7 @@ async fn test_completion_destructuring_short_syntax_function_call() {
 async fn test_completion_destructuring_list_syntax_function_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_list_func.php").unwrap();
+    let uri = Uri::parse("file:///destruct_list_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -7293,7 +7293,7 @@ async fn test_completion_destructuring_list_syntax_function_call() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("id")),
@@ -7306,7 +7306,7 @@ async fn test_completion_destructuring_list_syntax_function_call() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7316,7 +7316,7 @@ async fn test_completion_destructuring_list_syntax_function_call() {
 async fn test_completion_destructuring_variable_rhs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_var.php").unwrap();
+    let uri = Uri::parse("file:///destruct_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Task {\n",
@@ -7339,7 +7339,7 @@ async fn test_completion_destructuring_variable_rhs() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("title")),
@@ -7352,7 +7352,7 @@ async fn test_completion_destructuring_variable_rhs() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7362,7 +7362,7 @@ async fn test_completion_destructuring_variable_rhs() {
 async fn test_completion_destructuring_method_call_rhs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_method.php").unwrap();
+    let uri = Uri::parse("file:///destruct_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -7389,7 +7389,7 @@ async fn test_completion_destructuring_method_call_rhs() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("sku")),
@@ -7402,7 +7402,7 @@ async fn test_completion_destructuring_method_call_rhs() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7412,7 +7412,7 @@ async fn test_completion_destructuring_method_call_rhs() {
 async fn test_completion_destructuring_static_method_call_rhs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_static.php").unwrap();
+    let uri = Uri::parse("file:///destruct_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -7437,7 +7437,7 @@ async fn test_completion_destructuring_static_method_call_rhs() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("species")),
@@ -7450,7 +7450,7 @@ async fn test_completion_destructuring_static_method_call_rhs() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7460,7 +7460,7 @@ async fn test_completion_destructuring_static_method_call_rhs() {
 async fn test_completion_destructuring_inline_var_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_inline_var.php").unwrap();
+    let uri = Uri::parse("file:///destruct_inline_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -7482,7 +7482,7 @@ async fn test_completion_destructuring_inline_var_annotation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("email")),
@@ -7495,7 +7495,7 @@ async fn test_completion_destructuring_inline_var_annotation() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7505,7 +7505,7 @@ async fn test_completion_destructuring_inline_var_annotation() {
 async fn test_completion_destructuring_property_rhs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_prop.php").unwrap();
+    let uri = Uri::parse("file:///destruct_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -7532,7 +7532,7 @@ async fn test_completion_destructuring_property_rhs() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("label")),
@@ -7545,7 +7545,7 @@ async fn test_completion_destructuring_property_rhs() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7555,7 +7555,7 @@ async fn test_completion_destructuring_property_rhs() {
 async fn test_completion_destructuring_unrelated_variable_not_affected() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_unrelated.php").unwrap();
+    let uri = Uri::parse("file:///destruct_unrelated.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Gadget { public string $code; }\n",
@@ -7575,8 +7575,8 @@ async fn test_completion_destructuring_unrelated_variable_not_affected() {
     // get Gadget completions.
     if let Some(response) = result {
         let items = match response {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
         };
         let gadget_items: Vec<_> = items
             .iter()
@@ -7596,7 +7596,7 @@ async fn test_completion_destructuring_unrelated_variable_not_affected() {
 async fn test_completion_destructuring_second_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_second.php").unwrap();
+    let uri = Uri::parse("file:///destruct_second.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Fruit {\n",
@@ -7621,7 +7621,7 @@ async fn test_completion_destructuring_second_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("color")),
@@ -7634,7 +7634,7 @@ async fn test_completion_destructuring_second_variable() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7643,7 +7643,7 @@ async fn test_completion_destructuring_second_variable() {
 async fn test_completion_destructuring_from_param_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_param.php").unwrap();
+    let uri = Uri::parse("file:///destruct_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Ticket {\n",
@@ -7671,7 +7671,7 @@ async fn test_completion_destructuring_from_param_annotation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("seat")),
@@ -7684,7 +7684,7 @@ async fn test_completion_destructuring_from_param_annotation() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7692,7 +7692,7 @@ async fn test_completion_destructuring_from_param_annotation() {
 async fn test_completion_catch_variable_single_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///catch_single.php").unwrap();
+    let uri = Uri::parse("file:///catch_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ValidationException {\n",
@@ -7719,7 +7719,7 @@ async fn test_completion_catch_variable_single_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getErrors")),
@@ -7732,7 +7732,7 @@ async fn test_completion_catch_variable_single_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7740,7 +7740,7 @@ async fn test_completion_catch_variable_single_type() {
 async fn test_completion_catch_variable_multi_catch_union() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///catch_multi.php").unwrap();
+    let uri = Uri::parse("file:///catch_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class HttpException {\n",
@@ -7769,7 +7769,7 @@ async fn test_completion_catch_variable_multi_catch_union() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getStatusCode")),
@@ -7782,7 +7782,7 @@ async fn test_completion_catch_variable_multi_catch_union() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7803,7 +7803,7 @@ async fn test_completion_catch_variable_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///catch_cross.php").unwrap();
+    let uri = Uri::parse("file:///catch_cross.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -7827,7 +7827,7 @@ async fn test_completion_catch_variable_cross_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getQuery")),
@@ -7840,7 +7840,7 @@ async fn test_completion_catch_variable_cross_file() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7868,7 +7868,7 @@ async fn test_completion_catch_variable_cross_file_global_parent_via_use() {
         )],
     );
 
-    let uri = Url::parse("file:///catch_cross_global.php").unwrap();
+    let uri = Uri::parse("file:///catch_cross_global.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Console;\n",
@@ -7896,7 +7896,7 @@ async fn test_completion_catch_variable_cross_file_global_parent_via_use() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getMessage")),
@@ -7909,7 +7909,7 @@ async fn test_completion_catch_variable_cross_file_global_parent_via_use() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7917,7 +7917,7 @@ async fn test_completion_catch_variable_cross_file_global_parent_via_use() {
 async fn test_completion_catch_variable_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///catch_top.php").unwrap();
+    let uri = Uri::parse("file:///catch_top.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class RuntimeError {\n",
@@ -7939,7 +7939,7 @@ async fn test_completion_catch_variable_top_level() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getMessage")),
@@ -7947,7 +7947,7 @@ async fn test_completion_catch_variable_top_level() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -7957,7 +7957,7 @@ async fn test_completion_catch_variable_no_own_methods_no_namespace() {
     // whether the bug is namespace-specific or inheritance-specific.
     let backend = create_test_backend_with_exception_stubs();
 
-    let uri = Url::parse("file:///catch_bare_no_ns.php").unwrap();
+    let uri = Uri::parse("file:///catch_bare_no_ns.php").unwrap();
     let text = concat!(
         "<?php\n",
         "\n",
@@ -7987,7 +7987,7 @@ async fn test_completion_catch_variable_no_own_methods_no_namespace() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
             assert!(
@@ -7996,7 +7996,7 @@ async fn test_completion_catch_variable_no_own_methods_no_namespace() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8007,7 +8007,7 @@ async fn test_completion_catch_variable_namespace_no_own_methods() {
     // resolve via inheritance.
     let backend = create_test_backend_with_exception_stubs();
 
-    let uri = Url::parse("file:///catch_ns_bare.php").unwrap();
+    let uri = Uri::parse("file:///catch_ns_bare.php").unwrap();
     let text = concat!(
         "<?php\n",
         "\n",
@@ -8038,7 +8038,7 @@ async fn test_completion_catch_variable_namespace_no_own_methods() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             // ValidationException extends \RuntimeException which has
             // getMessage(), getCode(), etc. — these should appear via
             // inheritance even though the class has no own members.
@@ -8055,7 +8055,7 @@ async fn test_completion_catch_variable_namespace_no_own_methods() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8063,7 +8063,7 @@ async fn test_completion_catch_variable_namespace_no_own_methods() {
 async fn test_completion_catch_variable_with_namespace() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///catch_ns.php").unwrap();
+    let uri = Uri::parse("file:///catch_ns.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo;\n",
@@ -8091,7 +8091,7 @@ async fn test_completion_catch_variable_with_namespace() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getErrors")),
@@ -8099,7 +8099,7 @@ async fn test_completion_catch_variable_with_namespace() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8109,7 +8109,7 @@ async fn test_completion_catch_variable_with_namespace() {
 async fn test_completion_clone_new_instance() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///clone_new.php").unwrap();
+    let uri = Uri::parse("file:///clone_new.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -8134,10 +8134,10 @@ async fn test_completion_clone_new_instance() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -8151,7 +8151,7 @@ async fn test_completion_clone_new_instance() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8159,7 +8159,7 @@ async fn test_completion_clone_new_instance() {
 async fn test_completion_clone_parameter() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///clone_param.php").unwrap();
+    let uri = Uri::parse("file:///clone_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Invoice {\n",
@@ -8183,10 +8183,10 @@ async fn test_completion_clone_parameter() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -8200,7 +8200,7 @@ async fn test_completion_clone_parameter() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8208,7 +8208,7 @@ async fn test_completion_clone_parameter() {
 async fn test_completion_clone_this() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///clone_this.php").unwrap();
+    let uri = Uri::parse("file:///clone_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Immutable {\n",
@@ -8230,10 +8230,10 @@ async fn test_completion_clone_this() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -8247,7 +8247,7 @@ async fn test_completion_clone_this() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8255,7 +8255,7 @@ async fn test_completion_clone_this() {
 async fn test_completion_clone_method_return() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///clone_method.php").unwrap();
+    let uri = Uri::parse("file:///clone_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -8280,10 +8280,10 @@ async fn test_completion_clone_method_return() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -8297,7 +8297,7 @@ async fn test_completion_clone_method_return() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8305,7 +8305,7 @@ async fn test_completion_clone_method_return() {
 async fn test_completion_clone_in_ternary() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///clone_ternary.php").unwrap();
+    let uri = Uri::parse("file:///clone_ternary.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Settings {\n",
@@ -8329,10 +8329,10 @@ async fn test_completion_clone_in_ternary() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -8346,7 +8346,7 @@ async fn test_completion_clone_in_ternary() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8389,7 +8389,7 @@ async fn test_completion_clone_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///src/Service.php").unwrap();
+    let uri = Uri::parse("file:///src/Service.php").unwrap();
     open_php(&backend, &uri, service_php).await;
 
     let result = completion_response(&backend, &uri, 6, 20, None).await;
@@ -8399,10 +8399,10 @@ async fn test_completion_clone_cross_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -8416,7 +8416,7 @@ async fn test_completion_clone_cross_file() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8426,7 +8426,7 @@ async fn test_completion_clone_cross_file() {
 async fn test_completion_clone_inline_parenthesized() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///clone_inline.php").unwrap();
+    let uri = Uri::parse("file:///clone_inline.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class DateRange {\n",
@@ -8449,10 +8449,10 @@ async fn test_completion_clone_inline_parenthesized() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -8466,7 +8466,7 @@ async fn test_completion_clone_inline_parenthesized() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8477,7 +8477,7 @@ async fn test_completion_clone_inline_parenthesized() {
 async fn test_completion_foreach_method_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_method.php").unwrap();
+    let uri = Uri::parse("file:///foreach_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -8504,7 +8504,7 @@ async fn test_completion_foreach_method_call() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -8517,7 +8517,7 @@ async fn test_completion_foreach_method_call() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8526,7 +8526,7 @@ async fn test_completion_foreach_method_call() {
 async fn test_completion_foreach_property_access() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_prop.php").unwrap();
+    let uri = Uri::parse("file:///foreach_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -8553,7 +8553,7 @@ async fn test_completion_foreach_property_access() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -8566,7 +8566,7 @@ async fn test_completion_foreach_property_access() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8575,7 +8575,7 @@ async fn test_completion_foreach_property_access() {
 async fn test_completion_foreach_static_method_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_static.php").unwrap();
+    let uri = Uri::parse("file:///foreach_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -8604,7 +8604,7 @@ async fn test_completion_foreach_static_method_call() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -8617,7 +8617,7 @@ async fn test_completion_foreach_static_method_call() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8626,7 +8626,7 @@ async fn test_completion_foreach_static_method_call() {
 async fn test_completion_foreach_self_static_call() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_self.php").unwrap();
+    let uri = Uri::parse("file:///foreach_self.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -8652,7 +8652,7 @@ async fn test_completion_foreach_self_static_call() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -8660,7 +8660,7 @@ async fn test_completion_foreach_self_static_call() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8669,7 +8669,7 @@ async fn test_completion_foreach_self_static_call() {
 async fn test_completion_foreach_method_call_key_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_method_key.php").unwrap();
+    let uri = Uri::parse("file:///foreach_method_key.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Request {\n",
@@ -8698,7 +8698,7 @@ async fn test_completion_foreach_method_call_key_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("url")),
@@ -8706,7 +8706,7 @@ async fn test_completion_foreach_method_call_key_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8715,7 +8715,7 @@ async fn test_completion_foreach_method_call_key_type() {
 async fn test_completion_foreach_method_call_on_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_var_method.php").unwrap();
+    let uri = Uri::parse("file:///foreach_var_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -8744,7 +8744,7 @@ async fn test_completion_foreach_method_call_on_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("label")),
@@ -8752,7 +8752,7 @@ async fn test_completion_foreach_method_call_on_variable() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8787,7 +8787,7 @@ async fn test_completion_foreach_method_call_cross_file() {
     );
 
     let service_path = _dir.path().join("src/Services/UserService.php");
-    let uri = Url::from_file_path(&service_path).unwrap();
+    let uri = Uri::from_file_path(&service_path).unwrap();
     let text = std::fs::read_to_string(&service_path).unwrap();
 
     open_php(&backend, &uri, &text).await;
@@ -8799,7 +8799,7 @@ async fn test_completion_foreach_method_call_cross_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -8812,7 +8812,7 @@ async fn test_completion_foreach_method_call_cross_file() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8821,7 +8821,7 @@ async fn test_completion_foreach_method_call_cross_file() {
 async fn test_completion_foreach_property_access_on_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_var_prop.php").unwrap();
+    let uri = Uri::parse("file:///foreach_var_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -8850,7 +8850,7 @@ async fn test_completion_foreach_property_access_on_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("label")),
@@ -8858,7 +8858,7 @@ async fn test_completion_foreach_property_access_on_variable() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8867,7 +8867,7 @@ async fn test_completion_foreach_property_access_on_variable() {
 async fn test_completion_foreach_method_call_array_shorthand() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_shorthand.php").unwrap();
+    let uri = Uri::parse("file:///foreach_shorthand.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -8893,7 +8893,7 @@ async fn test_completion_foreach_method_call_array_shorthand() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -8901,7 +8901,7 @@ async fn test_completion_foreach_method_call_array_shorthand() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8912,7 +8912,7 @@ async fn test_chained_method_call_this_method_chain() {
     // $this->getRepository()->find(1) — method chain on $this
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_test.php").unwrap();
+    let uri = Uri::parse("file:///chain_test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Repository {\n",
@@ -8943,7 +8943,7 @@ async fn test_chained_method_call_this_method_chain() {
         "Should return completions for chained $this->method()->method() in assignment RHS"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getName")),
@@ -8956,7 +8956,7 @@ async fn test_chained_method_call_this_method_chain() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -8966,7 +8966,7 @@ async fn test_chained_method_call_function_then_method() {
     // then a method call on the result.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_func.php").unwrap();
+    let uri = Uri::parse("file:///chain_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -8994,7 +8994,7 @@ async fn test_chained_method_call_function_then_method() {
         "Should return completions for function()->method() chain in assignment RHS"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("render")),
@@ -9002,7 +9002,7 @@ async fn test_chained_method_call_function_then_method() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9012,7 +9012,7 @@ async fn test_chained_method_call_variable_method_chain() {
     // prior assignment, then chained methods.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_var.php").unwrap();
+    let uri = Uri::parse("file:///chain_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Model {\n",
@@ -9046,7 +9046,7 @@ async fn test_chained_method_call_variable_method_chain() {
         "Should return completions for $var->method()->method() chain in assignment RHS"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("save")),
@@ -9059,7 +9059,7 @@ async fn test_chained_method_call_variable_method_chain() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9068,7 +9068,7 @@ async fn test_chained_method_call_static_then_method() {
     // Factory::create()->process() — static method chain
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_static.php").unwrap();
+    let uri = Uri::parse("file:///chain_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Processor {\n",
@@ -9096,7 +9096,7 @@ async fn test_chained_method_call_static_then_method() {
         "Should return completions for Static::method()->method() chain in assignment RHS"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getOutput")),
@@ -9104,7 +9104,7 @@ async fn test_chained_method_call_static_then_method() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9113,7 +9113,7 @@ async fn test_chained_method_call_triple_chain() {
     // $this->a()->b()->c() — three-deep chain
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_triple.php").unwrap();
+    let uri = Uri::parse("file:///chain_triple.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -9145,7 +9145,7 @@ async fn test_chained_method_call_triple_chain() {
         "Should return completions for triple-deep method chain in assignment RHS"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("doSomething")),
@@ -9158,7 +9158,7 @@ async fn test_chained_method_call_triple_chain() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9167,7 +9167,7 @@ async fn test_chained_method_call_new_then_method() {
     // (new Builder())->build() — parenthesized new then method chain
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_new.php").unwrap();
+    let uri = Uri::parse("file:///chain_new.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -9192,7 +9192,7 @@ async fn test_chained_method_call_new_then_method() {
         "Should return completions for (new Class())->method() chain in assignment RHS"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("ship")),
@@ -9205,7 +9205,7 @@ async fn test_chained_method_call_new_then_method() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9214,7 +9214,7 @@ async fn test_chained_method_call_new_then_method_inside_class() {
     // (new Builder())->build() inside a class method
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_new_class.php").unwrap();
+    let uri = Uri::parse("file:///chain_new_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -9243,7 +9243,7 @@ async fn test_chained_method_call_new_then_method_inside_class() {
         "Should return completions for (new Class())->method() inside class method"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("ship")),
@@ -9251,7 +9251,7 @@ async fn test_chained_method_call_new_then_method_inside_class() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9260,7 +9260,7 @@ async fn test_chained_method_call_new_no_parens_then_method() {
     // new Builder()->build() — PHP 8.x style without outer parens
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_new_no_parens.php").unwrap();
+    let uri = Uri::parse("file:///chain_new_no_parens.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -9288,7 +9288,7 @@ async fn test_chained_method_call_new_no_parens_then_method() {
     let result = completion_response(&backend, &uri, 12, 17, None).await;
     // This may or may not resolve depending on how the parser interprets it.
     // We mainly want to ensure no panic / crash.
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         // If it resolves, it should show Product members
         if !labels.is_empty() {
@@ -9309,7 +9309,7 @@ async fn test_chained_method_call_extract_raw_type_chain() {
     // $items[0]->
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_array_access.php").unwrap();
+    let uri = Uri::parse("file:///chain_array_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -9340,7 +9340,7 @@ async fn test_chained_method_call_extract_raw_type_chain() {
         "Should return completions for array element after chained call assignment"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getName")),
@@ -9348,7 +9348,7 @@ async fn test_chained_method_call_extract_raw_type_chain() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9361,7 +9361,7 @@ async fn test_chained_method_call_extract_raw_type_chain() {
 async fn test_array_access_multiline_new_expression_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multiline_array_access.php").unwrap();
+    let uri = Uri::parse("file:///multiline_array_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class UseFactory {\n",
@@ -9393,7 +9393,7 @@ async fn test_array_access_multiline_new_expression_chain() {
         "Should return completions for array element from multi-line new expression chain"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("newInstance")),
@@ -9406,7 +9406,7 @@ async fn test_array_access_multiline_new_expression_chain() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9418,7 +9418,7 @@ async fn test_array_access_multiline_new_expression_chain() {
 async fn test_array_access_property_method_call_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///prop_array_access.php").unwrap();
+    let uri = Uri::parse("file:///prop_array_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -9450,7 +9450,7 @@ async fn test_array_access_property_method_call_assignment() {
         "Should return completions for $items[0]-> after $this->repo->findAll()"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getTitle")),
@@ -9463,7 +9463,7 @@ async fn test_array_access_property_method_call_assignment() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9474,7 +9474,7 @@ async fn test_array_access_property_method_call_assignment() {
 async fn test_array_access_intermediate_assignment_ast_path() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ast_array_access.php").unwrap();
+    let uri = Uri::parse("file:///ast_array_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -9503,7 +9503,7 @@ async fn test_array_access_intermediate_assignment_ast_path() {
         "Should return completions for $first after $first = $orders[0]"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getId")),
@@ -9516,7 +9516,7 @@ async fn test_array_access_intermediate_assignment_ast_path() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9526,7 +9526,7 @@ async fn test_array_access_intermediate_assignment_ast_path() {
 async fn test_array_access_intermediate_assignment_generic_syntax() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///ast_array_access_generic.php").unwrap();
+    let uri = Uri::parse("file:///ast_array_access_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Task {\n",
@@ -9555,7 +9555,7 @@ async fn test_array_access_intermediate_assignment_generic_syntax() {
         "Should return completions for $task after $task = $tasks[0] with generic return type"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("run")),
@@ -9568,7 +9568,7 @@ async fn test_array_access_intermediate_assignment_generic_syntax() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9580,7 +9580,7 @@ async fn test_array_access_intermediate_assignment_generic_syntax() {
 async fn test_completion_destructuring_named_key_from_array_shape_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_shape_var.php").unwrap();
+    let uri = Uri::parse("file:///destruct_shape_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -9603,7 +9603,7 @@ async fn test_completion_destructuring_named_key_from_array_shape_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -9616,7 +9616,7 @@ async fn test_completion_destructuring_named_key_from_array_shape_variable() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9626,7 +9626,7 @@ async fn test_completion_destructuring_named_key_from_array_shape_variable() {
 async fn test_completion_destructuring_named_key_from_function_return_shape() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_shape_func.php").unwrap();
+    let uri = Uri::parse("file:///destruct_shape_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -9651,7 +9651,7 @@ async fn test_completion_destructuring_named_key_from_function_return_shape() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("id")),
@@ -9664,7 +9664,7 @@ async fn test_completion_destructuring_named_key_from_function_return_shape() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9675,7 +9675,7 @@ async fn test_completion_destructuring_named_key_from_function_return_shape() {
 async fn test_completion_destructuring_positional_from_array_shape() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_shape_pos.php").unwrap();
+    let uri = Uri::parse("file:///destruct_shape_pos.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -9700,7 +9700,7 @@ async fn test_completion_destructuring_positional_from_array_shape() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -9714,7 +9714,7 @@ async fn test_completion_destructuring_positional_from_array_shape() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9724,7 +9724,7 @@ async fn test_completion_destructuring_positional_from_array_shape() {
 async fn test_completion_destructuring_numeric_key_from_array_shape() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_shape_numkey.php").unwrap();
+    let uri = Uri::parse("file:///destruct_shape_numkey.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -9749,7 +9749,7 @@ async fn test_completion_destructuring_numeric_key_from_array_shape() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("sku")),
@@ -9757,7 +9757,7 @@ async fn test_completion_destructuring_numeric_key_from_array_shape() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9767,7 +9767,7 @@ async fn test_completion_destructuring_numeric_key_from_array_shape() {
 async fn test_completion_destructuring_named_key_method_return_shape() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_shape_method.php").unwrap();
+    let uri = Uri::parse("file:///destruct_shape_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -9796,7 +9796,7 @@ async fn test_completion_destructuring_named_key_method_return_shape() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("email")),
@@ -9809,7 +9809,7 @@ async fn test_completion_destructuring_named_key_method_return_shape() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9819,7 +9819,7 @@ async fn test_completion_destructuring_named_key_method_return_shape() {
 async fn test_completion_destructuring_named_key_inline_var_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_shape_inline.php").unwrap();
+    let uri = Uri::parse("file:///destruct_shape_inline.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -9841,7 +9841,7 @@ async fn test_completion_destructuring_named_key_inline_var_annotation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("label")),
@@ -9854,7 +9854,7 @@ async fn test_completion_destructuring_named_key_inline_var_annotation() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9864,7 +9864,7 @@ async fn test_completion_destructuring_named_key_inline_var_annotation() {
 async fn test_completion_destructuring_double_quoted_key_from_array_shape() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_shape_dblquote.php").unwrap();
+    let uri = Uri::parse("file:///destruct_shape_dblquote.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -9886,7 +9886,7 @@ async fn test_completion_destructuring_double_quoted_key_from_array_shape() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("species")),
@@ -9894,7 +9894,7 @@ async fn test_completion_destructuring_double_quoted_key_from_array_shape() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9904,7 +9904,7 @@ async fn test_completion_destructuring_double_quoted_key_from_array_shape() {
 async fn test_completion_destructuring_generic_list_still_works() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_generic_guard.php").unwrap();
+    let uri = Uri::parse("file:///destruct_generic_guard.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Gadget {\n",
@@ -9928,7 +9928,7 @@ async fn test_completion_destructuring_generic_list_still_works() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("code")),
@@ -9936,7 +9936,7 @@ async fn test_completion_destructuring_generic_list_still_works() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9945,7 +9945,7 @@ async fn test_completion_destructuring_generic_list_still_works() {
 async fn test_completion_destructuring_list_syntax_named_key_shape() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///destruct_shape_list.php").unwrap();
+    let uri = Uri::parse("file:///destruct_shape_list.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Ticket {\n",
@@ -9968,7 +9968,7 @@ async fn test_completion_destructuring_list_syntax_named_key_shape() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("seat")),
@@ -9981,7 +9981,7 @@ async fn test_completion_destructuring_list_syntax_named_key_shape() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -9993,7 +9993,7 @@ async fn test_completion_destructuring_list_syntax_named_key_shape() {
 async fn test_completion_array_filter_preserves_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_filter.php").unwrap();
+    let uri = Uri::parse("file:///array_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10016,7 +10016,7 @@ async fn test_completion_array_filter_preserves_element_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10029,7 +10029,7 @@ async fn test_completion_array_filter_preserves_element_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10039,7 +10039,7 @@ async fn test_completion_array_filter_preserves_element_type() {
 async fn test_completion_array_values_preserves_element_type() {
     let backend = create_test_backend_with_full_stubs();
 
-    let uri = Url::parse("file:///array_values.php").unwrap();
+    let uri = Uri::parse("file:///array_values.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Product {\n",
@@ -10061,7 +10061,7 @@ async fn test_completion_array_values_preserves_element_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("sku")),
@@ -10074,7 +10074,7 @@ async fn test_completion_array_values_preserves_element_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10083,7 +10083,7 @@ async fn test_completion_array_values_preserves_element_type() {
 async fn test_completion_array_unique_preserves_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_unique.php").unwrap();
+    let uri = Uri::parse("file:///array_unique.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Tag {\n",
@@ -10104,7 +10104,7 @@ async fn test_completion_array_unique_preserves_element_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("label")),
@@ -10112,7 +10112,7 @@ async fn test_completion_array_unique_preserves_element_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10121,7 +10121,7 @@ async fn test_completion_array_unique_preserves_element_type() {
 async fn test_completion_array_reverse_preserves_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_reverse.php").unwrap();
+    let uri = Uri::parse("file:///array_reverse.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Step {\n",
@@ -10142,7 +10142,7 @@ async fn test_completion_array_reverse_preserves_element_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("order")),
@@ -10150,7 +10150,7 @@ async fn test_completion_array_reverse_preserves_element_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10160,7 +10160,7 @@ async fn test_completion_array_reverse_preserves_element_type() {
 async fn test_completion_array_pop_extracts_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_pop.php").unwrap();
+    let uri = Uri::parse("file:///array_pop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10183,7 +10183,7 @@ async fn test_completion_array_pop_extracts_element_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10196,7 +10196,7 @@ async fn test_completion_array_pop_extracts_element_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10205,7 +10205,7 @@ async fn test_completion_array_pop_extracts_element_type() {
 async fn test_completion_array_shift_extracts_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_shift.php").unwrap();
+    let uri = Uri::parse("file:///array_shift.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -10227,7 +10227,7 @@ async fn test_completion_array_shift_extracts_element_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("id")),
@@ -10240,7 +10240,7 @@ async fn test_completion_array_shift_extracts_element_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10249,7 +10249,7 @@ async fn test_completion_array_shift_extracts_element_type() {
 async fn test_completion_current_extracts_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///current.php").unwrap();
+    let uri = Uri::parse("file:///current.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -10270,7 +10270,7 @@ async fn test_completion_current_extracts_element_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("label")),
@@ -10278,7 +10278,7 @@ async fn test_completion_current_extracts_element_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10287,7 +10287,7 @@ async fn test_completion_current_extracts_element_type() {
 async fn test_completion_foreach_over_array_filter() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_filter.php").unwrap();
+    let uri = Uri::parse("file:///foreach_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10311,7 +10311,7 @@ async fn test_completion_foreach_over_array_filter() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10324,7 +10324,7 @@ async fn test_completion_foreach_over_array_filter() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10336,7 +10336,7 @@ async fn test_completion_foreach_over_array_filter() {
 async fn test_completion_array_map_fallback_to_input_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_map_fallback.php").unwrap();
+    let uri = Uri::parse("file:///array_map_fallback.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10358,7 +10358,7 @@ async fn test_completion_array_map_fallback_to_input_element_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10366,7 +10366,7 @@ async fn test_completion_array_map_fallback_to_input_element_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10376,7 +10376,7 @@ async fn test_completion_array_map_fallback_to_input_element_type() {
 async fn test_completion_destructuring_from_array_values() {
     let backend = create_test_backend_with_full_stubs();
 
-    let uri = Url::parse("file:///destruct_array_values.php").unwrap();
+    let uri = Uri::parse("file:///destruct_array_values.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Customer {\n",
@@ -10399,7 +10399,7 @@ async fn test_completion_destructuring_from_array_values() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("email")),
@@ -10412,7 +10412,7 @@ async fn test_completion_destructuring_from_array_values() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10421,7 +10421,7 @@ async fn test_completion_destructuring_from_array_values() {
 async fn test_completion_end_extracts_element_type_bracket_shorthand() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///end_bracket.php").unwrap();
+    let uri = Uri::parse("file:///end_bracket.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Task {\n",
@@ -10443,7 +10443,7 @@ async fn test_completion_end_extracts_element_type_bracket_shorthand() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("title")),
@@ -10456,7 +10456,7 @@ async fn test_completion_end_extracts_element_type_bracket_shorthand() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10465,7 +10465,7 @@ async fn test_completion_end_extracts_element_type_bracket_shorthand() {
 async fn test_completion_reset_extracts_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///reset.php").unwrap();
+    let uri = Uri::parse("file:///reset.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Gadget {\n",
@@ -10486,7 +10486,7 @@ async fn test_completion_reset_extracts_element_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("code")),
@@ -10494,7 +10494,7 @@ async fn test_completion_reset_extracts_element_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10504,7 +10504,7 @@ async fn test_completion_reset_extracts_element_type() {
 async fn test_completion_array_filter_from_param_annotation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_func_param.php").unwrap();
+    let uri = Uri::parse("file:///array_func_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10532,7 +10532,7 @@ async fn test_completion_array_filter_from_param_annotation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10545,7 +10545,7 @@ async fn test_completion_array_filter_from_param_annotation() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10554,7 +10554,7 @@ async fn test_completion_array_filter_from_param_annotation() {
 async fn test_completion_array_slice_preserves_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///array_slice.php").unwrap();
+    let uri = Uri::parse("file:///array_slice.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -10575,7 +10575,7 @@ async fn test_completion_array_slice_preserves_element_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("desc")),
@@ -10583,7 +10583,7 @@ async fn test_completion_array_slice_preserves_element_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10593,7 +10593,7 @@ async fn test_completion_array_slice_preserves_element_type() {
 async fn test_completion_array_filter_this_property_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///af_this_prop.php").unwrap();
+    let uri = Uri::parse("file:///af_this_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10620,7 +10620,7 @@ async fn test_completion_array_filter_this_property_arg() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10633,7 +10633,7 @@ async fn test_completion_array_filter_this_property_arg() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10643,7 +10643,7 @@ async fn test_completion_array_filter_this_property_arg() {
 async fn test_completion_array_values_this_property_arg() {
     let backend = create_test_backend_with_full_stubs();
 
-    let uri = Url::parse("file:///av_this_prop.php").unwrap();
+    let uri = Uri::parse("file:///av_this_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10670,7 +10670,7 @@ async fn test_completion_array_values_this_property_arg() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10678,7 +10678,7 @@ async fn test_completion_array_values_this_property_arg() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10688,7 +10688,7 @@ async fn test_completion_array_values_this_property_arg() {
 async fn test_completion_current_this_property_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///cur_this_prop.php").unwrap();
+    let uri = Uri::parse("file:///cur_this_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10715,7 +10715,7 @@ async fn test_completion_current_this_property_arg() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10728,7 +10728,7 @@ async fn test_completion_current_this_property_arg() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10738,7 +10738,7 @@ async fn test_completion_current_this_property_arg() {
 async fn test_completion_array_pop_method_assigned_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///pop_method_var.php").unwrap();
+    let uri = Uri::parse("file:///pop_method_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10766,7 +10766,7 @@ async fn test_completion_array_pop_method_assigned_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10779,7 +10779,7 @@ async fn test_completion_array_pop_method_assigned_variable() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10789,7 +10789,7 @@ async fn test_completion_array_pop_method_assigned_variable() {
 async fn test_completion_array_shift_method_assigned_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///shift_method_var.php").unwrap();
+    let uri = Uri::parse("file:///shift_method_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10817,7 +10817,7 @@ async fn test_completion_array_shift_method_assigned_variable() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10830,7 +10830,7 @@ async fn test_completion_array_shift_method_assigned_variable() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10840,7 +10840,7 @@ async fn test_completion_array_shift_method_assigned_variable() {
 async fn test_completion_array_map_this_property_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///map_this_prop.php").unwrap();
+    let uri = Uri::parse("file:///map_this_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10867,7 +10867,7 @@ async fn test_completion_array_map_this_property_arg() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10875,7 +10875,7 @@ async fn test_completion_array_map_this_property_arg() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10885,7 +10885,7 @@ async fn test_completion_array_map_this_property_arg() {
 async fn test_completion_foreach_array_filter_this_property_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_filter_this.php").unwrap();
+    let uri = Uri::parse("file:///foreach_filter_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -10913,7 +10913,7 @@ async fn test_completion_foreach_array_filter_this_property_arg() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -10926,7 +10926,7 @@ async fn test_completion_foreach_array_filter_this_property_arg() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10936,7 +10936,7 @@ async fn test_completion_foreach_array_filter_this_property_arg() {
 async fn test_completion_variable_property_access_text_path() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_prop_access.php").unwrap();
+    let uri = Uri::parse("file:///var_prop_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Address {\n",
@@ -10962,7 +10962,7 @@ async fn test_completion_variable_property_access_text_path() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("city")),
@@ -10975,7 +10975,7 @@ async fn test_completion_variable_property_access_text_path() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -10984,7 +10984,7 @@ async fn test_completion_variable_property_access_text_path() {
 async fn test_completion_variable_property_access_from_this() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_prop_from_this.php").unwrap();
+    let uri = Uri::parse("file:///var_prop_from_this.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Engine {\n",
@@ -11011,7 +11011,7 @@ async fn test_completion_variable_property_access_from_this() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("horsepower")),
@@ -11024,7 +11024,7 @@ async fn test_completion_variable_property_access_from_this() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11034,7 +11034,7 @@ async fn test_completion_variable_property_access_from_this() {
 async fn test_completion_variable_property_access_chained_assignments() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_prop_chain.php").unwrap();
+    let uri = Uri::parse("file:///var_prop_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Wheel {\n",
@@ -11063,7 +11063,7 @@ async fn test_completion_variable_property_access_chained_assignments() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("brand")),
@@ -11076,7 +11076,7 @@ async fn test_completion_variable_property_access_chained_assignments() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11117,7 +11117,7 @@ async fn test_completion_variable_property_access_cross_file() {
     );
 
     let cust_path = _dir.path().join("src/Models/Customer.php");
-    let uri = Url::from_file_path(&cust_path).unwrap();
+    let uri = Uri::from_file_path(&cust_path).unwrap();
     let text = std::fs::read_to_string(&cust_path).unwrap();
 
     open_php(&backend, &uri, &text).await;
@@ -11129,7 +11129,7 @@ async fn test_completion_variable_property_access_cross_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("street")),
@@ -11142,7 +11142,7 @@ async fn test_completion_variable_property_access_cross_file() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11151,7 +11151,7 @@ async fn test_completion_variable_property_access_cross_file() {
 async fn test_completion_variable_property_access_top_level() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_prop_top_level.php").unwrap();
+    let uri = Uri::parse("file:///var_prop_top_level.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -11175,7 +11175,7 @@ async fn test_completion_variable_property_access_top_level() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("dsn")),
@@ -11188,7 +11188,7 @@ async fn test_completion_variable_property_access_top_level() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11201,7 +11201,7 @@ async fn test_completion_variable_property_access_top_level() {
 async fn test_completion_param_same_name_different_methods() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///param_same_name.php").unwrap();
+    let uri = Uri::parse("file:///param_same_name.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface IShoppingCart {}\n",
@@ -11236,7 +11236,7 @@ async fn test_completion_param_same_name_different_methods() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("customer_id")),
@@ -11249,7 +11249,7 @@ async fn test_completion_param_same_name_different_methods() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11259,7 +11259,7 @@ async fn test_completion_param_same_name_different_methods() {
 async fn test_completion_param_same_name_second_param() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///param_same_name2.php").unwrap();
+    let uri = Uri::parse("file:///param_same_name2.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface ICustomer {}\n",
@@ -11284,7 +11284,7 @@ async fn test_completion_param_same_name_second_param() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("id")),
@@ -11297,7 +11297,7 @@ async fn test_completion_param_same_name_second_param() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11307,7 +11307,7 @@ async fn test_completion_param_same_name_second_param() {
 async fn test_completion_param_same_name_cursor_in_first_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///param_first_method.php").unwrap();
+    let uri = Uri::parse("file:///param_first_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Alpha {\n",
@@ -11334,7 +11334,7 @@ async fn test_completion_param_same_name_cursor_in_first_method() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -11352,7 +11352,7 @@ async fn test_completion_param_same_name_cursor_in_first_method() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11362,7 +11362,7 @@ async fn test_completion_param_same_name_cursor_in_first_method() {
 async fn test_completion_union_sort_intersection_above_branch_only() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///union_sort.php").unwrap();
+    let uri = Uri::parse("file:///union_sort.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -11390,7 +11390,7 @@ async fn test_completion_union_sort_intersection_above_branch_only() {
     assert!(result.is_some(), "Should return union completion results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             // Intersection members: eat, sleep (on both Dog and Cat)
             let eat = items
                 .iter()
@@ -11454,7 +11454,7 @@ async fn test_completion_union_sort_intersection_above_branch_only() {
                 meow_sort
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11464,7 +11464,7 @@ async fn test_completion_union_sort_intersection_above_branch_only() {
 async fn test_completion_union_branch_only_has_label_details() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///union_label_details.php").unwrap();
+    let uri = Uri::parse("file:///union_label_details.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Truck {\n",
@@ -11490,7 +11490,7 @@ async fn test_completion_union_branch_only_has_label_details() {
     assert!(result.is_some(), "Should return union completion results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             // Intersection member: drive (on both)
             let drive = items
                 .iter()
@@ -11541,7 +11541,7 @@ async fn test_completion_union_branch_only_has_label_details() {
                 park.label_details
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11551,7 +11551,7 @@ async fn test_completion_union_branch_only_has_label_details() {
 async fn test_completion_single_class_no_union_sort_adjustment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///no_union.php").unwrap();
+    let uri = Uri::parse("file:///no_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -11572,7 +11572,7 @@ async fn test_completion_single_class_no_union_sort_adjustment() {
     assert!(result.is_some(), "Should return completion results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let render = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("render"))
@@ -11616,7 +11616,7 @@ async fn test_completion_single_class_no_union_sort_adjustment() {
                 update.label_details
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11627,7 +11627,7 @@ async fn test_completion_single_class_no_union_sort_adjustment() {
 async fn test_completion_union_three_types_sort() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///union_three.php").unwrap();
+    let uri = Uri::parse("file:///union_three.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -11658,7 +11658,7 @@ async fn test_completion_union_three_types_sort() {
     assert!(result.is_some(), "Should return union completion results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let shared = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("shared"))
@@ -11747,7 +11747,7 @@ async fn test_completion_union_three_types_sort() {
                 only_c.label_details
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11756,7 +11756,7 @@ async fn test_completion_union_three_types_sort() {
 async fn test_completion_union_sort_properties() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///union_props.php").unwrap();
+    let uri = Uri::parse("file:///union_props.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Circle {\n",
@@ -11783,7 +11783,7 @@ async fn test_completion_union_sort_properties() {
     assert!(result.is_some(), "Should return union completion results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             // Shared property: color
             let color = items.iter().find(|i| i.label == "color").unwrap();
             // Branch-only properties: radius (Circle), side (Square)
@@ -11845,7 +11845,7 @@ async fn test_completion_union_sort_properties() {
                 side.label_details
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11862,7 +11862,7 @@ async fn test_completion_union_sort_properties() {
 async fn test_array_access_after_method_call_on_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_method_array_access.php").unwrap();
+    let uri = Uri::parse("file:///var_method_array_access.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen {\n",
@@ -11893,7 +11893,7 @@ async fn test_array_access_after_method_call_on_variable() {
         "Should return completions for array element after $var->method() assignment"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("write")),
@@ -11906,7 +11906,7 @@ async fn test_array_access_after_method_call_on_variable() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11916,7 +11916,7 @@ async fn test_array_access_after_method_call_on_variable() {
 async fn test_variable_assigned_from_array_access_on_variable_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_method_array_assign.php").unwrap();
+    let uri = Uri::parse("file:///var_method_array_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen {\n",
@@ -11947,7 +11947,7 @@ async fn test_variable_assigned_from_array_access_on_variable_method() {
         "Should return completions for $first assigned from $pens[0]"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("write")),
@@ -11955,7 +11955,7 @@ async fn test_variable_assigned_from_array_access_on_variable_method() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -11968,7 +11968,7 @@ async fn test_variable_assigned_from_array_access_on_variable_method() {
 async fn test_completion_array_filter_var_property_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///af_var_prop.php").unwrap();
+    let uri = Uri::parse("file:///af_var_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen {\n",
@@ -11996,7 +11996,7 @@ async fn test_completion_array_filter_var_property_arg() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("write")),
@@ -12004,7 +12004,7 @@ async fn test_completion_array_filter_var_property_arg() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12014,7 +12014,7 @@ async fn test_completion_array_filter_var_property_arg() {
 async fn test_completion_array_values_var_property_arg() {
     let backend = create_test_backend_with_full_stubs();
 
-    let uri = Url::parse("file:///av_var_prop.php").unwrap();
+    let uri = Uri::parse("file:///av_var_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen {\n",
@@ -12042,7 +12042,7 @@ async fn test_completion_array_values_var_property_arg() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("write")),
@@ -12050,7 +12050,7 @@ async fn test_completion_array_values_var_property_arg() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12060,7 +12060,7 @@ async fn test_completion_array_values_var_property_arg() {
 async fn test_completion_end_inline_var_property_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///end_var_prop.php").unwrap();
+    let uri = Uri::parse("file:///end_var_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen {\n",
@@ -12087,7 +12087,7 @@ async fn test_completion_end_inline_var_property_arg() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("write")),
@@ -12095,7 +12095,7 @@ async fn test_completion_end_inline_var_property_arg() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12105,7 +12105,7 @@ async fn test_completion_end_inline_var_property_arg() {
 async fn test_completion_array_map_var_property_arg() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///am_var_prop.php").unwrap();
+    let uri = Uri::parse("file:///am_var_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen {\n",
@@ -12133,7 +12133,7 @@ async fn test_completion_array_map_var_property_arg() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("write")),
@@ -12141,7 +12141,7 @@ async fn test_completion_array_map_var_property_arg() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12154,7 +12154,7 @@ async fn test_completion_array_map_var_property_arg() {
 async fn test_completion_outer_scope_variable_inside_arrow_function() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///arrow_outer_scope.php").unwrap();
+    let uri = Uri::parse("file:///arrow_outer_scope.php").unwrap();
     let text = concat!(
         "<?php\n",                             // 0
         "class Feature {\n",                   // 1
@@ -12184,7 +12184,7 @@ async fn test_completion_outer_scope_variable_inside_arrow_function() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("id")),
@@ -12197,7 +12197,7 @@ async fn test_completion_outer_scope_variable_inside_arrow_function() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12208,7 +12208,7 @@ async fn test_completion_outer_scope_variable_inside_arrow_function() {
 async fn test_completion_param_inside_function_exists_guard() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guarded_func.php").unwrap();
+    let uri = Uri::parse("file:///guarded_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Country {\n",
@@ -12233,10 +12233,10 @@ async fn test_completion_param_inside_function_exists_guard() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12250,7 +12250,7 @@ async fn test_completion_param_inside_function_exists_guard() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12260,7 +12260,7 @@ async fn test_completion_param_inside_function_exists_guard() {
 async fn test_completion_param_inside_top_level_function() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///toplevel_func.php").unwrap();
+    let uri = Uri::parse("file:///toplevel_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Country {\n",
@@ -12282,10 +12282,10 @@ async fn test_completion_param_inside_top_level_function() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12294,7 +12294,7 @@ async fn test_completion_param_inside_top_level_function() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12307,7 +12307,7 @@ async fn test_completion_param_inside_top_level_function() {
 async fn test_completion_nullsafe_method_chain_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nullsafe_assign.php").unwrap();
+    let uri = Uri::parse("file:///nullsafe_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class NsEngine {\n",
@@ -12336,10 +12336,10 @@ async fn test_completion_nullsafe_method_chain_assignment() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12353,7 +12353,7 @@ async fn test_completion_nullsafe_method_chain_assignment() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12362,7 +12362,7 @@ async fn test_completion_nullsafe_method_chain_assignment() {
 async fn test_completion_nullsafe_mid_chain_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nullsafe_mid_chain.php").unwrap();
+    let uri = Uri::parse("file:///nullsafe_mid_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class NsMcPart {\n",
@@ -12390,10 +12390,10 @@ async fn test_completion_nullsafe_mid_chain_assignment() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12402,7 +12402,7 @@ async fn test_completion_nullsafe_mid_chain_assignment() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12451,14 +12451,14 @@ async fn test_completion_nullsafe_method_chain_cross_file() {
 
     open_php(
         &backend,
-        &tower_lsp::lsp_types::Url::parse(uri).unwrap(),
+        &tower_lsp_server::gen_lsp_types::Uri::parse(uri).unwrap(),
         content,
     )
     .await;
 
     let result = completion_response(
         &backend,
-        &tower_lsp::lsp_types::Url::parse(uri).unwrap(),
+        &tower_lsp_server::gen_lsp_types::Uri::parse(uri).unwrap(),
         6,
         21,
         None,
@@ -12471,10 +12471,10 @@ async fn test_completion_nullsafe_method_chain_cross_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12488,7 +12488,7 @@ async fn test_completion_nullsafe_method_chain_cross_file() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12499,7 +12499,7 @@ async fn test_completion_nullsafe_method_chain_cross_file() {
 async fn test_completion_short_ternary_rhs_instantiation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///short_ternary.php").unwrap();
+    let uri = Uri::parse("file:///short_ternary.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Printer {\n",
@@ -12522,10 +12522,10 @@ async fn test_completion_short_ternary_rhs_instantiation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12534,7 +12534,7 @@ async fn test_completion_short_ternary_rhs_instantiation() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12543,7 +12543,7 @@ async fn test_completion_short_ternary_rhs_instantiation() {
 async fn test_completion_full_ternary_rhs_instantiation() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///full_ternary.php").unwrap();
+    let uri = Uri::parse("file:///full_ternary.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Renderer {\n",
@@ -12566,10 +12566,10 @@ async fn test_completion_full_ternary_rhs_instantiation() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12578,7 +12578,7 @@ async fn test_completion_full_ternary_rhs_instantiation() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12589,7 +12589,7 @@ async fn test_completion_full_ternary_rhs_instantiation() {
 async fn test_completion_nullable_param_type_hint() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nullable_param.php").unwrap();
+    let uri = Uri::parse("file:///nullable_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Invoice {\n",
@@ -12612,10 +12612,10 @@ async fn test_completion_nullable_param_type_hint() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12629,7 +12629,7 @@ async fn test_completion_nullable_param_type_hint() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12638,7 +12638,7 @@ async fn test_completion_nullable_param_type_hint() {
 async fn test_completion_nullable_var_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nullable_var.php").unwrap();
+    let uri = Uri::parse("file:///nullable_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -12662,10 +12662,10 @@ async fn test_completion_nullable_var_docblock() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12674,7 +12674,7 @@ async fn test_completion_nullable_var_docblock() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12683,7 +12683,7 @@ async fn test_completion_nullable_var_docblock() {
 async fn test_completion_nullable_return_type_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nullable_return.php").unwrap();
+    let uri = Uri::parse("file:///nullable_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -12707,10 +12707,10 @@ async fn test_completion_nullable_return_type_chain() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12719,7 +12719,7 @@ async fn test_completion_nullable_return_type_chain() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12732,7 +12732,7 @@ async fn test_completion_nullable_return_type_chain() {
 async fn test_null_init_foreach_reassign() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b11_foreach.php").unwrap();
+    let uri = Uri::parse("file:///b11_foreach.php").unwrap();
     let text = concat!(
         "<?php\n",                                             // 0
         "class Transaction {\n",                               // 1
@@ -12761,10 +12761,10 @@ async fn test_null_init_foreach_reassign() {
         "Should return completions after null-init + foreach reassign"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12773,7 +12773,7 @@ async fn test_null_init_foreach_reassign() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12784,7 +12784,7 @@ async fn test_null_init_foreach_reassign() {
 async fn test_null_init_foreach_var_to_var_reassign() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b11_var_to_var.php").unwrap();
+    let uri = Uri::parse("file:///b11_var_to_var.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class Pen {\n",                                        // 1
@@ -12816,10 +12816,10 @@ async fn test_null_init_foreach_var_to_var_reassign() {
         "Should return completions for var-to-var reassign from foreach value"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12828,7 +12828,7 @@ async fn test_null_init_foreach_var_to_var_reassign() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12838,7 +12838,7 @@ async fn test_null_init_foreach_var_to_var_reassign() {
 async fn test_null_init_foreach_nested_if_reassign() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b11_foreach_nested.php").unwrap();
+    let uri = Uri::parse("file:///b11_foreach_nested.php").unwrap();
     let text = concat!(
         "<?php\n",                                             // 0
         "class Transaction {\n",                               // 1
@@ -12869,10 +12869,10 @@ async fn test_null_init_foreach_nested_if_reassign() {
         "Should return completions after null-init + foreach + nested if reassign"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12881,7 +12881,7 @@ async fn test_null_init_foreach_nested_if_reassign() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12892,7 +12892,7 @@ async fn test_null_init_foreach_nested_if_reassign() {
 async fn test_null_coalesce_guard_inside_foreach() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b11_coalesce.php").unwrap();
+    let uri = Uri::parse("file:///b11_coalesce.php").unwrap();
     let text = concat!(
         "<?php\n",                                            // 0
         "class Day {\n",                                      // 1
@@ -12920,10 +12920,10 @@ async fn test_null_coalesce_guard_inside_foreach() {
         "Should return completions for null-coalesce + guard inside foreach"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12932,7 +12932,7 @@ async fn test_null_coalesce_guard_inside_foreach() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12941,7 +12941,7 @@ async fn test_null_coalesce_guard_inside_foreach() {
 async fn test_null_init_while_reassign() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b11_while.php").unwrap();
+    let uri = Uri::parse("file:///b11_while.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -12969,10 +12969,10 @@ async fn test_null_init_while_reassign() {
         "Should return completions after null-init + while reassign"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -12981,7 +12981,7 @@ async fn test_null_init_while_reassign() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -12990,7 +12990,7 @@ async fn test_null_init_while_reassign() {
 async fn test_null_init_for_reassign() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b11_for.php").unwrap();
+    let uri = Uri::parse("file:///b11_for.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -13018,10 +13018,10 @@ async fn test_null_init_for_reassign() {
         "Should return completions after null-init + for reassign"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -13030,7 +13030,7 @@ async fn test_null_init_for_reassign() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13072,7 +13072,7 @@ async fn test_null_init_foreach_reassign_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///src/Processor.php").unwrap();
+    let uri = Uri::parse("file:///src/Processor.php").unwrap();
     open_php(
         &backend,
         &uri,
@@ -13087,10 +13087,10 @@ async fn test_null_init_foreach_reassign_cross_file() {
         "Should return completions for cross-file null-init + foreach reassign"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -13099,7 +13099,7 @@ async fn test_null_init_foreach_reassign_cross_file() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13111,7 +13111,7 @@ async fn test_null_init_foreach_reassign_cross_file() {
 async fn test_null_coalesce_non_nullable_lhs_ignores_rhs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nc_non_nullable.php").unwrap();
+    let uri = Uri::parse("file:///nc_non_nullable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Alpha {\n",
@@ -13134,10 +13134,10 @@ async fn test_null_coalesce_non_nullable_lhs_ignores_rhs() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -13152,7 +13152,7 @@ async fn test_null_coalesce_non_nullable_lhs_ignores_rhs() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13162,7 +13162,7 @@ async fn test_null_coalesce_non_nullable_lhs_ignores_rhs() {
 async fn test_null_coalesce_nullable_lhs_unions_with_rhs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nc_nullable.php").unwrap();
+    let uri = Uri::parse("file:///nc_nullable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen {\n",
@@ -13187,10 +13187,10 @@ async fn test_null_coalesce_nullable_lhs_unions_with_rhs() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -13205,7 +13205,7 @@ async fn test_null_coalesce_nullable_lhs_unions_with_rhs() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13215,7 +13215,7 @@ async fn test_null_coalesce_nullable_lhs_unions_with_rhs() {
 async fn test_null_coalesce_unknown_lhs_resolves_rhs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nc_unknown.php").unwrap();
+    let uri = Uri::parse("file:///nc_unknown.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Fallback {\n",
@@ -13235,10 +13235,10 @@ async fn test_null_coalesce_unknown_lhs_resolves_rhs() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -13248,7 +13248,7 @@ async fn test_null_coalesce_unknown_lhs_resolves_rhs() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13258,7 +13258,7 @@ async fn test_null_coalesce_unknown_lhs_resolves_rhs() {
 async fn test_null_coalesce_array_access_untyped_base_resolves_rhs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nc_arr_untyped.php").unwrap();
+    let uri = Uri::parse("file:///nc_arr_untyped.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Fallback {\n",
@@ -13278,10 +13278,10 @@ async fn test_null_coalesce_array_access_untyped_base_resolves_rhs() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -13290,7 +13290,7 @@ async fn test_null_coalesce_array_access_untyped_base_resolves_rhs() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13299,7 +13299,7 @@ async fn test_null_coalesce_array_access_untyped_base_resolves_rhs() {
 async fn test_null_coalesce_clone_lhs_ignores_rhs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///nc_clone.php").unwrap();
+    let uri = Uri::parse("file:///nc_clone.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Original {\n",
@@ -13322,10 +13322,10 @@ async fn test_null_coalesce_clone_lhs_ignores_rhs() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -13340,7 +13340,7 @@ async fn test_null_coalesce_clone_lhs_ignores_rhs() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13354,7 +13354,7 @@ async fn test_null_coalesce_clone_lhs_ignores_rhs() {
 async fn test_completion_var_inside_reassignment_rhs_sees_old_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b13_reassign_rhs.php").unwrap();
+    let uri = Uri::parse("file:///b13_reassign_rhs.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -13384,7 +13384,7 @@ async fn test_completion_var_inside_reassignment_rhs_sees_old_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include Foo's members (the original param type)
             assert!(
@@ -13404,7 +13404,7 @@ async fn test_completion_var_inside_reassignment_rhs_sees_old_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13418,7 +13418,7 @@ async fn test_completion_var_inside_reassignment_rhs_sees_old_type() {
 async fn test_completion_inline_var_cast_does_not_override_rhs() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b15_inline_var_rhs.php").unwrap();
+    let uri = Uri::parse("file:///b15_inline_var_rhs.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Data {\n",                                        // 1
@@ -13444,7 +13444,7 @@ async fn test_completion_inline_var_cast_does_not_override_rhs() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include Data's members (the original param type)
             assert!(
@@ -13458,7 +13458,7 @@ async fn test_completion_inline_var_cast_does_not_override_rhs() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13469,7 +13469,7 @@ async fn test_completion_inline_var_cast_does_not_override_rhs() {
 async fn test_completion_inline_var_cast_applies_after_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b15_inline_var_after.php").unwrap();
+    let uri = Uri::parse("file:///b15_inline_var_after.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Data {\n",
@@ -13498,7 +13498,7 @@ async fn test_completion_inline_var_cast_applies_after_assignment() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Should include Wrapper's members (the @var override type)
             assert!(
@@ -13518,7 +13518,7 @@ async fn test_completion_inline_var_cast_applies_after_assignment() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13528,7 +13528,7 @@ async fn test_completion_inline_var_cast_applies_after_assignment() {
 async fn test_completion_class_string_param_static_access() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///class_string_param.php").unwrap();
+    let uri = Uri::parse("file:///class_string_param.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class CustomerModel {\n",
@@ -13558,7 +13558,7 @@ async fn test_completion_class_string_param_static_access() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -13579,7 +13579,7 @@ async fn test_completion_class_string_param_static_access() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13589,7 +13589,7 @@ async fn test_completion_class_string_param_static_access() {
 async fn test_completion_class_string_param_backed_enum_static_access() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///class_string_enum.php").unwrap();
+    let uri = Uri::parse("file:///class_string_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface BackedEnum {\n",
@@ -13616,7 +13616,7 @@ async fn test_completion_class_string_param_backed_enum_static_access() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -13632,7 +13632,7 @@ async fn test_completion_class_string_param_backed_enum_static_access() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13642,7 +13642,7 @@ async fn test_completion_class_string_param_backed_enum_static_access() {
 async fn test_completion_class_string_param_standalone_function() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///class_string_func.php").unwrap();
+    let uri = Uri::parse("file:///class_string_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -13669,7 +13669,7 @@ async fn test_completion_class_string_param_standalone_function() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -13685,7 +13685,7 @@ async fn test_completion_class_string_param_standalone_function() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13696,7 +13696,7 @@ async fn test_completion_class_string_param_standalone_function() {
 async fn test_completion_class_string_foreach_cases() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///class_string_foreach.php").unwrap();
+    let uri = Uri::parse("file:///class_string_foreach.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface BackedEnum {\n",
@@ -13735,7 +13735,7 @@ async fn test_completion_class_string_foreach_cases() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -13751,7 +13751,7 @@ async fn test_completion_class_string_foreach_cases() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13762,7 +13762,7 @@ async fn test_completion_class_string_foreach_cases() {
 async fn test_completion_class_string_foreach_cases_item_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///class_string_foreach_item.php").unwrap();
+    let uri = Uri::parse("file:///class_string_foreach_item.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface UnitEnum {\n",
@@ -13796,7 +13796,7 @@ async fn test_completion_class_string_foreach_cases_item_members() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -13812,7 +13812,7 @@ async fn test_completion_class_string_foreach_cases_item_members() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13823,7 +13823,7 @@ async fn test_completion_class_string_foreach_cases_item_members() {
 async fn test_completion_class_string_static_return_type_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///class_string_static_chain.php").unwrap();
+    let uri = Uri::parse("file:///class_string_static_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface UnitEnum {\n",
@@ -13856,7 +13856,7 @@ async fn test_completion_class_string_static_return_type_chain() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -13872,7 +13872,7 @@ async fn test_completion_class_string_static_return_type_chain() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13882,7 +13882,7 @@ async fn test_completion_class_string_static_return_type_chain() {
 async fn test_completion_class_string_template_standalone_function_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///class_string_tpl_func.php").unwrap();
+    let uri = Uri::parse("file:///class_string_tpl_func.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface UnitEnum {\n",
@@ -13915,7 +13915,7 @@ async fn test_completion_class_string_template_standalone_function_chain() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -13931,7 +13931,7 @@ async fn test_completion_class_string_template_standalone_function_chain() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13945,7 +13945,7 @@ async fn test_completion_class_string_template_standalone_function_chain() {
 async fn test_loop_body_assignment_visible_inside_foreach() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b20_foreach_inside.php").unwrap();
+    let uri = Uri::parse("file:///b20_foreach_inside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Carbon {\n",
@@ -13978,10 +13978,10 @@ async fn test_loop_body_assignment_visible_inside_foreach() {
         "Should return completions for loop-carried assignment inside foreach"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -13990,7 +13990,7 @@ async fn test_loop_body_assignment_visible_inside_foreach() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -13999,7 +13999,7 @@ async fn test_loop_body_assignment_visible_inside_foreach() {
 async fn test_loop_body_assignment_visible_inside_while() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b20_while_inside.php").unwrap();
+    let uri = Uri::parse("file:///b20_while_inside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Record {\n",
@@ -14027,10 +14027,10 @@ async fn test_loop_body_assignment_visible_inside_while() {
         "Should return completions for loop-carried assignment inside while"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -14039,7 +14039,7 @@ async fn test_loop_body_assignment_visible_inside_while() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14048,7 +14048,7 @@ async fn test_loop_body_assignment_visible_inside_while() {
 #[tokio::test]
 async fn test_loop_body_assignment_visible_inside_do_while() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///loop_carried_do_while_inside.php").unwrap();
+    let uri = Uri::parse("file:///loop_carried_do_while_inside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Record {\n",
@@ -14070,7 +14070,7 @@ async fn test_loop_body_assignment_visible_inside_do_while() {
     let items = crate::common::complete_at(&backend, &uri, text, 9, 23).await;
     let names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .filter_map(|i| i.filter_text.as_deref())
         .collect();
     assert!(
@@ -14084,7 +14084,7 @@ async fn test_loop_body_assignment_visible_inside_do_while() {
 async fn test_loop_body_assignment_visible_inside_for() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b20_for_inside.php").unwrap();
+    let uri = Uri::parse("file:///b20_for_inside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -14112,10 +14112,10 @@ async fn test_loop_body_assignment_visible_inside_for() {
         "Should return completions for loop-carried assignment inside for"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -14124,7 +14124,7 @@ async fn test_loop_body_assignment_visible_inside_for() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14135,7 +14135,7 @@ async fn test_loop_body_assignment_visible_inside_for() {
 async fn test_loop_body_nested_if_assignment_visible_inside_foreach() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b20_nested_if.php").unwrap();
+    let uri = Uri::parse("file:///b20_nested_if.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Marker {\n",
@@ -14166,10 +14166,10 @@ async fn test_loop_body_nested_if_assignment_visible_inside_foreach() {
         "Should return completions for nested-if loop-carried assignment"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -14178,7 +14178,7 @@ async fn test_loop_body_nested_if_assignment_visible_inside_foreach() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14189,7 +14189,7 @@ async fn test_loop_body_nested_if_assignment_visible_inside_foreach() {
 async fn test_loop_body_assignment_before_cursor_still_works() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b20_before_cursor.php").unwrap();
+    let uri = Uri::parse("file:///b20_before_cursor.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Gadget {\n",
@@ -14216,10 +14216,10 @@ async fn test_loop_body_assignment_before_cursor_still_works() {
         "Should return completions when assignment is before cursor in loop"
     );
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -14228,7 +14228,7 @@ async fn test_loop_body_assignment_before_cursor_still_works() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14243,7 +14243,7 @@ async fn test_loop_body_assignment_before_cursor_still_works() {
 async fn test_completion_magic_call_self_return_preserves_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///magic_call_chain.php").unwrap();
+    let uri = Uri::parse("file:///magic_call_chain.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                           // 0
         "class Item {\n",                                                                    // 1
@@ -14276,7 +14276,7 @@ async fn test_completion_magic_call_self_return_preserves_chain() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("save")),
@@ -14289,7 +14289,7 @@ async fn test_completion_magic_call_self_return_preserves_chain() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14299,7 +14299,7 @@ async fn test_completion_magic_call_self_return_preserves_chain() {
 async fn test_completion_magic_call_mixed_return_no_completions() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///magic_call_mixed.php").unwrap();
+    let uri = Uri::parse("file:///magic_call_mixed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dynamic {\n",
@@ -14317,12 +14317,12 @@ async fn test_completion_magic_call_mixed_return_no_completions() {
 
     let result = completion_response(&backend, &uri, 7, 24, None).await;
     // mixed return type should not produce class-member completions
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let method_items: Vec<_> = items
             .iter()
             .filter(|i| {
-                i.kind == Some(CompletionItemKind::METHOD)
-                    || i.kind == Some(CompletionItemKind::PROPERTY)
+                i.kind == Some(CompletionItemKind::Method)
+                    || i.kind == Some(CompletionItemKind::Property)
             })
             .collect();
         assert!(
@@ -14339,7 +14339,7 @@ async fn test_completion_magic_call_mixed_return_no_completions() {
 async fn test_completion_magic_call_concrete_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///magic_call_concrete.php").unwrap();
+    let uri = Uri::parse("file:///magic_call_concrete.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Result {\n",
@@ -14366,7 +14366,7 @@ async fn test_completion_magic_call_concrete_return_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getData")),
@@ -14379,7 +14379,7 @@ async fn test_completion_magic_call_concrete_return_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14388,7 +14388,7 @@ async fn test_completion_magic_call_concrete_return_type() {
 async fn test_completion_magic_call_inherited_self_return() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///magic_call_inherited.php").unwrap();
+    let uri = Uri::parse("file:///magic_call_inherited.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class BaseBuilder {\n",
@@ -14417,7 +14417,7 @@ async fn test_completion_magic_call_inherited_self_return() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("limit")),
@@ -14430,7 +14430,7 @@ async fn test_completion_magic_call_inherited_self_return() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14439,7 +14439,7 @@ async fn test_completion_magic_call_inherited_self_return() {
 async fn test_completion_magic_call_variable_assignment() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///magic_call_assign.php").unwrap();
+    let uri = Uri::parse("file:///magic_call_assign.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Item {\n",
@@ -14468,7 +14468,7 @@ async fn test_completion_magic_call_variable_assignment() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("save")),
@@ -14476,7 +14476,7 @@ async fn test_completion_magic_call_variable_assignment() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14486,7 +14486,7 @@ async fn test_completion_magic_call_variable_assignment() {
 async fn test_completion_magic_call_method_tag_inherits_return_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tag_inherits_call.php").unwrap();
+    let uri = Uri::parse("file:///method_tag_inherits_call.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -14515,7 +14515,7 @@ async fn test_completion_magic_call_method_tag_inherits_return_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // whereStatus has no return type in @method, should inherit
             // static from __call, so chain continues with QueryBuilder members
@@ -14530,7 +14530,7 @@ async fn test_completion_magic_call_method_tag_inherits_return_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14543,7 +14543,7 @@ async fn test_completion_magic_call_method_tag_inherits_return_type() {
 async fn test_completion_magic_call_method_tag_own_return_type_wins() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tag_own_return.php").unwrap();
+    let uri = Uri::parse("file:///method_tag_own_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Result {\n",
@@ -14574,7 +14574,7 @@ async fn test_completion_magic_call_method_tag_own_return_type_wins() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // @method Result is a lie: Result does not extend ApiClient,
             // so __call's native `static` wins → ApiClient members.
@@ -14594,7 +14594,7 @@ async fn test_completion_magic_call_method_tag_own_return_type_wins() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14606,7 +14606,7 @@ async fn test_completion_magic_call_method_tag_own_return_type_wins() {
 async fn test_completion_magic_call_method_tag_lie_detection_native_wins() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tag_lie.php").unwrap();
+    let uri = Uri::parse("file:///method_tag_lie.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Frog {\n",
@@ -14640,7 +14640,7 @@ async fn test_completion_magic_call_method_tag_lie_detection_native_wins() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // __call natively returns Cement — @method Frog is a lie.
             // We should see Cement members, not Frog members.
@@ -14660,7 +14660,7 @@ async fn test_completion_magic_call_method_tag_lie_detection_native_wins() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14671,7 +14671,7 @@ async fn test_completion_magic_call_method_tag_lie_detection_native_wins() {
 async fn test_completion_magic_call_no_native_type_trusts_method_tag() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tag_no_native.php").unwrap();
+    let uri = Uri::parse("file:///method_tag_no_native.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Result {\n",
@@ -14702,7 +14702,7 @@ async fn test_completion_magic_call_no_native_type_trusts_method_tag() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // __call has no native type hint — @method Result is trusted
             assert!(
@@ -14711,7 +14711,7 @@ async fn test_completion_magic_call_no_native_type_trusts_method_tag() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14721,7 +14721,7 @@ async fn test_completion_magic_call_no_native_type_trusts_method_tag() {
 async fn test_completion_magic_call_method_tag_valid_narrowing() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///method_tag_narrow.php").unwrap();
+    let uri = Uri::parse("file:///method_tag_narrow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -14754,7 +14754,7 @@ async fn test_completion_magic_call_method_tag_valid_narrowing() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             // Dog extends Animal, so @method Dog is a valid narrowing
             // of __call's native return type Animal.
@@ -14769,7 +14769,7 @@ async fn test_completion_magic_call_method_tag_valid_narrowing() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14778,7 +14778,7 @@ async fn test_completion_magic_call_method_tag_valid_narrowing() {
 async fn test_completion_magic_call_static_fallback() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///call_static_fallback.php").unwrap();
+    let uri = Uri::parse("file:///call_static_fallback.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Result {\n",
@@ -14804,7 +14804,7 @@ async fn test_completion_magic_call_static_fallback() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getData")),
@@ -14812,7 +14812,7 @@ async fn test_completion_magic_call_static_fallback() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14822,7 +14822,7 @@ async fn test_completion_magic_call_static_fallback() {
 async fn test_completion_foreach_variadic_param_class_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///variadic_foreach.php").unwrap();
+    let uri = Uri::parse("file:///variadic_foreach.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class HtmlString {\n",
@@ -14846,7 +14846,7 @@ async fn test_completion_foreach_variadic_param_class_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("toHtml")),
@@ -14854,7 +14854,7 @@ async fn test_completion_foreach_variadic_param_class_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14865,7 +14865,7 @@ async fn test_completion_foreach_variadic_param_class_type() {
 async fn test_completion_foreach_variadic_param_union_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///variadic_union_foreach.php").unwrap();
+    let uri = Uri::parse("file:///variadic_union_foreach.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class HtmlString {\n",
@@ -14891,7 +14891,7 @@ async fn test_completion_foreach_variadic_param_union_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("toHtml")),
@@ -14899,7 +14899,7 @@ async fn test_completion_foreach_variadic_param_union_type() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14909,7 +14909,7 @@ async fn test_completion_foreach_variadic_param_union_type() {
 async fn test_completion_foreach_variadic_param_standalone_function() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///variadic_func_foreach.php").unwrap();
+    let uri = Uri::parse("file:///variadic_func_foreach.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Widget {\n",
@@ -14932,7 +14932,7 @@ async fn test_completion_foreach_variadic_param_standalone_function() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("name")),
@@ -14945,7 +14945,7 @@ async fn test_completion_foreach_variadic_param_standalone_function() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -14958,7 +14958,7 @@ async fn test_completion_foreach_variadic_param_standalone_function() {
 async fn test_foreach_variable_type_from_param_array_shape() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///foreach_param_shape.php").unwrap();
+    let uri = Uri::parse("file:///foreach_param_shape.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                    // 0
         "class Product {\n",                                                          // 1
@@ -14986,7 +14986,7 @@ async fn test_foreach_variable_type_from_param_array_shape() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("sku")),
@@ -14999,7 +14999,7 @@ async fn test_foreach_variable_type_from_param_array_shape() {
                 labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -15012,7 +15012,7 @@ async fn test_foreach_variable_type_from_param_array_shape() {
 async fn test_completion_deep_variable_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///deep_var_chain.php").unwrap();
+    let uri = Uri::parse("file:///deep_var_chain.php").unwrap();
     // 5-level chain: param $a → $b → $c → $d → $e → $final
     let text = concat!(
         "<?php\n",                                                                 // 0
@@ -15055,7 +15055,7 @@ async fn test_completion_deep_variable_chain() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -15066,7 +15066,7 @@ async fn test_completion_deep_variable_chain() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -15077,7 +15077,7 @@ async fn test_completion_deep_variable_chain() {
 async fn test_completion_very_deep_variable_chain_no_depth_limit() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///very_deep_chain.php").unwrap();
+    let uri = Uri::parse("file:///very_deep_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Level1 { public function next(): Level2 { return new Level2(); } }\n",
@@ -15116,7 +15116,7 @@ async fn test_completion_very_deep_variable_chain_no_depth_limit() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -15127,7 +15127,7 @@ async fn test_completion_very_deep_variable_chain_no_depth_limit() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -15138,7 +15138,7 @@ async fn test_completion_very_deep_variable_chain_no_depth_limit() {
 async fn test_completion_deep_variable_chain_standalone_function() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///deep_func_chain.php").unwrap();
+    let uri = Uri::parse("file:///deep_func_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ChainStart {\n",
@@ -15166,7 +15166,7 @@ async fn test_completion_deep_variable_chain_standalone_function() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -15177,7 +15177,7 @@ async fn test_completion_deep_variable_chain_standalone_function() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -15189,7 +15189,7 @@ async fn test_completion_deep_variable_chain_standalone_function() {
 async fn test_completion_cross_parameter_reference_in_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///cross_param.php").unwrap();
+    let uri = Uri::parse("file:///cross_param.php").unwrap();
     let text = concat!(
         "<?php\n",                                                                     // 0
         "class ParamA {\n",                                                            // 1
@@ -15222,7 +15222,7 @@ async fn test_completion_cross_parameter_reference_in_chain() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
@@ -15233,7 +15233,7 @@ async fn test_completion_cross_parameter_reference_in_chain() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -15241,7 +15241,7 @@ async fn test_completion_cross_parameter_reference_in_chain() {
 async fn test_completion_falsy_narrowing_after_throw_guard() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///falsy_guard.php").unwrap();
+    let uri = Uri::parse("file:///falsy_guard.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class XmlNode {\n",
@@ -15267,10 +15267,10 @@ async fn test_completion_falsy_narrowing_after_throw_guard() {
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -15287,14 +15287,14 @@ async fn test_completion_falsy_narrowing_after_throw_guard() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
 #[tokio::test]
 async fn test_null_coalescing_with_throw_narrows_nullable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test_null_coalesce_throw.php").unwrap();
+    let uri = Uri::parse("file:///test_null_coalesce_throw.php").unwrap();
 
     let php = r#"<?php
 class Item { public function getName(): string { return ''; } }
@@ -15310,10 +15310,10 @@ $item->
 
     assert!(result.is_some(), "Completion should return results");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -15323,7 +15323,7 @@ $item->
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -15332,7 +15332,7 @@ $item->
 #[tokio::test]
 async fn test_completion_psalm_and_phpstan_param_type_the_body_variable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///vendor_param_tags.php").unwrap();
+    let uri = Uri::parse("file:///vendor_param_tags.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen { public function write(): void {} }\n",
@@ -15361,7 +15361,7 @@ async fn test_completion_psalm_and_phpstan_param_type_the_body_variable() {
 #[tokio::test]
 async fn test_completion_vendor_param_wins_over_plain_param_in_either_order() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///vendor_param_precedence.php").unwrap();
+    let uri = Uri::parse("file:///vendor_param_precedence.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen { public function write(): void {} }\n",

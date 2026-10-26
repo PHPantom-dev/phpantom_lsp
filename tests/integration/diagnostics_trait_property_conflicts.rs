@@ -1,6 +1,7 @@
 use crate::common::collect_diagnostics_with;
+use crate::common::message_text;
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 fn collect(php: &str) -> Vec<Diagnostic> {
     collect_diagnostics_with(
@@ -11,7 +12,10 @@ fn collect(php: &str) -> Vec<Diagnostic> {
 }
 
 fn messages(php: &str) -> Vec<String> {
-    collect(php).into_iter().map(|d| d.message).collect()
+    collect(php)
+        .into_iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
 }
 
 #[test]
@@ -23,15 +27,13 @@ final class Composed { use Left; use Right; }
 "#;
     let diags = collect(php);
     assert_eq!(diags.len(), 1, "{diags:?}");
-    assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+    assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     assert_eq!(
         diags[0].code,
-        Some(NumberOrString::String(
-            "incompatible_trait_property".to_string()
-        ))
+        Some(Code::String("incompatible_trait_property".to_string()))
     );
     assert_eq!(
-        diags[0].message,
+        message_text(&diags[0].message),
         "Left and Right define the same property ($prop) in the composition of Composed, but the definitions are incompatible"
     );
     assert_eq!(diags[0].range.start.line, 3);

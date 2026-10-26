@@ -1,14 +1,14 @@
 //! The span every Laravel string family is emitted through: one string
-//! literal naming a key of some [`LaravelStringKind`], found at an argument
+//! literal naming a key of some [`StringKeyKind`], found at an argument
 //! picked by position or by parameter name.
 //!
-//! [`LaravelStringKind`]: crate::symbol_map::LaravelStringKind
+//! [`StringKeyKind`]: crate::symbol_map::StringKeyKind
 
 use super::*;
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 
 /// If the first argument of `argument_list` is a non-empty, non-interpolated
-/// string literal, push a [`SymbolKind::LaravelStringKey`] span covering the
+/// string literal, push a [`SymbolKind::StringKey`] span covering the
 /// string content (inside the quotes) onto `spans`.
 ///
 /// Called by the `config()` function-call extractor and the
@@ -16,12 +16,12 @@ use crate::virtual_members::laravel::helpers::resolved_string_literal;
 /// find-references and go-to-definition for Laravel config keys can use
 /// the pre-built symbol map instead of re-parsing every file on demand.
 pub(in crate::symbol_map::extraction) fn try_emit_laravel_string_span(
-    kind: crate::symbol_map::LaravelStringKind,
+    kind: crate::symbol_map::StringKeyKind,
     argument_list: &ArgumentList<'_>,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    if kind == crate::symbol_map::LaravelStringKind::Trans {
+    if kind == crate::symbol_map::StringKeyKind::Trans {
         if let Some(key) = argument_expr_for_parameter(argument_list, "key") {
             push_laravel_string_span(kind, false, false, key, content, spans);
         }
@@ -34,7 +34,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_string_span(
 /// lead with its key: `Route::view('/about', 'pages.about')` names the URI
 /// first and the template second.
 pub(in crate::symbol_map::extraction) fn try_emit_laravel_string_span_at(
-    kind: crate::symbol_map::LaravelStringKind,
+    kind: crate::symbol_map::StringKeyKind,
     index: usize,
     argument_list: &ArgumentList<'_>,
     content: &str,
@@ -48,7 +48,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_string_span_at(
 /// 'account.*')` asks whether the current route is any of them, so every
 /// argument names one.
 pub(in crate::symbol_map::extraction) fn try_emit_laravel_string_spans_all(
-    kind: crate::symbol_map::LaravelStringKind,
+    kind: crate::symbol_map::StringKeyKind,
     argument_list: &ArgumentList<'_>,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
@@ -85,7 +85,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_config_resource_span_f
                 ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
             };
             push_laravel_string_span(
-                crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+                crate::symbol_map::StringKeyKind::ConfigResource(resource),
                 access.is_write(),
                 access.is_optional(),
                 value,
@@ -95,7 +95,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_config_resource_span_f
         }
     } else if shape.accepts_scalar() {
         push_laravel_string_span(
-            crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+            crate::symbol_map::StringKeyKind::ConfigResource(resource),
             access.is_write(),
             access.is_optional(),
             argument,
@@ -165,7 +165,7 @@ pub(super) fn for_each_value<'ast>(
 }
 
 pub(super) fn emit_laravel_string_span(
-    kind: crate::symbol_map::LaravelStringKind,
+    kind: crate::symbol_map::StringKeyKind,
     is_write: bool,
     index: usize,
     argument_list: &ArgumentList<'_>,
@@ -183,8 +183,8 @@ pub(super) fn emit_laravel_string_span(
 /// The key compared against declared config/route/view/translation names is
 /// the literal's unescaped runtime `value` (`'it\'s'` names `it's`), not the
 /// raw source between the quotes; the span still covers the source text.
-pub(super) fn push_laravel_string_span(
-    kind: crate::symbol_map::LaravelStringKind,
+pub(in crate::symbol_map::extraction) fn push_laravel_string_span(
+    kind: crate::symbol_map::StringKeyKind,
     is_write: bool,
     is_optional: bool,
     expr: &Expression<'_>,
@@ -197,7 +197,7 @@ pub(super) fn push_laravel_string_span(
     let inner_start = inner_start as u32;
     let mut inner_end = inner_end as u32;
 
-    if kind == crate::symbol_map::LaravelStringKind::Config && !is_write && !key.contains('.') {
+    if kind == crate::symbol_map::StringKeyKind::Config && !is_write && !key.contains('.') {
         // A bare read names a config file, not one of its keys. A write can
         // establish that whole file's namespace with an opaque runtime value.
         return;
@@ -205,11 +205,11 @@ pub(super) fn push_laravel_string_span(
 
     // A container argument spelled as a class name is a class reference rather
     // than a binding key: it resolves without the container's table.
-    if kind == crate::symbol_map::LaravelStringKind::ContainerBinding && key.contains('\\') {
+    if kind == crate::symbol_map::StringKeyKind::ContainerBinding && key.contains('\\') {
         return;
     }
 
-    if kind == crate::symbol_map::LaravelStringKind::Command
+    if kind == crate::symbol_map::StringKeyKind::Command
         && let Some(name_len) = command_name_length(key)
     {
         // The string may carry inline arguments (`'app:sync --limit=50'`,
@@ -222,7 +222,7 @@ pub(super) fn push_laravel_string_span(
     spans.push(SymbolSpan {
         start: inner_start,
         end: inner_end,
-        kind: SymbolKind::LaravelStringKey {
+        kind: SymbolKind::StringKey {
             key: normalised_key(kind, key),
             kind,
             is_write,
@@ -241,8 +241,8 @@ fn command_name_length(key: &str) -> Option<usize> {
 /// A view name is stored in its canonical dotted spelling so that the
 /// slash-separated form Laravel also accepts compares equal to it; every
 /// other kind is stored as written.
-fn normalised_key(kind: crate::symbol_map::LaravelStringKind, key: &str) -> String {
-    if kind == crate::symbol_map::LaravelStringKind::View {
+fn normalised_key(kind: crate::symbol_map::StringKeyKind, key: &str) -> String {
+    if kind == crate::symbol_map::StringKeyKind::View {
         crate::virtual_members::laravel::canonical_view_name(key).into_owned()
     } else {
         key.to_string()
@@ -253,7 +253,7 @@ fn normalised_key(kind: crate::symbol_map::LaravelStringKind, key: &str) -> Stri
 /// argument named for `parameter`, else the first positional one, as in
 /// `#[Config('app.timezone')]` and `#[RedirectToRoute(route: 'login')]`.
 pub(in crate::symbol_map::extraction) fn try_emit_laravel_string_span_partial_for_parameter(
-    kind: crate::symbol_map::LaravelStringKind,
+    kind: crate::symbol_map::StringKeyKind,
     argument_list: &PartialArgumentList<'_>,
     parameter: &str,
     content: &str,
@@ -278,7 +278,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_config_resource_span_p
         return;
     };
     push_laravel_string_span(
-        crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+        crate::symbol_map::StringKeyKind::ConfigResource(resource),
         access.is_write(),
         access.is_optional(),
         expr,

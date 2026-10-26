@@ -1,6 +1,6 @@
 //! Laravel calls whose arguments decide more than the declared return
-//! type says: helper functions (`app()`, `now()`, `view()`, `config()`,
-//! `trans()`), configuration and translation lookups through their
+//! type says: helper functions (`app()`, `now()`, `view()`, `response()`,
+//! `config()`, `trans()`), configuration and translation lookups through their
 //! facades, validated request input, and request and console accessors.
 
 use std::sync::Arc;
@@ -21,8 +21,9 @@ use super::{resolve_rhs_expression, resolve_var_types};
 
 /// What the Laravel helper function `name` returns when its arguments
 /// decide more than its declared return type: the class a container
-/// binding names, the configured date class, the concrete view, a
-/// configuration value, or a translation.
+/// binding names, the configured date class, the concrete view, the
+/// response `response($content)` builds, a configuration value, or a
+/// translation.
 pub(super) fn laravel_helper_call(
     name: &str,
     argument_list: &ArgumentList<'_>,
@@ -84,6 +85,17 @@ pub(super) fn laravel_helper_call(
         {
             return Some(ResolvedType::from_classes(vec![cls]));
         }
+    }
+
+    // ── response($content) → Illuminate\Http\Response ──
+    // The helper's docblock keys the factory branch on `$content is null`,
+    // but the body keys it on whether an argument was passed at all.
+    if normalized_func == "response"
+        && !argument_list.arguments.is_empty()
+        && let Some(cls) =
+            (ctx.file.class_loader)(Fqn::new(crate::virtual_members::laravel::RESPONSE_FQN))
+    {
+        return Some(ResolvedType::from_classes(vec![cls]));
     }
 
     // ── config() return type inference ───────

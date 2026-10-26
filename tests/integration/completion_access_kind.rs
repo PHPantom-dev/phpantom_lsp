@@ -1,6 +1,6 @@
 use crate::common::{completion_response, create_test_backend, open_php};
 use phpantom_lsp::{AccessKind, extract_completion_target};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Access Kind Detection ──────────────────────────────────────────────────
 
@@ -93,7 +93,7 @@ async fn test_detect_access_kind_multiline() {
 async fn test_completion_arrow_shows_only_non_static() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///arrow.php").unwrap();
+    let uri = Uri::parse("file:///arrow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -115,20 +115,20 @@ async fn test_completion_arrow_shows_only_non_static() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let property_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.label.as_str())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
 
@@ -166,7 +166,7 @@ async fn test_completion_arrow_shows_only_non_static() {
                 constant_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -174,7 +174,7 @@ async fn test_completion_arrow_shows_only_non_static() {
 async fn test_completion_self_double_colon_shows_all_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///dcolon.php").unwrap();
+    let uri = Uri::parse("file:///dcolon.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Svc {\n",
@@ -196,20 +196,20 @@ async fn test_completion_self_double_colon_shows_all_members() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let property_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.label.as_str())
                 .collect();
             let constant_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
 
@@ -247,7 +247,7 @@ async fn test_completion_self_double_colon_shows_all_members() {
                 "self:: should include constant 'MAX'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -255,7 +255,7 @@ async fn test_completion_self_double_colon_shows_all_members() {
 async fn test_completion_arrow_with_partial_typed_identifier() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///partial.php").unwrap();
+    let uri = Uri::parse("file:///partial.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Obj {\n",
@@ -274,10 +274,10 @@ async fn test_completion_arrow_with_partial_typed_identifier() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -294,7 +294,7 @@ async fn test_completion_arrow_with_partial_typed_identifier() {
                 "Should include staticMethod when using -> (PHP allows static calls via instance)"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -304,7 +304,7 @@ async fn test_completion_arrow_with_partial_typed_identifier() {
 async fn test_construct_shown_via_self_inside_same_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///construct_self.php").unwrap();
+    let uri = Uri::parse("file:///construct_self.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -321,10 +321,10 @@ async fn test_construct_shown_via_self_inside_same_class() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -333,7 +333,7 @@ async fn test_construct_shown_via_self_inside_same_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -341,7 +341,7 @@ async fn test_construct_shown_via_self_inside_same_class() {
 async fn test_construct_shown_via_classname_inside_same_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///construct_classname.php").unwrap();
+    let uri = Uri::parse("file:///construct_classname.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -358,10 +358,10 @@ async fn test_construct_shown_via_classname_inside_same_class() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -370,7 +370,7 @@ async fn test_construct_shown_via_classname_inside_same_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -378,7 +378,7 @@ async fn test_construct_shown_via_classname_inside_same_class() {
 async fn test_construct_shown_via_static_inside_same_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///construct_static.php").unwrap();
+    let uri = Uri::parse("file:///construct_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -395,10 +395,10 @@ async fn test_construct_shown_via_static_inside_same_class() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -407,7 +407,7 @@ async fn test_construct_shown_via_static_inside_same_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -415,7 +415,7 @@ async fn test_construct_shown_via_static_inside_same_class() {
 async fn test_construct_shown_via_parent_in_subclass() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///construct_parent.php").unwrap();
+    let uri = Uri::parse("file:///construct_parent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -434,10 +434,10 @@ async fn test_construct_shown_via_parent_in_subclass() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -446,7 +446,7 @@ async fn test_construct_shown_via_parent_in_subclass() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -454,7 +454,7 @@ async fn test_construct_shown_via_parent_in_subclass() {
 async fn test_construct_shown_via_self_in_subclass() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///construct_self_sub.php").unwrap();
+    let uri = Uri::parse("file:///construct_self_sub.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -473,10 +473,10 @@ async fn test_construct_shown_via_self_in_subclass() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -485,7 +485,7 @@ async fn test_construct_shown_via_self_in_subclass() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -493,7 +493,7 @@ async fn test_construct_shown_via_self_in_subclass() {
 async fn test_construct_shown_via_parent_classname_in_subclass() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///construct_parent_name.php").unwrap();
+    let uri = Uri::parse("file:///construct_parent_name.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -512,10 +512,10 @@ async fn test_construct_shown_via_parent_classname_in_subclass() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -524,7 +524,7 @@ async fn test_construct_shown_via_parent_classname_in_subclass() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -532,7 +532,7 @@ async fn test_construct_shown_via_parent_classname_in_subclass() {
 async fn test_construct_hidden_via_classname_outside_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///construct_outside.php").unwrap();
+    let uri = Uri::parse("file:///construct_outside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -545,10 +545,10 @@ async fn test_construct_hidden_via_classname_outside_class() {
 
     let result = completion_response(&backend, &uri, 4, 3, None).await;
 
-    if let Some(CompletionResponse::Array(items)) = result {
+    if let Some(CompletionResponse::CompletionItemList(items)) = result {
         let method_names: Vec<&str> = items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .map(|i| i.filter_text.as_deref().unwrap())
             .collect();
         assert!(
@@ -564,7 +564,7 @@ async fn test_construct_hidden_via_classname_outside_class() {
 async fn test_construct_hidden_via_classname_in_unrelated_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///construct_unrelated.php").unwrap();
+    let uri = Uri::parse("file:///construct_unrelated.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class A {\n",
@@ -587,10 +587,10 @@ async fn test_construct_hidden_via_classname_in_unrelated_class() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             assert!(
@@ -604,7 +604,7 @@ async fn test_construct_hidden_via_classname_in_unrelated_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -614,7 +614,7 @@ async fn test_construct_hidden_via_classname_in_unrelated_class() {
 async fn test_double_colon_shows_class_keyword() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///class_keyword.php").unwrap();
+    let uri = Uri::parse("file:///class_keyword.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Foo {\n",
@@ -632,10 +632,10 @@ async fn test_double_colon_shows_class_keyword() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let keyword_labels: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::KEYWORD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Keyword))
                 .map(|i| i.label.as_str())
                 .collect();
             assert!(
@@ -644,7 +644,7 @@ async fn test_double_colon_shows_class_keyword() {
                 keyword_labels
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -657,7 +657,7 @@ async fn test_double_colon_shows_class_keyword() {
 async fn test_self_and_static_show_non_static_methods_like_parent() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///self_static_parity.php").unwrap();
+    let uri = Uri::parse("file:///self_static_parity.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -685,23 +685,23 @@ async fn test_self_and_static_show_non_static_methods_like_parent() {
     assert!(self_result.is_some(), "self:: should return completions");
 
     let self_items = match self_result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        _ => panic!("Expected CompletionResponse::Array"),
+        CompletionResponse::CompletionItemList(items) => items,
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     };
 
     let self_method_names: Vec<&str> = self_items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap())
         .collect();
     let self_property_names: Vec<&str> = self_items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+        .filter(|i| i.kind == Some(CompletionItemKind::Property))
         .map(|i| i.label.as_str())
         .collect();
     let self_constant_names: Vec<&str> = self_items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .filter(|i| i.kind == Some(CompletionItemKind::Constant))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -747,18 +747,18 @@ async fn test_self_and_static_show_non_static_methods_like_parent() {
     );
 
     let static_items = match static_result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        _ => panic!("Expected CompletionResponse::Array"),
+        CompletionResponse::CompletionItemList(items) => items,
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     };
 
     let static_method_names: Vec<&str> = static_items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap())
         .collect();
     let static_constant_names: Vec<&str> = static_items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+        .filter(|i| i.kind == Some(CompletionItemKind::Constant))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -794,7 +794,7 @@ async fn test_self_and_static_show_non_static_methods_like_parent() {
 async fn test_static_property_access_resolves_to_property_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b17_static_prop.php").unwrap();
+    let uri = Uri::parse("file:///b17_static_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Connection {\n",
@@ -815,13 +815,13 @@ async fn test_static_property_access_resolves_to_property_type() {
     // Cursor right after `self::$instance->` on line 9
     let result = completion_response(&backend, &uri, 9, 26, None).await;
     let items = match result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
 
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -843,7 +843,7 @@ async fn test_static_property_access_resolves_to_property_type() {
 async fn test_classname_static_property_access_resolves_to_property_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b17_classname_static.php").unwrap();
+    let uri = Uri::parse("file:///b17_classname_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -863,13 +863,13 @@ async fn test_classname_static_property_access_resolves_to_property_type() {
     // Cursor right after `Registry::$logger->` on line 8
     let result = completion_response(&backend, &uri, 8, 28, None).await;
     let items = match result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
 
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.label.as_str())
         .collect();
 
@@ -886,7 +886,7 @@ async fn test_classname_static_property_access_resolves_to_property_type() {
 async fn test_parent_static_property_access_resolves_to_property_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///b17_parent_static.php").unwrap();
+    let uri = Uri::parse("file:///b17_parent_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Formatter {\n",
@@ -907,13 +907,13 @@ async fn test_parent_static_property_access_resolves_to_property_type() {
     // Cursor right after `parent::$fmt->` on line 9
     let result = completion_response(&backend, &uri, 9, 22, None).await;
     let items = match result.unwrap() {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => list.items,
     };
 
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.label.as_str())
         .collect();
 

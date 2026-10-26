@@ -68,7 +68,7 @@ mod remove_throws;
 pub(crate) mod remove_unreachable;
 pub(crate) mod remove_unused_return_type;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::CodeActionData;
@@ -99,7 +99,7 @@ impl Backend {
 /// `return.type`.
 pub(super) fn phpstan_identifier(diag: &Diagnostic) -> Option<&str> {
     match &diag.code {
-        Some(NumberOrString::String(s)) => Some(s),
+        Some(Code::String(s)) => Some(s),
         _ => None,
     }
 }
@@ -141,7 +141,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         // ── PHPStan ignore / remove unnecessary ignore ──────────────
         self.collect_phpstan_ignore_actions(uri, content, params, out);
@@ -240,10 +240,11 @@ impl Backend {
             }
 
             // Must be for the same exception class.
-            let cached_fqn: String = match extract_exception_fqn(&cached_d.message) {
-                Some(fqn) => fqn,
-                None => continue,
-            };
+            let cached_fqn: String =
+                match extract_exception_fqn(crate::util::message_text(&cached_d.message)) {
+                    Some(fqn) => fqn,
+                    None => continue,
+                };
             if !cached_fqn.eq_ignore_ascii_case(&exception_fqn) {
                 continue;
             }

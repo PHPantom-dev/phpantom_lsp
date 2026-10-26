@@ -30,7 +30,7 @@
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::phpstan_identifier;
@@ -63,7 +63,7 @@ impl Backend {
         uri: &str,
         _content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         for diag in self.phpstan_diags_overlapping(uri, &params.range) {
             if phpstan_identifier(&diag) != Some(UNREACHABLE_ID) {
@@ -91,7 +91,7 @@ impl Backend {
         content: &str,
     ) -> Option<WorkspaceEdit> {
         let extra = &data.extra;
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
 
         match data.action_kind.as_str() {
             ACTION_KIND => {

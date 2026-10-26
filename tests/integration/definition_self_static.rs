@@ -1,5 +1,5 @@
 use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Goto Definition: new self() / new static() / new parent() ─────────────
 
@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::*;
 async fn test_goto_definition_new_self_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SessionManager {\n",
@@ -27,7 +27,7 @@ async fn test_goto_definition_new_self_same_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -42,7 +42,7 @@ async fn test_goto_definition_new_self_same_file() {
 async fn test_goto_definition_new_static_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SessionManager {\n",
@@ -62,7 +62,7 @@ async fn test_goto_definition_new_static_same_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -77,7 +77,7 @@ async fn test_goto_definition_new_static_same_file() {
 async fn test_goto_definition_new_parent_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Manager {\n",
@@ -101,7 +101,7 @@ async fn test_goto_definition_new_parent_same_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 1, "class Manager is on line 1");
         }
@@ -113,7 +113,7 @@ async fn test_goto_definition_new_parent_same_file() {
 async fn test_goto_definition_parent_imported_from_another_namespace() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Lib {\n",
@@ -134,7 +134,7 @@ async fn test_goto_definition_parent_imported_from_another_namespace() {
     // Click on "parent" in `new parent()` on line 8
     let result = goto_definition_at(&backend, &uri, 8, 17).await;
     match result {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 2, "class Manager is on line 2");
         }
@@ -165,7 +165,7 @@ async fn test_goto_definition_new_parent_cross_file_psr4() {
         )],
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -187,7 +187,7 @@ async fn test_goto_definition_new_parent_cross_file_psr4() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/Manager.php"),
@@ -207,7 +207,7 @@ async fn test_goto_definition_new_parent_cross_file_psr4() {
 async fn test_goto_definition_self_outside_class_returns_none() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     // `self` used outside any class — should not resolve
     let text = concat!("<?php\n", "$x = new self();\n",);
 
@@ -225,7 +225,7 @@ async fn test_goto_definition_self_outside_class_returns_none() {
 async fn test_goto_definition_new_self_in_nested_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -254,7 +254,7 @@ async fn test_goto_definition_new_self_in_nested_method() {
         "Should resolve `new self()` inside namespaced class"
     );
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 3, "class Factory is on line 3");
         }
@@ -268,7 +268,7 @@ async fn test_goto_definition_new_self_in_nested_method() {
         "Should resolve `new static()` inside namespaced class"
     );
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 3, "class Factory is on line 3");
         }
@@ -282,7 +282,7 @@ async fn test_goto_definition_new_self_in_nested_method() {
 async fn test_goto_definition_new_classname_arrow_method_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SessionManager {\n",
@@ -303,7 +303,7 @@ async fn test_goto_definition_new_classname_arrow_method_same_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -318,7 +318,7 @@ async fn test_goto_definition_new_classname_arrow_method_same_file() {
 async fn test_goto_definition_parenthesized_new_arrow_method_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class SessionManager {\n",
@@ -339,7 +339,7 @@ async fn test_goto_definition_parenthesized_new_arrow_method_same_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 2,
@@ -374,7 +374,7 @@ async fn test_goto_definition_new_classname_arrow_method_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\SessionManager;\n",
@@ -396,7 +396,7 @@ async fn test_goto_definition_new_classname_arrow_method_cross_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/SessionManager.php"),
@@ -436,7 +436,7 @@ async fn test_goto_definition_parenthesized_new_arrow_method_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\SessionManager;\n",
@@ -458,7 +458,7 @@ async fn test_goto_definition_parenthesized_new_arrow_method_cross_file() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             let path = location.uri.to_file_path().unwrap();
             assert!(
                 path.ends_with("src/SessionManager.php"),
@@ -478,7 +478,7 @@ async fn test_goto_definition_parenthesized_new_arrow_method_cross_file() {
 async fn test_goto_definition_new_namespaced_classname_arrow_method() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App;\n",
@@ -504,7 +504,7 @@ async fn test_goto_definition_new_namespaced_classname_arrow_method() {
         "Should resolve `(new Widget())->render()` to render declaration"
     );
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 4, "render is on line 4");
         }
@@ -518,7 +518,7 @@ async fn test_goto_definition_new_namespaced_classname_arrow_method() {
         "Should resolve `new Widget()->render()` to render declaration"
     );
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(location.range.start.line, 4, "render is on line 4");
         }

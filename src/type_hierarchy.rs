@@ -7,7 +7,7 @@
 //! `find_implementors` scan) and the already-resolved inheritance
 //! chain for supertypes.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::names::resolve_to_fqn;
@@ -249,7 +249,7 @@ fn build_type_hierarchy_item(
     };
 
     let tags = if class_info.deprecation_message.is_some() {
-        Some(SymbolTag::DEPRECATED)
+        Some(vec![SymbolTag::Deprecated])
     } else {
         None
     };
@@ -293,12 +293,14 @@ fn find_name_start(content: &[u8], keyword_offset: usize) -> usize {
 ///
 /// Traits map to `STRUCT` because LSP does not have a dedicated trait
 /// symbol kind.
-fn class_like_kind_to_symbol_kind(kind: ClassLikeKind) -> tower_lsp::lsp_types::SymbolKind {
+fn class_like_kind_to_symbol_kind(
+    kind: ClassLikeKind,
+) -> tower_lsp_server::gen_lsp_types::SymbolKind {
     match kind {
-        ClassLikeKind::Class => tower_lsp::lsp_types::SymbolKind::CLASS,
-        ClassLikeKind::Interface => tower_lsp::lsp_types::SymbolKind::INTERFACE,
-        ClassLikeKind::Trait => tower_lsp::lsp_types::SymbolKind::STRUCT,
-        ClassLikeKind::Enum => tower_lsp::lsp_types::SymbolKind::ENUM,
+        ClassLikeKind::Class => tower_lsp_server::gen_lsp_types::SymbolKind::Class,
+        ClassLikeKind::Interface => tower_lsp_server::gen_lsp_types::SymbolKind::Interface,
+        ClassLikeKind::Trait => tower_lsp_server::gen_lsp_types::SymbolKind::Struct,
+        ClassLikeKind::Enum => tower_lsp_server::gen_lsp_types::SymbolKind::Enum,
     }
 }
 

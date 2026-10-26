@@ -509,6 +509,47 @@ pub(crate) fn is_subtype_of_typed(
         return is_subtype_of_typed(sub, sup, class_loader);
     }
 
+    // ── class-string <: enum-string / trait-string ──────────────
+    // The same name-kind rule as `interface-string`: `SomeEnum::class`
+    // is an `enum-string`, `SomeClass::class` is not.  A bare
+    // `class-string`, and one whose class we cannot load, stay silent.
+    if let TypeKind::ClassString(sub_inner) = subtype.kind()
+        && let Some((kind, sup_bound)) = class_kind_string(supertype)
+    {
+        if let (Some(sub), Some(sup)) = (sub_inner, sup_bound)
+            && !is_subtype_of_typed(sub, sup, class_loader)
+        {
+            return false;
+        }
+        return sub_inner
+            .as_ref()
+            .and_then(|inner| inner.base_name())
+            .and_then(|name| class_loader(Fqn::new(name)))
+            .is_none_or(|cls| cls.kind == kind);
+    }
+
+    // ── enum-string / trait-string <: class-string / its own kind ─
+    // An enum name is a class-string, a trait name is not (the name
+    // lattice keeps them apart the same way), and a kind-string only
+    // satisfies its own kind.  What is left is lining up the bounds,
+    // where a missing one is `object`.
+    if let Some((sub_kind, sub_bound)) = class_kind_string(subtype)
+        && let Some((kind_fits, sup_bound)) = match supertype.kind() {
+            TypeKind::ClassString(bound) => Some((sub_kind == ClassLikeKind::Enum, bound.as_ref())),
+            _ => class_kind_string(supertype).map(|(kind, bound)| (kind == sub_kind, bound)),
+        }
+    {
+        if !kind_fits {
+            return false;
+        }
+        let object_bound = PhpType::named(atom("object"));
+        return is_subtype_of_typed(
+            sub_bound.unwrap_or(&object_bound),
+            sup_bound.unwrap_or(&object_bound),
+            class_loader,
+        );
+    }
+
     // ── String literal <: model-property<Model> ────────────────
     // The Laravel PHPStan extensions' `model-property<Model>` is a string subtype
     // representing the property names of an Eloquent model.  A
@@ -579,6 +620,20 @@ pub(crate) fn is_subtype_of_typed(
         };
     }
 
+    // ── String literal <: enum-string / trait-string ────────────
+    if let TypeKind::Literal(lit) = subtype.kind()
+        && let Some(class_name) = lit.string_content()
+        && let Some((kind, bound)) = class_kind_string(supertype)
+    {
+        let Some(cls) = class_loader(Fqn::new(&class_name)) else {
+            return true;
+        };
+        return cls.kind == kind
+            && bound
+                .and_then(|bound| bound.base_name())
+                .is_none_or(|bound_name| is_subtype_of(&cls, bound_name, class_loader));
+    }
+
     // ── Class-like <: `object` / `iterable` ─────────────────────
     // Neither `object` nor `iterable` is a class name, so the nominal
     // walk below cannot speak for them: it needs a loadable name on both
@@ -615,6 +670,25 @@ pub(crate) fn is_subtype_of_typed(
     }
 
     false
+}
+
+/// The class-like kind an `enum-string` or `trait-string` (bare, or with
+/// a `<Bound>`) requires its name to have, and the bound if written.
+fn class_kind_string(
+    ty: &crate::php_type::PhpType,
+) -> Option<(ClassLikeKind, Option<&crate::php_type::PhpType>)> {
+    let (name, bound) = match ty.kind() {
+        TypeKind::Named(name) => (name.as_str(), None),
+        TypeKind::Generic(g) if g.args.len() == 1 => (g.name.as_str(), g.args.first()),
+        _ => return None,
+    };
+    if name.eq_ignore_ascii_case("enum-string") {
+        Some((ClassLikeKind::Enum, bound))
+    } else if name.eq_ignore_ascii_case("trait-string") {
+        Some((ClassLikeKind::Trait, bound))
+    } else {
+        None
+    }
 }
 
 /// The runtime array key a shape key spelled `Foo::CONSTANT` evaluates to,

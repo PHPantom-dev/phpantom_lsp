@@ -1,0 +1,8 @@
+// test: A final entity Doctrine cannot proxy
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityNotFinalRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/FinalEntity.php
+// expect_diagnostic: 8: Entity class PHPStan\Rules\Doctrine\ORM\FinalEntity is final which can cause problems with proxies. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

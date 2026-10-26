@@ -93,8 +93,7 @@ impl OwnedResolvedNames {
     /// Iterate all resolved name entries as `(offset, fqn, imported)` triples.
     ///
     /// Useful for cross-referencing resolved names with other data structures
-    /// (e.g. checking which declared imports are actually used).
-    #[allow(dead_code)]
+    /// (e.g. finding every use of one attribute).
     pub fn iter(&self) -> impl Iterator<Item = (u32, &str, bool)> {
         self.names
             .iter()

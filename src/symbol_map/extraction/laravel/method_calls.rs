@@ -11,7 +11,7 @@
 //! cannot disagree about which calls name what.
 
 use super::*;
-use crate::symbol_map::LaravelStringKind;
+use crate::symbol_map::StringKeyKind;
 
 /// What an instance method call's receiver reads as.
 ///
@@ -207,27 +207,27 @@ pub(crate) fn instance_method_arg_kind(
     member_name: &str,
     index: usize,
     receiver: &dyn MethodReceiver,
-) -> Option<LaravelStringKind> {
+) -> Option<StringKeyKind> {
     let first = index == 0;
     if first && names_config_key(member_name, receiver) {
-        Some(LaravelStringKind::Config)
+        Some(StringKeyKind::Config)
     } else if container_key_index(member_name, receiver) == Some(index) {
-        Some(LaravelStringKind::ContainerBinding)
+        Some(StringKeyKind::ContainerBinding)
     } else if (first && names_route(member_name, receiver))
         // `$request->routeIs('admin.*', 'account.*')`: every argument.
         || is_request_route_pattern_method(member_name)
     {
-        Some(LaravelStringKind::Route)
+        Some(StringKeyKind::Route)
     } else if (first && names_mailable_view(member_name, receiver))
         || (view_factory_names_view_at(member_name, index) && receiver.is_view_factory())
     {
-        Some(LaravelStringKind::View)
+        Some(StringKeyKind::View)
     } else if first && names_command(member_name, receiver) {
-        Some(LaravelStringKind::Command)
+        Some(StringKeyKind::Command)
     } else if ability_arguments(member_name, receiver).is_some_and(|args| args.ability == index) {
-        Some(LaravelStringKind::GateAbility)
+        Some(StringKeyKind::GateAbility)
     } else if index == MORPH_TYPES_ARG && is_morph_types_query_method(member_name) {
-        Some(LaravelStringKind::MorphAlias)
+        Some(StringKeyKind::MorphAlias)
     } else {
         None
     }
@@ -259,7 +259,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_method_call_spans<'a>(
     }
     if names_route(member_name, &receiver) {
         try_emit_laravel_string_span(
-            LaravelStringKind::Route,
+            StringKeyKind::Route,
             argument_list,
             ctx.content,
             &mut ctx.spans,
@@ -267,7 +267,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_method_call_spans<'a>(
     }
     if is_request_route_pattern_method(member_name) {
         try_emit_laravel_string_spans_all(
-            LaravelStringKind::Route,
+            StringKeyKind::Route,
             argument_list,
             ctx.content,
             &mut ctx.spans,
@@ -279,7 +279,7 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_method_call_spans<'a>(
     let mut named_syntactically = true;
     if names_mailable_view(member_name, &receiver) {
         try_emit_laravel_string_span(
-            LaravelStringKind::View,
+            StringKeyKind::View,
             argument_list,
             ctx.content,
             &mut ctx.spans,
@@ -304,12 +304,12 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_method_call_spans<'a>(
             name_indices,
             argument_list,
             ctx.content,
-            &mut ctx.view_receiver_sites,
+            &mut ctx.typed_receiver_sites,
         );
     }
     if names_command(member_name, &receiver) {
         try_emit_laravel_string_span(
-            LaravelStringKind::Command,
+            StringKeyKind::Command,
             argument_list,
             ctx.content,
             &mut ctx.spans,
@@ -383,6 +383,6 @@ fn defer_on_route_root(receiver: &AstReceiver<'_>, span_start: usize, ctx: &mut 
         .resolved_names
         .and_then(|names| route_facade_root_dependency(receiver.object, names))
     {
-        ctx.defer_laravel_spans_since(span_start, dependency);
+        ctx.defer_string_key_spans_since(span_start, dependency);
     }
 }

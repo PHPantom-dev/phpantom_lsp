@@ -1,11 +1,11 @@
 use crate::common::{completion_response, create_psr4_workspace, create_test_backend, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 #[tokio::test]
 async fn test_completion_includes_properties() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///props.php").unwrap();
+    let uri = Uri::parse("file:///props.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -27,15 +27,15 @@ async fn test_completion_includes_properties() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             // Should have 3 methods (login, logout, test) + 2 properties = 5 items
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
             let property_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .collect();
 
             assert_eq!(method_items.len(), 3, "Should have 3 methods");
@@ -67,7 +67,7 @@ async fn test_completion_includes_properties() {
                 name_detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -75,7 +75,7 @@ async fn test_completion_includes_properties() {
 async fn test_completion_property_without_type_hint() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///untyped.php").unwrap();
+    let uri = Uri::parse("file:///untyped.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Bag {\n",
@@ -92,10 +92,10 @@ async fn test_completion_property_without_type_hint() {
     // Cursor right after `$this->` on line 4
     let result = completion_response(&backend, &uri, 4, 15, None).await;
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let property_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .collect();
 
             assert_eq!(property_items.len(), 1);
@@ -107,7 +107,7 @@ async fn test_completion_property_without_type_hint() {
                 property_items[0].detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -115,7 +115,7 @@ async fn test_completion_property_without_type_hint() {
 async fn test_completion_class_with_only_properties() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///onlyprops.php").unwrap();
+    let uri = Uri::parse("file:///onlyprops.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Data {\n",
@@ -133,10 +133,10 @@ async fn test_completion_class_with_only_properties() {
     // Cursor right after `$this->` on line 5
     let result = completion_response(&backend, &uri, 5, 15, None).await;
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let property_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .collect();
             // Class has 2 properties + test method, but we check properties
             assert_eq!(
@@ -148,7 +148,7 @@ async fn test_completion_class_with_only_properties() {
             assert!(labels.contains(&"name"));
             assert!(labels.contains(&"value"));
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -156,7 +156,7 @@ async fn test_completion_class_with_only_properties() {
 async fn test_completion_constant_detail_with_type_hint() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///consttype.php").unwrap();
+    let uri = Uri::parse("file:///consttype.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Cfg {\n",
@@ -175,10 +175,10 @@ async fn test_completion_constant_detail_with_type_hint() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let constants: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .collect();
             assert_eq!(constants.len(), 2, "Should have 2 constants");
 
@@ -198,7 +198,7 @@ async fn test_completion_constant_detail_with_type_hint() {
                 count_const.detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -206,7 +206,7 @@ async fn test_completion_constant_detail_with_type_hint() {
 async fn test_completion_promoted_properties_appear_in_this() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///promoted.php").unwrap();
+    let uri = Uri::parse("file:///promoted.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class ShoppingCartService {\n",
@@ -229,7 +229,7 @@ async fn test_completion_promoted_properties_appear_in_this() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 names.contains(&"regular"),
@@ -242,7 +242,7 @@ async fn test_completion_promoted_properties_appear_in_this() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -254,7 +254,7 @@ async fn test_completion_promoted_properties_appear_in_this() {
 async fn test_completion_private_property_hidden_outside_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///vis_private_hidden.php").unwrap();
+    let uri = Uri::parse("file:///vis_private_hidden.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Container {\n",
@@ -272,7 +272,7 @@ async fn test_completion_private_property_hidden_outside_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
@@ -294,7 +294,7 @@ async fn test_completion_private_property_hidden_outside_class() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -303,7 +303,7 @@ async fn test_completion_private_property_hidden_outside_class() {
 async fn test_completion_private_method_hidden_outside_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///vis_private_method_hidden.php").unwrap();
+    let uri = Uri::parse("file:///vis_private_method_hidden.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -321,10 +321,10 @@ async fn test_completion_private_method_hidden_outside_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -344,7 +344,7 @@ async fn test_completion_private_method_hidden_outside_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -352,7 +352,7 @@ async fn test_completion_private_method_hidden_outside_class() {
 async fn test_completion_instance_access_includes_public_static_methods() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///vis_instance_static_method.php").unwrap();
+    let uri = Uri::parse("file:///vis_instance_static_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -369,10 +369,10 @@ async fn test_completion_instance_access_includes_public_static_methods() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -387,7 +387,7 @@ async fn test_completion_instance_access_includes_public_static_methods() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -396,7 +396,7 @@ async fn test_completion_instance_access_includes_public_static_methods() {
 async fn test_completion_private_and_protected_visible_inside_own_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///vis_private_visible.php").unwrap();
+    let uri = Uri::parse("file:///vis_private_visible.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Vault {\n",
@@ -417,7 +417,7 @@ async fn test_completion_private_and_protected_visible_inside_own_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
@@ -454,7 +454,7 @@ async fn test_completion_private_and_protected_visible_inside_own_class() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -464,7 +464,7 @@ async fn test_completion_private_and_protected_visible_inside_own_class() {
 async fn test_completion_private_visible_on_same_class_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///vis_same_class_var.php").unwrap();
+    let uri = Uri::parse("file:///vis_same_class_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Node {\n",
@@ -482,7 +482,7 @@ async fn test_completion_private_visible_on_same_class_variable() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
@@ -499,7 +499,7 @@ async fn test_completion_private_visible_on_same_class_variable() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -509,7 +509,7 @@ async fn test_completion_private_visible_on_same_class_variable() {
 async fn test_completion_protected_visible_from_different_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///vis_protected_subclass.php").unwrap();
+    let uri = Uri::parse("file:///vis_protected_subclass.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -531,10 +531,10 @@ async fn test_completion_protected_visible_from_different_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -554,7 +554,7 @@ async fn test_completion_protected_visible_from_different_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -563,7 +563,7 @@ async fn test_completion_protected_visible_from_different_class() {
 async fn test_completion_private_constant_hidden_outside_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///vis_const_hidden.php").unwrap();
+    let uri = Uri::parse("file:///vis_const_hidden.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -581,10 +581,10 @@ async fn test_completion_private_constant_hidden_outside_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let const_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -604,7 +604,7 @@ async fn test_completion_private_constant_hidden_outside_class() {
                 const_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -613,7 +613,7 @@ async fn test_completion_private_constant_hidden_outside_class() {
 async fn test_completion_private_constant_visible_via_self() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///vis_const_self.php").unwrap();
+    let uri = Uri::parse("file:///vis_const_self.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -632,10 +632,10 @@ async fn test_completion_private_constant_visible_via_self() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let const_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -655,7 +655,7 @@ async fn test_completion_private_constant_visible_via_self() {
                 const_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -679,7 +679,7 @@ async fn test_completion_private_hidden_cross_file() {
         )],
     );
 
-    let uri = Url::parse("file:///vis_cross_file.php").unwrap();
+    let uri = Uri::parse("file:///vis_cross_file.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Repo;\n",
@@ -693,7 +693,7 @@ async fn test_completion_private_hidden_cross_file() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items
                 .iter()
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
@@ -715,7 +715,7 @@ async fn test_completion_private_hidden_cross_file() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -723,7 +723,7 @@ async fn test_completion_private_hidden_cross_file() {
 async fn test_completion_promoted_property_type_resolves_for_chaining() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///promoted_chain.php").unwrap();
+    let uri = Uri::parse("file:///promoted_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -751,7 +751,7 @@ async fn test_completion_promoted_property_type_resolves_for_chaining() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 names.iter().any(|n| n.starts_with("info(")),
@@ -764,7 +764,7 @@ async fn test_completion_promoted_property_type_resolves_for_chaining() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -778,7 +778,7 @@ async fn test_completion_promoted_property_type_resolves_for_chaining() {
 async fn test_completion_promoted_property_param_override_basic() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///promoted_param_override.php").unwrap();
+    let uri = Uri::parse("file:///promoted_param_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -809,7 +809,7 @@ async fn test_completion_promoted_property_param_override_basic() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("users")),
@@ -817,7 +817,7 @@ async fn test_completion_promoted_property_param_override_basic() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -828,7 +828,7 @@ async fn test_completion_promoted_property_param_override_basic() {
 async fn test_completion_promoted_property_param_override_generic_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///promoted_generic_override.php").unwrap();
+    let uri = Uri::parse("file:///promoted_generic_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Order {\n",
@@ -861,7 +861,7 @@ async fn test_completion_promoted_property_param_override_generic_class() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("first")),
@@ -874,7 +874,7 @@ async fn test_completion_promoted_property_param_override_generic_class() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -884,7 +884,7 @@ async fn test_completion_promoted_property_param_override_generic_class() {
 async fn test_completion_promoted_property_param_scalar_not_overridden() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///promoted_scalar_no_override.php").unwrap();
+    let uri = Uri::parse("file:///promoted_scalar_no_override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class UserId {\n",
@@ -922,7 +922,7 @@ async fn test_completion_promoted_property_param_scalar_not_overridden() {
 async fn test_completion_promoted_property_param_override_with_var_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///promoted_var_chain.php").unwrap();
+    let uri = Uri::parse("file:///promoted_var_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -952,7 +952,7 @@ async fn test_completion_promoted_property_param_override_with_var_chain() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("info")),
@@ -965,7 +965,7 @@ async fn test_completion_promoted_property_param_override_with_var_chain() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -1011,7 +1011,7 @@ async fn test_completion_promoted_property_param_override_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///src/Service.php").unwrap();
+    let uri = Uri::parse("file:///src/Service.php").unwrap();
     open_php(&backend, &uri, service_php).await;
 
     let result = completion_response(&backend, &uri, 12, 22, None).await;
@@ -1021,7 +1021,7 @@ async fn test_completion_promoted_property_param_override_cross_file() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("get")),
@@ -1034,7 +1034,7 @@ async fn test_completion_promoted_property_param_override_cross_file() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -1052,7 +1052,7 @@ async fn test_completion_promoted_property_param_override_cross_file() {
 async fn test_completion_promoted_property_inline_var_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inline_var.php").unwrap();
+    let uri = Uri::parse("file:///inline_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class EventModel {\n",
@@ -1082,7 +1082,7 @@ async fn test_completion_promoted_property_inline_var_docblock() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("getLabel")),
@@ -1095,7 +1095,7 @@ async fn test_completion_promoted_property_inline_var_docblock() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -1105,7 +1105,7 @@ async fn test_completion_promoted_property_inline_var_docblock() {
 async fn test_completion_promoted_property_inline_var_union_native_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inline_var_union.php").unwrap();
+    let uri = Uri::parse("file:///inline_var_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Optional {}\n",
@@ -1136,7 +1136,7 @@ async fn test_completion_promoted_property_inline_var_union_native_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 labels.iter().any(|l| l.starts_with("greet")),
@@ -1149,7 +1149,7 @@ async fn test_completion_promoted_property_inline_var_union_native_type() {
                 labels
             );
         }
-        CompletionResponse::List(_) => panic!("Expected Array response"),
+        CompletionResponse::CompletionList(_) => panic!("Expected Array response"),
     }
 }
 
@@ -1172,7 +1172,7 @@ async fn test_completion_promoted_property_inline_var_union_native_type() {
 async fn test_completion_phpdoc_property_type_resolves_for_chaining_on_parameter() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///phpdoc_prop_chain.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_prop_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Carbon {\n",
@@ -1201,7 +1201,7 @@ async fn test_completion_phpdoc_property_type_resolves_for_chaining_on_parameter
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 names.iter().any(|n| n.starts_with("format(")),
@@ -1214,7 +1214,7 @@ async fn test_completion_phpdoc_property_type_resolves_for_chaining_on_parameter
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1227,7 +1227,7 @@ async fn test_completion_phpdoc_property_type_resolves_for_chaining_on_parameter
 async fn test_completion_phpdoc_property_type_resolves_with_parent_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///phpdoc_prop_parent.php").unwrap();
+    let uri = Uri::parse("file:///phpdoc_prop_parent.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Carbon {\n",
@@ -1259,7 +1259,7 @@ async fn test_completion_phpdoc_property_type_resolves_with_parent_class() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 names.iter().any(|n| n.starts_with("format(")),
@@ -1272,7 +1272,7 @@ async fn test_completion_phpdoc_property_type_resolves_with_parent_class() {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1343,7 +1343,7 @@ class Controller {
 
     let (backend, _dir) = create_psr4_workspace(composer_json, &files);
 
-    let uri = Url::from_file_path(_dir.path().join("src/Http/Controllers/Controller.php")).unwrap();
+    let uri = Uri::from_file_path(_dir.path().join("src/Http/Controllers/Controller.php")).unwrap();
     open_php(&backend, &uri, controller_php).await;
 
     // Cursor right after `$supplyValueLog->created->` on line 5
@@ -1354,7 +1354,7 @@ class Controller {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 names.iter().any(|n| n.starts_with("format(")),
@@ -1372,7 +1372,7 @@ class Controller {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1447,7 +1447,7 @@ class Controller {
 
     let (backend, _dir) = create_psr4_workspace(composer_json, &files);
 
-    let uri = Url::from_file_path(_dir.path().join("src/Http/Controllers/Controller.php")).unwrap();
+    let uri = Uri::from_file_path(_dir.path().join("src/Http/Controllers/Controller.php")).unwrap();
     open_php(&backend, &uri, controller_php).await;
 
     // Cursor right after `$supplyValueLog->created->` on line 5
@@ -1458,7 +1458,7 @@ class Controller {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
             assert!(
                 names.iter().any(|n| n.starts_with("format(")),
@@ -1476,6 +1476,6 @@ class Controller {
                 names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }

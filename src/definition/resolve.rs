@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use crate::symbol_map::VarDefKind;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::member::{MemberAccessHint, MemberDefinitionCtx, MemberKind};
 use super::{class_keyword_location, point_location};
@@ -96,17 +96,17 @@ impl Backend {
         {
             return Some(span.clone());
         }
-        // A view name behind a typed receiver is a gap in the map — the
-        // indexer could not tell it was one — so the cursor lands in what
-        // reads as a plain string literal until the receiver is typed.
+        // A key behind a typed receiver is a gap in the map — the indexer
+        // could not tell it was one — so the cursor lands in what reads as
+        // a plain string literal until the receiver is typed.
         if !map
-            .view_receiver_sites
+            .typed_receiver_sites
             .iter()
             .any(|site| offset >= site.start && offset < site.end)
         {
             return None;
         }
-        self.typed_receiver_view_spans_for(uri, &map)
+        self.typed_receiver_spans_for(uri, &map)
             .iter()
             .find(|span| offset >= span.start && offset < span.end)
             .cloned()
@@ -403,8 +403,8 @@ impl Backend {
                     .map(|loc| vec![loc])
             }
 
-            SymbolKind::LaravelStringKey { kind, key, .. } => {
-                if !self.resolved_class_cache.read().laravel().is_enabled() {
+            SymbolKind::StringKey { kind, key, .. } => {
+                if !self.string_key_kind_enabled(*kind) {
                     return None;
                 }
                 let locs = laravel::resolve_laravel_string_key(self, kind, key, uri);
@@ -591,7 +591,8 @@ impl Backend {
             Some(uri) => uri,
             None => {
                 self.find_or_load_class(fqn);
-                self.symbols.fqn_uri_index.read().get(fqn).cloned()?
+                let loaded = self.symbols.fqn_uri_index.read().get(fqn).cloned();
+                loaded?
             }
         };
         self.find_definition_in_uri_classes_index_cross_file(fqn, &target_uri)
@@ -608,6 +609,9 @@ impl Backend {
         fqn: &str,
         target_uri: &str,
     ) -> Option<Location> {
+        if crate::stubs::is_embedded_stub_uri(target_uri) {
+            return None;
+        }
         // Look up classes from uri_classes_index first, then fall back
         // to fqn_class_index and disk.  Each lock is dropped before
         // calling parse_and_cache_file (which takes write locks).
@@ -693,10 +697,11 @@ impl Backend {
 /// Matches on the full FQN so two namespaces declaring the same short
 /// name in one file never shadow each other.
 fn find_class_by_fqn<'a>(classes: &'a [Arc<ClassInfo>], fqn: &str) -> Option<&'a ClassInfo> {
+    // Class names are case-insensitive, so `new pdo` names `PDO`.
     let sn = short_name(fqn);
     classes
         .iter()
-        .find(|c| c.name == sn && c.fqn() == fqn)
+        .find(|c| c.name.eq_ignore_ascii_case(sn) && c.fqn().eq_ignore_ascii_case(fqn))
         .map(|c| &**c)
 }
 

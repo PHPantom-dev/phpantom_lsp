@@ -31,25 +31,14 @@ pub fn run() -> String {
         sections.push(format!("[indexing]\nstrategy = \"{strategy}\"\n"));
     }
 
-    let mut diagnostics = Vec::new();
-    if prompt_bool(
-        "Compute diagnostics for the whole workspace in the background, not just open files?",
-        false,
+    let diagnostics = if prompt_bool(
+        "Show diagnostics (errors and warnings) in the editor?",
+        true,
     ) {
-        diagnostics.push("workspace = true");
-    }
-    if prompt_bool(
-        "Report calls that pass more arguments than the function accepts?",
-        false,
-    ) {
-        diagnostics.push("extra-arguments = true");
-    }
-    if prompt_bool(
-        "Report member access on a subject whose type can't be resolved (mixed or unknown)?",
-        false,
-    ) {
-        diagnostics.push("unresolved-member-access = true");
-    }
+        prompt_diagnostic_toggles()
+    } else {
+        vec!["enabled = false"]
+    };
     if !diagnostics.is_empty() {
         sections.push(format!("[diagnostics]\n{}\n", diagnostics.join("\n")));
     }
@@ -69,6 +58,55 @@ pub fn run() -> String {
         content.push_str(&section);
     }
     content
+}
+
+/// Ask about the individual `[diagnostics]` toggles, returning the
+/// lines for the ones that differ from the defaults.
+fn prompt_diagnostic_toggles() -> Vec<&'static str> {
+    let mut diagnostics = Vec::new();
+    if prompt_bool(
+        "Compute diagnostics for the whole workspace in the background, not just open files?",
+        false,
+    ) {
+        diagnostics.push("workspace = true");
+        if !prompt_bool(
+            "Also run configured external tools (PHPStan, PHPCS, PHPMD, Mago) over the whole project?",
+            true,
+        ) {
+            diagnostics.push("workspace-external = false");
+        }
+    }
+    if prompt_bool(
+        "Report calls that pass more arguments than the function accepts?",
+        false,
+    ) {
+        diagnostics.push("extra-arguments = true");
+    }
+    if prompt_bool(
+        "Report member access on a subject whose type can't be resolved (mixed or unknown)?",
+        false,
+    ) {
+        diagnostics.push("unresolved-member-access = true");
+    }
+    if prompt_bool(
+        "Report unknown properties on classes with __get that also declare virtual properties?",
+        false,
+    ) {
+        diagnostics.push("report-magic-properties = true");
+    }
+    if prompt_bool(
+        "Report a member that only some classes of a union declare?",
+        false,
+    ) {
+        diagnostics.push("partial-union-members = true");
+    }
+    if prompt_bool(
+        "Downgrade argument type mismatches to a warning when the only problem is a possible null?",
+        false,
+    ) {
+        diagnostics.push("downgrade-nullable-argument-mismatch = true");
+    }
+    diagnostics
 }
 
 fn prompt_text(question: &str) -> String {

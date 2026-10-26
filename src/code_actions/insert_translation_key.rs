@@ -2,11 +2,11 @@
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::indent_of_line_at;
-use crate::symbol_map::{LaravelStringKind, SymbolKind};
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 use crate::text_position::{byte_range_to_lsp_range, line_ending, ranges_overlap};
 
 impl Backend {
@@ -16,10 +16,10 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let diagnostics: Vec<_> = params.context.diagnostics.iter().filter(|diagnostic| {
-            matches!(&diagnostic.code, Some(NumberOrString::String(code)) if code == "invalid_laravel_trans")
+            matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_trans")
                 && ranges_overlap(&diagnostic.range, &params.range)
         }).collect();
         if diagnostics.is_empty() {
@@ -34,8 +34,8 @@ impl Backend {
         // a package's lines through `lang/vendor/<namespace>/` instead.
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
         for span in &symbol_map.spans {
-            let SymbolKind::LaravelStringKey {
-                kind: LaravelStringKind::Trans,
+            let SymbolKind::StringKey {
+                kind: StringKeyKind::Trans,
                 key,
                 is_write: false,
                 ..
@@ -71,9 +71,9 @@ impl Backend {
                 let Some(edits) = insertion_edits(&source, path) else {
                     continue;
                 };
-                out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                out.push(CodeActionResponse::CodeAction(CodeAction {
                     title: format!("Insert translation '{}' ({})", key, file.locale),
-                    kind: Some(CodeActionKind::QUICKFIX),
+                    kind: Some(CodeActionKind::QuickFix),
                     diagnostics: Some(vec![(*diagnostic).clone()]),
                     edit: Some(super::helpers::single_file_edit(file.uri.clone(), edits)),
                     ..Default::default()

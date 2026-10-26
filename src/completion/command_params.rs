@@ -13,7 +13,7 @@
 //!   arguments and `--options`, so the referenced command's parsed signature
 //!   drives array-key completion.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::completion::source::code_context::CodeContext;
@@ -105,10 +105,10 @@ impl Backend {
             .enumerate()
             .map(|(i, name)| CompletionItem {
                 label: name.clone(),
-                kind: Some(CompletionItemKind::FIELD),
+                kind: Some(CompletionItemKind::Field),
                 sort_text: Some(format!("{:05}", i)),
                 filter_text: Some(name.clone()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                text_edit: Some(CompletionItemTextEdit::TextEdit(TextEdit {
                     range: edit_range,
                     new_text: name,
                 })),
@@ -119,7 +119,7 @@ impl Backend {
         if items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::Array(items))
+            Some(CompletionResponse::CompletionItemList(items))
         }
     }
 }

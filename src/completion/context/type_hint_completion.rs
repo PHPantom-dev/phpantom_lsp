@@ -16,7 +16,7 @@ use crate::completion::named_args::{
 };
 use crate::text_position::position_to_offset;
 use crate::text_scan::skip_string_backward;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 /// PHP native types valid in type-hint positions (PHP 8.x).
 ///

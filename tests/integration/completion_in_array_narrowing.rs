@@ -1,11 +1,11 @@
 use crate::common::{completion_response, create_psr4_workspace, create_test_backend, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 #[tokio::test]
 async fn test_in_array_strict_narrows_to_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_basic.php").unwrap();
+    let uri = Uri::parse("file:///in_array_basic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AdminUser {\n",
@@ -33,10 +33,10 @@ async fn test_in_array_strict_narrows_to_element_type() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -51,7 +51,7 @@ async fn test_in_array_strict_narrows_to_element_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -59,7 +59,7 @@ async fn test_in_array_strict_narrows_to_element_type() {
 async fn test_in_array_strict_no_narrowing_without_strict_flag() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_no_strict.php").unwrap();
+    let uri = Uri::parse("file:///in_array_no_strict.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AdminUser {\n",
@@ -87,10 +87,10 @@ async fn test_in_array_strict_no_narrowing_without_strict_flag() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -106,7 +106,7 @@ async fn test_in_array_strict_no_narrowing_without_strict_flag() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -114,7 +114,7 @@ async fn test_in_array_strict_no_narrowing_without_strict_flag() {
 async fn test_in_array_strict_else_branch_keeps_element_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_else.php").unwrap();
+    let uri = Uri::parse("file:///in_array_else.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AdminUser {\n",
@@ -144,10 +144,10 @@ async fn test_in_array_strict_else_branch_keeps_element_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -164,7 +164,7 @@ async fn test_in_array_strict_else_branch_keeps_element_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -172,7 +172,7 @@ async fn test_in_array_strict_else_branch_keeps_element_class() {
 async fn test_in_array_strict_negated_condition() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_negated.php").unwrap();
+    let uri = Uri::parse("file:///in_array_negated.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AdminUser {\n",
@@ -200,10 +200,10 @@ async fn test_in_array_strict_negated_condition() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -221,7 +221,7 @@ async fn test_in_array_strict_negated_condition() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -229,7 +229,7 @@ async fn test_in_array_strict_negated_condition() {
 async fn test_in_array_strict_guard_clause_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_guard.php").unwrap();
+    let uri = Uri::parse("file:///in_array_guard.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AdminUser {\n",
@@ -258,10 +258,10 @@ async fn test_in_array_strict_guard_clause_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -276,7 +276,7 @@ async fn test_in_array_strict_guard_clause_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -284,7 +284,7 @@ async fn test_in_array_strict_guard_clause_narrows() {
 async fn test_in_array_strict_guard_clause_positive_keeps_element_class() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_guard_positive.php").unwrap();
+    let uri = Uri::parse("file:///in_array_guard_positive.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AdminUser {\n",
@@ -313,10 +313,10 @@ async fn test_in_array_strict_guard_clause_positive_keeps_element_class() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -334,7 +334,7 @@ async fn test_in_array_strict_guard_clause_positive_keeps_element_class() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -342,7 +342,7 @@ async fn test_in_array_strict_guard_clause_positive_keeps_element_class() {
 async fn test_in_array_strict_with_array_shorthand_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_shorthand.php").unwrap();
+    let uri = Uri::parse("file:///in_array_shorthand.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -370,10 +370,10 @@ async fn test_in_array_strict_with_array_shorthand_type() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -388,7 +388,7 @@ async fn test_in_array_strict_with_array_shorthand_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -396,7 +396,7 @@ async fn test_in_array_strict_with_array_shorthand_type() {
 async fn test_in_array_strict_with_array_generic_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_generic.php").unwrap();
+    let uri = Uri::parse("file:///in_array_generic.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -424,10 +424,10 @@ async fn test_in_array_strict_with_array_generic_type() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -442,7 +442,7 @@ async fn test_in_array_strict_with_array_generic_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -450,7 +450,7 @@ async fn test_in_array_strict_with_array_generic_type() {
 async fn test_in_array_strict_with_inline_var_docblock() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_inline_var.php").unwrap();
+    let uri = Uri::parse("file:///in_array_inline_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -477,10 +477,10 @@ async fn test_in_array_strict_with_inline_var_docblock() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -495,7 +495,7 @@ async fn test_in_array_strict_with_inline_var_docblock() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -555,7 +555,7 @@ async fn test_in_array_strict_cross_file() {
 
     let (backend, _dir) = create_psr4_workspace(composer_json, &files);
 
-    let svc_uri = Url::from_file_path(_dir.path().join("src/Svc.php")).unwrap();
+    let svc_uri = Uri::from_file_path(_dir.path().join("src/Svc.php")).unwrap();
     open_php(
         &backend,
         &svc_uri,
@@ -567,10 +567,10 @@ async fn test_in_array_strict_cross_file() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -585,7 +585,7 @@ async fn test_in_array_strict_cross_file() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -593,7 +593,7 @@ async fn test_in_array_strict_cross_file() {
 async fn test_in_array_strict_while_loop() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_while.php").unwrap();
+    let uri = Uri::parse("file:///in_array_while.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AdminUser {\n",
@@ -621,10 +621,10 @@ async fn test_in_array_strict_while_loop() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -639,7 +639,7 @@ async fn test_in_array_strict_while_loop() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -647,7 +647,7 @@ async fn test_in_array_strict_while_loop() {
 async fn test_in_array_strict_parenthesised_condition() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_parens.php").unwrap();
+    let uri = Uri::parse("file:///in_array_parens.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -675,10 +675,10 @@ async fn test_in_array_strict_parenthesised_condition() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -693,7 +693,7 @@ async fn test_in_array_strict_parenthesised_condition() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -701,7 +701,7 @@ async fn test_in_array_strict_parenthesised_condition() {
 async fn test_in_array_strict_guard_clause_throw() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_guard_throw.php").unwrap();
+    let uri = Uri::parse("file:///in_array_guard_throw.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -730,10 +730,10 @@ async fn test_in_array_strict_guard_clause_throw() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -748,7 +748,7 @@ async fn test_in_array_strict_guard_clause_throw() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -756,7 +756,7 @@ async fn test_in_array_strict_guard_clause_throw() {
 async fn test_in_array_strict_no_narrowing_when_guard_body_does_not_exit() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_guard_no_exit.php").unwrap();
+    let uri = Uri::parse("file:///in_array_guard_no_exit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -785,10 +785,10 @@ async fn test_in_array_strict_no_narrowing_when_guard_body_does_not_exit() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -804,7 +804,7 @@ async fn test_in_array_strict_no_narrowing_when_guard_body_does_not_exit() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -812,7 +812,7 @@ async fn test_in_array_strict_no_narrowing_when_guard_body_does_not_exit() {
 async fn test_in_array_strict_with_union_element_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_union.php").unwrap();
+    let uri = Uri::parse("file:///in_array_union.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -843,10 +843,10 @@ async fn test_in_array_strict_with_union_element_type() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -866,7 +866,7 @@ async fn test_in_array_strict_with_union_element_type() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -874,7 +874,7 @@ async fn test_in_array_strict_with_union_element_type() {
 async fn test_in_array_strict_this_property_haystack() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///in_array_this_prop.php").unwrap();
+    let uri = Uri::parse("file:///in_array_this_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class AdminUser {\n",

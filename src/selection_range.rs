@@ -19,7 +19,7 @@
 use mago_allocator::LocalArena;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::{Position, Range, SelectionRange};
+use tower_lsp_server::gen_lsp_types::{Position, Range, SelectionRange};
 
 use crate::Backend;
 use crate::text_position::{offset_to_position, position_to_offset};

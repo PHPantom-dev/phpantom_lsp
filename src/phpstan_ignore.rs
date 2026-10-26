@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IgnoreCodeSpan {

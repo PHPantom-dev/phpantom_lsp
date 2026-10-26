@@ -5,9 +5,10 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::common::message_text;
     use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document};
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     /// The directive-balance diagnostics for one template, as
     /// `(code, message, line)` in report order.
@@ -17,7 +18,7 @@ mod tests {
         backend.initialized(InitializedParams {}).await;
 
         let path = dir.path().join(relative);
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         open_document(&backend, &uri, "blade", template).await;
 
         let effective = backend
@@ -28,10 +29,14 @@ mod tests {
         diags
             .into_iter()
             .filter_map(|d| match &d.code {
-                Some(NumberOrString::String(code))
+                Some(Code::String(code))
                     if code.ends_with("_blade_directive") || code.starts_with("unclosed_blade") =>
                 {
-                    Some((code.clone(), d.message, d.range.start.line))
+                    Some((
+                        code.clone(),
+                        message_text(&d.message).to_string(),
+                        d.range.start.line,
+                    ))
                 }
                 _ => None,
             })
@@ -131,7 +136,7 @@ mod tests {
         backend.initialized(InitializedParams {}).await;
 
         let path = dir.path().join(relative);
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         open_document(&backend, &uri, "blade", template).await;
 
         let effective = backend
@@ -142,9 +147,11 @@ mod tests {
         diags
             .into_iter()
             .filter_map(|d| match &d.code {
-                Some(NumberOrString::String(code)) if code.ends_with("_blade_component_tag") => {
-                    Some((code.clone(), d.message, d.range.start.line))
-                }
+                Some(Code::String(code)) if code.ends_with("_blade_component_tag") => Some((
+                    code.clone(),
+                    message_text(&d.message).to_string(),
+                    d.range.start.line,
+                )),
                 _ => None,
             })
             .collect()
@@ -251,7 +258,7 @@ mod tests {
         backend.initialized(InitializedParams {}).await;
 
         let path = dir.path().join(relative);
-        let uri = Url::from_file_path(&path).unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
         open_document(&backend, &uri, "blade", template).await;
 
         let effective = backend.blade_virtual_php(uri.as_str()).unwrap();

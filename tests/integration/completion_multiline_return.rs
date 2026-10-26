@@ -1,5 +1,5 @@
 use crate::common::{completion_response, create_psr4_workspace, create_test_backend, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Multi-line @return tag tests ───────────────────────────────────────────
 //
@@ -88,7 +88,7 @@ async fn test_multiline_return_does_not_break_sibling_methods() {
     );
 
     // The "current" file calls collect([])->
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use Illuminate\\Support\\Collection;\n",
@@ -109,10 +109,10 @@ async fn test_multiline_return_does_not_break_sibling_methods() {
     assert!(result.is_some(), "Completion should resolve collect([])->");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -131,11 +131,11 @@ async fn test_multiline_return_does_not_break_sibling_methods() {
                 method_names
             );
         }
-        CompletionResponse::List(list) => {
+        CompletionResponse::CompletionList(list) => {
             let method_names: Vec<&str> = list
                 .items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -189,7 +189,7 @@ async fn test_multiline_return_type_parsed_correctly() {
         )],
     );
 
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Builder;\n",
@@ -204,10 +204,10 @@ async fn test_multiline_return_type_parsed_correctly() {
     assert!(result.is_some(), "Completion should resolve $b->fresh()->");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -221,11 +221,11 @@ async fn test_multiline_return_type_parsed_correctly() {
                 method_names
             );
         }
-        CompletionResponse::List(list) => {
+        CompletionResponse::CompletionList(list) => {
             let method_names: Vec<&str> = list
                 .items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -244,7 +244,7 @@ async fn test_multiline_return_type_parsed_correctly() {
 async fn test_malformed_docblock_return_falls_back_to_native_type() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_fallback.php").unwrap();
+    let uri = Uri::parse("file:///test_fallback.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Result {\n",
@@ -274,10 +274,10 @@ async fn test_malformed_docblock_return_falls_back_to_native_type() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -286,11 +286,11 @@ async fn test_malformed_docblock_return_falls_back_to_native_type() {
                 method_names
             );
         }
-        CompletionResponse::List(list) => {
+        CompletionResponse::CompletionList(list) => {
             let method_names: Vec<&str> = list
                 .items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -339,7 +339,7 @@ async fn test_broken_static_generic_recovers_to_self() {
         )],
     );
 
-    let uri = Url::parse("file:///test_static_recovery.php").unwrap();
+    let uri = Uri::parse("file:///test_static_recovery.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Builder;\n",
@@ -356,10 +356,10 @@ async fn test_broken_static_generic_recovers_to_self() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(
@@ -373,11 +373,11 @@ async fn test_broken_static_generic_recovers_to_self() {
                 method_names
             );
         }
-        CompletionResponse::List(list) => {
+        CompletionResponse::CompletionList(list) => {
             let method_names: Vec<&str> = list
                 .items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
             assert!(

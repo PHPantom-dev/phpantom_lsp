@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::common::collect_diagnostics_with;
+    use crate::common::message_text;
     use phpantom_lsp::Backend;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     fn collect(php: &str) -> Vec<Diagnostic> {
         collect_diagnostics_with(
@@ -34,7 +35,7 @@ function greet(string $name): string {
             !diags.is_empty(),
             "Should produce at least one syntax error"
         );
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]
@@ -54,7 +55,7 @@ function greet(string $name): string {
         assert!(!diags.is_empty());
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("syntax_error".to_string()))
+            Some(Code::String("syntax_error".to_string()))
         );
         assert_eq!(diags[0].source, Some("phpantom".to_string()));
     }
@@ -65,7 +66,7 @@ function greet(string $name): string {
         let diags = collect(php);
         assert!(!diags.is_empty());
         assert!(
-            !diags[0].message.is_empty(),
+            !message_text(&diags[0].message).is_empty(),
             "Syntax error should have a descriptive message"
         );
     }

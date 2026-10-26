@@ -1,6 +1,6 @@
 use std::fs;
 
-use tower_lsp::lsp_types::{Position, Url};
+use tower_lsp_server::gen_lsp_types::{Position, Uri};
 
 use super::*;
 use crate::config::{Config, IndexingStrategy};
@@ -47,12 +47,12 @@ fn full_indexed_implementation_uses_gti_without_vendor_fallback() {
 
     backend.symbols.fqn_uri_index.write().insert(
         "Vendor\\Pkg\\VendorService".to_string(),
-        Url::from_file_path(&vendor_impl_path)
+        Uri::from_file_path(&vendor_impl_path)
             .expect("vendor uri")
             .to_string(),
     );
 
-    let interface_uri = Url::from_file_path(&interface_path).expect("interface uri");
+    let interface_uri = Uri::from_file_path(&interface_path).expect("interface uri");
     backend.update_ast(interface_uri.as_str(), interface_php);
 
     let locations = backend
@@ -73,7 +73,7 @@ fn full_indexed_implementation_uses_gti_without_vendor_fallback() {
     );
     assert_eq!(
         locations[0].uri,
-        Url::from_file_path(&user_impl_path).expect("user impl uri")
+        Uri::from_file_path(&user_impl_path).expect("user impl uri")
     );
 }
 
@@ -123,13 +123,13 @@ fn non_full_indexed_implementation_uses_ready_gti_without_fallback() {
 
     backend.symbols.fqn_uri_index.write().insert(
         "Vendor\\Pkg\\VendorService".to_string(),
-        Url::from_file_path(&vendor_impl_path)
+        Uri::from_file_path(&vendor_impl_path)
             .expect("vendor uri")
             .to_string(),
     );
 
-    let interface_uri = Url::from_file_path(&interface_path).expect("interface uri");
-    let user_impl_uri = Url::from_file_path(&user_impl_path).expect("user impl uri");
+    let interface_uri = Uri::from_file_path(&interface_path).expect("interface uri");
+    let user_impl_uri = Uri::from_file_path(&user_impl_path).expect("user impl uri");
     backend.update_ast(interface_uri.as_str(), interface_php);
     backend.update_ast(user_impl_uri.as_str(), user_impl_php);
 
@@ -181,8 +181,8 @@ fn same_short_name_interface_and_implementation_found() {
     config.indexing.strategy = Some(IndexingStrategy::Full);
     backend.set_config(config);
 
-    let interface_uri = Url::from_file_path(&interface_path).expect("interface uri");
-    let impl_uri = Url::from_file_path(&impl_path).expect("impl uri");
+    let interface_uri = Uri::from_file_path(&interface_path).expect("interface uri");
+    let impl_uri = Uri::from_file_path(&impl_path).expect("impl uri");
     backend.update_ast(interface_uri.as_str(), interface_php);
     backend.update_ast(impl_uri.as_str(), impl_php);
 
@@ -245,7 +245,7 @@ fn scenario_workspace(
         for (fqn, rel) in indexed {
             idx.insert(
                 (*fqn).to_string(),
-                Url::from_file_path(dir.path().join(rel))
+                Uri::from_file_path(dir.path().join(rel))
                     .expect("indexed uri")
                     .to_string(),
             );
@@ -257,10 +257,10 @@ fn scenario_workspace(
 
 /// Parse `rel` into the backend the way opening it in the editor does,
 /// returning its URI and content.
-fn open_file(backend: &Backend, dir: &std::path::Path, rel: &str) -> (Url, String) {
+fn open_file(backend: &Backend, dir: &std::path::Path, rel: &str) -> (Uri, String) {
     let path = dir.join(rel);
     let content = fs::read_to_string(&path).expect("read php file");
-    let uri = Url::from_file_path(&path).expect("file uri");
+    let uri = Uri::from_file_path(&path).expect("file uri");
     backend.update_ast(uri.as_str(), &content);
     (uri, content)
 }

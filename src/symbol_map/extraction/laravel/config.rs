@@ -24,7 +24,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_config_key_span(
         return;
     }
     emit_laravel_string_span(
-        crate::symbol_map::LaravelStringKind::Config,
+        crate::symbol_map::StringKeyKind::Config,
         is_write,
         0,
         argument_list,
@@ -45,7 +45,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_config_helper_spans(
         return;
     }
     emit_laravel_string_span(
-        crate::symbol_map::LaravelStringKind::Config,
+        crate::symbol_map::StringKeyKind::Config,
         false,
         0,
         argument_list,
@@ -115,7 +115,7 @@ pub(crate) fn config_keys_written_by(expr: &Expression<'_>, content: &str) -> Ve
     spans
         .into_iter()
         .filter_map(|span| match span.kind {
-            SymbolKind::LaravelStringKey {
+            SymbolKind::StringKey {
                 key,
                 is_write: true,
                 ..
@@ -161,7 +161,7 @@ fn try_emit_config_array_spans(
             _ => continue,
         };
         push_laravel_string_span(
-            crate::symbol_map::LaravelStringKind::Config,
+            crate::symbol_map::StringKeyKind::Config,
             is_write,
             false,
             key,

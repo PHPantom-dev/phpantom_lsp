@@ -24,6 +24,15 @@ impl PhpType {
         if self.as_class_name_literal().is_some() != other.as_class_name_literal().is_some() {
             return false;
         }
+        // One enum case is not another, nor the enum itself.
+        if self.as_enum_case().is_some() || other.as_enum_case().is_some() {
+            return match (self.as_enum_case(), other.as_enum_case()) {
+                (Some((a_enum, a_case)), Some((b_enum, b_case))) => {
+                    a_case == b_case && Self::short_name_of(a_enum) == Self::short_name_of(b_enum)
+                }
+                _ => false,
+            };
+        }
         match (self.kind(), other.kind()) {
             (TypeKind::Named(a), TypeKind::Named(b)) => {
                 Self::short_name_of(a) == Self::short_name_of(b)
@@ -147,6 +156,18 @@ impl PhpType {
         if self.is_array_key() {
             let as_union = PhpType::union(vec![PhpType::int(), PhpType::string()]);
             return Some(as_union.is_subtype_of(supertype));
+        }
+
+        // An enum case reads as its enum through `kind()`, which would let
+        // the enum, or any other of its cases, pass for it. Only the case
+        // itself does; a union or an intersection still goes member by
+        // member below.
+        if let Some((sup_enum, sup_case)) = supertype.as_enum_case()
+            && !matches!(self.kind(), TypeKind::Union(_) | TypeKind::Intersection(_))
+        {
+            return Some(self.as_enum_case().is_some_and(|(sub_enum, sub_case)| {
+                sub_case == sup_case && is_named_subtype(sub_enum, sup_enum)
+            }));
         }
         None
     }
@@ -472,6 +493,12 @@ impl PhpType {
             (TypeKind::ClassString(Some(_)), TypeKind::ClassString(None)) => Some(true),
             (TypeKind::InterfaceString(_), TypeKind::Named(sup)) => {
                 Some(is_named_subtype("interface-string", sup))
+            }
+            // A bare `enum-string` names a class-like just the same.
+            (TypeKind::Named(sub), TypeKind::ClassString(None))
+                if is_named_subtype(sub, "class-string") =>
+            {
+                Some(true)
             }
             _ => None,
         }

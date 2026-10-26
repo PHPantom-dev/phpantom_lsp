@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::FileChangeType;
+use tower_lsp_server::gen_lsp_types::FileChangeType;
 
 use crate::Backend;
 use crate::classmap_scanner::{ScanResult, WorkspaceScanResult};
@@ -145,11 +145,11 @@ impl Backend {
                 // commands, morph aliases, gates, provider resources) are
                 // refreshed only when the file is parsed, which a deleted
                 // file never is again.
-                if *change_type == FileChangeType::DELETED {
+                if *change_type == FileChangeType::Deleted {
                     self.forget_laravel_file_contributions(uri);
                 }
             }
-            if *change_type == FileChangeType::DELETED {
+            if *change_type == FileChangeType::Deleted {
                 self.forget_workspace_diagnostics(&spellings);
             }
         }
@@ -159,7 +159,7 @@ impl Backend {
         for (uri_str, path, change_type) in changes {
             if !matches!(
                 *change_type,
-                FileChangeType::CREATED | FileChangeType::CHANGED
+                FileChangeType::Created | FileChangeType::Changed
             ) {
                 continue;
             }
@@ -220,7 +220,7 @@ impl Backend {
                 .filter(|(_, _, change_type)| {
                     matches!(
                         *change_type,
-                        FileChangeType::CREATED | FileChangeType::CHANGED
+                        FileChangeType::Created | FileChangeType::Changed
                     )
                 })
                 .filter_map(|(_, path, _)| {

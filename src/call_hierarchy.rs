@@ -14,7 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{
+use tower_lsp_server::gen_lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Location, Position,
     Range, SymbolKind as LspSymbolKind,
 };
@@ -514,7 +514,7 @@ fn build_method_callable(
         uri,
         content,
         (&method.name, method.name_offset),
-        LspSymbolKind::METHOD,
+        LspSymbolKind::Method,
         Some(class_fqn.clone()),
         serde_json::json!({
             "kind": "php",
@@ -537,7 +537,7 @@ fn build_function_callable(
         uri,
         content,
         (&function.name, function.name_offset),
-        LspSymbolKind::FUNCTION,
+        LspSymbolKind::Function,
         function.namespace.clone(),
         serde_json::json!({
             "kind": "php",
@@ -716,7 +716,7 @@ function caller(): void { helper(); }
 "#;
         let backend = parse(content);
         let caller = prepare_at(&backend, content, "function caller");
-        assert_eq!(caller.kind, LspSymbolKind::FUNCTION);
+        assert_eq!(caller.kind, LspSymbolKind::Function);
         assert_eq!(
             outgoing_names(&backend, &caller),
             vec!["helper".to_string()]

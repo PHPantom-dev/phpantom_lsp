@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
@@ -130,7 +130,7 @@ impl Backend {
 
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 "missing_implementation",
                 message,
             ));

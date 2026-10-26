@@ -5,7 +5,7 @@
 //! variance and bound (e.g. `**template-covariant** `TNode` of
 //! `AstNode``) so the reader sees the constraint.
 
-use tower_lsp::lsp_types::Hover;
+use tower_lsp_server::gen_lsp_types::Hover;
 
 use crate::Backend;
 use crate::docblock::extract_template_params_full;

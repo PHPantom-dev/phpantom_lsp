@@ -45,13 +45,24 @@ pub struct FormattingConfig {
     /// `Pint/laravel_blade` rule.
     ///
     /// - `None` (default) — follow the workspace `pint.json`: Blade files
-    ///   go to Pint when its `rules` turn the rule on, and to the built-in
-    ///   reindenter otherwise.
+    ///   go to Pint when its `rules` turn the rule on, and to
+    ///   blade-formatter or the built-in reindenter otherwise.
     /// - `true` — send Blade files to Pint with `--blade`, which turns the
     ///   rule on for the run.
     /// - `false` — never send Blade files to Pint.
     #[serde(rename = "pint-blade")]
     pub pint_blade: Option<bool>,
+    /// Command (path or name) to run shufo/blade-formatter on Blade
+    /// templates.
+    ///
+    /// - `None` (default) — use `node_modules/.bin/blade-formatter` when
+    ///   `package.json` lists `blade-formatter`, the workspace root has a
+    ///   `.bladeformatterrc.json`/`.bladeformatterrc`, and Pint does not
+    ///   format Blade.
+    /// - `""` — never use blade-formatter.
+    /// - Any other value — use as the command, ahead of Pint.
+    #[serde(rename = "blade-formatter")]
+    pub blade_formatter: Option<String>,
     /// Whether the built-in Blade formatter also formats the PHP the
     /// template carries: `@php` bodies, `<?php` islands, echoes, and
     /// directive arguments, along with the spacing that is Blade's own
@@ -62,8 +73,8 @@ pub struct FormattingConfig {
     /// - `true` — format each fragment through the built-in PHP
     ///   formatter, with the same `mago.toml` settings a `.php` file gets.
     ///
-    /// Has no effect on a project whose Blade files go to Pint, which
-    /// formats them itself.
+    /// Has no effect on a project whose Blade files go to Pint or
+    /// blade-formatter, which format them themselves.
     #[serde(rename = "blade-php")]
     pub blade_php: Option<bool>,
     /// Maximum runtime in milliseconds before each formatter is killed.

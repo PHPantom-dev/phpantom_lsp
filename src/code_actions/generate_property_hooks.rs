@@ -21,7 +21,7 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::property::Property;
 use mago_syntax::cst::modifier::Modifier;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::cursor_context::{
     ClassLikeContextKind, CursorContext, MemberContext, find_cursor_context,
@@ -175,9 +175,9 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
-        let doc_uri: Url = match uri.parse() {
+        let doc_uri: Uri = match uri.parse() {
             Ok(u) => u,
             Err(_) => return,
         };
@@ -323,9 +323,9 @@ impl Backend {
                 new_text,
             };
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: "Generate get hook".to_string(),
-                kind: Some(CodeActionKind::REFACTOR),
+                kind: Some(CodeActionKind::Refactor),
                 diagnostics: None,
                 edit: Some(crate::code_actions::single_file_edit(
                     doc_uri.clone(),
@@ -335,6 +335,7 @@ impl Backend {
                 is_preferred: Some(false),
                 disabled: None,
                 data: None,
+                tags: None,
             }));
         }
 
@@ -354,9 +355,9 @@ impl Backend {
                 new_text,
             };
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: "Generate set hook".to_string(),
-                kind: Some(CodeActionKind::REFACTOR),
+                kind: Some(CodeActionKind::Refactor),
                 diagnostics: None,
                 edit: Some(crate::code_actions::single_file_edit(
                     doc_uri.clone(),
@@ -366,6 +367,7 @@ impl Backend {
                 is_preferred: Some(false),
                 disabled: None,
                 data: None,
+                tags: None,
             }));
         }
 
@@ -385,15 +387,16 @@ impl Backend {
                 new_text,
             };
 
-            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+            out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: "Generate get and set hooks".to_string(),
-                kind: Some(CodeActionKind::REFACTOR),
+                kind: Some(CodeActionKind::Refactor),
                 diagnostics: None,
                 edit: Some(crate::code_actions::single_file_edit(doc_uri, vec![edit])),
                 command: None,
                 is_preferred: Some(false),
                 disabled: None,
                 data: None,
+                tags: None,
             }));
         }
     }

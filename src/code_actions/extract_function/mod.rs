@@ -13,7 +13,7 @@
 // whole shared import surface in with a single `use super::*;`.
 pub(crate) use mago_span::HasSpan;
 pub(crate) use mago_syntax::cst::*;
-pub(crate) use tower_lsp::lsp_types::*;
+pub(crate) use tower_lsp_server::gen_lsp_types::*;
 
 pub(crate) use crate::Backend;
 pub(crate) use crate::atom::bytes_to_str;
@@ -61,7 +61,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let Some((start, end)) = crate::code_actions::selected_byte_range(content, params.range)
             .and_then(|(start, end)| trim_selection(content, start, end))
@@ -94,9 +94,9 @@ impl Backend {
         // The full workspace edit is computed lazily in
         // `resolve_extract_function` (Phase 2) when the user picks
         // this action.
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title,
-            kind: Some(CodeActionKind::REFACTOR_EXTRACT),
+            kind: Some(CodeActionKind::RefactorExtract),
             diagnostics: None,
             edit: None,
             command: None,
@@ -108,6 +108,7 @@ impl Backend {
                 &params.range,
                 serde_json::json!({}),
             )),
+            tags: None,
         }));
     }
 
@@ -315,7 +316,7 @@ impl Backend {
         let definition = build_extracted_definition(&info);
         let call_site = build_call_site(&info, call_indent);
 
-        let doc_uri: Url = uri.parse().ok()?;
+        let doc_uri: Uri = uri.parse().ok()?;
 
         let replace_start = find_line_start(content, start);
         let replace_end = find_line_end(content, end.saturating_sub(1).max(start));

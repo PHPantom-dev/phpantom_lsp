@@ -83,7 +83,7 @@ pub(in crate::symbol_map::extraction) fn chain_roots_at_route_facade(
 pub(in crate::symbol_map::extraction) fn route_facade_root_dependency(
     expr: &Expression<'_>,
     resolved_names: &crate::names::OwnedResolvedNames,
-) -> Option<crate::symbol_map::LaravelStringDependency> {
+) -> Option<crate::symbol_map::StringKeyDependency> {
     route_facade_root_dependency_inner(
         expr,
         crate::symbol_map::laravel_resources::FACADE_CHAIN_DEPTH,
@@ -95,7 +95,7 @@ fn route_facade_root_dependency_inner(
     expr: &Expression<'_>,
     depth: usize,
     resolved_names: &crate::names::OwnedResolvedNames,
-) -> Option<crate::symbol_map::LaravelStringDependency> {
+) -> Option<crate::symbol_map::StringKeyDependency> {
     if depth == 0 {
         return None;
     }
@@ -105,7 +105,7 @@ fn route_facade_root_dependency_inner(
         }
         Expression::Call(Call::StaticMethod(call)) => {
             let name = resolved_names.get(call.class.span().start.offset)?;
-            crate::symbol_map::LaravelStringDependency::root_facade(name)
+            crate::symbol_map::StringKeyDependency::root_facade(name)
         }
         _ => None,
     }

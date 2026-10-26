@@ -1,7 +1,7 @@
 //! Running the diagnostic collectors over one file: the fast pass, and the
 //! slow pass over the whole file or the regions an edit touched.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::type_engine::resolver::LendsLoaders;
@@ -17,15 +17,31 @@ struct SlowCollector {
     /// The name the `analyse` CLI attributes the collector's time to.
     name: &'static str,
     collect: SlowCollectFn,
-    /// Run only in Laravel projects.
-    laravel_only: bool,
+    /// The projects the collector runs in.
+    runs_in: Framework,
+    /// Whether a finding can depend on any function body in the file, so
+    /// that an edit to one body can change a diagnostic outside it.  Such
+    /// a collector reports under its own name as the diagnostic code, and
+    /// a partial pass runs it over the whole file instead of the edited
+    /// region (see [`Backend::collect_slow_diagnostics_reading_every_body`]).
+    reads_every_body: bool,
+}
+
+/// The projects a collector has anything to report in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Framework {
+    Any,
+    Laravel,
+    /// Laravel, Symfony, or Twig, whose string keys share one check.
+    LaravelSymfonyOrTwig,
 }
 
 const fn always(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
     SlowCollector {
         name,
         collect,
-        laravel_only: false,
+        runs_in: Framework::Any,
+        reads_every_body: false,
     }
 }
 
@@ -33,7 +49,8 @@ const fn laravel(name: &'static str, collect: SlowCollectFn) -> SlowCollector {
     SlowCollector {
         name,
         collect,
-        laravel_only: true,
+        runs_in: Framework::Laravel,
+        reads_every_body: false,
     }
 }
 
@@ -63,6 +80,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_argument_count_diagnostics_with_context,
     ),
     always(
+        "discarded_return_value",
+        Backend::collect_discarded_result_diagnostics_with_context,
+    ),
+    always(
         "type_mismatch_argument",
         Backend::collect_argument_type_diagnostics_with_context,
     ),
@@ -78,6 +99,13 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         "invalid_readonly_write",
         Backend::collect_readonly_write_diagnostics_with_context,
     ),
+    // Whether a property is ever written can be decided by any method.
+    SlowCollector {
+        name: "uninitialized_property",
+        collect: Backend::collect_uninitialized_property_diagnostics_with_context,
+        runs_in: Framework::Any,
+        reads_every_body: true,
+    },
     always(
         "missing_implementation",
         Backend::collect_implementation_error_diagnostics_with_context,
@@ -114,10 +142,20 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         "incompatible_override",
         Backend::collect_incompatible_override_diagnostics_with_context,
     ),
-    laravel(
-        "invalid_laravel_string_key",
-        Backend::collect_invalid_laravel_string_key_diagnostics,
+    always(
+        "invalid_override_attribute",
+        Backend::collect_override_attribute_diagnostics_with_context,
     ),
+    always(
+        "invalid_member_name",
+        Backend::collect_dynamic_member_name_diagnostics_with_context,
+    ),
+    SlowCollector {
+        name: "invalid_string_key",
+        collect: Backend::collect_invalid_laravel_string_key_diagnostics,
+        runs_in: Framework::LaravelSymfonyOrTwig,
+        reads_every_body: false,
+    },
     laravel(
         "invalid_command_parameter",
         Backend::collect_invalid_command_param_diagnostics,
@@ -148,8 +186,10 @@ pub(crate) type SlowDiagnosticObserver<'a> =
     &'a mut dyn FnMut(&'static str, std::time::Duration) -> bool;
 
 impl Backend {
-    /// Returns `true` if the URI should be skipped for diagnostics
-    /// (stub files only).  Vendor files are not skipped here: users
+    /// Returns `true` if the URI should be skipped for diagnostics: stub
+    /// files (embedded or under a stub path), and resource documents (Twig
+    /// templates, YAML and XML files), which are not PHP.  Vendor files are
+    /// not skipped here: users
     /// working in monorepos or with `--prefer-source` packages
     /// legitimately edit vendor files, so the live per-file pass
     /// diagnoses them like any other open file.  The workspace-wide
@@ -157,6 +197,8 @@ impl Backend {
     /// `vendor_uri_prefixes` filter.
     pub(super) fn should_skip_diagnostics(&self, uri_str: &str) -> bool {
         crate::stubs::is_stub_uri(uri_str)
+            || self.is_external_stub_uri(uri_str)
+            || self.is_resource_uri(uri_str)
     }
 
     /// Collect Phase 1 (fast) diagnostics: syntax errors, unused
@@ -235,6 +277,25 @@ impl Backend {
     ) {
         let _region = incremental::region::restrict_to(spans.to_vec());
         self.collect_slow_diagnostics_scoped(uri_str, content, out, None, Some(targets));
+    }
+
+    /// Run the collectors whose findings can depend on any function body
+    /// over the whole file.  A partial pass skips them in the edited
+    /// region and calls this instead, after dropping what they reported
+    /// last time (see [`reads_every_body`]).
+    pub(crate) fn collect_slow_diagnostics_reading_every_body(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        let _parse_guard = crate::parser::with_parse_cache(content);
+        let ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
+        for collector in SLOW_COLLECTORS {
+            if collector.reads_every_body && collector.runs_in == Framework::Any {
+                (collector.collect)(self, &ctx, uri_str, content, out);
+            }
+        }
     }
 
     /// The slow pass behind [`Self::collect_slow_diagnostics_observed`] and
@@ -371,8 +432,15 @@ impl Backend {
         }
 
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
+        let has_string_keys = is_laravel || self.is_symfony_project() || self.is_twig_project();
         for collector in SLOW_COLLECTORS {
-            if collector.laravel_only && !is_laravel {
+            let runs = match collector.runs_in {
+                Framework::Any => true,
+                Framework::Laravel => is_laravel,
+                Framework::LaravelSymfonyOrTwig => has_string_keys,
+            };
+            // A partial pass runs these over the whole file separately.
+            if !runs || (collector.reads_every_body && targets.is_some()) {
                 continue;
             }
             match observe.as_mut() {
@@ -389,4 +457,15 @@ impl Backend {
             }
         }
     }
+}
+
+/// Whether `diagnostic` came from a collector that reads every function
+/// body in the file.
+pub(crate) fn reads_every_body(diagnostic: &Diagnostic) -> bool {
+    let Some(Code::String(code)) = &diagnostic.code else {
+        return false;
+    };
+    SLOW_COLLECTORS
+        .iter()
+        .any(|collector| collector.reads_every_body && collector.name == code)
 }

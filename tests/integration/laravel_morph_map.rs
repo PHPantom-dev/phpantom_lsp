@@ -6,12 +6,13 @@
 //! find-references links every usage, and — when the project calls
 //! `enforceMorphMap()` — an unregistered alias is flagged.
 
+use crate::common::message_text;
 use crate::common::{
     LARAVEL_SRC_COMPOSER, completion_response, create_initialized_psr4_workspace,
     definition_locations, goto_definition_at, hover_text_at, open_php_str, position_after,
     references_response,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -141,7 +142,7 @@ async fn hover_at(
     uri: &str,
     position: Position,
 ) -> Option<String> {
-    let uri = Url::parse(uri).unwrap();
+    let uri = Uri::parse(uri).unwrap();
     hover_text_at(backend, &uri, position.line, position.character).await
 }
 
@@ -150,7 +151,7 @@ async fn definition_uris(
     uri: &str,
     position: Position,
 ) -> Vec<String> {
-    let uri = Url::parse(uri).unwrap();
+    let uri = Uri::parse(uri).unwrap();
     let response = goto_definition_at(backend, &uri, position.line, position.character).await;
     definition_locations(response)
         .into_iter()
@@ -161,9 +162,7 @@ async fn definition_uris(
 fn morph_diagnostics(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     diags
         .iter()
-        .filter(|d| {
-            matches!(&d.code, Some(NumberOrString::String(c)) if c == "invalid_laravel_morph_alias")
-        })
+        .filter(|d| matches!(&d.code, Some(Code::String(c)) if c == "invalid_laravel_morph_alias"))
         .collect()
 }
 
@@ -185,7 +184,7 @@ async fn hover_on_a_morph_alias_names_the_mapped_model() {
     let position = position_after(WHERE_HAS_MORPH_CONSUMER, "['po");
     let hover = hover_text_at(
         &backend,
-        &Url::parse(&uri).unwrap(),
+        &Uri::parse(&uri).unwrap(),
         position.line,
         position.character,
     )
@@ -254,7 +253,7 @@ class Consumer {
         "only the unregistered alias should be flagged, got {flagged:?}"
     );
     assert!(
-        flagged[0].message.contains("audio"),
+        message_text(&flagged[0].message).contains("audio"),
         "message should name the bad alias, got {:?}",
         flagged[0].message
     );
@@ -300,15 +299,19 @@ class Consumer {
     let position = position_after(consumer, "getMorphedModel('");
     let result = completion_response(
         &backend,
-        &Url::parse(&uri).unwrap(),
+        &Uri::parse(&uri).unwrap(),
         position.line,
         position.character,
         None,
     )
     .await;
     let labels: Vec<String> = match result {
-        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-        Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
+        Some(CompletionResponse::CompletionItemList(items)) => {
+            items.into_iter().map(|i| i.label).collect()
+        }
+        Some(CompletionResponse::CompletionList(list)) => {
+            list.items.into_iter().map(|i| i.label).collect()
+        }
         None => Vec::new(),
     };
     assert!(
@@ -370,7 +373,7 @@ class Consumer {
         "`posts` is registered and `post` is not, got {flagged:?}"
     );
     assert!(
-        flagged[0].message.contains("'post'"),
+        message_text(&flagged[0].message).contains("'post'"),
         "the singular spelling should be the one flagged, got {:?}",
         flagged[0].message
     );
@@ -380,7 +383,7 @@ class Consumer {
 async fn find_references_links_usages_to_the_registration() {
     let (backend, dir, uri) = workspace(false, WHERE_HAS_MORPH_CONSUMER).await;
     let provider_src = provider(false);
-    let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
+    let provider_uri = Uri::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
     open_php_str(&backend, &provider_uri, &provider_src).await;
@@ -389,7 +392,7 @@ async fn find_references_links_usages_to_the_registration() {
     let position = position_after(&provider_src, "'po");
     let locations = references_response(
         &backend,
-        &Url::parse(&provider_uri).unwrap(),
+        &Uri::parse(&provider_uri).unwrap(),
         position,
         true,
     )
@@ -943,7 +946,7 @@ class Consumer {
 "#;
     let (backend, dir, uri) = workspace(false, consumer).await;
     let provider_src = provider(false);
-    let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
+    let provider_uri = Uri::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
     open_php_str(&backend, &provider_uri, &provider_src).await;
@@ -973,7 +976,7 @@ class Consumer {
         (&uri, position_after(consumer, usages[1])),
     ] {
         let locations =
-            references_response(&backend, &Url::parse(source_uri).unwrap(), position, true)
+            references_response(&backend, &Uri::parse(source_uri).unwrap(), position, true)
                 .await
                 .unwrap_or_default();
         assert!(

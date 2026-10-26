@@ -1,7 +1,7 @@
 //! Integration tests for `textDocument/documentSymbol`.
 
 use crate::common::create_test_backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: open a file and return the document symbol response.
 fn get_symbols(php: &str) -> Option<DocumentSymbolResponse> {
@@ -30,7 +30,7 @@ fn flatten_symbols(
 #[allow(deprecated)]
 fn unwrap_nested(resp: DocumentSymbolResponse) -> Vec<DocumentSymbol> {
     match resp {
-        DocumentSymbolResponse::Nested(syms) => syms,
+        DocumentSymbolResponse::DocumentSymbolList(syms) => syms,
         _ => panic!("expected Nested response"),
     }
 }
@@ -53,7 +53,7 @@ class User {
 
     assert_eq!(symbols.len(), 1, "one top-level class");
     assert_eq!(symbols[0].name, "User");
-    assert_eq!(symbols[0].kind, SymbolKind::CLASS);
+    assert_eq!(symbols[0].kind, SymbolKind::Class);
 
     let children = symbols[0].children.as_ref().expect("class has children");
     let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
@@ -73,7 +73,7 @@ interface Printable {
 "#;
     let resp = get_symbols(php).expect("should have symbols");
     let symbols = unwrap_nested(resp);
-    assert_eq!(symbols[0].kind, SymbolKind::INTERFACE);
+    assert_eq!(symbols[0].kind, SymbolKind::Interface);
     assert_eq!(symbols[0].name, "Printable");
 }
 
@@ -89,7 +89,7 @@ trait Timestampable {
     let resp = get_symbols(php).expect("should have symbols");
     let symbols = unwrap_nested(resp);
     // LSP has no dedicated trait kind; we use CLASS.
-    assert_eq!(symbols[0].kind, SymbolKind::CLASS);
+    assert_eq!(symbols[0].kind, SymbolKind::Class);
     assert_eq!(symbols[0].name, "Timestampable");
 
     let children = symbols[0].children.as_ref().unwrap();
@@ -109,7 +109,7 @@ enum Status: string {
 "#;
     let resp = get_symbols(php).expect("should have symbols");
     let symbols = unwrap_nested(resp);
-    assert_eq!(symbols[0].kind, SymbolKind::ENUM);
+    assert_eq!(symbols[0].kind, SymbolKind::Enum);
     assert_eq!(symbols[0].name, "Status");
 
     let children = symbols[0].children.as_ref().unwrap();
@@ -119,7 +119,7 @@ enum Status: string {
 
     // Enum cases should be ENUM_MEMBER.
     for child in children {
-        assert_eq!(child.kind, SymbolKind::ENUM_MEMBER);
+        assert_eq!(child.kind, SymbolKind::EnumMember);
     }
 }
 
@@ -136,7 +136,7 @@ class Foo {
     let symbols = unwrap_nested(resp);
     let children = symbols[0].children.as_ref().unwrap();
     assert_eq!(children[0].name, "__construct");
-    assert_eq!(children[0].kind, SymbolKind::CONSTRUCTOR);
+    assert_eq!(children[0].kind, SymbolKind::Constructor);
 }
 
 // ── Multiple classes ────────────────────────────────────────────────
@@ -172,7 +172,7 @@ function helper(): string {
 
     let func_symbols: Vec<_> = symbols
         .iter()
-        .filter(|s| s.kind == SymbolKind::FUNCTION)
+        .filter(|s| s.kind == SymbolKind::Function)
         .collect();
     assert_eq!(func_symbols.len(), 1);
     assert_eq!(func_symbols[0].name, "helper");
@@ -194,7 +194,7 @@ define('APP_VERSION', '1.0.0');
         for sym in &symbols {
             // If a constant symbol appears, it should be CONSTANT kind.
             if sym.name == "APP_VERSION" {
-                assert_eq!(sym.kind, SymbolKind::CONSTANT);
+                assert_eq!(sym.kind, SymbolKind::Constant);
             }
         }
     }
@@ -283,7 +283,7 @@ class OldClass {
     let old = &symbols[0];
     assert_eq!(old.name, "OldClass");
     let tags = old.tags.as_ref().expect("should have tags");
-    assert!(tags.contains(&SymbolTag::DEPRECATED));
+    assert!(tags.contains(&SymbolTag::Deprecated));
 }
 
 #[allow(deprecated)]
@@ -300,7 +300,7 @@ class Foo {
     let children = symbols[0].children.as_ref().unwrap();
     let old_method = children.iter().find(|c| c.name == "old").unwrap();
     let tags = old_method.tags.as_ref().expect("should have tags");
-    assert!(tags.contains(&SymbolTag::DEPRECATED));
+    assert!(tags.contains(&SymbolTag::Deprecated));
 }
 
 // ── Property includes $ prefix ──────────────────────────────────────
@@ -318,7 +318,7 @@ class Foo {
     let children = symbols[0].children.as_ref().unwrap();
     let prop = children
         .iter()
-        .find(|c| c.kind == SymbolKind::PROPERTY)
+        .find(|c| c.kind == SymbolKind::Property)
         .unwrap();
     assert_eq!(prop.name, "$bar");
 }
@@ -338,7 +338,7 @@ class Foo {
     let children = symbols[0].children.as_ref().unwrap();
     let prop = children
         .iter()
-        .find(|c| c.kind == SymbolKind::PROPERTY)
+        .find(|c| c.kind == SymbolKind::Property)
         .unwrap();
     let detail = prop.detail.as_deref().unwrap_or("");
     assert!(
@@ -406,7 +406,7 @@ class Outer {
     flatten_symbols(&symbols, 0, &mut flat);
 
     // Top-level class at depth 0.
-    assert_eq!(flat[0], ("Outer".to_string(), SymbolKind::CLASS, 0));
+    assert_eq!(flat[0], ("Outer".to_string(), SymbolKind::Class, 0));
 
     // Members at depth 1.
     let depth_1: Vec<_> = flat.iter().filter(|(_, _, d)| *d == 1).collect();
@@ -449,11 +449,11 @@ function standalone(): int { return 1; }
 
     let class_count = symbols
         .iter()
-        .filter(|s| s.kind == SymbolKind::CLASS)
+        .filter(|s| s.kind == SymbolKind::Class)
         .count();
     let func_count = symbols
         .iter()
-        .filter(|s| s.kind == SymbolKind::FUNCTION)
+        .filter(|s| s.kind == SymbolKind::Function)
         .count();
     assert_eq!(class_count, 1, "one class");
     assert_eq!(func_count, 1, "one function");
@@ -495,7 +495,7 @@ abstract class Base {
     let resp = get_symbols(php).expect("should have symbols");
     let symbols = unwrap_nested(resp);
     assert_eq!(symbols[0].name, "Base");
-    assert_eq!(symbols[0].kind, SymbolKind::CLASS);
+    assert_eq!(symbols[0].kind, SymbolKind::Class);
 
     let children = symbols[0].children.as_ref().unwrap();
     let method_names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();

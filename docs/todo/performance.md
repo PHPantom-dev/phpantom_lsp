@@ -20,42 +20,25 @@ against that bar.
 
 ---
 
-## P84. Class lookups re-apply the Laravel patches on every call
+## P86. A Symfony app's generated `config/reference.php` is slow to parse
 
-**Impact: Medium-High · Complexity: Medium**
+**Impact: Medium · Complexity: Medium**
 
-`find_or_load_class_typed` (`resolution/classes.rs`) memoises the indexed
-class but runs the auth, storage, macro and pivot refinements after the
-memo, on every lookup. When one applies, it copies the whole `ClassInfo`
-into a new `Arc`, which also defeats the pointer-identity shortcut in
-`forward_walk/scope_state/merge.rs`.
+Symfony 7.3 and later generate `config/reference.php` for the application:
+one 100 KB class whose docblock declares some forty `@psalm-type` array
+shapes, several hundred lines each, nested into one another. Parsing that
+single file takes about 0.5 s in a debug build, roughly ten times what a
+PHP file of its size costs, so something on the way from the docblock to
+the type aliases is superlinear in the size of a shape.
 
-Measured on the large Laravel app (debug `analyze`, 2026-10-19): 8.4M
-lookups, 400k of them copying, spend 47.7 s of the run's 371 CPU-seconds
-in the refinements (12.9%), 32.7 s of it in the copies alone. Memoise the
-refined class keyed on the indexed class and a generation that moves with
-the auth model, storage driver, macro and pivot registries, so a repeat
-lookup hands back the same `Arc`.
+Every Symfony project pays it once, when the workspace index parses the
+file. On `projects/symfony-demo` (debug `analyze`, 2026-10-24) it is the
+whole difference between 0.74 s and 1.23 s, since the workspace walk that
+reads the service configuration now runs there too. Profile a single-file
+`analyze` of the file to find where the time goes.
 
-## P85. One keystroke parses the open file three times
-
-**Impact: Medium · Complexity: Medium-High**
-
-`update_ast` (`parser/ast_update.rs`) parses the buffer and discards the
-tree, then the fast diagnostics (`diagnostics/collect.rs`) and the slow
-pass (`diagnostics/incremental/mod.rs`) each parse it again under their
-own parse cache. A probe counted three parses per edit in every file it
-tried.
-
-Measured on the large Laravel app (debug, an edit inside one method, the
-slow pass running partial): a parse costs 3.5 to 5 ms on 1,300 to
-1,900-line services, where the whole edit cycle takes 95 to 185 ms, and
-0.2 to 0.6 ms on service providers whose cycle takes 7 to 22 ms. Parsing
-once would save 4 to 11% of the cycle. The Laravel refreshers `update_ast`
-calls add at most one more parse on the providers tried (about 2.5% of the
-cycle), not worth a change of their own. Keeping the parsed tree alive
-between `didChange` and the diagnostic pass costs its parse memory, about
-22 MB for a 73 KB file, for as long as the file is open.
+**Where to look:** `src/docblock/` (type-alias tags), the alias handling in
+`src/parser/classes/`.
 
 ---
 

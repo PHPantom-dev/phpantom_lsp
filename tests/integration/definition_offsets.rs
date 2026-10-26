@@ -1,5 +1,5 @@
 use crate::common::{create_test_backend, goto_definition_at, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Tests: Stored byte offsets and offset_to_position ──────────────────────
 
@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::*;
 async fn test_parsed_members_have_nonzero_name_offset() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_offsets.php").unwrap();
+    let uri = Uri::parse("file:///test_offsets.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Greeter {\n",
@@ -72,7 +72,7 @@ async fn test_parsed_members_have_nonzero_name_offset() {
 async fn test_keyword_offset_populated_for_all_class_kinds() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_keyword_offsets.php").unwrap();
+    let uri = Uri::parse("file:///test_keyword_offsets.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class MyClass {\n",
@@ -151,7 +151,7 @@ async fn test_keyword_offset_populated_for_all_class_kinds() {
 async fn test_name_offset_points_to_correct_token() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_name_tokens.php").unwrap();
+    let uri = Uri::parse("file:///test_name_tokens.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Demo {\n",
@@ -210,7 +210,7 @@ async fn test_name_offset_points_to_correct_token() {
 async fn test_enum_case_name_offset() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_enum_case_offset.php").unwrap();
+    let uri = Uri::parse("file:///test_enum_case_offset.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Color {\n",
@@ -244,7 +244,7 @@ async fn test_enum_case_name_offset() {
 async fn test_promoted_property_name_offset() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_promoted.php").unwrap();
+    let uri = Uri::parse("file:///test_promoted.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Point {\n",
@@ -295,7 +295,7 @@ async fn test_promoted_property_name_offset() {
 async fn test_offset_to_position_matches_text_search() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_offset_pos.php").unwrap();
+    let uri = Uri::parse("file:///test_offset_pos.php").unwrap();
     let text = concat!(
         "<?php\n",
         "abstract class AbstractHandler {\n",
@@ -320,7 +320,7 @@ async fn test_offset_to_position_matches_text_search() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             // "const MAX_RETRIES" is on line 2
             assert_eq!(
@@ -341,7 +341,7 @@ async fn test_offset_to_position_matches_text_search() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             // "protected int $retryCount" is on line 3
             assert_eq!(
@@ -363,7 +363,7 @@ async fn test_offset_to_position_matches_text_search() {
 async fn test_class_name_inside_string_does_not_false_match() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_string_false_match.php").unwrap();
+    let uri = Uri::parse("file:///test_string_false_match.php").unwrap();
     // The string literal on line 3 contains "class Greeter" — this should
     // NOT be treated as a class definition.
     let text = concat!(
@@ -416,7 +416,7 @@ async fn test_class_name_inside_string_does_not_false_match() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 7,
@@ -433,7 +433,7 @@ async fn test_class_name_inside_string_does_not_false_match() {
 async fn test_member_name_in_heredoc_does_not_false_match() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_heredoc.php").unwrap();
+    let uri = Uri::parse("file:///test_heredoc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -462,7 +462,7 @@ async fn test_member_name_in_heredoc_does_not_false_match() {
     );
 
     match result.unwrap() {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             // The real `public function write(...)` is on line 2, not line 6
             assert_eq!(
@@ -479,7 +479,7 @@ async fn test_member_name_in_heredoc_does_not_false_match() {
 async fn test_trait_member_offset() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_trait_offset.php").unwrap();
+    let uri = Uri::parse("file:///test_trait_offset.php").unwrap();
     let text = concat!(
         "<?php\n",
         "trait Timestampable {\n",
@@ -524,7 +524,7 @@ async fn test_trait_member_offset() {
 async fn test_offsets_with_comments_heredocs_and_strings() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_stress.php").unwrap();
+    let uri = Uri::parse("file:///test_stress.php").unwrap();
     let text = concat!(
         "<?php\n",
         "// class FakeClass { const FAKE = 1; }\n",
@@ -590,7 +590,7 @@ async fn test_offsets_with_comments_heredocs_and_strings() {
 async fn test_backed_enum_case_offsets() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_backed_enum.php").unwrap();
+    let uri = Uri::parse("file:///test_backed_enum.php").unwrap();
     let text = concat!(
         "<?php\n",
         "enum Suit: string {\n",
@@ -633,7 +633,7 @@ async fn test_backed_enum_case_offsets() {
 async fn test_interface_constant_definition_via_offset() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_iface_const.php").unwrap();
+    let uri = Uri::parse("file:///test_iface_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Configurable {\n",
@@ -672,7 +672,7 @@ async fn test_interface_constant_definition_via_offset() {
 async fn test_anonymous_class_keyword_offset_is_zero() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///test_anon_class.php").unwrap();
+    let uri = Uri::parse("file:///test_anon_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Outer {\n",
@@ -727,7 +727,7 @@ async fn test_anonymous_class_keyword_offset_is_zero() {
 #[tokio::test]
 async fn test_goto_definition_on_a_function_declaration_offers_usages() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///function_declaration.php").unwrap();
+    let uri = Uri::parse("file:///function_declaration.php").unwrap();
     let content = "<?php\nfunction helper(): void {}\n\nhelper();\n";
 
     open_php(&backend, &uri, content).await;
@@ -738,7 +738,7 @@ async fn test_goto_definition_on_a_function_declaration_offers_usages() {
         .expect("a function declaration should answer with itself");
 
     match result {
-        GotoDefinitionResponse::Scalar(location) => {
+        DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.uri, uri);
             assert_eq!(
                 location.range.start.line, 1,
@@ -746,7 +746,7 @@ async fn test_goto_definition_on_a_function_declaration_offers_usages() {
                 location.range
             );
         }
-        GotoDefinitionResponse::Array(locations) => {
+        DefinitionResponse::Definition(Definition::LocationList(locations)) => {
             assert_eq!(locations.len(), 1, "got {:?}", locations);
             assert_eq!(locations[0].range.start.line, 1, "got {:?}", locations);
         }

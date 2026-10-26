@@ -27,6 +27,7 @@ impl Backend {
     /// baked into, so the next load of either recomputes it.
     fn invalidate_storage_disk_type(&self) {
         *self.laravel.storage_disk_type_cache.write() = None;
+        self.laravel.note_config_facts_change();
         {
             let mut cache = self.resolved_class_cache.write();
             for fqn in [

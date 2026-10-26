@@ -5,13 +5,14 @@
 //! names itself via `Laravel\Folio\name()`.  These routes must resolve for
 //! `route()` the same way a conventional `->name()` declaration does:
 //! completion, hover, diagnostics, and go-to-definition.
+use crate::common::message_text;
 
 use crate::common::{
     LARAVEL_SRC_COMPOSER, create_psr4_workspace, definition_uri, open_initialized_php,
     position_after, response_labels,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// The framework's own `withRouting(pages: ...)` forwards to
 /// `Folio::route()` internally, which is why this file — not a service
@@ -67,12 +68,10 @@ async fn a_named_folio_page_is_not_reported_as_an_unknown_route() {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), SERVICE_PHP, &mut diags);
 
-    let messages: Vec<&String> = diags
+    let messages: Vec<&str> = diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_route"),
-        )
-        .map(|d| &d.message)
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_route"))
+        .map(|d| message_text(&d.message))
         .collect();
 
     assert_eq!(
@@ -93,7 +92,7 @@ async fn goto_definition_on_a_folio_route_name_lands_on_the_page() {
     let service_uri = open_initialized_php(&backend, "src/Services/Service.php").await;
 
     let result = backend
-        .goto_definition(GotoDefinitionParams {
+        .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: service_uri.clone(),
@@ -133,7 +132,7 @@ async fn hover_on_a_folio_route_name_names_the_page() {
         .unwrap()
         .expect("route('explore') should hover");
     let text = match hover.contents {
-        HoverContents::Markup(markup) => markup.value,
+        Contents::MarkupContent(markup) => markup.value,
         other => panic!("expected markup hover, got {other:?}"),
     };
 
@@ -150,7 +149,7 @@ async fn completion_inside_route_offers_the_folio_page_name() {
 
     let result = backend
         .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
                 position: position_after(SERVICE_PHP, "route('"),
             },

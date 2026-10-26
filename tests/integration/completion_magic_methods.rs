@@ -1,5 +1,5 @@
 use crate::common::{completion_response, create_test_backend, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// The class under test declares several magic methods plus an ordinary
 /// dunder-prefixed method and a couple of regular methods.
@@ -21,7 +21,7 @@ const SOURCE: &str = concat!(
 #[tokio::test]
 async fn test_magic_methods_offered_but_sorted_last() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///magic_sort.php").unwrap();
+    let uri = Uri::parse("file:///magic_sort.php").unwrap();
 
     open_php(&backend, &uri, SOURCE).await;
 
@@ -31,13 +31,13 @@ async fn test_magic_methods_offered_but_sorted_last() {
         .unwrap();
 
     let items = match result {
-        CompletionResponse::Array(items)
-        | CompletionResponse::List(CompletionList { items, .. }) => items,
+        CompletionResponse::CompletionItemList(items)
+        | CompletionResponse::CompletionList(CompletionList { items, .. }) => items,
     };
 
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .filter_map(|i| i.filter_text.as_deref())
         .collect();
 

@@ -1,0 +1,13 @@
+// test: An enum column's enum and backing type
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testEnumType.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data-attributes/enum-type.php
+// expect_diagnostic: 42: Property PHPStan\Rules\Doctrine\ORMAttributes\Foo::$type2 type mapping mismatch: database can contain PHPStan\Rules\Doctrine\ORMAttributes\FooEnum but property expects PHPStan\Rules\Doctrine\ORMAttributes\BarEnum. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 42: Property PHPStan\Rules\Doctrine\ORMAttributes\Foo::$type2 type mapping mismatch: property can contain PHPStan\Rules\Doctrine\ORMAttributes\BarEnum but database expects PHPStan\Rules\Doctrine\ORMAttributes\FooEnum. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 45: Property PHPStan\Rules\Doctrine\ORMAttributes\Foo::$type3 type mapping mismatch: backing type string of enum PHPStan\Rules\Doctrine\ORMAttributes\FooEnum does not match database type int. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 51: Property PHPStan\Rules\Doctrine\ORMAttributes\Foo::$type5 type mapping mismatch: database can contain list<PHPStan\Rules\Doctrine\ORMAttributes\FooEnum> but property expects PHPStan\Rules\Doctrine\ORMAttributes\FooEnum. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 51: Property PHPStan\Rules\Doctrine\ORMAttributes\Foo::$type5 type mapping mismatch: property can contain PHPStan\Rules\Doctrine\ORMAttributes\FooEnum but database expects array<PHPStan\Rules\Doctrine\ORMAttributes\FooEnum>. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 63: Property PHPStan\Rules\Doctrine\ORMAttributes\Foo::$type7 type mapping mismatch: backing type int of enum PHPStan\Rules\Doctrine\ORMAttributes\BazEnum does not match value type string of the database type array<string>. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

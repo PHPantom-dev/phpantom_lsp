@@ -1,11 +1,12 @@
+use crate::common::message_text;
 use crate::common::{
     create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
     create_test_backend_with_closure_stub, create_test_backend_with_exception_stubs,
-    create_test_backend_with_full_stubs, create_test_backend_with_stubs, slow_diagnostic_messages,
-    unknown_member_diagnostics_with_scope_cache,
+    create_test_backend_with_full_stubs, create_test_backend_with_stubs, open_php_str,
+    slow_diagnostic_messages, unknown_member_diagnostics_with_scope_cache,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// A minimal global SPL `Iterator` stub: it deliberately does NOT declare
 /// `accept()`, so any diagnostic flagging `accept` proves the instance was
@@ -77,7 +78,8 @@ async fn inherited_member_not_flagged_after_indexing_completes() {
     let mut pre = Vec::new();
     backend.collect_unknown_member_diagnostics(uri, text, &mut pre);
     assert!(
-        pre.iter().any(|d| d.message.contains("redirectToRoute")),
+        pre.iter()
+            .any(|d| message_text(&d.message).contains("redirectToRoute")),
         "setup precondition: the inherited method should be flagged \
          while the vendor parent is not yet indexed, got: {pre:?}"
     );
@@ -93,7 +95,9 @@ async fn inherited_member_not_flagged_after_indexing_completes() {
     let mut post = Vec::new();
     backend.collect_unknown_member_diagnostics(uri, text, &mut post);
     assert!(
-        !post.iter().any(|d| d.message.contains("redirectToRoute")),
+        !post
+            .iter()
+            .any(|d| message_text(&d.message).contains("redirectToRoute")),
         "inherited method must resolve once the vendor parent is indexed, got: {post:?}"
     );
 }
@@ -122,7 +126,8 @@ class Consumer {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonexistent") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("nonexistent")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown method diagnostic, got: {:?}",
         diags
     );
@@ -184,7 +189,7 @@ class Processor {
 }
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert!(
         messages.len() == 1 && messages[0].contains("nonexistent"),
         "Expected one unknown method diagnostic for nonexistent, got: {messages:?}"
@@ -224,7 +229,9 @@ if (PHP_VERSION_ID > 80000) {
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     for name in ["inElseIf", "inElse", "inNestedIf"] {
         assert!(
-            diags.iter().any(|d| d.message.contains(name)),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains(name)),
             "Expected unknown method diagnostic for {name}, got: {:?}",
             diags
         );
@@ -289,7 +296,11 @@ namespace B {
         "Only block B's `make()` is the global Gadget one, got: {:?}",
         diags
     );
-    assert!(diags[0].message.contains("Gadget"), "got: {:?}", diags);
+    assert!(
+        message_text(&diags[0].message).contains("Gadget"),
+        "got: {:?}",
+        diags
+    );
 }
 
 /// PHP shares one global variable scope across a file's `namespace`
@@ -317,7 +328,11 @@ namespace B {
         "`$x` is still the Widget in block B, got: {:?}",
         diags
     );
-    assert!(diags[1].message.contains("gone"), "got: {:?}", diags);
+    assert!(
+        message_text(&diags[1].message).contains("gone"),
+        "got: {:?}",
+        diags
+    );
 }
 
 /// The same call written at the top level of several `namespace` blocks
@@ -356,7 +371,11 @@ namespace C {
         "Only block B's `make()` is the global Gadget one, got: {:?}",
         diags
     );
-    assert!(diags[0].message.contains("Gadget"), "got: {:?}", diags);
+    assert!(
+        message_text(&diags[0].message).contains("Gadget"),
+        "got: {:?}",
+        diags
+    );
 }
 
 /// A class name written at the top level of two `namespace` blocks is
@@ -441,7 +460,7 @@ namespace B {
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     let reported: Vec<(u32, &str)> = diags
         .iter()
-        .map(|d| (d.range.start.line, d.message.as_str()))
+        .map(|d| (d.range.start.line, message_text(&d.message)))
         .collect();
     assert_eq!(
         reported,
@@ -478,7 +497,8 @@ class Consumer {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("missing") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("missing")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown property diagnostic, got: {:?}",
         diags
     );
@@ -527,7 +547,8 @@ Foo::nonexistent();
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonexistent") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("nonexistent")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown static method diagnostic, got: {:?}",
         diags
     );
@@ -571,7 +592,8 @@ $x = Foo::MISSING;
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("MISSING") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("MISSING")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown constant diagnostic, got: {:?}",
         diags
     );
@@ -689,13 +711,110 @@ $foo->bar();
 $foo->missing();
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages.len(),
         1,
         "only the missing method should be flagged, got: {messages:?}"
     );
     assert!(messages[0].contains("missing"), "got: {messages:?}");
+}
+
+/// PHP 8.0 accepts any parenthesised expression as the operand of `new`.
+#[test]
+fn new_on_parenthesised_class_name_expression_resolves() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+class User {
+    public function bar(): void {}
+}
+
+class Factory {
+    /** @var class-string<User> */
+    public string $class = User::class;
+}
+
+function test(Factory $factory): void {
+    $a = new (User::class)();
+    $a->bar();
+    $a->missingA();
+
+    $b = new ('App\\User')();
+    $b->bar();
+    $b->missingB();
+
+    $c = new ($factory->class)();
+    $c->bar();
+    $c->missingC();
+
+    (new (User::class)())->missingD();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let mut messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
+    messages.sort_unstable();
+    assert_eq!(messages.len(), 4, "got: {messages:?}");
+    for (message, name) in messages
+        .iter()
+        .zip(["missingA", "missingB", "missingC", "missingD"])
+    {
+        assert!(message.contains(name), "got: {messages:?}");
+    }
+}
+
+/// A member access written directly on `new $var` builds the class the
+/// variable names, whatever kind of class name it holds.
+#[test]
+fn member_access_on_new_variable_resolves_the_instance() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+class Customer {
+    public function name(): string { return ''; }
+}
+
+/** @param array<string, class-string<Customer>> $map */
+function f(Customer $c, array $map, string $type): void {
+    $class = $c::class;
+    echo (new $class())->name();
+    (new $class())->missingA();
+    (new $class)->missingB();
+    (new $class('extra'))->missingE();
+    new $class()->missingF();
+
+    $runtime = get_class($c);
+    echo (new $runtime())->name();
+    (new $runtime())->missingG();
+
+    $literal = 'App\\Customer';
+    echo (new $literal())->name();
+    (new $literal())->missingC();
+
+    $mapped = $map[$type] ?? null;
+    if ($mapped === null) {
+        return;
+    }
+    echo (new $mapped())->name();
+    (new $mapped())->missingD();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut out);
+    let mut messages: Vec<&str> = out.iter().map(|d| message_text(&d.message)).collect();
+    messages.sort_unstable();
+    let expected = [
+        "missingA", "missingB", "missingC", "missingD", "missingE", "missingF", "missingG",
+    ];
+    assert_eq!(messages.len(), expected.len(), "got: {messages:?}");
+    for (message, name) in messages.iter().zip(expected) {
+        assert!(message.contains(name), "got: {messages:?}");
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -794,7 +913,8 @@ class Consumer {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("missingProp") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("missingProp")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown property diagnostic even with __call (no __get), got: {:?}",
         diags
     );
@@ -1008,7 +1128,7 @@ class Consumer {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages,
         vec!["Method 'nope' not found on class 'Stamp'"],
@@ -1152,7 +1272,8 @@ class Foo {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonexistent") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("nonexistent")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown method diagnostic for $this->nonexistent(), got: {:?}",
         diags
     );
@@ -1194,7 +1315,8 @@ class Foo {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonexistent") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("nonexistent")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown method diagnostic for self::nonexistent(), got: {:?}",
         diags
     );
@@ -1236,7 +1358,8 @@ class Foo {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonexistent") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("nonexistent")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown method diagnostic for static::nonexistent(), got: {:?}",
         diags
     );
@@ -1323,8 +1446,16 @@ class Consumer {
         "Expected exactly 2 diagnostics, got: {:?}",
         diags
     );
-    assert!(diags.iter().any(|d| d.message.contains("unknown1")));
-    assert!(diags.iter().any(|d| d.message.contains("unknown2")));
+    assert!(
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("unknown1"))
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("unknown2"))
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1409,7 +1540,8 @@ $c = Color::Purple;
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("Purple") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("Purple")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown member diagnostic for Color::Purple, got: {:?}",
         diags
     );
@@ -1458,7 +1590,8 @@ class Handler {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonexistent") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("nonexistent")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown method diagnostic via parameter type, got: {:?}",
         diags
     );
@@ -1565,7 +1698,8 @@ class Consumer {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonexistent") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("nonexistent")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown method diagnostic on interface, got: {:?}",
         diags
     );
@@ -1591,7 +1725,7 @@ class Consumer {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(!diags.is_empty(), "Expected at least one diagnostic");
-    assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+    assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
 }
 
 #[test]
@@ -1612,7 +1746,7 @@ class Consumer {
     assert!(!diags.is_empty(), "Expected at least one diagnostic");
     assert_eq!(
         diags[0].code,
-        Some(NumberOrString::String("unknown_member".to_string()))
+        Some(Code::String("unknown_member".to_string()))
     );
     assert_eq!(diags[0].source, Some("phpantom".to_string()));
 }
@@ -1634,9 +1768,9 @@ class Consumer {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(!diags.is_empty(), "Expected at least one diagnostic");
     assert!(
-        diags[0].message.contains("MyService"),
+        message_text(&diags[0].message).contains("MyService"),
         "Diagnostic should mention the class name, got: {}",
-        diags[0].message
+        message_text(&diags[0].message)
     );
 }
 
@@ -1733,7 +1867,8 @@ class Consumer {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonexistent") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("nonexistent")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown method diagnostic across files, got: {:?}",
         diags
     );
@@ -1808,11 +1943,15 @@ class Consumer {
         diags
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("'bar'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'bar'")),
         "bar() should not be flagged"
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("'name'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'name'")),
         "name should not be flagged"
     );
 }
@@ -1946,7 +2085,8 @@ class Consumer {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("anything") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("anything")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown method diagnostic on empty class, got: {:?}",
         diags
     );
@@ -1970,7 +2110,8 @@ class Consumer {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("anything") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("anything")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown property diagnostic on empty class, got: {:?}",
         diags
     );
@@ -2073,7 +2214,8 @@ class Foo {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("MIN") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("MIN")
+                && message_text(&d.message).contains("not found")),
         "Expected unknown constant diagnostic for self::MIN, got: {:?}",
         diags
     );
@@ -2208,7 +2350,9 @@ class Consumer {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("getLabel")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getLabel")),
         "No diagnostic expected for getLabel on Item resolved via method-return array access, got: {:?}",
         diags
     );
@@ -2236,7 +2380,9 @@ class Consumer {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("getLabel")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getLabel")),
         "No diagnostic expected for getLabel on Item resolved via generic method-return array access, got: {:?}",
         diags
     );
@@ -2285,7 +2431,9 @@ class Consumer {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("subMinutes")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("subMinutes")),
         "No diagnostic expected for subMinutes on function return type resolved via FQN, got: {:?}",
         diags
     );
@@ -2351,7 +2499,9 @@ class Consumer {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("code")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("code")),
         "No diagnostic expected for 'code' on self-referencing return type resolved cross-file, got: {:?}",
         diags
     );
@@ -2378,7 +2528,9 @@ function test(): void {
     let mut diags = Vec::new();
     backend.collect_unknown_member_diagnostics(uri, text, &mut diags);
     assert!(
-        !diags.iter().any(|d| d.message.contains("getLabel")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getLabel")),
         "No diagnostic expected for getLabel on Item resolved via static method-return array access, got: {:?}",
         diags
     );
@@ -2417,19 +2569,24 @@ function test(Application $app): void {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     // $app->useStoragePath() should NOT be flagged (valid method).
     assert!(
-        !diags.iter().any(|d| d.message.contains("useStoragePath")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("useStoragePath")),
         "useStoragePath is a valid method on Application, got: {diags:?}",
     );
     // $app['config']->set() should NOT say 'set' is missing on Application.
     assert!(
-        !diags.iter().any(|d| d.message.contains("Application")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("Application")),
         "should not report 'set' as missing on Application, got: {diags:?}",
     );
     // $app['config']->set() SHOULD flag that the subject is `mixed`.
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("set") && d.message.contains("is 'mixed'")),
+            .any(|d| message_text(&d.message).contains("set")
+                && message_text(&d.message).contains("is 'mixed'")),
         "expected unresolved-member-access diagnostic for $app['config']->set(), got: {diags:?}",
     );
 }
@@ -2461,13 +2618,14 @@ function f(Factory $factory): void {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
         "closure literal subjects should resolve, got: {diags:?}",
     );
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("missing") && d.message.contains("Closure")),
+            .any(|d| message_text(&d.message).contains("missing")
+                && message_text(&d.message).contains("Closure")),
         "expected unknown-method diagnostic for 'missing' on Closure, got: {diags:?}",
     );
 }
@@ -2519,11 +2677,13 @@ class MyTest extends BaseAssert
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
         "assertInstanceOf should narrow $constants['C'] to ASTNode, got: {diags:?}",
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("getImage")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getImage")),
         "getImage is a valid method on ASTNode, got: {diags:?}",
     );
 }
@@ -2636,7 +2796,9 @@ class Test extends TestCase {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("id")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("id")),
         "No diagnostic expected for 'id' after assert($x instanceof MolliePayment), got: {:?}",
         diags
     );
@@ -2671,7 +2833,10 @@ class Test extends TestCase {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     // The first $x->id (before the assert) should be flagged because
     // $x is MockInterface and MockInterface has no 'id' property.
-    let id_diags: Vec<_> = diags.iter().filter(|d| d.message.contains("id")).collect();
+    let id_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| message_text(&d.message).contains("id"))
+        .collect();
     assert_eq!(
         id_diags.len(),
         1,
@@ -2926,7 +3091,9 @@ class Service {
     backend.collect_unknown_member_diagnostics(uri, text, &mut diags);
 
     assert!(
-        !diags.iter().any(|d| d.message.contains("translations")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("translations")),
         "Relationship property 'translations' should be resolved via LaravelModelProvider, got: {:?}",
         diags
     );
@@ -3002,7 +3169,9 @@ class Handler {
     backend.collect_unknown_member_diagnostics(uri, text, &mut diags);
 
     assert!(
-        !diags.iter().any(|d| d.message.contains("imageFile")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("imageFile")),
         "HasOne relationship property 'imageFile' should be resolved via LaravelModelProvider, got: {:?}",
         diags
     );
@@ -3085,7 +3254,9 @@ class Category extends Model {
     backend.collect_unknown_member_diagnostics(uri, text, &mut diags);
 
     assert!(
-        !diags.iter().any(|d| d.message.contains("translations")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("translations")),
         "Relationship property '$this->translations' should be resolved inside model, got: {:?}",
         diags
     );
@@ -3167,7 +3338,9 @@ class Service {
     backend.collect_unknown_member_diagnostics(uri, text, &mut diags);
 
     assert!(
-        !diags.iter().any(|d| d.message.contains("associate")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("associate")),
         "BelongsTo::associate() should be resolved on relationship method return type, got: {:?}",
         diags
     );
@@ -3248,7 +3421,9 @@ class Service {
     backend.collect_unknown_member_diagnostics(uri, text, &mut diags);
 
     assert!(
-        !diags.iter().any(|d| d.message.contains("associate")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("associate")),
         "BelongsTo::associate() should be resolved even with 'covariant $this' syntax, got: {:?}",
         diags
     );
@@ -3336,7 +3511,9 @@ class Handler {
     backend.collect_unknown_member_diagnostics(uri, text, &mut diags);
 
     assert!(
-        !diags.iter().any(|d| d.message.contains("comments")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("comments")),
         "Body-inferred relationship property 'comments' should be resolved, got: {:?}",
         diags
     );
@@ -3517,7 +3694,9 @@ class TranslationModel extends Model {
     let mut diags1 = Vec::new();
     backend.collect_unknown_member_diagnostics(uri1, &text1, &mut diags1);
     assert!(
-        !diags1.iter().any(|d| d.message.contains("translations")),
+        !diags1
+            .iter()
+            .any(|d| message_text(&d.message).contains("translations")),
         "HasMany relationship property '$this->translations' with mixed native return should resolve, got: {:?}",
         diags1
     );
@@ -3529,7 +3708,9 @@ class TranslationModel extends Model {
     let mut diags2 = Vec::new();
     backend.collect_unknown_member_diagnostics(uri2, &text2, &mut diags2);
     assert!(
-        !diags2.iter().any(|d| d.message.contains("imageFile")),
+        !diags2
+            .iter()
+            .any(|d| message_text(&d.message).contains("imageFile")),
         "HasOne relationship property '$this->imageFile' with mixed native return should resolve, got: {:?}",
         diags2
     );
@@ -3550,7 +3731,9 @@ class NotificationCategoryService {
     let mut diags3 = Vec::new();
     backend.collect_unknown_member_diagnostics(uri3, text3, &mut diags3);
     assert!(
-        !diags3.iter().any(|d| d.message.contains("associate")),
+        !diags3
+            .iter()
+            .any(|d| message_text(&d.message).contains("associate")),
         "BelongsTo::associate() should be found when method returns mixed with @return BelongsTo<..., covariant $this>, got: {:?}",
         diags3
     );
@@ -3607,17 +3790,23 @@ class KlaviyoClient {
 
     let diags = unknown_member_diagnostics(&backend, consumer_uri, consumer_text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("createEvent")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("createEvent")),
         "createEvent from mixin TWraps→EventsApi should not be flagged, got: {:?}",
         diags
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("getEvents")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getEvents")),
         "getEvents from mixin TWraps→EventsApi should not be flagged, got: {:?}",
         diags
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("getApiInstance")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getApiInstance")),
         "Own method getApiInstance should not be flagged, got: {:?}",
         diags
     );
@@ -3663,7 +3852,9 @@ class Consumer {
 
     let diags = unknown_member_diagnostics(&backend, consumer_uri, consumer_text);
     assert!(
-        diags.iter().any(|d| d.message.contains("fakeMethod")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("fakeMethod")),
         "fakeMethod does not exist on Api and should be flagged, got: {:?}",
         diags
     );
@@ -3769,22 +3960,30 @@ class KlaviyoService {
     let diags = unknown_member_diagnostics(&backend, service_uri, service_text);
 
     assert!(
-        !diags.iter().any(|d| d.message.contains("createEvent")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("createEvent")),
         "createEvent from mixin TWraps→EventsApi should not be flagged, got: {:?}",
         diags
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("getEvents")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getEvents")),
         "getEvents from mixin TWraps→EventsApi should not be flagged, got: {:?}",
         diags
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("getProfiles")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getProfiles")),
         "getProfiles from mixin TWraps→ProfilesApi should not be flagged, got: {:?}",
         diags
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("updateProfile")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("updateProfile")),
         "updateProfile from mixin TWraps→ProfilesApi should not be flagged, got: {:?}",
         diags
     );
@@ -3905,19 +4104,23 @@ class ProductRepository {
     backend.collect_unknown_member_diagnostics(uri, text, &mut diags);
 
     assert!(
-        !diags.iter().any(|d| d.message.contains("whereIsLuxury")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("whereIsLuxury")),
         "Scope method 'whereIsLuxury' should be found on Builder<Product>, got: {:?}",
         diags
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("whereIsDerma")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("whereIsDerma")),
         "Scope method 'whereIsDerma' should be found on Builder<Product>, got: {:?}",
         diags
     );
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("whereIsProHairCare")),
+            .any(|d| message_text(&d.message).contains("whereIsProHairCare")),
         "Scope method 'whereIsProHairCare' should be found on Builder<Product>, got: {:?}",
         diags
     );
@@ -4022,18 +4225,22 @@ class EventRepository {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("whereIsBlackFriday")),
+            .any(|d| message_text(&d.message).contains("whereIsBlackFriday")),
         "Scope method 'whereIsBlackFriday' should be found on Builder<Product>, got: {:?}",
         diags
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("whereIsVisible")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("whereIsVisible")),
         "Scope method 'whereIsVisible' should be found on Builder<Product>, got: {:?}",
         diags
     );
     // pluck and all should also resolve without issues
     assert!(
-        !diags.iter().any(|d| d.message.contains("pluck")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("pluck")),
         "pluck should be found on Builder after scope methods, got: {:?}",
         diags
     );
@@ -4137,19 +4344,25 @@ class ProductRepository {
     // The explicit `Builder` type hint is a supertype, so the inferred
     // `Builder<Product>` is preferred — scope methods are found.
     assert!(
-        !diags.iter().any(|d| d.message.contains("whereIsLuxury")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("whereIsLuxury")),
         "Scope method should be found via callable param inference from when(), got: {:?}",
         diags
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("whereIsDerma")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("whereIsDerma")),
         "Scope method should be found via callable param inference from when(), got: {:?}",
         diags
     );
 
     // Known methods after the scope calls should also resolve.
     assert!(
-        !diags.iter().any(|d| d.message.contains("get")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("get")),
         "Known method 'get' should resolve after scope calls, got: {:?}",
         diags
     );
@@ -4157,7 +4370,7 @@ class ProductRepository {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
         "Chain should not break, got: {:?}",
         diags
     );
@@ -4247,7 +4460,9 @@ function filterProducts(Builder $query): void {
     // Scope method is NOT flagged — Builder defines __call, so the call
     // is valid and dynamically dispatched even without knowing the model.
     assert!(
-        !diags.iter().any(|d| d.message.contains("whereIsLuxury")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("whereIsLuxury")),
         "Scope method dispatched through Builder's __call must not be flagged, got: {:?}",
         diags
     );
@@ -4255,19 +4470,23 @@ function filterProducts(Builder $query): void {
     // Chain continues — known methods after the scope call
     // should NOT be flagged because __call returns static.
     assert!(
-        !diags.iter().any(|d| d.message.contains("orderBy")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("orderBy")),
         "Known method 'orderBy' should resolve after __call fallback, got: {:?}",
         diags
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("get")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("get")),
         "Known method 'get' should resolve after __call fallback, got: {:?}",
         diags
     );
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
         "Chain should not break after __call fallback, got: {:?}",
         diags
     );
@@ -4352,21 +4571,28 @@ class FlowService {
     );
     let diags = unknown_member_diagnostics(&backend, uri, service_php);
 
-    let chained_diags: Vec<_> = diags.iter().filter(|d| !d.message.contains("$c")).collect();
+    let chained_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| !message_text(&d.message).contains("$c"))
+        .collect();
     assert!(
-        !chained_diags.iter().any(|d| d.message.contains("add")),
+        !chained_diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("add")),
         "reduce() should resolve TReduceReturnType=Decimal cross-file, chained 'add' should be known, got: {:?}",
         chained_diags
     );
     assert!(
-        !chained_diags.iter().any(|d| d.message.contains("getValue")),
+        !chained_diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getValue")),
         "reduce() should resolve TReduceReturnType=Decimal cross-file, chained 'getValue' should be known, got: {:?}",
         chained_diags
     );
     assert!(
         !chained_diags
             .iter()
-            .any(|d| d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
         "reduce() return type should be fully resolved cross-file when chained, got: {:?}",
         chained_diags
     );
@@ -4498,21 +4724,28 @@ class FlowService {
     );
     let diags = unknown_member_diagnostics(&backend, uri, service_php);
 
-    let chained_diags: Vec<_> = diags.iter().filter(|d| !d.message.contains("$c")).collect();
+    let chained_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| !message_text(&d.message).contains("$c"))
+        .collect();
     assert!(
-        !chained_diags.iter().any(|d| d.message.contains("add")),
+        !chained_diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("add")),
         "reduce() via trait+interface should resolve TReduceReturnType=Decimal, chained 'add' should be known, got: {:?}",
         chained_diags
     );
     assert!(
-        !chained_diags.iter().any(|d| d.message.contains("getValue")),
+        !chained_diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getValue")),
         "reduce() via trait+interface should resolve TReduceReturnType=Decimal, chained 'getValue' should be known, got: {:?}",
         chained_diags
     );
     assert!(
         !chained_diags
             .iter()
-            .any(|d| d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
         "reduce() return type via trait+interface should be fully resolved when chained, got: {:?}",
         chained_diags
     );
@@ -4567,21 +4800,28 @@ class FlowService {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     // Filter out diagnostics for the inner `$c->add($p->price)` inside
     // the closure — we only care about the chained call after reduce().
-    let chained_diags: Vec<_> = diags.iter().filter(|d| !d.message.contains("$c")).collect();
+    let chained_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| !message_text(&d.message).contains("$c"))
+        .collect();
     assert!(
-        !chained_diags.iter().any(|d| d.message.contains("add")),
+        !chained_diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("add")),
         "reduce() should resolve TReduceReturnType=Decimal, chained 'add' should be known, got: {:?}",
         chained_diags
     );
     assert!(
-        !chained_diags.iter().any(|d| d.message.contains("getValue")),
+        !chained_diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getValue")),
         "reduce() should resolve TReduceReturnType=Decimal, chained 'getValue' should be known, got: {:?}",
         chained_diags
     );
     assert!(
         !chained_diags
             .iter()
-            .any(|d| d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
         "reduce() return type should be fully resolved when chained, got: {:?}",
         chained_diags
     );
@@ -4613,7 +4853,9 @@ class SpecificFeature extends BaseCatalogFeature {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("specificMethod")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("specificMethod")),
         "No diagnostic expected for 'specificMethod' after assert($feature instanceof self), got: {:?}",
         diags
     );
@@ -4640,7 +4882,9 @@ class Handler {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("bark")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("bark")),
         "No diagnostic expected for 'bark' after assert($pet instanceof Dog), got: {:?}",
         diags
     );
@@ -4670,7 +4914,9 @@ class Consumer {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("toHtml")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("toHtml")),
         "No diagnostic expected for 'toHtml' after assert instanceof, got: {:?}",
         diags
     );
@@ -4720,7 +4966,9 @@ class NodeTest extends BaseAssert {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("getName")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getName")),
         "No diagnostic expected for 'getName' after inherited assertInstanceOf via \
          $this->/static::/self::, got: {diags:?}",
     );
@@ -4765,9 +5013,10 @@ class ParserTest extends BaseAssert {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut diags);
     assert!(
-        !diags
-            .iter()
-            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        !diags.iter().any(
+            |d| message_text(&d.message).contains("could not be resolved")
+                && message_text(&d.message).contains("getImage")
+        ),
         "assertInstanceOf must narrow a list-destructured variable from an \
          unresolvable RHS, got: {diags:?}",
     );
@@ -4810,9 +5059,10 @@ class ParserTest extends BaseAssert {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut diags);
     assert!(
-        !diags
-            .iter()
-            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        !diags.iter().any(
+            |d| message_text(&d.message).contains("could not be resolved")
+                && message_text(&d.message).contains("getImage")
+        ),
         "assertInstanceOf must narrow via a variable holding a ::class literal, got: {diags:?}",
     );
 }
@@ -4853,7 +5103,7 @@ function test(): void {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
         "PlainArrayAccess::offsetGet()'s own `Pen` return type must win over \
          ArrayAccess's unbound `TValue` docblock, got: {diags:?}",
     );
@@ -4904,9 +5154,10 @@ class ParserTest extends BaseAssert {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut diags);
     assert!(
-        !diags
-            .iter()
-            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        !diags.iter().any(
+            |d| message_text(&d.message).contains("could not be resolved")
+                && message_text(&d.message).contains("getImage")
+        ),
         "assertInstanceOf must narrow via a variable assigned a ::class literal inside \
          a foreach body, got: {diags:?}",
     );
@@ -4962,9 +5213,10 @@ class ParserTest extends BaseAssert {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut diags);
     assert!(
-        !diags
-            .iter()
-            .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
+        !diags.iter().any(
+            |d| message_text(&d.message).contains("could not be resolved")
+                && message_text(&d.message).contains("getImage")
+        ),
         "assertInstanceOf must narrow via a variable list-destructured from a foreach \
          source array, got: {diags:?}",
     );
@@ -4991,7 +5243,9 @@ class Asserter {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut diags);
     assert!(
-        !diags.iter().any(|d| d.message.contains("=Foobar")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("=Foobar")),
         "No unknown-class diagnostic expected for the `=` exact-type prefix, got: {diags:?}",
     );
 }
@@ -5020,7 +5274,7 @@ class Handler {
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     let child_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("childMethod"))
+        .filter(|d| message_text(&d.message).contains("childMethod"))
         .collect();
     assert_eq!(
         child_diags.len(),
@@ -5050,7 +5304,9 @@ final class ConcreteFoo extends BaseFoo {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("concreteOp")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("concreteOp")),
         "No diagnostic expected for 'concreteOp' after assert instanceof self in final class, got: {:?}",
         diags
     );
@@ -5079,7 +5335,9 @@ class Tester {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("alphaMethod")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("alphaMethod")),
         "No diagnostic expected for 'alphaMethod' after assert negated instanceof, got: {:?}",
         diags
     );
@@ -5108,7 +5366,9 @@ class Renderer {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("radius")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("radius")),
         "No diagnostic expected for 'radius' inside if-instanceof branch, got: {:?}",
         diags
     );
@@ -5138,7 +5398,9 @@ class Renderer {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("radius")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("radius")),
         "No diagnostic expected for 'radius' in the right operand of ||, got: {:?}",
         diags
     );
@@ -5168,7 +5430,9 @@ class Renderer {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("radius")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("radius")),
         "No diagnostic expected for 'radius' in the right operand of &&, got: {:?}",
         diags
     );
@@ -5198,7 +5462,9 @@ class Renderer {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("radius")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("radius")),
         "No diagnostic expected for 'radius' in nested && inside ||, got: {:?}",
         diags
     );
@@ -5964,7 +6230,10 @@ class MyController {
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &content);
     let with_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("with") || d.message.contains("withErrors"))
+        .filter(|d| {
+            message_text(&d.message).contains("with")
+                || message_text(&d.message).contains("withErrors")
+        })
         .collect();
     assert!(
         with_diags.is_empty(),
@@ -6023,9 +6292,9 @@ function test(int $id): void {
     let scalar_diags: Vec<_> = diags
         .iter()
         .filter(|diag| {
-            diag.code.as_ref().is_some_and(
-                |code| matches!(code, NumberOrString::String(s) if s == "scalar_member_access"),
-            )
+            diag.code
+                .as_ref()
+                .is_some_and(|code| matches!(code, Code::String(s) if s == "scalar_member_access"))
         })
         .collect();
     assert_eq!(
@@ -6037,7 +6306,8 @@ function test(int $id): void {
     assert!(
         scalar_diags
             .iter()
-            .all(|diag| diag.message.contains("string") && diag.message.contains("current")),
+            .all(|diag| message_text(&diag.message).contains("string")
+                && message_text(&diag.message).contains("current")),
         "each invalid access should identify the selected string branch, got: {:?}",
         scalar_diags
     );
@@ -6220,7 +6490,7 @@ class AbstractNode {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("getCompilationUnit")),
+            .any(|d| message_text(&d.message).contains("getCompilationUnit")),
         "No diagnostic expected for 'getCompilationUnit' inside the ternary then-branch, got: {:?}",
         diags
     );
@@ -6314,7 +6584,9 @@ class AbstractNode {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("missingMethod")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("missingMethod")),
         "A missing method on the narrowed type must still be flagged, got: {:?}",
         diags
     );
@@ -6337,7 +6609,9 @@ function run(A|B $x): void {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'a'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'a'")),
         "`$x` is still `A|B` after the ternary, got: {:?}",
         diags
     );
@@ -6368,7 +6642,9 @@ fn new_same_namespace_class_wins_over_global_stub() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("accept")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("accept")),
         "`new Iterator()` must resolve to the same-namespace App\\Input\\Iterator, \
          so `accept()` is a known method, got: {diags:?}"
     );
@@ -6390,7 +6666,9 @@ fn new_falls_back_to_global_stub_when_no_same_namespace_class() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("accept")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("accept")),
         "`new Iterator()` with no same-namespace class must resolve to the \
          global stub, which has no `accept()`, got: {diags:?}"
     );
@@ -6422,7 +6700,9 @@ fn static_call_same_namespace_class_wins_over_global_class() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'x'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'x'")),
         "`B::x()` inside `namespace Src` must resolve to Src\\B where `x()` \
          exists, not the global `B`, got: {diags:?}"
     );
@@ -6444,7 +6724,9 @@ fn static_call_does_not_fall_back_to_global_class_when_no_same_namespace_class()
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("missing")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("missing")),
         "`B::missing()` names `Src\\B`, not the global `B`, got: {diags:?}"
     );
 }
@@ -6463,11 +6745,15 @@ fn static_call_resolves_global_class_imported_by_use() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'z'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'z'")),
         "`B::z()` must resolve to the imported global `B`, got: {diags:?}"
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("missing")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("missing")),
         "`B::missing()` must be flagged on the imported global `B`, got: {diags:?}"
     );
 }
@@ -6489,9 +6775,10 @@ fn diagnostics_in_src_namespace(imports: &str, body: &str) -> Vec<Diagnostic> {
 
 /// Whether a diagnostic flags `missing()` against the global `C`.
 fn flags_missing_on_global_c(diags: &[Diagnostic]) -> bool {
-    diags
-        .iter()
-        .any(|d| d.message.contains("'missing'") && !d.message.contains("Src\\C"))
+    diags.iter().any(|d| {
+        message_text(&d.message).contains("'missing'")
+            && !message_text(&d.message).contains("Src\\C")
+    })
 }
 
 /// `new C()` inside `namespace Src` names `Src\C`, never the global `C`.
@@ -6512,7 +6799,9 @@ fn instantiation_resolves_global_class_imported_by_use() {
         "        $c = new C();\n        $c->z();\n        $c->missing();",
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("'z'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'z'")),
         "`new C()` must resolve to the imported global `C`, got: {diags:?}"
     );
     assert!(
@@ -6578,7 +6867,9 @@ fn inline_var_resolves_global_class_imported_by_use() {
         "        /** @var C $x */\n        $x->z();\n        $x->missing();",
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("'z'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'z'")),
         "`@var C` must resolve to the imported global `C`, got: {diags:?}"
     );
     assert!(
@@ -6609,7 +6900,9 @@ fn static_call_use_import_wins_over_same_namespace_class() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("imported")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("imported")),
         "`use Other\\B` must outrank the same-namespace Src\\B, so \
          `B::imported()` is known, got: {diags:?}"
     );
@@ -6641,7 +6934,9 @@ fn static_property_subject_same_namespace_class_wins_over_global_class() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("localOnly")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("localOnly")),
         "`B::$inst` must read the static property off the same-namespace \
          Src\\B, so `localOnly()` is known, got: {diags:?}"
     );
@@ -6667,7 +6962,9 @@ fn static_call_leading_backslash_reaches_global_class() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'z'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'z'")),
         "`\\B::z()` must resolve to the global `B` where `z()` exists, \
          not the same-namespace Src\\B, got: {diags:?}"
     );
@@ -6701,7 +6998,9 @@ fn new_relative_qualified_name_resolves_against_current_namespace() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("siteOnly")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("siteOnly")),
         "`new View\\Event()` inside `namespace Site` must resolve to \
          Site\\View\\Event where `siteOnly()` exists, got: {diags:?}"
     );
@@ -6726,7 +7025,8 @@ fn static_call_relative_qualified_name_resolves_against_current_namespace() {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("make") || d.message.contains("siteOnly")),
+            .any(|d| message_text(&d.message).contains("make")
+                || message_text(&d.message).contains("siteOnly")),
         "`View\\Event::make()` inside `namespace Site` must resolve to \
          Site\\View\\Event, got: {diags:?}"
     );
@@ -6756,7 +7056,9 @@ fn relative_qualified_name_prefers_current_namespace_over_global_path() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("siteOnly")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("siteOnly")),
         "`new View\\Event()` must prefer Site\\View\\Event over the global \
          View\\Event, got: {diags:?}"
     );
@@ -6784,7 +7086,9 @@ fn relative_qualified_name_import_prefix_wins_over_current_namespace() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("importedOnly")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("importedOnly")),
         "`use Other\\View` must expand `View\\Event` to Other\\View\\Event \
          rather than Site\\View\\Event, got: {diags:?}"
     );
@@ -6812,11 +7116,15 @@ fn leading_backslash_qualified_name_reaches_global_namespace() {
 
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("globalViewOnly")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("globalViewOnly")),
         "`new \\View\\Event()` must resolve to the global View\\Event, got: {diags:?}"
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("siteOnly")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("siteOnly")),
         "`\\View\\Event` must not pick up Site\\View\\Event's members, got: {diags:?}"
     );
 }
@@ -6844,8 +7152,8 @@ fn relative_qualified_name_does_not_fall_back_to_global_namespace() {
     assert!(
         diags
             .iter()
-            .filter(|d| d.message.contains("missingMethod"))
-            .all(|d| d.message.contains("Site\\View\\Event")),
+            .filter(|d| message_text(&d.message).contains("missingMethod"))
+            .all(|d| message_text(&d.message).contains("Site\\View\\Event")),
         "`new View\\Event()` names `Site\\View\\Event`, not the global \
          `View\\Event`, got: {diags:?}"
     );
@@ -6946,7 +7254,9 @@ namespace App {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("with")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("with")),
         "shouldHaveReceived()->with(...) must resolve through VerificationDirector, got: {diags:?}"
     );
 }
@@ -6973,7 +7283,9 @@ class Test
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("value")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("value")),
         "$this->value inside the anonymous class must resolve to the anon class, got: {diags:?}"
     );
 }
@@ -7006,11 +7318,15 @@ class Outer
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("helper")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("helper")),
         "$this->helper() must resolve on the anonymous class, got: {diags:?}"
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("outerOnly")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("outerOnly")),
         "$this->outerOnly() (defined only on Outer) must be flagged inside the anon class, got: {diags:?}"
     );
 }
@@ -7037,7 +7353,9 @@ class Outer
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("outerProp")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("outerProp")),
         "$this->outerProp() after the anon class must resolve on Outer, got: {diags:?}"
     );
 }
@@ -7069,7 +7387,7 @@ function check(Response $response): void {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("MerchantErrorMessage")),
+            .any(|d| message_text(&d.message).contains("MerchantErrorMessage")),
         "property_exists guard must allow the guarded property, got: {diags:?}"
     );
 }
@@ -7094,7 +7412,9 @@ function check(Response $response): void {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("CardHolder")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("CardHolder")),
         "chained property_exists guards must allow both properties, got: {diags:?}"
     );
 }
@@ -7120,7 +7440,7 @@ function check(Response $response): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("MerchantErrorMessage")),
+            .any(|d| message_text(&d.message).contains("MerchantErrorMessage")),
         "access after the guarded branch must still be flagged, got: {diags:?}"
     );
 }
@@ -7143,7 +7463,9 @@ function check(Response $response): void {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("SomethingElse")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("SomethingElse")),
         "unguarded property inside the branch must still be flagged, got: {diags:?}"
     );
 }
@@ -7170,7 +7492,7 @@ function check(Response $response): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("MerchantErrorMessage")),
+            .any(|d| message_text(&d.message).contains("MerchantErrorMessage")),
         "else branch of property_exists must still flag the property, got: {diags:?}"
     );
 }
@@ -7196,7 +7518,7 @@ function check(Response $response): void {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("MerchantErrorMessage")),
+            .any(|d| message_text(&d.message).contains("MerchantErrorMessage")),
         "negated property_exists guard clause must allow access after it, got: {diags:?}"
     );
 }
@@ -7218,7 +7540,9 @@ function check(Handler $handler): void {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("customHook")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("customHook")),
         "method_exists guard must allow the guarded method, got: {diags:?}"
     );
 }
@@ -7244,7 +7568,7 @@ function check(Response $response, string $name): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("MerchantErrorMessage")),
+            .any(|d| message_text(&d.message).contains("MerchantErrorMessage")),
         "dynamic property_exists must not prove arbitrary properties, got: {diags:?}"
     );
 }
@@ -7276,7 +7600,7 @@ class ResponseTest extends TestCase {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("MerchantErrorMessage")),
+            .any(|d| message_text(&d.message).contains("MerchantErrorMessage")),
         "assertTrue(property_exists(...)) must prove the property, got: {diags:?}"
     );
 }
@@ -7306,7 +7630,7 @@ class ResponseTest extends TestCase {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("MerchantErrorMessage")),
+            .any(|d| message_text(&d.message).contains("MerchantErrorMessage")),
         "@psalm-assert true must re-export like @phpstan-assert, got: {diags:?}"
     );
 }
@@ -7337,7 +7661,7 @@ class ResponseTest extends TestCase {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("CardHolderErrorMessage")),
+            .any(|d| message_text(&d.message).contains("CardHolderErrorMessage")),
         "only the guarded property is proven, got: {diags:?}"
     );
 }
@@ -7375,7 +7699,9 @@ class ControllerTest extends TestCase {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("$model")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("$model")),
         "assertIsObject + assertTrue(property_exists) must resolve the subject, got: {diags:?}"
     );
 }
@@ -7401,7 +7727,7 @@ function probeIsset(CanApply $item): int {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("salesCampaignGroupId")),
+            .any(|d| message_text(&d.message).contains("salesCampaignGroupId")),
         "isset($item->prop) guard must allow the guarded property, got: {diags:?}"
     );
 }
@@ -7427,7 +7753,7 @@ function probeIsset(CanApply $item): int {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("salesCampaignGroupId")),
+            .any(|d| message_text(&d.message).contains("salesCampaignGroupId")),
         "access after the isset branch must still be flagged, got: {diags:?}"
     );
 }
@@ -7448,7 +7774,9 @@ function probeTernary(CanApply $item): mixed {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("qty")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("qty")),
         "isset($item->qty) ternary must allow the guarded property, got: {diags:?}"
     );
 }
@@ -7469,7 +7797,9 @@ function probeTernary(CanApply $item): mixed {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("qty")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("qty")),
         "property_exists ternary must allow the guarded property, got: {diags:?}"
     );
 }
@@ -7490,7 +7820,9 @@ function probeTernary(CanApply $item): mixed {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("qty")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("qty")),
         "else-branch of a property_exists ternary must still flag the property, got: {diags:?}"
     );
 }
@@ -7519,7 +7851,9 @@ class WidgetTest extends TestCase {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("render")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("render")),
         "assertFalse(is_string($value)) must narrow away the string branch, got: {diags:?}"
     );
 }
@@ -7574,7 +7908,9 @@ class Widget { public function render(): string { return ''; } }
         backend.update_ast(uri, &text);
         let mut diags = Vec::new();
         backend.collect_slow_diagnostics(uri, &text, &mut diags);
-        let flagged = diags.iter().any(|d| d.message.contains("render"));
+        let flagged = diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("render"));
         assert_eq!(
             flagged, should_flag,
             "case `{body}` expected render flagged={should_flag}, got {flagged}: {diags:?}"
@@ -7615,11 +7951,15 @@ function run(Holder $a): void {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("attrName")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("attrName")),
         "real method on the inferred element type must not be flagged, got: {diags:?}"
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("bogusMethod")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("bogusMethod")),
         "unknown method on the inferred element type must be flagged, got: {diags:?}"
     );
 }
@@ -7644,11 +7984,15 @@ function run(): void {
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'value'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'value'")),
         "backed-enum 'value' property must not be flagged, got: {diags:?}"
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("bogusProp")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("bogusProp")),
         "unknown property on the enum instance must be flagged, got: {diags:?}"
     );
 }
@@ -7758,7 +8102,8 @@ trait MyTrait {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonexistent") && d.message.contains("Foo")),
+            .any(|d| message_text(&d.message).contains("nonexistent")
+                && message_text(&d.message).contains("Foo")),
         "expected diagnostic for unknown method on typed variable inside trait, got: {:?}",
         diags
     );
@@ -7946,7 +8291,8 @@ trait BadTrait {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonExistentMethod") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("nonExistentMethod")
+                && message_text(&d.message).contains("not found")),
         "expected diagnostic for non-self-referencing subject inside trait, got: {:?}",
         diags
     );
@@ -8024,7 +8370,8 @@ class Second {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonexistent") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("nonexistent")
+                && message_text(&d.message).contains("not found")),
         "expected diagnostic for $this->nonexistent() scoped to Second, got: {:?}",
         diags
     );
@@ -8099,7 +8446,8 @@ function test(): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("unknown") && d.message.contains("not found")),
+            .any(|d| message_text(&d.message).contains("unknown")
+                && message_text(&d.message).contains("not found")),
         "expected unknown member diagnostic on anonymous class variable, got: {:?}",
         diags
     );
@@ -8124,7 +8472,8 @@ class HealthCheckController
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("ROUTE") || d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("ROUTE")
+                || message_text(&d.message).contains("could not be resolved")),
         "expected no self::ROUTE diagnostic, got: {:?}",
         diags
     );
@@ -8186,7 +8535,7 @@ class Foo {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("nonExistentMethod")),
+            .any(|d| message_text(&d.message).contains("nonExistentMethod")),
         "expected unknown member diagnostic for nonExistentMethod, got: {:?}",
         diags
     );
@@ -8250,7 +8599,9 @@ class Consumer {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("missing")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("missing")),
         "expected diagnostic for missing property on object shape, got: {:?}",
         diags
     );
@@ -8328,7 +8679,9 @@ class Test {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("fly")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("fly")),
         "expected diagnostic for member missing from all union branches, got: {:?}",
         diags
     );
@@ -8365,12 +8718,12 @@ class Test {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let d = diags
         .iter()
-        .find(|d| d.message.contains("fly"))
+        .find(|d| message_text(&d.message).contains("fly"))
         .expect("expected diagnostic");
     assert!(
-        d.message.contains("Cat") && d.message.contains("Dog"),
+        message_text(&d.message).contains("Cat") && message_text(&d.message).contains("Dog"),
         "expected both union member types in message: {}",
-        d.message
+        message_text(&d.message)
     );
 }
 
@@ -8862,7 +9215,9 @@ class Test {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("missing")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("missing")),
         "expected diagnostic for unknown member on property chain, got: {:?}",
         diags
     );
@@ -8914,7 +9269,9 @@ function test(): void {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("missing")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("missing")),
         "expected diagnostic for unknown member on method return chain, got: {:?}",
         diags
     );
@@ -8943,7 +9300,9 @@ function test(): void {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("missing")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("missing")),
         "expected diagnostic for unknown member on virtual property chain, got: {:?}",
         diags
     );
@@ -8973,14 +9332,15 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
     assert!(
         diags
             .iter()
-            .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)),
+            .any(|d| d.severity == Some(DiagnosticSeverity::Error)),
         "expected ERROR severity for scalar access, got: {:?}",
         diags
     );
@@ -9006,7 +9366,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("string")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9032,7 +9393,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9066,7 +9428,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("string")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9088,7 +9451,8 @@ function test(Foo $foo): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9112,7 +9476,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9132,7 +9497,8 @@ function test(): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9161,7 +9527,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("string")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9186,7 +9553,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("string")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9233,7 +9601,8 @@ function test(): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("string")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9258,7 +9627,8 @@ function test(): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("string")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9286,7 +9656,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9314,7 +9685,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("string")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic, got: {:?}",
         diags
     );
@@ -9345,7 +9717,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic for int virtual property, got: {:?}",
         diags
     );
@@ -9397,7 +9770,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic for bare int variable, got: {:?}",
         diags
     );
@@ -9424,7 +9798,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("string") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("string")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic for bare string variable, got: {:?}",
         diags
     );
@@ -9451,7 +9826,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("bool") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("bool")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic for bare bool variable, got: {:?}",
         diags
     );
@@ -9474,7 +9850,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic for function return, got: {:?}",
         diags
     );
@@ -9511,7 +9888,8 @@ function test(int $value): void {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("nonexistent")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("nonexistent")),
         "expected scalar access diagnostic for typed parameter, got: {:?}",
         diags
     );
@@ -9580,7 +9958,8 @@ class Test {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("int") && d.message.contains("method")),
+            .any(|d| message_text(&d.message).contains("int")
+                && message_text(&d.message).contains("method")),
         "an `int` subject can never be a class name, so `::` access must still be flagged, \
          got: {:?}",
         diags
@@ -9609,7 +9988,9 @@ class Test {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("nonexistent")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("nonexistent")),
         "a `class-string<T>` property accessed via `::` should resolve against `T`, got: {:?}",
         diags
     );
@@ -9631,7 +10012,8 @@ function test(NonExistentClass $obj): void {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
         diags.iter().any(|d| {
-            d.message.contains("doSomething") && d.message.contains("NonExistentClass")
+            message_text(&d.message).contains("doSomething")
+                && message_text(&d.message).contains("NonExistentClass")
         }),
         "expected diagnostic for unknown class parameter, got: {:?}",
         diags
@@ -10064,11 +10446,15 @@ class Service {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("foo") && d.message.contains("NoFoo")),
+            .any(|d| message_text(&d.message).contains("foo")
+                && message_text(&d.message).contains("NoFoo")),
         "expected diagnostic for foo() on NoFoo in method b(), got: {:?}",
         diags
     );
-    let foo_diags: Vec<_> = diags.iter().filter(|d| d.message.contains("foo")).collect();
+    let foo_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| message_text(&d.message).contains("foo"))
+        .collect();
     assert_eq!(
         foo_diags.len(),
         1,
@@ -10137,13 +10523,14 @@ class Service {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("onlyOnA") && d.message.contains("TypeB")),
+            .any(|d| message_text(&d.message).contains("onlyOnA")
+                && message_text(&d.message).contains("TypeB")),
         "expected diagnostic for onlyOnA() on TypeB after reassignment, got: {:?}",
         diags
     );
     let relevant: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("onlyOnA"))
+        .filter(|d| message_text(&d.message).contains("onlyOnA"))
         .collect();
     assert_eq!(
         relevant.len(),
@@ -10183,7 +10570,7 @@ class Svc {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -10192,7 +10579,7 @@ class Svc {
     );
     let unknown_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("write"))
+        .filter(|d| message_text(&d.message).contains("write"))
         .collect();
     assert!(
         unknown_diags.is_empty(),
@@ -10244,7 +10631,7 @@ class Svc {
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -10340,7 +10727,9 @@ class Svc {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let bad_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("commit") || d.message.contains("null"))
+        .filter(|d| {
+            message_text(&d.message).contains("commit") || message_text(&d.message).contains("null")
+        })
         .collect();
     assert!(
         bad_diags.is_empty(),
@@ -10385,7 +10774,10 @@ class Svc {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let bad: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("value") && d.message.contains("Stringable"))
+        .filter(|d| {
+            message_text(&d.message).contains("value")
+                && message_text(&d.message).contains("Stringable")
+        })
         .collect();
     assert!(
         bad.is_empty(),
@@ -10428,8 +10820,9 @@ class Svc {
     let bad: Vec<_> = diags
         .iter()
         .filter(|d| {
-            d.message.contains("gammaMethod")
-                && (d.message.contains("Alpha") || d.message.contains("Beta"))
+            message_text(&d.message).contains("gammaMethod")
+                && (message_text(&d.message).contains("Alpha")
+                    || message_text(&d.message).contains("Beta"))
         })
         .collect();
     assert!(
@@ -10663,7 +11056,9 @@ class TestCase
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("Application2")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("Application2")),
         "should not report 'set' as missing on Application2 — bracket access returns mixed, got: {:?}",
         diags
     );
@@ -10693,7 +11088,10 @@ function test(string $role): void {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let bad: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("assignRole") || d.message.contains("admin"))
+        .filter(|d| {
+            message_text(&d.message).contains("assignRole")
+                || message_text(&d.message).contains("admin")
+        })
         .collect();
     assert!(
         bad.is_empty(),
@@ -10722,7 +11120,9 @@ function test(): void {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let bad: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("query") || d.message.contains("conn"))
+        .filter(|d| {
+            message_text(&d.message).contains("query") || message_text(&d.message).contains("conn")
+        })
         .collect();
     assert!(
         bad.is_empty(),
@@ -10750,7 +11150,9 @@ function test(): void {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let bad: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("toArray") || d.message.contains("row"))
+        .filter(|d| {
+            message_text(&d.message).contains("toArray") || message_text(&d.message).contains("row")
+        })
         .collect();
     assert!(
         bad.is_empty(),
@@ -10787,7 +11189,7 @@ function test(): void {
         diags
     );
     assert!(
-        diags[0].message.contains("callHome"),
+        message_text(&diags[0].message).contains("callHome"),
         "expected diagnostic for callHome, got: {:?}",
         diags[0].message
     );
@@ -10817,7 +11219,7 @@ function test(): void {
         "expected 2 diagnostics (separate statements), got: {:?}",
         diags
     );
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert!(
         messages.iter().any(|m| m.contains("callHome")),
         "expected callHome diagnostic"
@@ -10852,7 +11254,7 @@ function test(): void {
         diags
     );
     assert!(
-        diags[0].message.contains("int"),
+        message_text(&diags[0].message).contains("int"),
         "expected scalar type 'int' in message, got: {:?}",
         diags[0].message
     );
@@ -10885,7 +11287,7 @@ function test(): void {
         diags
     );
     assert!(
-        diags[0].message.contains("fakeMethod"),
+        message_text(&diags[0].message).contains("fakeMethod"),
         "expected diagnostic for fakeMethod, got: {:?}",
         diags[0].message
     );
@@ -10925,7 +11327,7 @@ class Test {
         diags
     );
     assert!(
-        diags[0].message.contains("nonexistent"),
+        message_text(&diags[0].message).contains("nonexistent"),
         "expected diagnostic for nonexistent, got: {:?}",
         diags[0].message
     );
@@ -10982,7 +11384,7 @@ function test(): void {
         diags
     );
     assert!(
-        diags[0].message.contains("unknown"),
+        message_text(&diags[0].message).contains("unknown"),
         "expected diagnostic for unknown, got: {:?}",
         diags[0].message
     );
@@ -11010,7 +11412,7 @@ function test(?Machine $m): void {
         diags
     );
     assert!(
-        diags[0].message.contains("callHome"),
+        message_text(&diags[0].message).contains("callHome"),
         "expected diagnostic for callHome, got: {:?}",
         diags[0].message
     );
@@ -11055,7 +11457,7 @@ function test(?string $s): void {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages,
         vec!["Cannot access method 'bar' on type 'null'"],
@@ -11085,7 +11487,7 @@ class Foo {
         diags
     );
     assert!(
-        diags[0].message.contains("unknownMethod"),
+        message_text(&diags[0].message).contains("unknownMethod"),
         "expected diagnostic for unknownMethod, got: {:?}",
         diags[0].message
     );
@@ -11119,7 +11521,8 @@ class Test {
         diags
     );
     assert!(
-        diags[0].message.contains("nonexistent") || diags[0].message.contains("string"),
+        message_text(&diags[0].message).contains("nonexistent")
+            || message_text(&diags[0].message).contains("string"),
         "expected diagnostic about scalar access on string, got: {:?}",
         diags[0].message
     );
@@ -11152,7 +11555,7 @@ function test(): void {
         diags
     );
     assert!(
-        diags[0].message.contains("staticMissing"),
+        message_text(&diags[0].message).contains("staticMissing"),
         "expected diagnostic for staticMissing, got: {:?}",
         diags[0].message
     );
@@ -11181,7 +11584,7 @@ function test(): void {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert!(
         messages.iter().any(|m| m.contains("whereInvalid")),
         "expected diagnostic for whereInvalid (outer chain), got: {:?}",
@@ -11241,7 +11644,7 @@ class Svc {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -11272,7 +11675,7 @@ class Svc {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -11307,7 +11710,7 @@ class Svc {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -11345,7 +11748,7 @@ class Svc {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -11379,7 +11782,7 @@ class Svc {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -11408,7 +11811,7 @@ class Svc {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -11531,7 +11934,9 @@ class Svc {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("unknown")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("unknown")),
         "unknown() is dispatched through __call and must not be flagged, got: {:?}",
         diags
     );
@@ -11608,7 +12013,8 @@ class Service {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("onlyOnOriginal") && d.message.contains("ReplacementType")),
+            .any(|d| message_text(&d.message).contains("onlyOnOriginal")
+                && message_text(&d.message).contains("ReplacementType")),
         "expected diagnostic for onlyOnOriginal() on ReplacementType after reassignment in try, got: {:?}",
         diags
     );
@@ -12019,7 +12425,7 @@ function test(string $file): void {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -12312,7 +12718,7 @@ class Svc {
 fn assert_only_unverifiable(diags: &[Diagnostic], form: &str) {
     assert!(
         !diags.is_empty()
-            && diags.iter().all(|d| d.message
+            && diags.iter().all(|d| message_text(&d.message)
                 == "Cannot verify method 'getTypes' — subject type 'UnionType' could not be resolved"),
         "expected only the unresolved-class warning ({form}), got: {diags:?}"
     );
@@ -12618,8 +13024,8 @@ class ImageController extends AbstractController {
     let unknown_diags: Vec<_> = diags
         .iter()
         .filter(|d| {
-            d.code == Some(NumberOrString::String("unknown_member".to_string()))
-                || d.code == Some(NumberOrString::String("scalar_member_access".to_string()))
+            d.code == Some(Code::String("unknown_member".to_string()))
+                || d.code == Some(Code::String("scalar_member_access".to_string()))
         })
         .collect();
     assert!(
@@ -12675,8 +13081,8 @@ class ImageController extends AbstractController {
     let unknown_diags: Vec<_> = diags
         .iter()
         .filter(|d| {
-            d.code == Some(NumberOrString::String("unknown_member".to_string()))
-                || d.code == Some(NumberOrString::String("scalar_member_access".to_string()))
+            d.code == Some(Code::String("unknown_member".to_string()))
+                || d.code == Some(Code::String("scalar_member_access".to_string()))
         })
         .collect();
     assert!(
@@ -12732,7 +13138,7 @@ class Repo {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -12741,7 +13147,7 @@ class Repo {
     );
     let unknown_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("toResponseObject"))
+        .filter(|d| message_text(&d.message).contains("toResponseObject"))
         .collect();
     assert!(
         unknown_diags.is_empty(),
@@ -12863,7 +13269,7 @@ class Demo {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     let scalar_diags: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("scalar_member_access".to_string())))
+        .filter(|d| d.code == Some(Code::String("scalar_member_access".to_string())))
         .collect();
     assert!(
         scalar_diags.is_empty(),
@@ -12960,7 +13366,8 @@ function test(Node $n): void {
     assert!(
         diags_wrong
             .iter()
-            .any(|d| d.message.contains("stmtOnly") && d.message.contains("Label")),
+            .any(|d| message_text(&d.message).contains("stmtOnly")
+                && message_text(&d.message).contains("Label")),
         "calling Stmt's method on $pair[0] (a Label) should be flagged, got: {:?}",
         diags_wrong
     );
@@ -13067,7 +13474,8 @@ async fn self_outside_macro_closure_stays_lexical() {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("this") && d.message.contains("Provider")),
+            .any(|d| message_text(&d.message).contains("this")
+                && message_text(&d.message).contains("Provider")),
         "self::this() outside the closure should be flagged on Provider, got: {:?}",
         diags
     );
@@ -13157,7 +13565,7 @@ async fn union_of_same_short_name_classes_still_flags_missing_members() {
         diags
     );
     assert!(
-        diags[0].message.contains("nowhere"),
+        message_text(&diags[0].message).contains("nowhere"),
         "expected the diagnostic to name 'nowhere', got: {:?}",
         diags
     );
@@ -13207,7 +13615,7 @@ async fn standalone_var_docblock_survives_line_comment_and_sibling_blocks() {
         "file:///test/standalone_var_docblock.php",
         text,
     );
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
 
     // Both bogus members are flagged as *missing from Model*, which is
     // only possible when `$model` resolved to `Model` at both sites.
@@ -13308,7 +13716,7 @@ class Service {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut diags);
 
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert!(
         messages.is_empty(),
         "a guarded array index on a property path must keep the element type, got: {:?}",
@@ -13452,7 +13860,7 @@ class Export {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut diags);
 
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert!(
         messages.is_empty(),
         "guarded relation-collection indexes must resolve across relation hops, got: {:?}",
@@ -13485,7 +13893,7 @@ class Pen {
 
     // The consumer namespace has a `Pen` of its own, so a class-string
     // that kept only the short name resolves to the wrong class here.
-    let uri = Url::from_file_path(dir.path().join("consumer/Factory.php"))
+    let uri = Uri::from_file_path(dir.path().join("consumer/Factory.php"))
         .unwrap()
         .to_string();
     let uri = uri.as_str();
@@ -13745,7 +14153,9 @@ class AttributeTest {}
     let diags = unknown_member_diagnostics(&backend, uri, text);
     for name in ["nonExistentMethod", "alsoMissing", "missingViaAttribute"] {
         assert!(
-            diags.iter().any(|d| d.message.contains(name)),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains(name)),
             "coverage metadata naming the missing `{name}` must be flagged, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -13816,7 +14226,9 @@ final class ProviderTest
         "missingExternal",
     ] {
         assert!(
-            diags.iter().any(|d| d.message.contains(name)),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains(name)),
             "a data provider or dependency naming the missing `{name}` must be flagged, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -14122,7 +14534,7 @@ class Bag
 }
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
-    let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         diags.len(),
         1,
@@ -14249,7 +14661,7 @@ class NeonAdapter
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, "file:///src/NeonAdapter.php", php);
-    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let msgs: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert!(
         msgs.is_empty(),
         "getMessage() is inherited from the global \\Exception, got: {msgs:?}"
@@ -14285,7 +14697,7 @@ function probe(array $statements, int $count): void
 }
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, "file:///computed.php", php);
-    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let msgs: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert!(
         msgs.is_empty(),
         "the guard narrows both reads, got: {msgs:?}"
@@ -14324,7 +14736,7 @@ function accumulate(array $ends): ?Scope
     backend.update_ast("file:///accumulate.php", php);
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics("file:///accumulate.php", php, &mut diags);
-    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let msgs: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert!(
         msgs.is_empty(),
         "`$acc` no longer holds the initial null, got: {msgs:?}"
@@ -14364,7 +14776,7 @@ class Holder
 }
 "#;
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, "file:///holder.php", php);
-    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let msgs: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert!(
         msgs.is_empty(),
         "the write drops the stale `A` narrowing, got: {msgs:?}"
@@ -14435,7 +14847,7 @@ class Combinator
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let msgs: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert!(
         msgs.is_empty(),
         "every read off the accumulator is a ConstantArrayType, got: {msgs:?}"
@@ -14537,20 +14949,22 @@ function probe(array $types, mixed $declared): void
 "#;
 
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         diags.len(),
         3,
         "each of the three reads is unverifiable: {messages:?}"
     );
     assert!(
-        diags.iter().all(|d| d.message.contains("is 'mixed'")),
+        diags
+            .iter()
+            .all(|d| message_text(&d.message).contains("is 'mixed'")),
         "every subject here resolved to `mixed`: {messages:?}"
     );
     assert!(
         diags
             .iter()
-            .all(|d| d.severity == Some(DiagnosticSeverity::HINT)),
+            .all(|d| d.severity == Some(DiagnosticSeverity::Hint)),
         "a gap in the codebase's annotations is a hint, not an error: {diags:?}"
     );
 }
@@ -14577,7 +14991,7 @@ function probe(): void
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
         "nothing typed `$undeclared` at all: {:?}",
         diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
@@ -14631,9 +15045,9 @@ class Provider {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut diags);
     diags.retain(|d| {
-        d.code.as_ref().is_some_and(
-            |c| matches!(c, NumberOrString::String(s) if s == "unresolved_member_access"),
-        )
+        d.code
+            .as_ref()
+            .is_some_and(|c| matches!(c, Code::String(s) if s == "unresolved_member_access"))
     });
     assert!(
         diags.is_empty(),
@@ -14696,14 +15110,15 @@ function test(Certainty $c, string $name): void {
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains(subject) && d.message.contains("is 'mixed'")),
+                .any(|d| message_text(&d.message).contains(subject)
+                    && message_text(&d.message).contains("is 'mixed'")),
             "expected `{subject}` to be reported as 'mixed', got: {diags:?}",
         );
     }
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("could not be resolved")),
+            .any(|d| message_text(&d.message).contains("could not be resolved")),
         "no runtime-named member should be reported as unresolved, got: {diags:?}",
     );
 }
@@ -14910,19 +15325,23 @@ class Merger {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut diags);
     assert!(
-        diags.iter().any(|d| d.message.contains("mergeWith")
-            && d.message.contains("not found")
-            && d.message.contains("Scope")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("mergeWith")
+                && message_text(&d.message).contains("not found")
+                && message_text(&d.message).contains("Scope")),
         "the merge line should name the method the interface lacks, got: {diags:?}",
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("$finalScope")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("$finalScope")),
         "no read of the accumulator should blame the accumulator itself, got: {diags:?}",
     );
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("hasExpressionType")),
+            .any(|d| message_text(&d.message).contains("hasExpressionType")),
         "a member the interface does declare must resolve below the loop, got: {diags:?}",
     );
 }
@@ -14969,8 +15388,11 @@ class Collector {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, text, &mut diags);
     assert!(
-        !diags.iter().any(|d| d.message.contains("getName")
-            && (d.message.contains("'null'") || d.message.contains("not found"))),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("getName")
+                && (message_text(&d.message).contains("'null'")
+                    || message_text(&d.message).contains("not found"))),
         "an untyped assignment must not leave the `null` seed behind, got: {diags:?}",
     );
 }
@@ -15210,7 +15632,7 @@ class Service
     assert!(
         diags
             .iter()
-            .any(|d| d.range.start.line == 9 && d.message.contains("'bar'")),
+            .any(|d| d.range.start.line == 9 && message_text(&d.message).contains("'bar'")),
         "`bar()` on `Good` in `two()` should be reported, got: {:?}",
         diags
             .iter()
@@ -15716,9 +16138,10 @@ namespace App {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert_eq!(diags.len(), 2, "got: {diags:?}");
     assert!(
-        diags.iter().all(|d| d
-            .message
-            .contains("subject type 'App\\Bar' could not be resolved")),
+        diags
+            .iter()
+            .all(|d| message_text(&d.message)
+                .contains("subject type 'App\\Bar' could not be resolved")),
         "`Bar` names the missing App\\Bar, got: {diags:?}",
     );
 }
@@ -15788,11 +16211,15 @@ class Consumer
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        diags.iter().any(|d| d.message.contains("'missing'")),
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'missing'")),
         "`get(Svc::class)` must resolve to `Svc`, got: {diags:?}",
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("'run'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'run'")),
         "`run()` exists on `Svc`, got: {diags:?}",
     );
 }
@@ -15845,12 +16272,14 @@ function run(ContainerInterface $c): void {
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains(&format!("'{name}'"))),
+                .any(|d| message_text(&d.message).contains(&format!("'{name}'"))),
             "the chained call must resolve to `Svc` and report `{name}`, got: {diags:?}",
         );
     }
     assert!(
-        !diags.iter().any(|d| d.message.contains("'run'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'run'")),
         "`run()` exists on `Svc`, got: {diags:?}",
     );
 }
@@ -15919,7 +16348,8 @@ function run(\Lib\Factory $f): void {
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert_eq!(diags.len(), 1, "got: {diags:?}");
     assert!(
-        diags[0].message.contains("'missing'") && diags[0].message.contains("Lib\\Svc"),
+        message_text(&diags[0].message).contains("'missing'")
+            && message_text(&diags[0].message).contains("Lib\\Svc"),
         "`make()` must resolve to `Lib\\Svc`, got: {diags:?}",
     );
 }
@@ -15982,13 +16412,15 @@ class Consumer extends Base
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("'missing'") && d.message.contains("Lib\\Factory")),
+            .any(|d| message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("Lib\\Factory")),
         "`make()` must resolve to `Lib\\Factory`, got: {diags:?}",
     );
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("'missingOnParent'") && d.message.contains("Lib\\Base")),
+            .any(|d| message_text(&d.message).contains("'missingOnParent'")
+                && message_text(&d.message).contains("Lib\\Base")),
         "`makeParent()` must resolve to `Lib\\Base`, got: {diags:?}",
     );
 }
@@ -16025,14 +16457,17 @@ class Child extends \Base
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'baseOnly'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'baseOnly'")),
         "`parent` is the global `Base`, got: {diags:?}",
     );
     for missing in ["'missingOnNew'", "'missingOnClassString'"] {
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains(missing) && !d.message.contains("App\\Base")),
+                .any(|d| message_text(&d.message).contains(missing)
+                    && !message_text(&d.message).contains("App\\Base")),
             "{missing} must be flagged on the global `Base`, got: {diags:?}",
         );
     }
@@ -16064,13 +16499,16 @@ class Wallet
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'amount'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'amount'")),
         "`$money` is `Lib\\Money`, got: {diags:?}",
     );
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("'missing'") && d.message.contains("Lib\\Money")),
+            .any(|d| message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("Lib\\Money")),
         "`missing()` must be flagged on `Lib\\Money`, got: {diags:?}",
     );
 }
@@ -16102,13 +16540,16 @@ class Wallet
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'amount'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'amount'")),
         "`money` is the imported `Lib\\Money`, got: {diags:?}",
     );
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("'missing'") && d.message.contains("Lib\\Money")),
+            .any(|d| message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("Lib\\Money")),
         "`missing()` must be flagged on `Lib\\Money`, got: {diags:?}",
     );
 }
@@ -16339,7 +16780,7 @@ class Iterator extends FilterIterator
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
     assert_eq!(
         messages,
         ["Method 'missing' not found on class 'SplFileInfo'"],
@@ -16372,7 +16813,8 @@ Base::missingAtTopLevel();
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("'missing") && !d.message.contains("App\\Base")),
+            .any(|d| message_text(&d.message).contains("'missing")
+                && !message_text(&d.message).contains("App\\Base")),
         "`Base` names `App\\Base`, not the global `Base`, got: {diags:?}",
     );
 }
@@ -16461,7 +16903,8 @@ namespace App {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("missing") && d.message.contains(r"App\Node")),
+            .any(|d| message_text(&d.message).contains("missing")
+                && message_text(&d.message).contains(r"App\Node")),
         "`Node` is `App\\Node`, not the global class, got: {diags:?}"
     );
 }
@@ -16509,7 +16952,7 @@ class Post extends Model {
     let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
     let messages: Vec<String> = diags
         .iter()
-        .map(|d| format!("{}: {}", d.range.start.line, d.message))
+        .map(|d| format!("{}: {}", d.range.start.line, message_text(&d.message)))
         .collect();
     assert_eq!(
         messages,
@@ -16538,13 +16981,16 @@ function render(): void {
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
     assert!(
-        !diags.iter().any(|d| d.message.contains("'all'")),
+        !diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'all'")),
         "`$errors` is `Bag`, got: {diags:?}",
     );
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("'missing'") && d.message.contains("Bag")),
+            .any(|d| message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("Bag")),
         "`missing()` must be flagged on `Bag`, got: {diags:?}",
     );
 }
@@ -16571,7 +17017,444 @@ class Wallet
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("'missing'") && d.message.contains("Money")),
+            .any(|d| message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("Money")),
         "`missing()` must be flagged on `Money`, got: {diags:?}",
     );
+}
+
+/// Invoking an array callable calls the method it names, so the result has
+/// that method's return type.
+#[test]
+fn invoking_an_array_callable_returns_the_method_return_type() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo {
+    public function find(): User { return new User(); }
+    public static function make(): User { return new User(); }
+}
+
+function f(Repo $r): void {
+    $find = [$r, 'find'];
+    $find()->name();
+    $lookup = [$r, 'find'];
+    $lookup()->missing();
+    $make = [Repo::class, 'make'];
+    $make()->missing();
+    $named = ['Repo', 'make'];
+    $named()->name();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.range.start.line == 9 || d.range.start.line == 15),
+        "`$find()` and `$named()` should resolve to User, got: {diags:?}",
+    );
+    for line in [11, 13] {
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.range.start.line == line
+                    && message_text(&d.message).contains("'missing'")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+}
+
+/// `call_user_func()` returns what calling its callback does.
+#[test]
+fn call_user_func_returns_what_the_callback_returns() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo { public function find(): User { return new User(); } }
+
+function f(Repo $r): void {
+    $user = call_user_func([$r, 'find']);
+    $user->missing();
+    call_user_func([$r, 'find'])->missing();
+    call_user_func_array(fn(): User => new User(), [])->missing();
+    call_user_func([$r, 'find'])->name();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.range.start.line == 9 && message_text(&d.message).contains("'name'")),
+        "`call_user_func([$r, 'find'])` should resolve to User, got: {diags:?}",
+    );
+    for line in [6, 7, 8] {
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.range.start.line == line
+                    && message_text(&d.message).contains("'missing'")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+}
+
+/// A callback passed as a named argument, in any position, is the one
+/// `call_user_func()` and `Closure::fromCallable()` invoke.
+#[test]
+fn callback_passed_by_name_is_invoked() {
+    let backend = create_test_backend_with_closure_stub();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo { public function find(): User { return new User(); } }
+
+function f(Repo $r): void {
+    call_user_func(callback: [$r, 'find'])->missing();
+    call_user_func_array(args: [], callback: [$r, 'find'])->missing();
+    \Closure::fromCallable(callback: [$r, 'find'])()->missing();
+    $user = call_user_func(callback: [$r, 'find']);
+    $user->missing();
+    $c = \Closure::fromCallable(callback: [$r, 'find']);
+    $c()->missing();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    for line in [5, 6, 7, 9, 11] {
+        assert!(
+            diags.iter().any(|d| d.range.start.line == line
+                && message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("User")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+}
+
+/// A class named by a string in an array callable is resolved at runtime,
+/// so it is fully qualified: the file's namespace does not apply to it,
+/// while `Repo::class` follows the namespace as written code does.
+#[test]
+fn array_callable_class_string_is_fully_qualified() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace {
+    final class Global_ { public function g(): void {} }
+    final class Repo { public static function make(): Global_ { return new Global_(); } }
+}
+namespace App {
+    final class Local { public function l(): void {} }
+    final class Repo { public static function make(): Local { return new Local(); } }
+
+    function f(): void {
+        $global = ['Repo', 'make'];
+        $global()->l();
+        $local = [Repo::class, 'make'];
+        $local()->g();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.range.start.line == 11 && message_text(&d.message).contains("Global_")),
+        "`['Repo', 'make']()` calls the global Repo, got: {diags:?}",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.range.start.line == 13 && message_text(&d.message).contains("Local")),
+        "`[Repo::class, 'make']()` calls App\\Repo, got: {diags:?}",
+    );
+}
+
+/// Invoking an expression that makes a closure, without assigning it first,
+/// yields what the closure returns.
+#[test]
+fn member_access_on_a_closure_invoked_in_place() {
+    let backend = create_test_backend_with_closure_stub();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo { public function find(): User { return new User(); } }
+
+function f(Repo $r): void {
+    $r->find(...)()->name();
+    (fn(): User => new User())()->name();
+    \Closure::fromCallable([$r, 'find'])()->name();
+    (function (): User { return new User(); })()->name();
+    (static fn() => $r->find())()->name();
+    $r->find(...)()->missing();
+    (fn(): User => new User())()->missing();
+    \Closure::fromCallable([$r, 'find'])()->missing();
+    (function (): User { return new User(); })()->missing();
+    (static fn() => $r->find())()->missing();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags.iter().any(|d| (5..=9).contains(&d.range.start.line)),
+        "each invoked closure should resolve to User, got: {diags:?}",
+    );
+    for line in 10..=14 {
+        assert!(
+            diags.iter().any(|d| d.range.start.line == line
+                && message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("User")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+}
+
+/// `Closure::fromCallable()` only makes a closure from the builtin
+/// `Closure`; a namespaced class of the same short name is its own class.
+#[test]
+fn from_callable_on_a_namespaced_closure_class_is_not_the_builtin() {
+    let backend = create_test_backend_with_closure_stub();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+final class User { public function name(): string { return ''; } }
+final class Repo { public function find(): User { return new User(); } }
+final class Other { public function other(): void {} }
+final class Closure {
+    public static function fromCallable(mixed $c): Invoker { return new Invoker(); }
+}
+final class Invoker { public function __invoke(): Other { return new Other(); } }
+
+function f(Repo $r): void {
+    Closure::fromCallable([$r, 'find'])()->name();
+    \Closure::fromCallable([$r, 'find'])()->name();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.range.start.line == 11 && message_text(&d.message).contains("App\\Other")),
+        "`App\\Closure::fromCallable()` returns an Invoker, got: {diags:?}",
+    );
+    assert!(
+        !diags.iter().any(|d| d.range.start.line == 12),
+        "`\\Closure::fromCallable()` calls `$r->find()`, got: {diags:?}",
+    );
+}
+
+/// Invoking a partial application where it is made calls the wrapped
+/// method with the placeholders filled by the call's arguments.
+#[test]
+fn member_access_on_a_partial_application_invoked_in_place() {
+    let backend = create_test_backend_with_closure_stub();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo {
+    public function find(int $id, int $tenant): User { return new User(); }
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function make(int $id, string $class): object { return new $class(); }
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public static function build(string $class, int ...$ids): object { return new $class(); }
+}
+
+function f(Repo $r): void {
+    $r->find(?, 1)(5)->name();
+    $r->make(?, User::class)(5)->name();
+    $r->make(1, ?)(User::class)->name();
+    $r->make(class: ?, id: 1)(User::class)->name();
+    Repo::build(?, ...)(User::class, 1, 2)->name();
+    $u = $r->make(1, ?)(User::class);
+    $u->name();
+    $r->find(?, 1)(5)->missing();
+    $r->make(1, ?)(User::class)->missing();
+    $u->missing();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| (19..=25).contains(&d.range.start.line)),
+        "each invoked partial application should resolve to User, got: {diags:?}",
+    );
+    for line in 26..=28 {
+        assert!(
+            diags.iter().any(|d| d.range.start.line == line
+                && message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("User")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+}
+
+/// A partial application held in a variable takes only the parameters its
+/// placeholders leave open, and calling it passes the bound values on.
+#[test]
+fn partial_application_held_in_a_variable() {
+    let backend = create_test_backend_with_closure_stub();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        cfg.diagnostics.extra_arguments = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class User { public function name(): string { return ''; } }
+final class Repo {
+    public function find(int $id, int $tenant): User { return new User(); }
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function make(int $id, string $class): object { return new $class(); }
+}
+
+function f(Repo $r): void {
+    $c = $r->make(1, ?);
+    $c(User::class)->name();
+    $d = $r->find(?, 1);
+    $d(5)->name();
+    $e = $r->make(class: ?, id: 1);
+    $e(User::class)->name();
+    $g = $r->find(...);
+    $g(5, 1)->name();
+    $c(User::class)->missing();
+    $d(5)->missing();
+    $d();
+    $d(5, 1);
+    $d('x');
+    $u = $c(User::class);
+    $u->name();
+    $u->missing();
+    $c = fn (int $id) => $r;
+    $c(1)->find(1, 2);
+    $h = $r->make(...);
+    $h(1, User::class)->missing();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| (14..=20).contains(&d.range.start.line)),
+        "each call through a held partial application should check and resolve, got: {diags:?}",
+    );
+    for line in 21..=22 {
+        assert!(
+            diags.iter().any(|d| d.range.start.line == line
+                && message_text(&d.message).contains("'missing'")
+                && message_text(&d.message).contains("User")),
+            "`missing()` on line {line} must be flagged on User, got: {diags:?}",
+        );
+    }
+    for line in 23..=25 {
+        assert!(
+            diags.iter().any(|d| d.range.start.line == line),
+            "the call on line {line} does not fit the remaining parameter, got: {diags:?}",
+        );
+    }
+    assert!(
+        diags.iter().any(|d| d.range.start.line == 28
+            && message_text(&d.message).contains("not found on class 'User'")),
+        "`$u` holds the User the call returns, got: {diags:?}",
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|d| matches!(d.range.start.line, 26 | 27 | 30)),
+        "a reassigned `$c` is checked against its new value, got: {diags:?}",
+    );
+    assert!(
+        diags.iter().any(|d| d.range.start.line == 32
+            && message_text(&d.message).contains("'missing'")
+            && message_text(&d.message).contains("User")),
+        "a first-class callable binds the template from the call, got: {diags:?}",
+    );
+}
+
+/// A free function with no return type has it read off its body, as a
+/// method does, so a member it does not have is still flagged.
+#[tokio::test]
+async fn untyped_function_return_type_is_inferred_from_body() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+namespace App;
+
+class User { public function name(): string { return ''; } }
+
+function makeUser() { return new User(); }
+function wrapped() { return makeUser(); }
+
+function f(): void {
+    makeUser()->name();
+    wrapped()->name();
+    \App\makeUser()->name();
+    makeUser()->missing();
+}
+"#;
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    // Opened as the editor would, so the function's body can be read back.
+    open_php_str(&backend, uri, text).await;
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("'missing'"), "{messages:?}");
 }

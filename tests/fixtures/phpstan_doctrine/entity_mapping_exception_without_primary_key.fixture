@@ -1,0 +1,8 @@
+// test: An entity without a primary key
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityMappingExceptionRuleTest::testInvalidEntity.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data-attributes/enum-type-without-pk.php
+// expect_diagnostic: 7: No identifier/primary key specified for Entity "PHPStan\Rules\Doctrine\ORMAttributes\FooWithoutPK". Every Entity must have an identifier/primary key. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

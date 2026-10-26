@@ -11,7 +11,7 @@ use crate::common::{
     open_document, open_php, position_after, position_of, workspace_uri,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const CLASSES_URI: &str = "file:///Classes.php";
 
@@ -61,18 +61,18 @@ const PRELUDE: &str = "@php
 
 /// Open [`CLASSES`] and a template of [`PRELUDE`] followed by `body`,
 /// handing back the template's URI and full text.
-async fn template(body: &str) -> (Backend, Url, String) {
+async fn template(body: &str) -> (Backend, Uri, String) {
     let backend = create_test_backend();
-    open_php(&backend, &Url::parse(CLASSES_URI).unwrap(), CLASSES).await;
+    open_php(&backend, &Uri::parse(CLASSES_URI).unwrap(), CLASSES).await;
     let text = format!("{PRELUDE}{body}");
-    let uri = Url::parse("file:///view.blade.php").unwrap();
+    let uri = Uri::parse("file:///view.blade.php").unwrap();
     open_document(&backend, &uri, "blade", &text).await;
     (backend, uri, text)
 }
 
 /// The hover `offset` UTF-16 columns into the first `needle` of `text`,
 /// empty when nothing hovers.
-async fn hover_in(backend: &Backend, uri: &Url, text: &str, needle: &str, offset: u32) -> String {
+async fn hover_in(backend: &Backend, uri: &Uri, text: &str, needle: &str, offset: u32) -> String {
     let at = position_of(text, needle);
     hover_text_at(backend, uri, at.line, at.character + offset)
         .await
@@ -83,7 +83,7 @@ async fn hover_in(backend: &Backend, uri: &Url, text: &str, needle: &str, offset
 /// first `needle` of `text` lands on, if it lands in [`CLASSES`] at all.
 async fn definition_line_in(
     backend: &Backend,
-    uri: &Url,
+    uri: &Uri,
     text: &str,
     needle: &str,
     offset: u32,
@@ -580,7 +580,7 @@ async fn a_directive_after_multibyte_text_still_lowers() {
 #[tokio::test]
 async fn directive_completion_fires_after_an_emoji() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     let text = "<p>🎉 @fo</p>";
     open_document(&backend, &uri, "blade", text).await;
 
@@ -596,7 +596,7 @@ async fn directive_completion_fires_after_an_emoji() {
 #[tokio::test]
 async fn directive_completion_fires_after_an_accented_letter() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     let text = "é @for";
     open_document(&backend, &uri, "blade", text).await;
 
@@ -612,7 +612,7 @@ async fn directive_completion_fires_after_an_accented_letter() {
 #[tokio::test]
 async fn an_at_sign_glued_to_a_word_is_not_a_directive_position() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let uri = Uri::parse("file:///page.blade.php").unwrap();
     let text = "<p>foo@fo</p>";
     open_document(&backend, &uri, "blade", text).await;
 
@@ -629,7 +629,7 @@ async fn an_at_sign_glued_to_a_word_is_not_a_directive_position() {
 
 /// A project whose anonymous components exercise the shapes a `@props`
 /// list can take, plus `resources/views/page.blade.php` holding `template`.
-fn component_workspace(template: &str) -> (Backend, tempfile::TempDir, Url) {
+fn component_workspace(template: &str) -> (Backend, tempfile::TempDir, Uri) {
     let (backend, dir) = create_psr4_workspace(
         BLADE_COMPONENT_COMPOSER,
         &[
@@ -695,14 +695,14 @@ async fn attributes_offered(template: &str) -> Vec<CompletionItem> {
         at.line,
         at.character,
         Some(CompletionContext {
-            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_kind: CompletionTriggerKind::Invoked,
             trigger_character: None,
         }),
     )
     .await
     {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     }
 }

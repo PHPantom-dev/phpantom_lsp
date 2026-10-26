@@ -5,11 +5,12 @@
 //! which we never see, so nothing about them is knowable.  Installed
 //! packages still register routes of their own, so "the route table is
 //! empty" is the wrong question to ask.
+use crate::common::message_text;
 
 use crate::common::create_psr4_workspace;
 use crate::common::open_php;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -56,7 +57,7 @@ class Links {
 
 async fn route_diagnostics(files: &[(&str, &str)]) -> Vec<String> {
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, files);
-    let uri = Url::from_file_path(dir.path().join("src/Links.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("src/Links.php")).unwrap();
 
     backend.initialized(InitializedParams {}).await;
     open_php(&backend, &uri, CONSUMER).await;
@@ -66,10 +67,8 @@ async fn route_diagnostics(files: &[(&str, &str)]) -> Vec<String> {
 
     diags
         .iter()
-        .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_route"),
-        )
-        .map(|d| d.message.clone())
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "invalid_laravel_route"))
+        .map(|d| message_text(&d.message).to_string())
         .collect()
 }
 

@@ -10,7 +10,7 @@ use super::*;
 
 use std::cell::OnceCell;
 
-use tower_lsp::lsp_types::Location;
+use tower_lsp_server::gen_lsp_types::Location;
 
 use crate::atom::Atom;
 use crate::class_lookup::Fqn;

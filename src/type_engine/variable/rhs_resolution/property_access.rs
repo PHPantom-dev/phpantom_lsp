@@ -99,9 +99,9 @@ fn resolve_property_with_hint(
 }
 
 /// Class constant / enum case access: `Foo::BAR`.  Resolve the class and
-/// check whether the constant is an enum case (→ type is the enum
-/// itself) or a class constant (→ the type it holds).  `Foo::class` is
-/// the class's name.
+/// check whether the constant is an enum case (→ that case of the enum)
+/// or a class constant (→ the type it holds).  `Foo::class` is the
+/// class's name.
 fn class_constant_access_type(
     cca: &ClassConstantAccess<'_>,
     const_name: &str,
@@ -212,11 +212,14 @@ fn class_constant_access_type(
     };
 
     for cls in all_candidates {
-        // Check if the constant is an enum case — the result type is the
-        // enum class itself.
+        // An enum case is its own type, which reads as the enum it is
+        // one of wherever only the class matters.
         if let Some(c) = cls.constants.iter().find(|c| c.name == const_name) {
             if c.is_enum_case {
-                return ResolvedType::from_classes(target_classes);
+                return vec![ResolvedType::from_both_arc(
+                    PhpType::enum_case(cls.fqn(), c.name),
+                    Arc::clone(cls),
+                )];
             }
             if let Some(ts) = crate::type_engine::call_resolution::class_constant_type(
                 cls,
@@ -303,6 +306,9 @@ fn instance_property_type(
         return narrowed;
     }
     let receiver = PropertyReceiver::of(object, prop_name, ctx);
+    if let Some(literals) = receiver.enum_case_property_literals(prop_name) {
+        return vec![ResolvedType::from_type_string(literals)];
+    }
     let mut resolved = receiver.declared_property_types(prop_name, ctx);
     apply_nullsafe_short_circuit(&mut resolved, receiver.nullability, nullsafe, object);
     resolved
@@ -431,6 +437,9 @@ struct PropertyReceiver {
     /// open; any other receiver fixes it to the class it names.
     lsb_open: bool,
     nullability: ReceiverNullability,
+    /// The enum cases the receiver is, when it is nothing but cases: each
+    /// one's enum and the case's name.
+    enum_cases: Option<Vec<(Arc<ClassInfo>, Atom)>>,
 }
 
 impl PropertyReceiver {
@@ -440,6 +449,7 @@ impl PropertyReceiver {
             owners: Vec::new(),
             lsb_open: false,
             nullability: ReceiverNullability::Never,
+            enum_cases: None,
         };
         receiver.owners = match object {
             Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
@@ -488,6 +498,7 @@ impl PropertyReceiver {
         if !resolved.is_empty() {
             self.nullability = ReceiverNullability::of(&resolved);
         }
+        self.enum_cases = held_enum_cases(&resolved);
         self.lsb_open |= resolved.iter().any(|rt| {
             matches!(
                 rt.type_string.kind(),
@@ -495,6 +506,28 @@ impl PropertyReceiver {
             )
         });
         ResolvedType::into_arced_classes(resolved)
+    }
+
+    /// What a `->name` or `->value` read gives on a receiver that is only
+    /// enum cases: the names or backing values of exactly those cases.
+    fn enum_case_property_literals(&self, prop_name: &str) -> Option<PhpType> {
+        if !matches!(prop_name, "name" | "value") {
+            return None;
+        }
+        let mut literals: Vec<PhpType> = Vec::new();
+        for (enum_cls, case) in self.enum_cases.as_ref()? {
+            let literal = crate::type_engine::call_resolution::enum_case_property_literal(
+                enum_cls, case, prop_name,
+            )?;
+            if !literals.contains(&literal) {
+                literals.push(literal);
+            }
+        }
+        match literals.len() {
+            0 => None,
+            1 => literals.pop(),
+            _ => Some(PhpType::union(literals)),
+        }
     }
 
     /// The declared type of `prop_name` on each class the receiver can be,
@@ -539,6 +572,23 @@ impl PropertyReceiver {
         }
         all_resolved
     }
+}
+
+/// The enum cases `resolved` holds, when every alternative it has is one,
+/// each paired with the enum it belongs to.
+fn held_enum_cases(resolved: &[ResolvedType]) -> Option<Vec<(Arc<ClassInfo>, Atom)>> {
+    if resolved.is_empty() {
+        return None;
+    }
+    let mut cases = Vec::new();
+    for rt in resolved {
+        let enum_cls = rt.class_info.as_ref()?;
+        for member in rt.type_string.union_members() {
+            let (_, case) = member.as_enum_case()?;
+            cases.push((Arc::clone(enum_cls), atom(case)));
+        }
+    }
+    Some(cases)
 }
 
 /// The classes whose `prop_name` a `$this->prop_name` read reaches: the

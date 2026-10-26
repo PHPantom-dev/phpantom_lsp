@@ -7,12 +7,12 @@
 //! shape that names a global function.
 
 use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
-fn assert_line(response: Option<GotoDefinitionResponse>, expected_line: u32) {
+fn assert_line(response: Option<DefinitionResponse>, expected_line: u32) {
     match response {
-        Some(GotoDefinitionResponse::Scalar(location)) => {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
             assert_eq!(
                 location.range.start.line, expected_line,
                 "expected line {}, got {}",
@@ -43,7 +43,7 @@ class Calculator
 async fn covers_class_attribute_jumps_to_class() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -66,7 +66,7 @@ class CalculatorTest
 async fn covers_annotation_jumps_to_class() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -89,7 +89,7 @@ class CalculatorTest
 async fn covers_annotation_with_method_jumps_to_method() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -112,7 +112,7 @@ class CalculatorTest
 async fn covers_fqn_annotation_jumps_to_class() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -135,7 +135,7 @@ class CalculatorTest
 async fn uses_annotation_jumps_to_class() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -156,7 +156,7 @@ class CalculatorTest
 #[tokio::test]
 async fn covers_bare_function_annotation_jumps_to_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let source = r#"<?php
 
 function helper(): void {}
@@ -178,7 +178,7 @@ class HelperTest
 async fn covers_default_class_makes_bare_member_a_method() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -204,7 +204,7 @@ class CalculatorTest
 async fn covers_default_class_reaches_method_docblocks() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -230,7 +230,7 @@ class CalculatorTest
 async fn covers_method_attribute_jumps_to_method() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -251,7 +251,7 @@ class CalculatorTest
 #[tokio::test]
 async fn covers_function_attribute_jumps_to_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let source = r#"<?php
 
 use PHPUnit\Framework\Attributes\CoversFunction;
@@ -272,7 +272,7 @@ class HelperTest
 async fn covers_class_attribute_accepts_a_string_target() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -290,7 +290,7 @@ class CalculatorTest
 async fn a_projects_own_covers_method_attribute_is_left_alone() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     // No `use PHPUnit\Framework\Attributes\…` import, so the short name is
     // some other project's attribute and its string argument is not a
     // coverage target.
@@ -313,7 +313,7 @@ class CalculatorTest
 async fn a_visibility_selector_leaves_the_class_navigable() {
     let (backend, dir) = create_psr4_workspace(COMPOSER, &[("src/Calculator.php", SUBJECT)]);
     let test_path = dir.path().join("tests/CalculatorTest.php");
-    let uri = Url::from_file_path(&test_path).unwrap();
+    let uri = Uri::from_file_path(&test_path).unwrap();
     let source = r#"<?php
 namespace Tests;
 
@@ -337,7 +337,7 @@ class CalculatorTest
 #[tokio::test]
 async fn renaming_a_method_updates_its_coverage_metadata() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///rename.php").unwrap();
+    let uri = Uri::parse("file:///rename.php").unwrap();
     let source = r#"<?php
 
 use PHPUnit\Framework\Attributes\CoversMethod;
@@ -361,7 +361,7 @@ class CalculatorTest
     open_php(&backend, &uri, source).await;
 
     let params = RenameParams {
-        text_document_position: TextDocumentPositionParams {
+        text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position {
                 line: 6,

@@ -36,8 +36,8 @@
 //! try the next strategy."
 use std::ops::ControlFlow;
 
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
+use tower_lsp_server::jsonrpc::Result;
 
 use crate::Backend;
 use crate::completion::class_completion::{ClassCompletionParams, ClassNameContext};
@@ -68,13 +68,13 @@ fn merge_named_args_into_response(
         return response;
     }
     match response {
-        CompletionResponse::Array(mut items) => {
+        CompletionResponse::CompletionItemList(mut items) => {
             items.extend(named_arg_items);
-            CompletionResponse::Array(items)
+            CompletionResponse::CompletionItemList(items)
         }
-        CompletionResponse::List(mut list) => {
+        CompletionResponse::CompletionList(mut list) => {
             list.items.extend(named_arg_items);
-            CompletionResponse::List(list)
+            CompletionResponse::CompletionList(list)
         }
     }
 }
@@ -104,16 +104,18 @@ fn match_completion_line_endings(response: &mut CompletionResponse, eol: &str) {
         return;
     }
     let items = match response {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => &mut list.items,
+        CompletionResponse::CompletionItemList(items) => items,
+        CompletionResponse::CompletionList(list) => &mut list.items,
     };
     for item in items {
         if let Some(text) = &mut item.insert_text {
             match_line_ending(text, eol);
         }
         match &mut item.text_edit {
-            Some(CompletionTextEdit::Edit(edit)) => match_line_ending(&mut edit.new_text, eol),
-            Some(CompletionTextEdit::InsertAndReplace(edit)) => {
+            Some(CompletionItemTextEdit::TextEdit(edit)) => {
+                match_line_ending(&mut edit.new_text, eol)
+            }
+            Some(CompletionItemTextEdit::InsertReplaceEdit(edit)) => {
                 match_line_ending(&mut edit.new_text, eol);
             }
             None => {}
@@ -136,12 +138,12 @@ fn strip_snippet_parens(items: Vec<CompletionItem>) -> Vec<CompletionItem> {
     items
         .into_iter()
         .map(|mut item| {
-            if item.insert_text_format == Some(InsertTextFormat::SNIPPET)
+            if item.insert_text_format == Some(InsertTextFormat::Snippet)
                 && matches!(
                     item.kind,
-                    Some(CompletionItemKind::METHOD)
-                        | Some(CompletionItemKind::FUNCTION)
-                        | Some(CompletionItemKind::CLASS)
+                    Some(CompletionItemKind::Method)
+                        | Some(CompletionItemKind::Function)
+                        | Some(CompletionItemKind::Class)
                 )
             {
                 // Replace the snippet with just the name
@@ -150,7 +152,7 @@ fn strip_snippet_parens(items: Vec<CompletionItem>) -> Vec<CompletionItem> {
                     item.insert_text = Some(name.clone());
                 }
                 // Also clear any text_edit that carries the snippet text.
-                if let Some(CompletionTextEdit::Edit(ref mut te)) = item.text_edit
+                if let Some(CompletionItemTextEdit::TextEdit(ref mut te)) = item.text_edit
                     && let Some(ref name) = item.filter_text
                 {
                     te.new_text = name.clone();
@@ -190,7 +192,11 @@ impl Backend {
         &self,
         params: CompletionParams,
     ) -> Result<Option<CompletionResponse>> {
-        let uri = params.text_document_position.text_document.uri.to_string();
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
         let mut response = self.completion_response(&uri, params);
         if let Some(response) = &mut response
             && let Some(content) = self.get_file_content_arc(&uri)
@@ -207,12 +213,24 @@ impl Backend {
         uri: &str,
         params: CompletionParams,
     ) -> Option<CompletionResponse> {
-        let position = params.text_document_position.position;
+        let position = params.text_document_position_params.position;
 
         if self.is_blade_file(uri)
             && let Some(response) = self.blade_source_completion(uri, position)
         {
             return Some(response);
+        }
+
+        let is_template = self.is_twig_template_uri(uri);
+        if (is_template || self.is_resource_uri(uri))
+            && let Some(content) = self.get_file_content_arc(uri)
+            && let Some(response) = self.try_symfony_resource_completion(uri, &content, position)
+        {
+            return Some(response);
+        }
+        // A template is not PHP, so nothing below applies to it.
+        if is_template {
+            return None;
         }
 
         // A template is analysed as the virtual PHP it lowers to, with the
@@ -353,7 +371,7 @@ impl Backend {
         // still fall through to it.
         if let Some(items) = self.try_class_root_member_completion(uri, content, position, ctx) {
             return ControlFlow::Break(
-                (!items.is_empty()).then_some(CompletionResponse::Array(items)),
+                (!items.is_empty()).then_some(CompletionResponse::CompletionItemList(items)),
             );
         }
 
@@ -364,7 +382,7 @@ impl Backend {
             let items = self
                 .try_method_override_completion(content, position, ctx)
                 .filter(|items| !items.is_empty());
-            return ControlFlow::Break(items.map(CompletionResponse::Array));
+            return ControlFlow::Break(items.map(CompletionResponse::CompletionItemList));
         }
 
         ControlFlow::Continue(())
@@ -399,14 +417,14 @@ impl Backend {
             // syntax errors.  Filter to properties only.
             if matches!(string_ctx, StringContext::SimpleInterpolation) {
                 let items = match response {
-                    CompletionResponse::Array(items) => items,
-                    CompletionResponse::List(list) => list.items,
+                    CompletionResponse::CompletionItemList(items) => items,
+                    CompletionResponse::CompletionList(list) => list.items,
                 };
                 let filtered = items
                     .into_iter()
-                    .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                    .filter(|i| i.kind == Some(CompletionItemKind::Property))
                     .collect();
-                return Some(CompletionResponse::Array(filtered));
+                return Some(CompletionResponse::CompletionItemList(filtered));
             }
             return Some(response);
         }
@@ -449,7 +467,8 @@ impl Backend {
         }
 
         // No strategy matched, but we may still have named arg items.
-        (!named_arg_items.is_empty()).then_some(CompletionResponse::Array(named_arg_items))
+        (!named_arg_items.is_empty())
+            .then_some(CompletionResponse::CompletionItemList(named_arg_items))
     }
 
     // ─── Strategy: array shape key completion ────────────────────────────
@@ -470,7 +489,7 @@ impl Backend {
         if items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::Array(items))
+            Some(CompletionResponse::CompletionItemList(items))
         }
     }
 
@@ -497,9 +516,11 @@ impl Backend {
         if var_items.is_empty() {
             None
         } else {
-            Some(CompletionResponse::List(CompletionList {
+            Some(CompletionResponse::CompletionList(CompletionList {
                 is_incomplete: var_incomplete,
                 items: var_items,
+                apply_kind: None,
+                item_defaults: None,
             }))
         }
     }
@@ -531,7 +552,7 @@ impl Backend {
         );
         if catch_ctx.has_specific_types && !items.is_empty() {
             // These items don't carry snippets, but guard for consistency.
-            return Some(CompletionResponse::Array(items));
+            return Some(CompletionResponse::CompletionItemList(items));
         }
 
         // No specific throws discovered — fall back to
@@ -576,9 +597,11 @@ impl Backend {
             } else {
                 all_items
             };
-            Some(CompletionResponse::List(CompletionList {
+            Some(CompletionResponse::CompletionList(CompletionList {
                 is_incomplete: class_incomplete,
                 items,
+                apply_kind: None,
+                item_defaults: None,
             }))
         }
     }

@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::ci_map::contains_folded;
@@ -39,14 +39,14 @@ fn build_constant_item(
     .ok();
     // Compute text_edit before `name` is moved into `filter_text`.
     let text_edit = replace_range.map(|range| {
-        CompletionTextEdit::Edit(TextEdit {
+        CompletionItemTextEdit::TextEdit(TextEdit {
             range,
             new_text: name.clone(),
         })
     });
     CompletionItem {
         label: name.clone(),
-        kind: Some(CompletionItemKind::CONSTANT),
+        kind: Some(CompletionItemKind::Constant),
         detail: value,
         insert_text: Some(name.clone()),
         filter_text: Some(name),

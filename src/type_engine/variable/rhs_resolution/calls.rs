@@ -18,9 +18,13 @@ use crate::types::ResolvedType;
 use crate::type_engine::resolver::VarResolutionCtx;
 
 use super::function_calls::{
-    callable_invocation, first_class_function_return_type, resolve_rhs_function_call,
+    callable_invocation, first_class_function_return_type, partial_application_return,
+    resolve_rhs_function_call,
 };
-use super::method_calls::{resolve_member_call_on_receiver, resolve_rhs_method_call_inner};
+use super::method_calls::{
+    resolve_member_call_on_receiver, resolve_method_receiver, resolve_rhs_method_call_inner,
+    selected_member_name,
+};
 use super::static_calls::{StaticCallParts, resolve_rhs_static_call};
 use super::{resolve_rhs_expression, resolve_var_types, resolved_type_with_lookup};
 
@@ -533,18 +537,11 @@ pub(crate) fn infer_closure_literal_type(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
-    // `$fn(...)` wraps a callable value rather than naming a function, so
-    // the closure it makes has that value's own signature.
+    // `$fn(...)` wraps a callable value rather than naming a function.
     if let Expression::PartialApplication(PartialApplication::Function(fpa)) = expr
         && !matches!(fpa.function, Expression::Identifier(_))
     {
-        let resolved = resolve_rhs_expression(fpa.function, ctx);
-        if let TypeKind::Callable(callable) = ResolvedType::types_joined(&resolved).kind() {
-            return PhpType::callable_type(crate::php_type::CallableType {
-                kind: atom("Closure"),
-                ..(**callable).clone()
-            });
-        }
+        return closure_from_callable(fpa.function, ctx);
     }
 
     // The declared `: ReturnType`, else the `Generator` the body's yields
@@ -623,8 +620,13 @@ pub(crate) fn infer_closure_literal_type(
         None => body_return().or_else(|| match expr {
             // First-class callable syntax: `strlen(...)`,
             // `$this->method(...)`, `ClassName::method(...)` and
-            // `$invokable(...)` return what calling the callable does.
-            Expression::PartialApplication(pa) => first_class_callable_return_type(pa, expr, ctx),
+            // `$invokable(...)` return what calling the callable does,
+            // and a partial application what the arguments it binds
+            // decide.
+            Expression::PartialApplication(pa) => partial_application_return(pa, ctx)
+                .filter(|resolved| !resolved.is_empty())
+                .map(|resolved| ResolvedType::types_joined(&resolved))
+                .or_else(|| first_class_callable_return_type(pa, expr, ctx)),
             _ => None,
         }),
     };
@@ -645,7 +647,10 @@ pub(crate) fn infer_closure_literal_type(
         }
     });
 
-    let params = declared_closure_params(expr, ctx);
+    let params = match expr {
+        Expression::PartialApplication(pa) => partial_application_params(pa, ctx),
+        _ => declared_closure_params(expr, ctx),
+    };
     if inferred_return.is_some() || !params.is_empty() {
         PhpType::callable_spec("Closure", params, inferred_return)
     } else {
@@ -679,6 +684,112 @@ pub(crate) fn first_class_callable_return_type<'b>(
         PartialApplication::Function(fa) => callable_invocation(fa.function, at, ctx),
     };
     (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
+}
+
+/// The closure `Closure::fromCallable($value)` and `$value(...)` make from
+/// the callable `value`: a closure literal unchanged, a value whose type
+/// carries a callable signature with that signature, and otherwise a
+/// closure returning what invoking the value does (an array callable, a
+/// callable string, an object with `__invoke()`).
+pub(crate) fn closure_from_callable(value: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> PhpType {
+    let value = crate::parser::unwrap_parens(value);
+    if matches!(
+        value,
+        Expression::Closure(_) | Expression::ArrowFunction(_) | Expression::PartialApplication(_)
+    ) {
+        return infer_closure_literal_type(value, ctx);
+    }
+    let resolved = match value {
+        Expression::Variable(Variable::Direct(dv)) => {
+            resolve_var_types(bytes_to_str(dv.name), ctx, ctx.cursor_offset)
+        }
+        _ => resolve_rhs_expression(value, ctx),
+    };
+    if let TypeKind::Callable(callable) = ResolvedType::types_joined(&resolved).kind() {
+        return PhpType::callable_type(crate::php_type::CallableType {
+            kind: atom("Closure"),
+            ..(**callable).clone()
+        });
+    }
+    let returned = super::function_calls::value_invocation(&resolved, ctx);
+    if returned.is_empty() {
+        PhpType::closure()
+    } else {
+        PhpType::callable_spec(
+            "Closure",
+            Vec::new(),
+            Some(ResolvedType::types_joined(&returned)),
+        )
+    }
+}
+
+/// The parameters a call to the closure the partial application `pa` makes
+/// takes: those of the method or function it wraps, narrowed to the ones its
+/// placeholders leave open.  `$r->make(1, ?)` over `make(int $id, string
+/// $class)` takes a `string`, and `$r->find(...)` everything `find()` does.
+///
+/// Empty when the wrapped callable cannot be found.
+fn partial_application_params(
+    pa: &PartialApplication<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<CallableParam> {
+    let rctx = ctx.as_resolution_ctx();
+    let declared = match pa {
+        PartialApplication::Function(fa) => match fa.function {
+            Expression::Identifier(ident) => ctx
+                .function_loader()
+                .and_then(|load| load(bytes_to_str(ident.value()), ident.span().start.offset))
+                .map(|func| func.parameters),
+            _ => None,
+        },
+        PartialApplication::Method(ma) => selected_member_name(&ma.method, ctx).and_then(|name| {
+            let (classes, resolved) = resolve_method_receiver(ma.object, ctx);
+            // `$this` resolves to its classes alone.
+            let receivers = if resolved.is_empty() {
+                classes.into_iter().map(ResolvedType::from_arc).collect()
+            } else {
+                resolved
+            };
+            receivers
+                .iter()
+                .find_map(|rt| Backend::method_target_on_receiver(rt, &name, &rctx, None))
+                .map(|target| target.parameters)
+        }),
+        PartialApplication::StaticMethod(sma) => {
+            selected_member_name(&sma.method, ctx).and_then(|name| {
+                let span = sma.class.span();
+                let class = ctx
+                    .file
+                    .content
+                    .get(span.start.offset as usize..span.end.offset as usize)?;
+                Backend::resolve_static_method_callable(class, &name, &rctx, None)
+                    .map(|target| target.parameters)
+            })
+        }
+    };
+    let Some(declared) = declared else {
+        return Vec::new();
+    };
+    let to_param = |param: &crate::types::ParameterInfo| CallableParam {
+        type_hint: param.type_hint.clone().unwrap_or_else(PhpType::mixed),
+        optional: !param.is_required,
+        variadic: param.is_variadic,
+    };
+    if pa.is_first_class_callable() {
+        return declared.iter().map(to_param).collect();
+    }
+    let list = pa.get_argument_list();
+    let bound = ctx
+        .file
+        .content
+        .get(
+            list.left_parenthesis.end.offset as usize..list.right_parenthesis.start.offset as usize,
+        )
+        .unwrap_or("");
+    crate::call_args::partial_application_params(&declared, bound)
+        .iter()
+        .map(to_param)
+        .collect()
 }
 
 /// The parameter list a closure or arrow function literal declares, as

@@ -13,7 +13,7 @@
 //!   cursor position inside a PHPDoc tag
 //! - [`extract_phpdoc_prefix`] — extract the `@tag` prefix being typed
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 use super::helpers::{find_keyword_pos, find_matching_paren, split_params};
 use crate::completion::source::comment_position::{is_inside_docblock, position_to_byte_offset};

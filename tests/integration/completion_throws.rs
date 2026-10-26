@@ -8,7 +8,7 @@
 //! that are not yet in the file's `use` list.
 
 use crate::common::{complete_at, create_psr4_workspace, create_test_backend};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: extract `@throws` completion items from a list.
 fn throws_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
@@ -33,7 +33,7 @@ fn generic_throws_item(items: &[CompletionItem]) -> Option<&CompletionItem> {
 #[tokio::test]
 async fn test_throws_single_throw() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_single.php").unwrap();
+    let uri = Uri::parse("file:///throws_single.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -64,7 +64,7 @@ async fn test_throws_single_throw() {
 #[tokio::test]
 async fn test_throws_multiple_types() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_multi.php").unwrap();
+    let uri = Uri::parse("file:///throws_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -98,7 +98,7 @@ async fn test_throws_multiple_types() {
 #[tokio::test]
 async fn test_throws_deduplication() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_dedup.php").unwrap();
+    let uri = Uri::parse("file:///throws_dedup.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -134,7 +134,7 @@ async fn test_throws_deduplication() {
 #[tokio::test]
 async fn test_throws_caught_exception_excluded() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_caught.php").unwrap();
+    let uri = Uri::parse("file:///throws_caught.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -163,7 +163,7 @@ async fn test_throws_caught_exception_excluded() {
 #[tokio::test]
 async fn test_throws_partial_catch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_partial.php").unwrap();
+    let uri = Uri::parse("file:///throws_partial.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -195,7 +195,7 @@ async fn test_throws_partial_catch() {
 #[tokio::test]
 async fn test_throws_multi_catch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_multicatch.php").unwrap();
+    let uri = Uri::parse("file:///throws_multicatch.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -228,7 +228,7 @@ async fn test_throws_multi_catch() {
 #[tokio::test]
 async fn test_throws_catch_throwable_catches_all() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_throwable.php").unwrap();
+    let uri = Uri::parse("file:///throws_throwable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -258,7 +258,7 @@ async fn test_throws_catch_throwable_catches_all() {
 #[tokio::test]
 async fn test_throws_catch_exception_catches_all() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_exception.php").unwrap();
+    let uri = Uri::parse("file:///throws_exception.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -287,7 +287,7 @@ async fn test_throws_catch_exception_catches_all() {
 #[tokio::test]
 async fn test_throws_outside_try() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_outside.php").unwrap();
+    let uri = Uri::parse("file:///throws_outside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -321,7 +321,7 @@ async fn test_throws_outside_try() {
 #[tokio::test]
 async fn test_throws_skips_already_documented() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_skip.php").unwrap();
+    let uri = Uri::parse("file:///throws_skip.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -350,7 +350,7 @@ async fn test_throws_skips_already_documented() {
 #[tokio::test]
 async fn test_throws_all_documented_falls_back() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_all_doc.php").unwrap();
+    let uri = Uri::parse("file:///throws_all_doc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -385,7 +385,7 @@ async fn test_throws_all_documented_falls_back() {
 #[tokio::test]
 async fn test_throws_documented_with_backslash_prefix() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_fqn_doc.php").unwrap();
+    let uri = Uri::parse("file:///throws_fqn_doc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -413,7 +413,7 @@ async fn test_throws_documented_with_backslash_prefix() {
 #[tokio::test]
 async fn test_throws_in_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_method.php").unwrap();
+    let uri = Uri::parse("file:///throws_method.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class UserService {\n",
@@ -447,7 +447,7 @@ async fn test_throws_in_method() {
 #[tokio::test]
 async fn test_throws_in_static_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_static.php").unwrap();
+    let uri = Uri::parse("file:///throws_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Factory {\n",
@@ -473,7 +473,7 @@ async fn test_throws_in_static_method() {
 #[tokio::test]
 async fn test_throws_fqn_throw() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_fqn.php").unwrap();
+    let uri = Uri::parse("file:///throws_fqn.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -502,7 +502,7 @@ async fn test_throws_fqn_throw() {
 #[tokio::test]
 async fn test_throws_no_import_when_already_imported() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_imported.php").unwrap();
+    let uri = Uri::parse("file:///throws_imported.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Exceptions\\CustomException;\n",
@@ -532,7 +532,7 @@ async fn test_throws_no_import_when_already_imported() {
 #[tokio::test]
 async fn test_throws_auto_import_in_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_autoimport.php").unwrap();
+    let uri = Uri::parse("file:///throws_autoimport.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace App\\Services;\n",
@@ -576,7 +576,7 @@ async fn test_throws_auto_import_in_namespace() {
 #[tokio::test]
 async fn test_throws_abstract_method_no_suggestions() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_abstract.php").unwrap();
+    let uri = Uri::parse("file:///throws_abstract.php").unwrap();
     let text = concat!(
         "<?php\n",
         "abstract class Base {\n",
@@ -609,7 +609,7 @@ async fn test_throws_abstract_method_no_suggestions() {
 #[tokio::test]
 async fn test_throws_interface_method_no_suggestions() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_interface.php").unwrap();
+    let uri = Uri::parse("file:///throws_interface.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Repository {\n",
@@ -636,7 +636,7 @@ async fn test_throws_interface_method_no_suggestions() {
 #[tokio::test]
 async fn test_throws_not_in_class_context() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_class.php").unwrap();
+    let uri = Uri::parse("file:///throws_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -667,7 +667,7 @@ async fn test_throws_not_in_class_context() {
 #[tokio::test]
 async fn test_throws_sort_text() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_sort.php").unwrap();
+    let uri = Uri::parse("file:///throws_sort.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -695,7 +695,7 @@ async fn test_throws_sort_text() {
 #[tokio::test]
 async fn test_throws_filter_text() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_filter.php").unwrap();
+    let uri = Uri::parse("file:///throws_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -725,7 +725,7 @@ async fn test_throws_filter_text() {
 #[tokio::test]
 async fn test_throws_not_in_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_string.php").unwrap();
+    let uri = Uri::parse("file:///throws_string.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -750,7 +750,7 @@ async fn test_throws_not_in_string() {
 #[tokio::test]
 async fn test_throws_not_in_comment() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_comment.php").unwrap();
+    let uri = Uri::parse("file:///throws_comment.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -776,7 +776,7 @@ async fn test_throws_not_in_comment() {
 #[tokio::test]
 async fn test_throws_relative_namespace() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_relative.php").unwrap();
+    let uri = Uri::parse("file:///throws_relative.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -803,7 +803,7 @@ async fn test_throws_relative_namespace() {
 #[tokio::test]
 async fn test_throws_prefix_filtering() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prefix.php").unwrap();
+    let uri = Uri::parse("file:///throws_prefix.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -830,7 +830,7 @@ async fn test_throws_prefix_filtering() {
 #[tokio::test]
 async fn test_throws_empty_body() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_empty.php").unwrap();
+    let uri = Uri::parse("file:///throws_empty.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -853,7 +853,7 @@ async fn test_throws_empty_body() {
 #[tokio::test]
 async fn test_throws_documented_below_cursor() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_below.php").unwrap();
+    let uri = Uri::parse("file:///throws_below.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -882,7 +882,7 @@ async fn test_throws_documented_below_cursor() {
 #[tokio::test]
 async fn test_throws_nested_try_catch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_nested.php").unwrap();
+    let uri = Uri::parse("file:///throws_nested.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -958,7 +958,7 @@ async fn test_throws_psr4_auto_import() {
         ],
     );
 
-    let uri = Url::parse("file:///service.php").unwrap();
+    let uri = Uri::parse("file:///service.php").unwrap();
     let items = complete_at(&backend, &uri, service_file, 7, 8).await;
     let smart = throws_items(&items);
 
@@ -1003,7 +1003,7 @@ async fn test_throws_psr4_auto_import() {
 #[tokio::test]
 async fn test_throws_no_throws_generic_fallback() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_none.php").unwrap();
+    let uri = Uri::parse("file:///throws_none.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1037,7 +1037,7 @@ async fn test_throws_no_throws_generic_fallback() {
 #[tokio::test]
 async fn test_throws_rethrow_variable_detected_from_catch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_rethrow.php").unwrap();
+    let uri = Uri::parse("file:///throws_rethrow.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1070,7 +1070,7 @@ async fn test_throws_rethrow_variable_detected_from_catch() {
 #[tokio::test]
 async fn test_throws_global_namespace_no_import() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_global.php").unwrap();
+    let uri = Uri::parse("file:///throws_global.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1097,7 +1097,7 @@ async fn test_throws_global_namespace_no_import() {
 #[tokio::test]
 async fn test_throws_item_kind() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_kind.php").unwrap();
+    let uri = Uri::parse("file:///throws_kind.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1115,7 +1115,7 @@ async fn test_throws_item_kind() {
     for item in &smart {
         assert_eq!(
             item.kind,
-            Some(CompletionItemKind::KEYWORD),
+            Some(CompletionItemKind::Keyword),
             "Smart @throws items should have KEYWORD kind"
         );
     }
@@ -1125,7 +1125,7 @@ async fn test_throws_item_kind() {
 #[tokio::test]
 async fn test_throws_underscored_name() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_underscore.php").unwrap();
+    let uri = Uri::parse("file:///throws_underscore.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1147,7 +1147,7 @@ async fn test_throws_underscored_name() {
 #[tokio::test]
 async fn test_throws_not_in_double_quoted_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_dblquote.php").unwrap();
+    let uri = Uri::parse("file:///throws_dblquote.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1172,7 +1172,7 @@ async fn test_throws_not_in_double_quoted_string() {
 #[tokio::test]
 async fn test_throws_escaped_quote_in_string() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_escape.php").unwrap();
+    let uri = Uri::parse("file:///throws_escape.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1200,7 +1200,7 @@ async fn test_throws_escaped_quote_in_string() {
 #[tokio::test]
 async fn test_throws_fqn_catch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_fqn_catch.php").unwrap();
+    let uri = Uri::parse("file:///throws_fqn_catch.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1229,7 +1229,7 @@ async fn test_throws_fqn_catch() {
 #[tokio::test]
 async fn test_throws_multiple_try_catch_blocks() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_multitry.php").unwrap();
+    let uri = Uri::parse("file:///throws_multitry.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1266,7 +1266,7 @@ async fn test_throws_multiple_try_catch_blocks() {
 #[tokio::test]
 async fn test_throws_propagated_from_called_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_propagated.php").unwrap();
+    let uri = Uri::parse("file:///throws_propagated.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -1302,7 +1302,7 @@ async fn test_throws_propagated_from_called_method() {
 #[tokio::test]
 async fn test_throws_propagated_dedup_with_direct() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prop_dedup.php").unwrap();
+    let uri = Uri::parse("file:///throws_prop_dedup.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -1339,7 +1339,7 @@ async fn test_throws_propagated_dedup_with_direct() {
 #[tokio::test]
 async fn test_throws_propagated_from_multiple_methods() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prop_multi.php").unwrap();
+    let uri = Uri::parse("file:///throws_prop_multi.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -1381,7 +1381,7 @@ async fn test_throws_propagated_from_multiple_methods() {
 #[tokio::test]
 async fn test_throws_propagated_filtered_when_documented() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prop_filter.php").unwrap();
+    let uri = Uri::parse("file:///throws_prop_filter.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -1422,7 +1422,7 @@ async fn test_throws_propagated_filtered_when_documented() {
 #[tokio::test]
 async fn test_throws_propagated_from_static_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prop_static.php").unwrap();
+    let uri = Uri::parse("file:///throws_prop_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -1458,7 +1458,7 @@ async fn test_throws_propagated_from_static_call() {
 #[tokio::test]
 async fn test_throws_method_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_rettype.php").unwrap();
+    let uri = Uri::parse("file:///throws_rettype.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -1491,7 +1491,7 @@ async fn test_throws_method_return_type() {
 #[tokio::test]
 async fn test_throws_method_return_type_from_docblock() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_rettype_doc.php").unwrap();
+    let uri = Uri::parse("file:///throws_rettype_doc.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -1527,7 +1527,7 @@ async fn test_throws_method_return_type_from_docblock() {
 #[tokio::test]
 async fn test_throws_static_method_return_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_static_ret.php").unwrap();
+    let uri = Uri::parse("file:///throws_static_ret.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -1560,7 +1560,7 @@ async fn test_throws_static_method_return_type() {
 #[tokio::test]
 async fn test_throws_combined_all_sources() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_combined.php").unwrap();
+    let uri = Uri::parse("file:///throws_combined.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service {\n",
@@ -1610,7 +1610,7 @@ async fn test_throws_combined_all_sources() {
 #[tokio::test]
 async fn test_throws_propagated_not_caught_by_narrower_catch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prop_uncaught.php").unwrap();
+    let uri = Uri::parse("file:///throws_prop_uncaught.php").unwrap();
     let text = concat!(
         "<?php\n",
         "namespace Demo;\n",
@@ -1654,7 +1654,7 @@ async fn test_throws_propagated_not_caught_by_narrower_catch() {
 #[tokio::test]
 async fn test_throws_propagated_caught_by_exact_catch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prop_caught.php").unwrap();
+    let uri = Uri::parse("file:///throws_prop_caught.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service\n",
@@ -1691,7 +1691,7 @@ async fn test_throws_propagated_caught_by_exact_catch() {
 #[tokio::test]
 async fn test_throws_propagated_caught_by_broader_catch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prop_broad.php").unwrap();
+    let uri = Uri::parse("file:///throws_prop_broad.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service\n",
@@ -1727,7 +1727,7 @@ async fn test_throws_propagated_caught_by_broader_catch() {
 #[tokio::test]
 async fn test_throws_propagated_caught_by_throwable() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prop_throwable.php").unwrap();
+    let uri = Uri::parse("file:///throws_prop_throwable.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service\n",
@@ -1762,7 +1762,7 @@ async fn test_throws_propagated_caught_by_throwable() {
 #[tokio::test]
 async fn test_throws_propagated_partial_catch() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prop_partial.php").unwrap();
+    let uri = Uri::parse("file:///throws_prop_partial.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service\n",
@@ -1804,7 +1804,7 @@ async fn test_throws_propagated_partial_catch() {
 #[tokio::test]
 async fn test_throws_propagated_outside_try_block() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///throws_prop_outside.php").unwrap();
+    let uri = Uri::parse("file:///throws_prop_outside.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Service\n",

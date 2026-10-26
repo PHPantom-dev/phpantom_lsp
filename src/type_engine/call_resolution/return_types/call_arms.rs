@@ -442,6 +442,14 @@ impl Backend {
         if let Some(cls) = laravel_helper_call_class(func_name, text_args, ctx) {
             return vec![cls];
         }
+        if let Some(classes) = Self::return_types_of_call_user_func(
+            func_name,
+            text_args,
+            ctx,
+            return_type_hint_out.as_deref_mut(),
+        ) {
+            return classes;
+        }
 
         // ── Array-producing / element-extracting functions ───
         // The stubs declare these as returning a bare `array` or
@@ -677,6 +685,28 @@ impl Backend {
                 }
             }
 
+            // No return type to go on: read it off the body, as for a
+            // method without one.
+            if func_info.return_type.is_none()
+                && let Some(backend) = ctx.file.backend
+                && let Some(inferred) =
+                    crate::type_engine::call_resolution::try_infer_function_body_return_type(
+                        backend, &func_info,
+                    )
+            {
+                let classes =
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                        &inferred,
+                        "",
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
+                    );
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(inferred);
+                }
+                return classes;
+            }
+
             if let Some(ref ret) = func_info.return_type {
                 if let Some(ref mut hint_out) = return_type_hint_out {
                     **hint_out = Some(ret.clone());
@@ -696,18 +726,106 @@ impl Backend {
     /// `$fn(…)`: the variable invocation arm.
     pub(super) fn return_types_of_variable_invocation(
         var_name: &str,
+        text_args: &str,
+        ctx: &ResolutionCtx<'_>,
+        return_type_hint_out: Option<&mut Option<PhpType>>,
+    ) -> Vec<Arc<ClassInfo>> {
+        // Closures, arrow functions, and first-class callables are all
+        // inferred as a `TypeKind::Callable` (see
+        // `infer_closure_literal_type`), so `$fn`'s embedded return
+        // type covers `$fn = function(): T {}`, `$fn = fn(): T => …`,
+        // and `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
+        let resolved_var_types =
+            crate::type_engine::resolver::resolve_target_classes(var_name, AccessKind::Arrow, ctx);
+
+        // That type was read with no arguments, so a template the call's
+        // arguments bind is only bound by making the call the partial
+        // application wraps.
+        if resolved_var_types
+            .iter()
+            .any(|rt| rt.type_string.is_closure())
+            && let Some(call) = Self::invoked_partial_application_call(
+                var_name,
+                ctx.file.content,
+                ctx.cursor_offset,
+                text_args,
+            )
+            && let SubjectExpr::CallExpr { callee, args_text } = &SubjectExpr::parse(&call)
+        {
+            return Self::resolve_call_return_types_on_receiver(
+                callee,
+                args_text,
+                None,
+                ctx,
+                return_type_hint_out,
+            );
+        }
+        Self::return_types_of_invoked_value(resolved_var_types, ctx, return_type_hint_out)
+    }
+
+    /// `call_user_func($callback, …)` / `call_user_func_array($callback,
+    /// …)`: whatever calling `$callback` returns.  `None` for any other
+    /// function, or when the callback's type is unknown.
+    fn return_types_of_call_user_func(
+        func_name: &str,
+        text_args: &str,
+        ctx: &ResolutionCtx<'_>,
+        return_type_hint_out: Option<&mut Option<PhpType>>,
+    ) -> Option<Vec<Arc<ClassInfo>>> {
+        let name = func_name.strip_prefix('\\').unwrap_or(func_name);
+        if !name.eq_ignore_ascii_case("call_user_func")
+            && !name.eq_ignore_ascii_case("call_user_func_array")
+        {
+            return None;
+        }
+        Self::return_types_of_invoked_first_arg(text_args, ctx, return_type_hint_out)
+    }
+
+    /// What calling the callable `text_args` bind to the callee's first
+    /// parameter, `$callback`, returns.  `None` when its type is unknown.
+    fn return_types_of_invoked_first_arg(
+        text_args: &str,
+        ctx: &ResolutionCtx<'_>,
+        return_type_hint_out: Option<&mut Option<PhpType>>,
+    ) -> Option<Vec<Arc<ClassInfo>>> {
+        let callback =
+            crate::call_args::first_param_text_arg(&split_top_level_commas(text_args), "callback")?;
+        if callback.starts_with("...") {
+            return None;
+        }
+        let ty = Self::resolve_arg_text_to_type(callback, ctx)?;
+        let owner_fqn = ctx.current_class.map(ClassInfo::fqn);
+        let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            &ty,
+            owner_fqn.as_deref().unwrap_or(""),
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+        );
+        let callback_types = if classes.is_empty() {
+            vec![ResolvedType::from_type_string(ty)]
+        } else {
+            classes
+                .into_iter()
+                .map(|class| ResolvedType::from_both_arc(ty.clone(), class))
+                .collect()
+        };
+        let mut hint = None;
+        let classes = Self::return_types_of_invoked_value(callback_types, ctx, Some(&mut hint));
+        let hint = hint?;
+        if let Some(hint_out) = return_type_hint_out {
+            *hint_out = Some(hint);
+        }
+        Some(classes)
+    }
+
+    /// What calling a value of one of `types` returns: read from the
+    /// callable type it carries, the method an array callable names, or
+    /// its class's `__invoke()`.
+    fn return_types_of_invoked_value(
+        resolved_var_types: Vec<ResolvedType>,
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
-        // 1. Resolve the variable's own type.  Closures, arrow
-        //    functions, and first-class callables are all
-        //    inferred as a `TypeKind::Callable` (see
-        //    `infer_closure_literal_type`), so `$fn`'s embedded
-        //    return type covers `$fn = function(): T {}`,
-        //    `$fn = fn(): T => …`, and `$fn = strlen(...)` /
-        //    `$fn = $obj->method(...)` alike.
-        let resolved_var_types =
-            crate::type_engine::resolver::resolve_target_classes(var_name, AccessKind::Arrow, ctx);
         for rt in &resolved_var_types {
             if let Some(ret_type) = rt.type_string.callable_return_type() {
                 if let Some(ref mut hint_out) = return_type_hint_out {
@@ -722,13 +840,36 @@ impl Backend {
             }
         }
 
-        // 3. Check for __invoke().  When $f holds an object with
-        //    an __invoke() method, $f() should return
-        //    __invoke()'s return type.  Set the raw hint even when
-        //    the return type is scalar (e.g. `__invoke(): int`), so
-        //    a caller reading `return_type_hint_out` still sees it —
-        //    `type_hint_to_classes_typed_returned` only has classes
-        //    to hand back.
+        // An array callable, `[$obj, 'method']`, calls the method.
+        let current_class_fqn = ctx.current_class.map(|c| c.fqn());
+        let current_class_fqn = current_class_fqn.as_deref().unwrap_or("");
+        for rt in &resolved_var_types {
+            if let Some(ret_type) = crate::type_engine::call_resolution::array_callable_return_type(
+                &rt.type_string,
+                &ctx.file,
+                current_class_fqn,
+                ctx.resolved_class_cache,
+            ) {
+                let classes =
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                        &ret_type,
+                        "",
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
+                    );
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(ret_type);
+                }
+                return classes;
+            }
+        }
+
+        // An object with an __invoke() method returns __invoke()'s
+        // return type.  Set the raw hint even when the return type is
+        // scalar (e.g. `__invoke(): int`), so a caller reading
+        // `return_type_hint_out` still sees it —
+        // `type_hint_to_classes_typed_returned` only has classes to
+        // hand back.
         let var_classes = ResolvedType::into_arced_classes(resolved_var_types);
         for owner in &var_classes {
             if let Some(invoke) = owner.get_method("__invoke")
@@ -760,6 +901,18 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
+        // `new $class(…)` builds whatever class the variable names.
+        if class_name.starts_with('$') {
+            let built = crate::type_engine::resolver::resolve_target_classes_expr(
+                &SubjectExpr::NewExpr {
+                    class_name: class_name.to_string(),
+                },
+                crate::AccessKind::Arrow,
+                ctx,
+            );
+            return ResolvedType::into_arced_classes(built);
+        }
+
         // `new X` is a source-level reference: an unqualified name
         // resolves against the current namespace before the global
         // scope, so a same-namespace class wins over a global stub
@@ -809,6 +962,25 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
+        // The stub can only say `fromCallable()` makes a `Closure`; calling
+        // that closure calls the callable it was handed.
+        if let SubjectExpr::CallExpr {
+            callee: from_callable,
+            args_text,
+        } = callee
+            && let SubjectExpr::StaticMethodCall { class, method } = from_callable.as_ref()
+            && method.eq_ignore_ascii_case("fromCallable")
+            && crate::type_engine::resolver::resolve_static_owner_class(class, ctx)
+                .is_some_and(|owner| owner.fqn() == "Closure")
+            && let Some(classes) = Self::return_types_of_invoked_first_arg(
+                args_text,
+                ctx,
+                return_type_hint_out.as_deref_mut(),
+            )
+        {
+            return classes;
+        }
+
         let callee_resolved = crate::type_engine::resolver::resolve_target_classes_expr(
             callee,
             AccessKind::Arrow,

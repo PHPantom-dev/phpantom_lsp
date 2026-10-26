@@ -3,7 +3,8 @@
 //! A scope, an accessor, or a mutator is declared under one name and used
 //! under another: `scopeActive()` is called as `active()`,
 //! `getFullNameAttribute()` and an `Attribute`-returning `fullName()` are
-//! read as `->full_name`, `setLogoAttribute()` is written as `->logo = …`.
+//! read as `->full_name`, `setLogoAttribute()` is written as `->logo = …`,
+//! and a relationship `posts()` is also read as the property `->posts`.
 //! Find References and rename start from the declaration, so they need the
 //! forward mapping the model provider applies when it synthesizes the
 //! virtual members.
@@ -11,6 +12,7 @@
 use crate::types::{MethodInfo, Visibility};
 
 use super::accessors::{is_legacy_accessor, is_legacy_mutator, is_modern_accessor};
+use super::classify_relationship_typed;
 use super::helpers::snake_to_camel;
 use super::helpers::{camel_to_snake, legacy_accessor_method_name, legacy_mutator_method_name};
 use super::scopes::scope_name;
@@ -29,6 +31,9 @@ pub(crate) enum MagicMemberKind {
     LegacyMutator,
     /// `fullName(): Attribute`, used as `->full_name`.
     ModernAccessor,
+    /// `posts(): HasMany`, called as `posts()` and also read as the
+    /// related models through `->posts`.
+    Relationship,
 }
 
 impl MagicMemberKind {
@@ -54,6 +59,13 @@ impl MagicMemberKind {
         if is_modern_accessor(method) {
             return Some(Self::ModernAccessor);
         }
+        if method
+            .return_type
+            .as_ref()
+            .is_some_and(|return_type| classify_relationship_typed(return_type).is_some())
+        {
+            return Some(Self::Relationship);
+        }
         None
     }
 
@@ -72,7 +84,7 @@ impl MagicMemberKind {
         match self {
             Self::Scope => (method_name.starts_with("scope") && method_name.len() > 5)
                 .then(|| scope_name(method_name)),
-            Self::AttributeScope => Some(method_name.to_string()),
+            Self::AttributeScope | Self::Relationship => Some(method_name.to_string()),
             Self::LegacyAccessor => attribute_method_middle(method_name, "get").map(camel_to_snake),
             Self::LegacyMutator => attribute_method_middle(method_name, "set").map(camel_to_snake),
             Self::ModernAccessor => Some(camel_to_snake(method_name)),

@@ -12,8 +12,8 @@ use crate::common::{
     create_psr4_workspace, goto_definition_at, markup_hover_at, open_initialized_php, open_php,
     references_response,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Every location go-to-definition offers at `line`/`character` of `relative`.
 async fn definitions(
@@ -26,14 +26,14 @@ async fn definitions(
     backend.initialized(InitializedParams {}).await;
     let path = dir.path().join(relative);
     let text = std::fs::read_to_string(&path).unwrap();
-    let uri = Url::from_file_path(&path).unwrap();
+    let uri = Uri::from_file_path(&path).unwrap();
     open_php(backend, &uri, &text).await;
 
     let response = goto_definition_at(backend, &uri, line, character).await;
     match response {
-        Some(GotoDefinitionResponse::Scalar(location)) => vec![location],
-        Some(GotoDefinitionResponse::Array(locations)) => locations,
-        Some(GotoDefinitionResponse::Link(links)) => links
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => vec![location],
+        Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => locations,
+        Some(DefinitionResponse::DefinitionLinkList(links)) => links
             .into_iter()
             .map(|link| Location {
                 uri: link.target_uri,
@@ -127,7 +127,7 @@ async fn a_route_pattern_is_judged_by_what_it_matches() {
     let route_diagnostics: Vec<&Diagnostic> = diagnostics
         .iter()
         .filter(|diagnostic| {
-            matches!(&diagnostic.code, Some(NumberOrString::String(code))
+            matches!(&diagnostic.code, Some(Code::String(code))
                 if code == "invalid_laravel_route")
         })
         .collect();
@@ -229,10 +229,10 @@ async fn find_references_gathers_every_read_of_an_environment_variable() {
     for relative in ["app/Demo.php", "config/mail.php"] {
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
-        open_php(&backend, &Url::from_file_path(&path).unwrap(), &text).await;
+        open_php(&backend, &Uri::from_file_path(&path).unwrap(), &text).await;
     }
 
-    let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
+    let uri = Uri::from_file_path(dir.path().join("app/Demo.php")).unwrap();
     let found = references_response(&backend, &uri, Position::new(4, 24), true)
         .await
         .expect("an env key should have references");
@@ -306,8 +306,8 @@ async fn the_env_helper_completes_the_projects_variables() {
     .await;
 
     let items = match completion_response(&backend, &uri, 4, 13, None).await {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => Vec::new(),
     };
 

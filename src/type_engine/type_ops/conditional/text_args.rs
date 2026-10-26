@@ -42,6 +42,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
         class_ctx,
         class_loader,
         tpl,
+        narrowed: None,
     }
     .resolve(conditional)
 }
@@ -57,9 +58,24 @@ struct TextArgs<'a> {
     class_ctx: ConditionalClassContext<'a>,
     class_loader: &'a ResolvedClassLoader<'a>,
     tpl: &'a TemplateContext<'a>,
+    /// The part of one parameter's argument type that an enclosing
+    /// condition left for the branch being resolved, keyed by the
+    /// parameter's index. `?User` against `$key is Model ? … : ($key is
+    /// Arrayable ? … : …)` reaches the inner condition as `null` alone,
+    /// since its `User` part took the outer then branch.
+    narrowed: Option<(usize, &'a PhpType)>,
 }
 
 impl TextArgs<'_> {
+    /// The resolved type of the argument `arg` bound to the parameter at
+    /// `param_idx`, as narrowed by any enclosing condition on it.
+    fn arg_type(&self, param_idx: usize, arg: &str) -> Option<PhpType> {
+        match self.narrowed {
+            Some((idx, ty)) if idx == param_idx => Some(ty.clone()),
+            _ => self.tpl.arg_type_resolver.and_then(|resolve| resolve(arg)),
+        }
+    }
+
     /// Resolve `conditional` against this call.
     fn resolve(&self, conditional: &PhpType) -> Option<PhpType> {
         let Self {
@@ -183,10 +199,10 @@ impl TextArgs<'_> {
 
         if matches!(condition.kind(), TypeKind::ClassString(_)) {
             let variadic_args = is_variadic.then(|| args.get(param_idx..).unwrap_or_default());
-            self.class_string_condition(cond, condition, variadic_args, arg_text)
+            self.class_string_condition(cond, condition, param_idx, variadic_args, arg_text)
         } else if condition.is_null() {
             let variadic_passed = is_variadic.then_some(arg_text_owned.is_some());
-            self.null_condition(cond, condition, arg_text, variadic_passed)
+            self.null_condition(cond, condition, param_idx, arg_text, variadic_passed)
         } else if matches!(condition.kind(), TypeKind::Literal(_)) {
             // Value condition (`$format is 0`, `$flags is 15`). A literal
             // argument settles it outright; anything else is settled by
@@ -194,7 +210,7 @@ impl TextArgs<'_> {
             // literal of its own, which is how a named constant
             // (`pathinfo($p, PATHINFO_FILENAME)`) or a local holding one
             // decides the branch it really takes.
-            self.judged_condition(cond, condition, arg_text, |arg_ty| {
+            self.judged_condition(cond, condition, param_idx, arg_text, |arg_ty| {
                 literal_condition_result(condition, arg_ty)
             })
         } else if let Some(parts) = class_const_condition_parts(condition) {
@@ -204,7 +220,7 @@ impl TextArgs<'_> {
             // …), decided by the argument's resolved type when its text
             // is not a literal (e.g. a method-call chain that returns
             // `string`).
-            self.judged_condition(cond, condition, arg_text, |arg_ty| {
+            self.judged_condition(cond, condition, param_idx, arg_text, |arg_ty| {
                 type_condition_result(arg_ty, condition, class_loader)
             })
         }
@@ -253,27 +269,35 @@ impl TextArgs<'_> {
         &self,
         cond: &ConditionalType,
         condition: &PhpType,
+        param_idx: usize,
         arg_text: Option<&str>,
         variadic_passed: Option<bool>,
     ) -> Option<PhpType> {
         let resolver = self.tpl.arg_type_resolver;
+        let judge = |arg_ty: &PhpType| type_condition_result(arg_ty, condition, self.class_loader);
+        let mut undecided_ty = None;
         let is_null = match (variadic_passed, arg_text) {
             (Some(passed), _) => Some(!passed),
             (None, None) => Some(true),
             (None, Some(text)) if text.trim().is_empty() => Some(true),
             (None, Some(text)) => condition_result_from_text(condition, text).or_else(|| {
-                resolver
-                    .and_then(|resolve| resolve(text))
-                    .and_then(|arg_ty| type_condition_result(&arg_ty, condition, self.class_loader))
-                    .or_else(|| {
-                        // With no resolver to consult, an argument that is
-                        // not the literal `null` reads as non-null, which is
-                        // what it usually is.
-                        resolver.is_none().then_some(false)
-                    })
+                let arg_ty = self.arg_type(param_idx, text);
+                let decided = arg_ty.as_ref().and_then(judge);
+                if decided.is_none() {
+                    undecided_ty = arg_ty;
+                }
+                decided.or_else(|| {
+                    // With no resolver to consult, an argument that is
+                    // not the literal `null` reads as non-null, which is
+                    // what it usually is.
+                    resolver.is_none().then_some(false)
+                })
             }),
         };
-        self.branch(cond, is_null.map(|is_null| is_null ^ cond.negated))
+        match (is_null, undecided_ty) {
+            (None, Some(arg_ty)) => self.split_branches(cond, param_idx, &arg_ty, judge),
+            (is_null, _) => self.branch(cond, is_null.map(|is_null| is_null ^ cond.negated)),
+        }
     }
 
     /// Decide a condition by the argument's syntactic form (a literal),
@@ -282,19 +306,25 @@ impl TextArgs<'_> {
         &self,
         cond: &ConditionalType,
         condition: &PhpType,
+        param_idx: usize,
         arg_text: Option<&str>,
         judge: impl Fn(&PhpType) -> Option<bool>,
     ) -> Option<PhpType> {
         let resolver = self.tpl.arg_type_resolver;
+        let mut undecided_ty = None;
         let decided = arg_text.and_then(|arg| {
             condition_result_from_text(condition, arg).or_else(|| {
-                resolver
-                    .and_then(|resolve| resolve(arg))
-                    .and_then(|arg_ty| judge(&arg_ty))
+                let arg_ty = self.arg_type(param_idx, arg)?;
+                let decided = judge(&arg_ty);
+                if decided.is_none() {
+                    undecided_ty = Some(arg_ty);
+                }
+                decided
             })
         });
-        match decided {
-            Some(holds) => self.branch(cond, Some(holds ^ cond.negated)),
+        match (decided, undecided_ty) {
+            (Some(holds), _) => self.branch(cond, Some(holds ^ cond.negated)),
+            (None, Some(arg_ty)) => self.split_branches(cond, param_idx, &arg_ty, judge),
             // The condition is genuinely undecidable: the argument is an
             // expression whose type we could not pin down. When a resolver
             // was available (i.e. a real resolution context, not a bare
@@ -302,9 +332,66 @@ impl TextArgs<'_> {
             // branches, so return their union rather than committing to the
             // else branch — otherwise `Str::replace(…, $x->y())` would
             // resolve to `string[]` and falsely flag a `string` argument.
-            None if arg_text.is_some() && resolver.is_some() => self.undecided(cond),
-            None => self.resolve(&cond.else_type),
+            (None, None) if arg_text.is_some() && resolver.is_some() => self.undecided(cond),
+            (None, None) => self.resolve(&cond.else_type),
         }
+    }
+
+    /// Resolve a condition that `arg_ty` as a whole leaves open, by the
+    /// members of `arg_ty` that each decide it.
+    ///
+    /// A union argument (`?User` against `$key is Model`) may hold members
+    /// that settle the condition differently. Each branch is reached only by
+    /// the members that can take it, so it is resolved with the argument
+    /// narrowed to those, and a nested condition on the same parameter is
+    /// judged against what is left rather than against the whole argument.
+    fn split_branches(
+        &self,
+        cond: &ConditionalType,
+        param_idx: usize,
+        arg_ty: &PhpType,
+        judge: impl Fn(&PhpType) -> Option<bool>,
+    ) -> Option<PhpType> {
+        let members: Vec<PhpType> = match arg_ty.kind() {
+            TypeKind::Union(members) => members.to_vec(),
+            TypeKind::Nullable(inner) => vec![inner.clone(), PhpType::null()],
+            _ => Vec::new(),
+        };
+        if cond.else_when_undecided || members.is_empty() {
+            return self.undecided(cond);
+        }
+        let verdicts: Vec<Option<bool>> = members
+            .iter()
+            .map(|m| judge(m).map(|holds| holds ^ cond.negated))
+            .collect();
+        if verdicts.iter().all(Option::is_none) {
+            return self.undecided(cond);
+        }
+        let reaching = |takes_then: bool| -> Option<PhpType> {
+            let reached: Vec<PhpType> = members
+                .iter()
+                .zip(&verdicts)
+                .filter(|(_, verdict)| **verdict != Some(!takes_then))
+                .map(|(member, _)| member.clone())
+                .collect();
+            match reached.len() {
+                0 => None,
+                1 => reached.into_iter().next(),
+                _ => Some(PhpType::union(reached)),
+            }
+        };
+        let narrowed_branch = |takes_then: bool, branch: &PhpType| {
+            let narrowed = reaching(takes_then)?;
+            TextArgs {
+                narrowed: Some((param_idx, &narrowed)),
+                ..*self
+            }
+            .resolve(branch)
+        };
+        union_branch_types(
+            narrowed_branch(true, &cond.then_type),
+            narrowed_branch(false, &cond.else_type),
+        )
     }
 
     /// Decide a class-constant condition (e.g. `$mode is
@@ -339,6 +426,7 @@ impl TextArgs<'_> {
         &self,
         cond: &ConditionalType,
         condition: &PhpType,
+        param_idx: usize,
         variadic_args: Option<&[&str]>,
         arg_text: Option<&str>,
     ) -> Option<PhpType> {
@@ -526,8 +614,7 @@ impl TextArgs<'_> {
         // constant) is judged by its resolved type: a
         // `class-string<Foo>` names `Foo` just as `Foo::class` does.
         if let Some(arg) = arg_text
-            && let Some(resolve) = tpl.arg_type_resolver
-            && let Some(arg_ty) = resolve(arg)
+            && let Some(arg_ty) = self.arg_type(param_idx, arg)
             && let Some(inner) = class_string_inner_classes(&arg_ty)
         {
             if concrete_class_string_bound.is_some() {

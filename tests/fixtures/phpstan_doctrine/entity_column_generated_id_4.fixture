@@ -1,0 +1,7 @@
+// test: A generated identifier, case 4
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityColumnRuleTest::testGeneratedIds.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/GeneratedIdEntity4.php
+---

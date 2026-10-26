@@ -191,8 +191,8 @@ class GenerateConstructorDemo
 
 class GenerateGetterSetterDemo
 {
-    private string $name;
-    private bool $active;
+    private string $name = '';
+    private bool $active = false;
     public readonly int $id;
     private static int $count;
     /** @var list<string> */

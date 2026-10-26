@@ -26,7 +26,7 @@
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::text_position::position_to_byte_offset;
@@ -39,9 +39,9 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
-        let doc_uri: Url = match uri.parse() {
+        let doc_uri: Uri = match uri.parse() {
             Ok(u) => u,
             Err(_) => return,
         };

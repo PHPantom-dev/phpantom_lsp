@@ -179,11 +179,36 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
             })
         }
         Expression::Call(Call::Function(fc)) => {
+            // Invoking a partial application on the spot is the call it
+            // wraps: `$r->find(...)($id)` is `$r->find($id)`, and
+            // `$r->find(?, 1)($id)` is `$r->find($id, 1)`.
+            if let Expression::PartialApplication(pa) = crate::parser::unwrap_parens(fc.function) {
+                let args_text = if pa.is_first_class_callable() {
+                    format_all_call_args(&fc.argument_list.arguments)
+                } else {
+                    let bound = crate::call_args::bind_partial_arguments(
+                        pa.get_argument_list(),
+                        &fc.argument_list,
+                    );
+                    format_all_call_args(&TokenSeparatedSequence {
+                        nodes: &bound,
+                        tokens: &[],
+                    })
+                };
+                return lower_invoked_callable(pa, args_text);
+            }
+            let args_text = format_all_call_args(&fc.argument_list.arguments);
+            // A closure literal is kept as written, so invoking it reads
+            // the signature and body it was written with.
             if is_closure_literal(fc.function) {
-                return None;
+                return Some(SubjectExpr::CallExpr {
+                    callee: Box::new(SubjectExpr::Closure(format_arg_expr(
+                        crate::parser::unwrap_parens(fc.function),
+                    ))),
+                    args_text,
+                });
             }
             let callee = expr_to_subject_expr(fc.function)?;
-            let args_text = format_all_call_args(&fc.argument_list.arguments);
             // `SubjectExpr::to_subject_text` wraps callees that are not
             // callable-by-name (property chains, array access, nested calls)
             // in parentheses, so `($this->formatter)()` round-trips through
@@ -196,8 +221,15 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
 
         // `new Foo(...)` as a subject lowers to just the class name: the
         // constructed instance resolves through its own class regardless
-        // of the constructor arguments.
-        Expression::Instantiation(inst) => expr_to_subject_expr(inst.class),
+        // of the constructor arguments.  `new $class(...)` keeps the `new`,
+        // since the instance is of the class the variable names, not the
+        // variable's own type.
+        Expression::Instantiation(inst) => match inst.class {
+            Expression::Variable(Variable::Direct(dv)) => Some(SubjectExpr::NewExpr {
+                class_name: bytes_to_str(dv.name).to_string(),
+            }),
+            class => expr_to_subject_expr(class),
+        },
 
         Expression::Parenthesized(paren) => expr_to_subject_expr(paren.expression),
 
@@ -223,47 +255,37 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
         Expression::Clone(clone) => expr_to_subject_expr(clone.object),
 
         // Array literals: `[Foo::class, 'bar']` → `[Foo::class, 'bar']`.
-        // We format elements we can represent and elide the rest so that
+        // Elements are formatted the way call arguments are, so literals
+        // survive (an array callable names its method by one), and an
+        // element that cannot be represented is elided as `...` so that
         // callers (especially conditional return-type resolution) can see
         // that an argument was provided and is not null.
         Expression::Array(array) => {
-            let mut parts = Vec::new();
-            for element in array.elements.iter() {
-                match element {
+            let parts = array
+                .elements
+                .iter()
+                .map(|element| match element {
                     ArrayElement::KeyValue(kv) => {
-                        let val = expr_to_subject_text(kv.value);
-                        if !val.is_empty() {
-                            let key = expr_to_subject_text(kv.key);
-                            if key.is_empty() {
-                                parts.push(val);
-                            } else {
-                                parts.push(format!("{} => {}", key, val));
-                            }
+                        let val = format_arg_expr(kv.value);
+                        let key = format_arg_expr(kv.key);
+                        if val == "..." || key == "..." {
+                            val
                         } else {
-                            parts.push("...".to_string());
+                            format!("{} => {}", key, val)
                         }
                     }
-                    ArrayElement::Value(v) => {
-                        let val = expr_to_subject_text(v.value);
-                        if val.is_empty() {
-                            parts.push("...".to_string());
-                        } else {
-                            parts.push(val);
-                        }
-                    }
+                    ArrayElement::Value(v) => format_arg_expr(v.value),
                     ArrayElement::Variadic(v) => {
-                        let val = expr_to_subject_text(v.value);
-                        if val.is_empty() {
-                            parts.push("...".to_string());
+                        let val = format_arg_expr(v.value);
+                        if val == "..." {
+                            val
                         } else {
-                            parts.push(format!("...{}", val));
+                            format!("...{}", val)
                         }
                     }
-                    ArrayElement::Missing(_) => {
-                        parts.push("...".to_string());
-                    }
-                }
-            }
+                    ArrayElement::Missing(_) => "...".to_string(),
+                })
+                .collect();
             Some(SubjectExpr::InlineArray {
                 elements: parts,
                 index_segments: Vec::new(),
@@ -327,6 +349,34 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
             })
         }
 
+        _ => None,
+    }
+}
+
+/// The call a partial application `pa` makes when it is invoked, given the
+/// arguments the wrapped call receives as `args_text`.
+fn lower_invoked_callable(pa: &PartialApplication<'_>, args_text: String) -> Option<SubjectExpr> {
+    let callee = match pa {
+        PartialApplication::Function(fpa) => expr_to_subject_expr(fpa.function)?,
+        PartialApplication::Method(mpa) => SubjectExpr::MethodCall {
+            base: Box::new(expr_to_subject_expr(mpa.object)?),
+            method: member_selector_name(&mpa.method)?,
+        },
+        PartialApplication::StaticMethod(spa) => SubjectExpr::StaticMethodCall {
+            class: expr_to_subject_expr(spa.class)?.to_subject_text(),
+            method: member_selector_name(&spa.method)?,
+        },
+    };
+    Some(SubjectExpr::CallExpr {
+        callee: Box::new(callee),
+        args_text,
+    })
+}
+
+/// The name a member selector spells, when it is a plain identifier.
+fn member_selector_name(selector: &ClassLikeMemberSelector<'_>) -> Option<String> {
+    match selector {
+        ClassLikeMemberSelector::Identifier(ident) => Some(bytes_to_str(ident.value).to_string()),
         _ => None,
     }
 }

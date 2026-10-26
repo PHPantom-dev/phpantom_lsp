@@ -14,7 +14,7 @@
 //! `@yield` could be in, so the template is left alone rather than
 //! reported against a set of names known to be incomplete.
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp_server::gen_lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::Backend;
 use crate::blade::blocks::{self, BlockKind, BlockRole};
@@ -64,7 +64,7 @@ impl Backend {
                     block.name_span.start,
                     block.name_span.end,
                 ),
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 code,
                 format!(
                     "Nothing renders the {} '{}': no {renders}('{}') in the layouts this template extends",

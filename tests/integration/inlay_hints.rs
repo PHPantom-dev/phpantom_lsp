@@ -1,10 +1,10 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_function_stubs, open_php,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Helper: open a file and request inlay hints for the entire file.
-async fn inlay_hints_for(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) -> Vec<InlayHint> {
+async fn inlay_hints_for(backend: &phpantom_lsp::Backend, uri: &Uri, text: &str) -> Vec<InlayHint> {
     open_php(backend, uri, text).await;
 
     let line_count = text.lines().count() as u32;
@@ -29,8 +29,8 @@ async fn inlay_hints_for(backend: &phpantom_lsp::Backend, uri: &Url, text: &str)
 /// Extract the label string from an InlayHint.
 fn hint_label(hint: &InlayHint) -> String {
     match &hint.label {
-        InlayHintLabel::String(s) => s.clone(),
-        InlayHintLabel::LabelParts(parts) => parts.iter().map(|p| p.value.as_str()).collect(),
+        Label::String(s) => s.clone(),
+        Label::InlayHintLabelPartList(parts) => parts.iter().map(|p| p.value.as_str()).collect(),
     }
 }
 
@@ -49,7 +49,7 @@ fn hints_at_line(hints: &[InlayHint], line: u32) -> Vec<&InlayHint> {
 #[tokio::test]
 async fn standalone_function_two_params() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function greet(string $name, int $age): string { return ''; }
 greet('Alice', 25);
@@ -71,7 +71,7 @@ greet('Alice', 25);
 #[tokio::test]
 async fn no_hints_for_zero_arg_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function doStuff(): void {}
 doStuff();
@@ -84,7 +84,7 @@ doStuff();
 #[tokio::test]
 async fn hint_kind_is_parameter() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function foo(string $bar): void {}
 foo('hello');
@@ -92,7 +92,7 @@ foo('hello');
 
     let hints = inlay_hints_for(&backend, &uri, text).await;
     assert_eq!(hints.len(), 1);
-    assert_eq!(hints[0].kind, Some(InlayHintKind::PARAMETER));
+    assert_eq!(hints[0].kind, Some(InlayHintKind::Parameter));
 }
 
 // ─── Suppression: variable name matches parameter name ──────────────────────
@@ -100,7 +100,7 @@ foo('hello');
 #[tokio::test]
 async fn suppress_when_variable_matches_param_name() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function greet(string $name): void {}
 $name = 'Alice';
@@ -118,7 +118,7 @@ greet($name);
 #[tokio::test]
 async fn no_suppress_when_variable_differs() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function greet(string $name): void {}
 $foo = 'Alice';
@@ -136,7 +136,7 @@ greet($foo);
 #[tokio::test]
 async fn suppress_when_property_matches_param_name() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 class Obj { public string $name = ''; }
 function greet(string $name): void {}
@@ -157,7 +157,7 @@ greet($obj->name);
 #[tokio::test]
 async fn suppress_for_named_arguments() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function greet(string $name, int $age): void {}
 greet(name: 'Alice', age: 25);
@@ -174,7 +174,7 @@ greet(name: 'Alice', age: 25);
 #[tokio::test]
 async fn mixed_named_and_positional() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function greet(string $name, int $age, string $city): void {}
 greet('Alice', age: 25, 'NYC');
@@ -204,7 +204,7 @@ greet('Alice', age: 25, 'NYC');
 #[tokio::test]
 async fn named_arg_before_positional_maps_correctly() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     // Named arg `city:` consumes param 2, so the positional arg 'Alice'
     // should map to param 0 (`name:`), not param 1 (`age:`).
     let text = r#"<?php
@@ -235,7 +235,7 @@ greet(city: 'NYC', 'Alice');
 #[tokio::test]
 async fn multiple_named_args_with_positional_remainder() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     // Two named args consume params 0 and 2, leaving param 1 (`age:`)
     // for the single positional argument.
     let text = r#"<?php
@@ -262,7 +262,7 @@ greet(name: 'Alice', city: 'NYC', 30);
 #[tokio::test]
 async fn named_arg_out_of_order_two_positional() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     // Named arg `age:` consumes param 1.  Remaining params in order
     // are 0 (`name`) and 2 (`city`).  The two positional args should
     // map to those in order.
@@ -296,7 +296,7 @@ greet(age: 25, 'Alice', 'NYC');
 #[tokio::test]
 async fn by_reference_indicator() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function modify(array &$data, string $label): void {}
 $arr = [];
@@ -319,7 +319,7 @@ modify($arr, 'test');
 #[tokio::test]
 async fn by_reference_with_matching_name_still_shows() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function modify(array &$data): void {}
 $data = [];
@@ -347,7 +347,7 @@ modify($data);
 #[tokio::test]
 async fn instance_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 class Greeter {
     public function greet(string $name, int $age): void {}
@@ -379,7 +379,7 @@ class Demo {
 #[tokio::test]
 async fn static_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 class Greeter {
     public static function greet(string $name, int $age): void {}
@@ -398,7 +398,7 @@ Greeter::greet('Alice', 25);
 #[tokio::test]
 async fn constructor_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 class User {
     public function __construct(string $name, int $age) {}
@@ -419,7 +419,7 @@ $u = new User('Alice', 25);
 #[tokio::test]
 async fn variadic_parameter_hints() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function log(string $level, string ...$messages): void {}
 log('info', 'hello', 'world');
@@ -444,7 +444,7 @@ log('info', 'hello', 'world');
 #[tokio::test]
 async fn suppress_obvious_single_param_functions() {
     let backend = create_test_backend_with_function_stubs();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 $x = count([1, 2, 3]);
 $y = strlen('hello');
@@ -479,7 +479,7 @@ $z = json_encode(['a' => 1]);
 #[tokio::test]
 async fn this_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 class Calculator {
     public function add(int $a, int $b): int { return $a + $b; }
@@ -533,7 +533,7 @@ class Main {
         &[("src/Service.php", service_php), ("src/Main.php", main_php)],
     );
 
-    let main_uri = Url::parse("file:///test/Main.php").unwrap();
+    let main_uri = Uri::parse("file:///test/Main.php").unwrap();
     let hints = inlay_hints_for(&backend, &main_uri, main_php).await;
     let line_hints = hints_at_line(&hints, 5);
 
@@ -555,7 +555,7 @@ class Main {
 #[tokio::test]
 async fn only_hints_in_requested_range() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function foo(string $a): void {}
 foo('line2');
@@ -594,7 +594,7 @@ foo('line4');
 #[tokio::test]
 async fn range_excluding_early_arg_does_not_shift_later_hints() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function make(string $prefix, string $name, int $entries, int $versions, int $stale): void {}
 make(
@@ -640,7 +640,7 @@ make(
 #[tokio::test]
 async fn suppress_string_literal_matching_param() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function lookup(string $key): mixed { return null; }
 lookup('key');
@@ -659,7 +659,7 @@ lookup('key');
 #[tokio::test]
 async fn tooltip_shows_type_and_name() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function greet(string $name): void {}
 greet('Alice');
@@ -668,7 +668,7 @@ greet('Alice');
     let hints = inlay_hints_for(&backend, &uri, text).await;
     assert_eq!(hints.len(), 1);
 
-    if let Some(InlayHintTooltip::String(tooltip)) = &hints[0].tooltip {
+    if let Some(Tooltip::String(tooltip)) = &hints[0].tooltip {
         assert!(
             tooltip.contains("string"),
             "tooltip should contain type info: {}",
@@ -687,7 +687,7 @@ greet('Alice');
 #[tokio::test]
 async fn hint_has_right_padding() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function foo(string $bar): void {}
 foo('hello');
@@ -703,7 +703,7 @@ foo('hello');
 #[tokio::test]
 async fn multiple_calls_each_get_hints() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function add(int $a, int $b): int { return $a + $b; }
 $x = add(1, 2);
@@ -723,7 +723,7 @@ $y = add(3, 4);
 #[tokio::test]
 async fn nested_calls_both_get_hints() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function inner(int $x): int { return $x; }
 function outer(int $y): int { return $y; }
@@ -751,7 +751,7 @@ outer(inner(42));
 #[tokio::test]
 async fn suppress_case_insensitive_match() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function process(string $userName): void {}
 $user_name = 'Alice';
@@ -771,7 +771,7 @@ process($user_name);
 #[tokio::test]
 async fn stub_function_multi_param_shows_hints() {
     let backend = create_test_backend_with_function_stubs();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     // Wrap the call inside a function body so that the file context
     // has a proper scope for resolution.  Top-level calls in a bare
     // <?php file sometimes lack the context needed for stub resolution.
@@ -802,7 +802,7 @@ function demo(): void {
 #[tokio::test]
 async fn spread_argument_gets_no_hint() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function greet(string $name, int $age, string $city): void {}
 $args = ['Alice', 25, 'NYC'];
@@ -822,7 +822,7 @@ greet(...$args);
 #[tokio::test]
 async fn spread_after_positional_suppresses_only_spread() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function greet(string $name, int $age, string $city): void {}
 $rest = [25, 'NYC'];
@@ -845,7 +845,7 @@ greet('Alice', ...$rest);
 #[tokio::test]
 async fn positional_args_before_and_after_spread_only_spread_suppressed() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     // PHP allows positional args after a spread in some cases.
     // Even if it's unusual, we should only suppress the spread arg.
     let text = r#"<?php
@@ -877,7 +877,7 @@ multi('first', ...$mid, 'last');
 #[tokio::test]
 async fn no_return_type_hint_on_named_function() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 function doubled()
 {
@@ -888,7 +888,7 @@ function doubled()
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let type_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .filter(|h| h.kind == Some(InlayHintKind::Type))
         .collect();
     assert!(
         type_hints.is_empty(),
@@ -900,7 +900,7 @@ function doubled()
 #[tokio::test]
 async fn no_return_type_hint_on_method() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 class Calc {
     public function answer()
@@ -913,7 +913,7 @@ class Calc {
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let type_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .filter(|h| h.kind == Some(InlayHintKind::Type))
         .collect();
     assert!(
         type_hints.is_empty(),
@@ -927,7 +927,7 @@ class Calc {
 #[tokio::test]
 async fn closure_return_type_hint_from_callable_signature() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 /**
  * @param callable(int): string $fn
@@ -940,7 +940,7 @@ transform(function ($x) { return (string) $x; });
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let return_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(": "))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && hint_label(h).starts_with(": "))
         .collect();
     assert!(
         !return_hints.is_empty(),
@@ -957,7 +957,7 @@ transform(function ($x) { return (string) $x; });
 #[tokio::test]
 async fn arrow_fn_return_type_hint_from_callable_signature() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 /**
  * @param callable(int): string $fn
@@ -970,7 +970,7 @@ transform(fn ($x) => (string) $x);
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let return_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(": "))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && hint_label(h).starts_with(": "))
         .collect();
     assert!(
         !return_hints.is_empty(),
@@ -987,7 +987,7 @@ transform(fn ($x) => (string) $x);
 #[tokio::test]
 async fn no_closure_return_type_hint_when_already_typed() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 /**
  * @param callable(int): string $fn
@@ -1000,7 +1000,7 @@ transform(function ($x): string { return (string) $x; });
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let return_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(": "))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && hint_label(h).starts_with(": "))
         .collect();
     assert!(
         return_hints.is_empty(),
@@ -1015,7 +1015,7 @@ transform(function ($x): string { return (string) $x; });
 #[tokio::test]
 async fn closure_return_type_hint_shortened_fqn() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/inlay.php").unwrap();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
     let text = r#"<?php
 namespace App;
 class User { public string $name = ''; }
@@ -1033,7 +1033,7 @@ $s->apply(fn ($u) => $u);
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let return_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(": "))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && hint_label(h).starts_with(": "))
         .collect();
     assert!(
         !return_hints.is_empty(),
@@ -1053,7 +1053,7 @@ $s->apply(fn ($u) => $u);
 #[tokio::test]
 async fn closure_param_type_hint_from_callable_signature() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 /**
  * @param callable(int, string): void $callback
@@ -1066,7 +1066,7 @@ doStuff(function ($a, $b) {});
     // Filter to param type hints (not return type hints which start with ":").
     let param_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && !hint_label(h).starts_with(':'))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && !hint_label(h).starts_with(':'))
         .collect();
     assert!(
         param_hints.len() >= 2,
@@ -1093,7 +1093,7 @@ doStuff(function ($a, $b) {});
 #[tokio::test]
 async fn arrow_fn_param_type_hint_from_callable_signature() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 /**
  * @param callable(int): string $fn
@@ -1105,7 +1105,7 @@ transform(fn ($x) => (string) $x);
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let param_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && !hint_label(h).starts_with(':'))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && !hint_label(h).starts_with(':'))
         .collect();
     assert!(
         param_hints.iter().any(|h| hint_label(h).contains("int")),
@@ -1120,7 +1120,7 @@ transform(fn ($x) => (string) $x);
 #[tokio::test]
 async fn no_closure_param_hint_when_already_typed() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 /**
  * @param callable(int, string): void $callback
@@ -1133,7 +1133,7 @@ doStuff(function (int $a, string $b) {});
     // No param TYPE hints should appear for already-typed closure params.
     let param_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && !hint_label(h).starts_with(':'))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && !hint_label(h).starts_with(':'))
         .collect();
     assert!(
         param_hints.is_empty(),
@@ -1148,7 +1148,7 @@ doStuff(function (int $a, string $b) {});
 #[tokio::test]
 async fn closure_param_hint_partial_typing() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 /**
  * @param callable(int, string): void $callback
@@ -1161,7 +1161,7 @@ doStuff(function (int $a, $b) {});
     // Only the untyped $b should get a param type hint.
     let param_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && !hint_label(h).starts_with(':'))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && !hint_label(h).starts_with(':'))
         .collect();
     assert!(
         param_hints.iter().any(|h| hint_label(h).contains("string")),
@@ -1186,7 +1186,7 @@ doStuff(function (int $a, $b) {});
 #[tokio::test]
 async fn closure_param_hint_kind_is_type() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 /**
  * @param callable(int): void $fn
@@ -1198,18 +1198,18 @@ run(function ($x) {});
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let type_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .filter(|h| h.kind == Some(InlayHintKind::Type))
         .collect();
     assert!(!type_hints.is_empty(), "expected at least one type hint");
     for hint in &type_hints {
-        assert_eq!(hint.kind, Some(InlayHintKind::TYPE));
+        assert_eq!(hint.kind, Some(InlayHintKind::Type));
     }
 }
 
 #[tokio::test]
 async fn closure_param_hint_has_trailing_space() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 /**
  * @param callable(int): void $fn
@@ -1222,7 +1222,7 @@ run(function ($x) {});
     // Filter to param TYPE hints only (not return type hints).
     let closure_param_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && !hint_label(h).starts_with(':'))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && !hint_label(h).starts_with(':'))
         .collect();
     assert!(
         !closure_param_hints.is_empty(),
@@ -1242,7 +1242,7 @@ run(function ($x) {});
 #[tokio::test]
 async fn closure_param_hint_method_call() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 class Processor {
     /**
@@ -1257,7 +1257,7 @@ $p->filter(function ($item) { return true; });
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let param_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && !hint_label(h).starts_with(':'))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && !hint_label(h).starts_with(':'))
         .collect();
     assert!(
         param_hints.iter().any(|h| hint_label(h).contains("string")),
@@ -1272,7 +1272,7 @@ $p->filter(function ($item) { return true; });
 #[tokio::test]
 async fn closure_param_hint_shortened_fqn() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 namespace App;
 class User { public string $name = ''; }
@@ -1289,7 +1289,7 @@ $s->each(fn ($u) => $u->name);
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let param_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && !hint_label(h).starts_with(':'))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && !hint_label(h).starts_with(':'))
         .collect();
     assert!(
         !param_hints.is_empty(),
@@ -1314,7 +1314,7 @@ $s->each(fn ($u) => $u->name);
 #[tokio::test]
 async fn closure_param_hint_template_substitution_from_sibling_args() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 /**
  * @template T
@@ -1330,7 +1330,7 @@ each([1, 2, 3], function ($x) {});
 
     let param_type_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && !hint_label(h).starts_with(':'))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && !hint_label(h).starts_with(':'))
         .collect();
 
     // Template substitution infers T = 1|2|3 from [1, 2, 3].
@@ -1349,7 +1349,7 @@ each([1, 2, 3], function ($x) {});
     // Verify the callable resolves — we should get ": void" return hint.
     let return_type_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(':'))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && hint_label(h).starts_with(':'))
         .collect();
     assert!(
         !return_type_hints.is_empty(),
@@ -1364,7 +1364,7 @@ each([1, 2, 3], function ($x) {});
 #[tokio::test]
 async fn closure_return_type_hint_template_substitution() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 /**
  * @template T
@@ -1379,7 +1379,7 @@ transform([1, 2, 3], function ($x) { return $x; });
     let all: Vec<_> = hints.iter().map(|h| (hint_label(h), h.kind)).collect();
     let return_hints: Vec<_> = hints
         .iter()
-        .filter(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(':'))
+        .filter(|h| h.kind == Some(InlayHintKind::Type) && hint_label(h).starts_with(':'))
         .collect();
     // Template substitution infers T = 1|2|3 from [1, 2, 3], so the
     // return type of callable(T): T becomes ": 1|2|3".
@@ -1399,7 +1399,7 @@ transform([1, 2, 3], function ($x) { return $x; });
 #[tokio::test]
 async fn closure_return_type_hint_integer_arithmetic_is_int() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test.php").unwrap();
+    let uri = Uri::parse("file:///test.php").unwrap();
     let text = r#"<?php
 /**
  * @template T
@@ -1416,7 +1416,7 @@ transform([1, 2, 3], function ($x) { return $x * 2; });
     // over the substituted `T`.
     let return_hint = hints
         .iter()
-        .find(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(':'));
+        .find(|h| h.kind == Some(InlayHintKind::Type) && hint_label(h).starts_with(':'));
     assert_eq!(
         return_hint.map(hint_label).as_deref(),
         Some(": int"),
@@ -1437,7 +1437,7 @@ async fn callable_return_invocation_no_wrong_hints() {
     // on `'test'` instead of suppressing the hint (bare `callable`
     // has no known parameter names).
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/callable_invoke.php").unwrap();
+    let uri = Uri::parse("file:///test/callable_invoke.php").unwrap();
     let text = r#"<?php
 function makeCallable(string $a, string $b): callable
 {
@@ -1482,7 +1482,7 @@ async fn callable_return_invocation_fully_qualified_closure() {
     // The fully-qualified `\Closure` return type spelling must be
     // recognised the same way as bare `Closure` and `callable`.
     let backend = create_test_backend();
-    let uri = Url::parse("file:///test/closure_invoke.php").unwrap();
+    let uri = Uri::parse("file:///test/closure_invoke.php").unwrap();
     let text = r#"<?php
 function makeClosure(string $a, string $b): \Closure
 {
@@ -1502,5 +1502,48 @@ makeClosure('1', '2')('test');
         a_count, 1,
         "Should have exactly 1 'a:' hint (outer call only), got {}: {:?}",
         a_count, line6_labels
+    );
+}
+
+/// The editor asks for hints as soon as it sends an edit, usually before
+/// the background parse has replaced the symbol map.  The old map's
+/// argument offsets must not be laid over the new text: here they would
+/// put a second `var1:` in front of the named argument the user just
+/// typed.
+#[tokio::test]
+async fn stale_symbol_map_produces_no_hints() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test/inlay.php").unwrap();
+    let before = r#"<?php
+function myFunc(string $var1): void {}
+myFunc($something);
+"#;
+    let after = before.replace("myFunc($something)", "myFunc(var1: $something)");
+
+    let hints = inlay_hints_for(&backend, &uri, before).await;
+    assert_eq!(labels(&hints_at_line(&hints, 2)), ["var1:"]);
+
+    let range = Range {
+        start: Position::new(0, 0),
+        end: Position::new(3, 0),
+    };
+    let stale = backend
+        .handle_inlay_hints(uri.as_ref(), &after, range)
+        .unwrap_or_default();
+    assert!(
+        stale.is_empty(),
+        "stale map must not produce hints, got {:?}",
+        stale.iter().map(hint_label).collect::<Vec<_>>()
+    );
+
+    // Once the background parse lands, the named argument needs no hint.
+    backend.update_ast(uri.as_str(), &after);
+    let fresh = backend
+        .handle_inlay_hints(uri.as_ref(), &after, range)
+        .unwrap_or_default();
+    assert!(
+        fresh.is_empty(),
+        "{:?}",
+        fresh.iter().map(hint_label).collect::<Vec<_>>()
     );
 }

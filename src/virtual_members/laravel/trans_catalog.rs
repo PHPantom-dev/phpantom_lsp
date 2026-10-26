@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{Location, Range, Url};
+use tower_lsp_server::gen_lsp_types::{Location, Range, Uri};
 
 use crate::Backend;
 use crate::text_position::LineIndex;
@@ -18,7 +18,7 @@ use super::trans_keys::{
 /// A language file shared by all the keys it declares.
 pub(crate) struct TranslationFile {
     /// The URI shared by this file's declarations.
-    pub uri: Url,
+    pub uri: Uri,
     /// The locale derived from the containing directory or JSON filename.
     pub locale: String,
     /// PHP group name, with its package namespace; JSON files have no group.

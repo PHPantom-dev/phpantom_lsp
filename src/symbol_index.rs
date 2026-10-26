@@ -258,7 +258,8 @@ impl SymbolIndex {
     }
 
     /// Replace what the indexes hold under the directory `tree` (given in
-    /// every spelling it has) with what a rescan of it found.
+    /// every spelling it has; a file stands for itself) with what a rescan
+    /// of it found.
     ///
     /// Each index is purged and refilled under one hold of its lock, so a
     /// lookup never sees the tree half gone.  The rescan's entries replace
@@ -275,9 +276,16 @@ impl SymbolIndex {
             constant_origins,
             package_roots: _,
         } = scan;
-        let uri_prefixes: Vec<String> = tree
+        // An entry of `tree` may also be a single file, which its own URI
+        // matches exactly.
+        let uri_prefixes: Vec<(String, String)> = tree
             .iter()
-            .map(|dir| crate::util::dir_uri_prefix(dir))
+            .map(|dir| {
+                (
+                    crate::util::path_to_uri(dir),
+                    crate::util::dir_uri_prefix(dir),
+                )
+            })
             .collect();
         let in_tree = |path: &PathBuf| tree.iter().any(|dir| path.starts_with(dir));
         {
@@ -285,7 +293,7 @@ impl SymbolIndex {
             index.retain(|_, uri| {
                 !uri_prefixes
                     .iter()
-                    .any(|prefix| uri.starts_with(prefix.as_str()))
+                    .any(|(exact, prefix)| uri == exact || uri.starts_with(prefix.as_str()))
             });
             merge_into(
                 &mut *index,

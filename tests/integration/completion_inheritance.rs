@@ -3,7 +3,7 @@ use crate::common::{
 };
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 static EXCEPTION_CHAIN_STUB: &str = r#"<?php
 class Exception
@@ -31,7 +31,7 @@ fn create_exception_chain_backend() -> Backend {
 async fn test_completion_inherits_public_and_protected_methods_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inherit.php").unwrap();
+    let uri = Uri::parse("file:///inherit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Animal {\n",
@@ -53,10 +53,10 @@ async fn test_completion_inherits_public_and_protected_methods_same_file() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -88,7 +88,7 @@ async fn test_completion_inherits_public_and_protected_methods_same_file() {
                 "Should NOT include inherited private 'digest'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -96,7 +96,7 @@ async fn test_completion_inherits_public_and_protected_methods_same_file() {
 async fn test_completion_inherits_properties_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inherit_props.php").unwrap();
+    let uri = Uri::parse("file:///inherit_props.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -118,10 +118,10 @@ async fn test_completion_inherits_properties_same_file() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.label.as_str())
                 .collect();
 
@@ -142,7 +142,7 @@ async fn test_completion_inherits_properties_same_file() {
                 "Should NOT include inherited private property"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -150,7 +150,7 @@ async fn test_completion_inherits_properties_same_file() {
 async fn test_completion_inherits_constants_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inherit_const.php").unwrap();
+    let uri = Uri::parse("file:///inherit_const.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -172,10 +172,10 @@ async fn test_completion_inherits_constants_same_file() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let const_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
+                .filter(|i| i.kind == Some(CompletionItemKind::Constant))
                 .map(|i| i.label.as_str())
                 .collect();
 
@@ -196,7 +196,7 @@ async fn test_completion_inherits_constants_same_file() {
                 "Should NOT include inherited private constant"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -204,7 +204,7 @@ async fn test_completion_inherits_constants_same_file() {
 async fn test_completion_child_method_overrides_parent() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///override.php").unwrap();
+    let uri = Uri::parse("file:///override.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -225,10 +225,10 @@ async fn test_completion_child_method_overrides_parent() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
 
             // 'greet' should appear exactly once (child's version)
@@ -257,7 +257,7 @@ async fn test_completion_child_method_overrides_parent() {
                 .collect();
             assert_eq!(hello_items.len(), 1, "Inherited 'hello' should appear once");
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -265,7 +265,7 @@ async fn test_completion_child_method_overrides_parent() {
 async fn test_completion_multi_level_inheritance_same_file() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///multi_level.php").unwrap();
+    let uri = Uri::parse("file:///multi_level.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Grandparent {\n",
@@ -290,10 +290,10 @@ async fn test_completion_multi_level_inheritance_same_file() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -326,7 +326,7 @@ async fn test_completion_multi_level_inheritance_same_file() {
                 "Should NOT include grandparent's private 'gpPrivate'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -334,7 +334,7 @@ async fn test_completion_multi_level_inheritance_same_file() {
 async fn test_completion_inherits_static_members() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///inherit_static.php").unwrap();
+    let uri = Uri::parse("file:///inherit_static.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -356,15 +356,15 @@ async fn test_completion_inherits_static_members() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.label.as_str())
                 .collect();
 
@@ -385,7 +385,7 @@ async fn test_completion_inherits_static_members() {
                 "Should include inherited protected static property"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -414,7 +414,7 @@ async fn test_completion_cross_file_inheritance_psr4() {
         )],
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\BaseModel;\n",
@@ -436,15 +436,15 @@ async fn test_completion_cross_file_inheritance_psr4() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.label.as_str())
                 .collect();
 
@@ -480,7 +480,7 @@ async fn test_completion_cross_file_inheritance_psr4() {
                 "Should NOT include inherited private 'internalLog'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -520,7 +520,7 @@ async fn test_completion_cross_file_multi_level_inheritance_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Middle;\n",
@@ -541,10 +541,10 @@ async fn test_completion_cross_file_multi_level_inheritance_psr4() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -569,7 +569,7 @@ async fn test_completion_cross_file_multi_level_inheritance_psr4() {
                 "Should NOT include grandparent's private 'basePrivate'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -596,7 +596,7 @@ async fn test_completion_override_across_files() {
         )],
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\ParentClass;\n",
@@ -614,10 +614,10 @@ async fn test_completion_override_across_files() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_items: Vec<&CompletionItem> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .collect();
 
             // 'render' should appear exactly once (child's version with $template param)
@@ -643,7 +643,7 @@ async fn test_completion_override_across_files() {
                 "'prepare' should be inherited from parent"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -652,7 +652,7 @@ async fn test_completion_no_parent_class_unchanged_behavior() {
     // Verify that classes without extends still work exactly as before
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///standalone.php").unwrap();
+    let uri = Uri::parse("file:///standalone.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Standalone {\n",
@@ -670,10 +670,10 @@ async fn test_completion_no_parent_class_unchanged_behavior() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -688,7 +688,7 @@ async fn test_completion_no_parent_class_unchanged_behavior() {
             assert!(method_names.contains(&"test"), "Should include 'test'");
             assert_eq!(method_names.len(), 3, "Should have exactly 3 methods");
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -696,7 +696,7 @@ async fn test_completion_no_parent_class_unchanged_behavior() {
 async fn test_completion_variable_of_child_type_includes_inherited() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///var_inherit.php").unwrap();
+    let uri = Uri::parse("file:///var_inherit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Vehicle {\n",
@@ -721,10 +721,10 @@ async fn test_completion_variable_of_child_type_includes_inherited() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -745,7 +745,7 @@ async fn test_completion_variable_of_child_type_includes_inherited() {
                 "Should NOT include inherited private 'internalDiag'"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -753,7 +753,7 @@ async fn test_completion_variable_of_child_type_includes_inherited() {
 async fn test_completion_magic_methods_sorted_after_regular() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///magic_inherit.php").unwrap();
+    let uri = Uri::parse("file:///magic_inherit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Base {\n",
@@ -774,10 +774,10 @@ async fn test_completion_magic_methods_sorted_after_regular() {
     assert!(result.is_some());
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -809,7 +809,7 @@ async fn test_completion_magic_methods_sorted_after_regular() {
                 "Regular method should sort before the magic method"
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -819,7 +819,7 @@ async fn test_completion_magic_methods_sorted_after_regular() {
 #[tokio::test]
 async fn test_static_return_type_resolved_to_caller_class() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///static_return.php").unwrap();
+    let uri = Uri::parse("file:///static_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Builder {\n",
@@ -842,14 +842,14 @@ async fn test_static_return_type_resolved_to_caller_class() {
 
     let result = completion_response(&backend, &uri, 12, 31, None).await;
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
 
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap())
         .collect();
 
@@ -909,7 +909,7 @@ async fn test_static_return_type_cross_file_psr4() {
         ],
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use Acme\\AppBuilder;\n",
@@ -925,14 +925,14 @@ async fn test_static_return_type_cross_file_psr4() {
 
     let result = completion_response(&backend, &uri, 5, 31, None).await;
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
 
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap())
         .collect();
 
@@ -958,7 +958,7 @@ async fn test_static_return_type_cross_file_psr4() {
 #[tokio::test]
 async fn test_static_return_type_chained_calls() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///static_chain.php").unwrap();
+    let uri = Uri::parse("file:///static_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Query {\n",
@@ -983,14 +983,14 @@ async fn test_static_return_type_chained_calls() {
 
     let result = completion_response(&backend, &uri, 14, 32, None).await;
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
 
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap())
         .collect();
 
@@ -1064,7 +1064,7 @@ async fn test_namespaced_static_method_return_type_chain() {
     );
 
     // LeadProvider:: should include inherited `query` from Model
-    let uri1 = Url::parse("file:///step1.php").unwrap();
+    let uri1 = Uri::parse("file:///step1.php").unwrap();
     let text1 = concat!(
         "<?php\n",
         "use App\\Models\\LeadProvider;\n",
@@ -1073,8 +1073,8 @@ async fn test_namespaced_static_method_return_type_chain() {
     open_php(&backend, &uri1, text1).await;
     let result1 = completion_response(&backend, &uri1, 2, 15, None).await;
     let items1 = match result1 {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
     let labels1: Vec<&str> = items1
@@ -1088,7 +1088,7 @@ async fn test_namespaced_static_method_return_type_chain() {
     );
 
     // Model::query()-> should resolve the FQN return type to Builder
-    let uri2 = Url::parse("file:///step2.php").unwrap();
+    let uri2 = Uri::parse("file:///step2.php").unwrap();
     let text2 = concat!(
         "<?php\n",
         "use App\\Models\\Model;\n",
@@ -1101,8 +1101,8 @@ async fn test_namespaced_static_method_return_type_chain() {
     open_php(&backend, &uri2, text2).await;
     let result2 = completion_response(&backend, &uri2, 4, 24, None).await;
     let items2 = match result2 {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
     let labels2: Vec<&str> = items2
@@ -1116,7 +1116,7 @@ async fn test_namespaced_static_method_return_type_chain() {
     );
 
     // The full chain: LeadProvider::query()-> through the parent's FQN return type
-    let uri3 = Url::parse("file:///step3.php").unwrap();
+    let uri3 = Uri::parse("file:///step3.php").unwrap();
     let text3 = concat!(
         "<?php\n",
         "use App\\Models\\LeadProvider;\n",
@@ -1129,8 +1129,8 @@ async fn test_namespaced_static_method_return_type_chain() {
     open_php(&backend, &uri3, text3).await;
     let result3 = completion_response(&backend, &uri3, 4, 31, None).await;
     let items3 = match result3 {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
     let labels3: Vec<&str> = items3
@@ -1155,7 +1155,7 @@ async fn test_namespaced_static_method_return_type_chain() {
 async fn test_interface_method_and_property_tags_visible_on_implementor() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///iface_virtual.php").unwrap();
+    let uri = Uri::parse("file:///iface_virtual.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1181,15 +1181,15 @@ async fn test_interface_method_and_property_tags_visible_on_implementor() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
                 .collect();
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
                 .collect();
 
@@ -1217,7 +1217,7 @@ async fn test_interface_method_and_property_tags_visible_on_implementor() {
                 prop_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1225,7 +1225,7 @@ async fn test_interface_method_and_property_tags_visible_on_implementor() {
 async fn test_interface_virtual_members_visible_on_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///iface_virtual_var.php").unwrap();
+    let uri = Uri::parse("file:///iface_virtual_var.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1255,15 +1255,15 @@ async fn test_interface_virtual_members_visible_on_variable() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
                 .collect();
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
                 .collect();
 
@@ -1303,7 +1303,7 @@ async fn test_interface_virtual_members_visible_on_variable() {
                 prop_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1311,7 +1311,7 @@ async fn test_interface_virtual_members_visible_on_variable() {
 async fn test_interface_virtual_members_visible_through_parent_chain() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///iface_parent_chain.php").unwrap();
+    let uri = Uri::parse("file:///iface_parent_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "/**\n",
@@ -1337,15 +1337,15 @@ async fn test_interface_virtual_members_visible_through_parent_chain() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
                 .collect();
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(i.label.as_str()))
                 .collect();
 
@@ -1370,7 +1370,7 @@ async fn test_interface_virtual_members_visible_through_parent_chain() {
                 prop_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1384,7 +1384,7 @@ async fn test_interface_virtual_members_visible_through_parent_chain() {
 async fn test_completion_deep_inheritance_through_stubs() {
     let backend = create_exception_chain_backend();
 
-    let uri = Url::parse("file:///deep_chain.php").unwrap();
+    let uri = Uri::parse("file:///deep_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class QueryException extends \\PDOException {\n",
@@ -1406,10 +1406,10 @@ async fn test_completion_deep_inheritance_through_stubs() {
     );
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1437,7 +1437,7 @@ async fn test_completion_deep_inheritance_through_stubs() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1449,7 +1449,7 @@ async fn test_completion_deep_inheritance_through_stubs() {
 #[tokio::test]
 async fn test_static_return_type_on_static_method_called_from_subclass() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///static_method_return.php").unwrap();
+    let uri = Uri::parse("file:///static_method_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Model {\n",
@@ -1472,14 +1472,14 @@ async fn test_static_return_type_on_static_method_called_from_subclass() {
 
     let result = completion_response(&backend, &uri, 12, 16, None).await;
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
 
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap())
         .collect();
 
@@ -1537,7 +1537,7 @@ async fn test_static_return_type_on_static_method_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\AdminUser;\n",
@@ -1553,14 +1553,14 @@ async fn test_static_return_type_on_static_method_cross_file() {
 
     let result = completion_response(&backend, &uri, 5, 16, None).await;
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
 
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap())
         .collect();
 
@@ -1581,7 +1581,7 @@ async fn test_static_return_type_on_static_method_cross_file() {
 #[tokio::test]
 async fn test_static_return_type_static_method_chained() {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///static_chain.php").unwrap();
+    let uri = Uri::parse("file:///static_chain.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Model {\n",
@@ -1601,14 +1601,14 @@ async fn test_static_return_type_static_method_chained() {
 
     let result = completion_response(&backend, &uri, 11, 37, None).await;
     let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
+        Some(CompletionResponse::CompletionItemList(items)) => items,
+        Some(CompletionResponse::CompletionList(list)) => list.items,
         None => vec![],
     };
 
     let method_names: Vec<&str> = items
         .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+        .filter(|i| i.kind == Some(CompletionItemKind::Method))
         .map(|i| i.filter_text.as_deref().unwrap())
         .collect();
 
@@ -1632,7 +1632,7 @@ async fn test_hover_shows_inherited_interface_return_type() {
     // even though the implementor only declares `: array`.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///hover_iface_ret.php").unwrap();
+    let uri = Uri::parse("file:///hover_iface_ret.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Pen { public function write(): void {} }\n",      // 1
@@ -1660,7 +1660,7 @@ async fn test_hover_shows_inherited_interface_return_type() {
     assert!(result.is_some(), "Hover should return a result");
 
     let hover = result.unwrap();
-    if let HoverContents::Markup(markup) = hover.contents {
+    if let Contents::MarkupContent(markup) = hover.contents {
         let value = &markup.value;
         assert!(
             value.contains("list<Pen>"),
@@ -1668,7 +1668,7 @@ async fn test_hover_shows_inherited_interface_return_type() {
             value
         );
     } else {
-        panic!("Expected HoverContents::Markup");
+        panic!("Expected Contents::MarkupContent");
     }
 }
 
@@ -1678,7 +1678,7 @@ async fn test_hover_shows_inherited_parent_return_type() {
     // inherited from the parent class.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///hover_parent_ret.php").unwrap();
+    let uri = Uri::parse("file:///hover_parent_ret.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Pen { public function write(): void {} }\n",      // 1
@@ -1706,7 +1706,7 @@ async fn test_hover_shows_inherited_parent_return_type() {
     assert!(result.is_some(), "Hover should return a result");
 
     let hover = result.unwrap();
-    if let HoverContents::Markup(markup) = hover.contents {
+    if let Contents::MarkupContent(markup) = hover.contents {
         let value = &markup.value;
         assert!(
             value.contains("list<Pen>"),
@@ -1714,7 +1714,7 @@ async fn test_hover_shows_inherited_parent_return_type() {
             value
         );
     } else {
-        panic!("Expected HoverContents::Markup");
+        panic!("Expected Contents::MarkupContent");
     }
 }
 
@@ -1724,7 +1724,7 @@ async fn test_hover_shows_inherited_param_type() {
     // the parameter, inherited from the interface (with renamed param).
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///hover_iface_param.php").unwrap();
+    let uri = Uri::parse("file:///hover_iface_param.php").unwrap();
     let text = concat!(
         "<?php\n",                                             // 0
         "class Pen { public function write(): void {} }\n",    // 1
@@ -1752,7 +1752,7 @@ async fn test_hover_shows_inherited_param_type() {
     assert!(result.is_some(), "Hover should return a result");
 
     let hover = result.unwrap();
-    if let HoverContents::Markup(markup) = hover.contents {
+    if let Contents::MarkupContent(markup) = hover.contents {
         let value = &markup.value;
         assert!(
             value.contains("list<Pen>"),
@@ -1760,7 +1760,7 @@ async fn test_hover_shows_inherited_param_type() {
             value
         );
     } else {
-        panic!("Expected HoverContents::Markup");
+        panic!("Expected Contents::MarkupContent");
     }
 }
 
@@ -1770,7 +1770,7 @@ async fn test_interface_docblock_return_type_propagates_to_implementor() {
     // The enriched return type should show `list<Pen>` on the implementor's method.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///iface_return.php").unwrap();
+    let uri = Uri::parse("file:///iface_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen { public function write(): void {} }\n",
@@ -1792,7 +1792,7 @@ async fn test_interface_docblock_return_type_propagates_to_implementor() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let get_pens = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("getPens"))
@@ -1806,7 +1806,7 @@ async fn test_interface_docblock_return_type_propagates_to_implementor() {
                 detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1816,7 +1816,7 @@ async fn test_parent_docblock_return_type_propagates_to_child() {
     // The enriched return type should show `list<Pen>` on the child's method.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_return.php").unwrap();
+    let uri = Uri::parse("file:///parent_return.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen { public function write(): void {} }\n",
@@ -1838,7 +1838,7 @@ async fn test_parent_docblock_return_type_propagates_to_child() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let get_pens = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("getPens"))
@@ -1852,7 +1852,7 @@ async fn test_parent_docblock_return_type_propagates_to_child() {
                 detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1862,7 +1862,7 @@ async fn test_child_own_docblock_return_type_wins_over_parent() {
     // The child's own docblock should win.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///child_wins.php").unwrap();
+    let uri = Uri::parse("file:///child_wins.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog { public function bark(): void {} }\n",
@@ -1886,7 +1886,7 @@ async fn test_child_own_docblock_return_type_wins_over_parent() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let get_animals = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("getAnimals"))
@@ -1904,7 +1904,7 @@ async fn test_child_own_docblock_return_type_wins_over_parent() {
                 detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1913,7 +1913,7 @@ async fn test_parent_docblock_param_type_propagates_to_child() {
     // Parent has `@param list<Pen> $pens`, child just has `: array $pens`.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_param.php").unwrap();
+    let uri = Uri::parse("file:///parent_param.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Pen { public function write(): void {} }\n",      // 1
@@ -1937,10 +1937,10 @@ async fn test_parent_docblock_param_type_propagates_to_child() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1951,7 +1951,7 @@ async fn test_parent_docblock_param_type_propagates_to_child() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1961,7 +1961,7 @@ async fn test_interface_docblock_return_type_with_generics() {
     // substitute the template param before propagating.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///iface_generic.php").unwrap();
+    let uri = Uri::parse("file:///iface_generic.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class Pen { public function write(): void {} }\n",       // 1
@@ -1990,7 +1990,7 @@ async fn test_interface_docblock_return_type_with_generics() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let get_items = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("getItems"))
@@ -2004,7 +2004,7 @@ async fn test_interface_docblock_return_type_with_generics() {
                 detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2045,7 +2045,7 @@ async fn test_parent_docblock_return_type_propagates_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///app.php").unwrap();
+    let uri = Uri::parse("file:///app.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "use App\\BasePenHolder;\n",                             // 1
@@ -2063,7 +2063,7 @@ async fn test_parent_docblock_return_type_propagates_cross_file() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let get_pens = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("getPens"))
@@ -2076,7 +2076,7 @@ async fn test_parent_docblock_return_type_propagates_cross_file() {
                 detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2086,7 +2086,7 @@ async fn test_grandparent_docblock_return_type_propagates_through_chain() {
     // The type should flow through the entire chain.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///grandparent_return.php").unwrap();
+    let uri = Uri::parse("file:///grandparent_return.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Pen { public function write(): void {} }\n",      // 1
@@ -2111,7 +2111,7 @@ async fn test_grandparent_docblock_return_type_propagates_through_chain() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let get_pens = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("getPens"))
@@ -2125,7 +2125,7 @@ async fn test_grandparent_docblock_return_type_propagates_through_chain() {
                 detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2137,7 +2137,7 @@ async fn test_interface_description_propagates_to_implementor() {
     // may re-resolve from the local parse tree).
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///iface_desc.php").unwrap();
+    let uri = Uri::parse("file:///iface_desc.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Pen { public function write(): void {} }\n",      // 1
@@ -2162,7 +2162,7 @@ async fn test_interface_description_propagates_to_implementor() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let get_pens = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("getPens"))
@@ -2175,7 +2175,7 @@ async fn test_interface_description_propagates_to_implementor() {
                 detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2185,7 +2185,7 @@ async fn test_parent_description_propagates_to_child() {
     // Verify the enriched type flows through.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///parent_desc.php").unwrap();
+    let uri = Uri::parse("file:///parent_desc.php").unwrap();
     let text = concat!(
         "<?php\n",                                                // 0
         "class Pen { public function write(): void {} }\n",       // 1
@@ -2210,7 +2210,7 @@ async fn test_parent_description_propagates_to_child() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let find_pens = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("findPens"))
@@ -2223,7 +2223,7 @@ async fn test_parent_description_propagates_to_child() {
                 detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2233,7 +2233,7 @@ async fn test_no_return_type_at_all_inherits_from_interface() {
     // Interface has `@return list<Pen>`. Should still propagate.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///no_return.php").unwrap();
+    let uri = Uri::parse("file:///no_return.php").unwrap();
     let text = concat!(
         "<?php\n",                                          // 0
         "class Pen { public function write(): void {} }\n", // 1
@@ -2255,7 +2255,7 @@ async fn test_no_return_type_at_all_inherits_from_interface() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let get_pens = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("getPens"))
@@ -2269,7 +2269,7 @@ async fn test_no_return_type_at_all_inherits_from_interface() {
                 detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2279,7 +2279,7 @@ async fn test_return_type_detail_shows_enriched_type() {
     // return type from the interface, not just `array`.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///detail_enriched.php").unwrap();
+    let uri = Uri::parse("file:///detail_enriched.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Pen { public function write(): void {} }\n",
@@ -2301,7 +2301,7 @@ async fn test_return_type_detail_shows_enriched_type() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let get_pens = items
                 .iter()
                 .find(|i| i.filter_text.as_deref() == Some("getPens"))
@@ -2315,7 +2315,7 @@ async fn test_return_type_detail_shows_enriched_type() {
                 detail
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2325,7 +2325,7 @@ async fn test_child_own_docblock_param_type_wins_over_interface() {
     // The child's own docblock should win.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///child_param_wins.php").unwrap();
+    let uri = Uri::parse("file:///child_param_wins.php").unwrap();
     let text = concat!(
         "<?php\n",                                              // 0
         "class Dog { public function bark(): void {} }\n",      // 1
@@ -2351,10 +2351,10 @@ async fn test_child_own_docblock_param_type_wins_over_interface() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2369,7 +2369,7 @@ async fn test_child_own_docblock_param_type_wins_over_interface() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2379,7 +2379,7 @@ async fn test_inherited_interface_return_type_enables_array_element_completion()
     // `$holder->getPens()[0]->` should complete Pen members.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_iface.php").unwrap();
+    let uri = Uri::parse("file:///chain_iface.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Pen { public function write(): void {} }\n",      // 1
@@ -2408,10 +2408,10 @@ async fn test_inherited_interface_return_type_enables_array_element_completion()
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2422,7 +2422,7 @@ async fn test_inherited_interface_return_type_enables_array_element_completion()
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2432,7 +2432,7 @@ async fn test_inherited_parent_return_type_enables_array_element_completion() {
     // `$child->getPens()[0]->` should complete Pen members.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_parent.php").unwrap();
+    let uri = Uri::parse("file:///chain_parent.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Pen { public function write(): void {} }\n",      // 1
@@ -2461,10 +2461,10 @@ async fn test_inherited_parent_return_type_enables_array_element_completion() {
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2475,7 +2475,7 @@ async fn test_inherited_parent_return_type_enables_array_element_completion() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -2485,7 +2485,7 @@ async fn test_inherited_grandparent_return_type_enables_array_element_completion
     // `$deep->getPens()[0]->` should complete Pen members.
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///chain_grandparent.php").unwrap();
+    let uri = Uri::parse("file:///chain_grandparent.php").unwrap();
     let text = concat!(
         "<?php\n",                                               // 0
         "class Pen { public function write(): void {} }\n",      // 1
@@ -2517,10 +2517,10 @@ async fn test_inherited_grandparent_return_type_enables_array_element_completion
     assert!(result.is_some(), "Completion should return results");
 
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -2531,6 +2531,6 @@ async fn test_inherited_grandparent_return_type_enables_array_element_completion
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }

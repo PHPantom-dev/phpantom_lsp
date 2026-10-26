@@ -140,6 +140,8 @@ pub(crate) fn resolve_auth_user_type(
         .auth_user_type_cache
         .write()
         .insert(key, result.clone());
+    // A class loaded during the computation saw the seeded `None`.
+    backend.laravel.note_config_facts_change();
     result
 }
 
@@ -204,7 +206,7 @@ fn read_auth_config(backend: &Backend) -> Option<String> {
         return None;
     }
     // Prefer an open editor buffer (keyed by an absolute file URI); fall back
-    // to disk.  `Url::from_file_path` requires an absolute path, so relative
+    // to disk.  `Uri::from_file_path` requires an absolute path, so relative
     // workspace roots (e.g. `analyze --project-root`) go straight to disk.
     if let Some(uri) = crate::util::path_to_url(&path)
         && let Some(content) = backend.get_file_content(uri.as_ref())

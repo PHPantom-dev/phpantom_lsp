@@ -1,9 +1,10 @@
 #[cfg(test)]
 mod tests {
     use crate::common::collect_diagnostics_with;
+    use crate::common::message_text;
     use phpantom_lsp::Backend;
     use phpantom_lsp::types::PhpVersion;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     /// Helper: create a test backend, open a file, and collect
     /// unused-variable diagnostics.
@@ -62,7 +63,7 @@ function foo() {
             PhpVersion::new(8, 0),
         );
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("$e"));
+        assert!(message_text(&diags[0].message).contains("$e"));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -79,8 +80,8 @@ function foo() {
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("$x"));
-        assert!(diags[0].message.contains("Unused variable"));
+        assert!(message_text(&diags[0].message).contains("$x"));
+        assert!(message_text(&diags[0].message).contains("Unused variable"));
     }
 
     #[test]
@@ -225,7 +226,7 @@ class Foo {
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("$unused"));
+        assert!(message_text(&diags[0].message).contains("$unused"));
     }
 
     #[test]
@@ -280,7 +281,11 @@ function foo($items) {
 "#,
         );
         // $key is unused
-        assert!(diags.iter().any(|d| d.message.contains("$key")));
+        assert!(
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$key"))
+        );
     }
 
     #[test]
@@ -294,7 +299,9 @@ function test(string $domain): bool {
 "#,
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("$dummy")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$dummy")),
             "Got unexpected diagnostic for $dummy: {:?}",
             diags
         );
@@ -314,7 +321,9 @@ function test() {
 "#,
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("$value")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$value")),
             "Got unexpected diagnostic for $value: {:?}",
             diags
         );
@@ -346,10 +355,10 @@ function foo() {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("unused_variable".to_string()))
+            Some(Code::String("unused_variable".to_string()))
         );
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::HINT));
-        assert_eq!(diags[0].tags, Some(vec![DiagnosticTag::UNNECESSARY]));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Hint));
+        assert_eq!(diags[0].tags, Some(vec![DiagnosticTag::Unnecessary]));
         assert_eq!(diags[0].source, Some("phpantom".to_string()));
     }
 
@@ -380,7 +389,7 @@ function foo() {
 "#,
         );
         assert_eq!(diags.len(), 2);
-        let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+        let msgs: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
         assert!(msgs.iter().any(|m| m.contains("$a")));
         assert!(msgs.iter().any(|m| m.contains("$b")));
     }
@@ -415,7 +424,11 @@ function foo() {
 }
 "#,
         );
-        assert!(diags.iter().any(|d| d.message.contains("$e")));
+        assert!(
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$e"))
+        );
     }
 
     #[test]
@@ -431,7 +444,11 @@ function foo() {
 }
 "#,
         );
-        assert!(!diags.iter().any(|d| d.message.contains("$e")));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$e"))
+        );
     }
 
     #[test]
@@ -447,7 +464,10 @@ function foo() {
 }
 "#,
         );
-        let e_diags: Vec<_> = diags.iter().filter(|d| d.message.contains("$e")).collect();
+        let e_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| message_text(&d.message).contains("$e"))
+            .collect();
         assert_eq!(
             e_diags.len(),
             1,
@@ -550,7 +570,9 @@ function foo() {
 "#,
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("$item")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$item")),
             "closure param used in body should not be flagged: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -568,7 +590,9 @@ function foo($query) {
 "#,
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("$q")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$q")),
             "closure param used for method call should not be flagged: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -591,7 +615,9 @@ class Repo {
 "#,
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("$join")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$join")),
             "join closure param should not be flagged: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -612,7 +638,9 @@ function foo() {
 "#,
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("$item")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$item")),
             "closure params should not be flagged without suppression support: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -632,7 +660,9 @@ function foo($query) {
         );
         // $q should not appear in any diagnostic
         assert!(
-            !diags.iter().any(|d| d.message.contains("$q")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$q")),
             "closure param should not leak to outer scope: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -654,7 +684,9 @@ function foo() {
 "#,
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("$lastId")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$lastId")),
             "by-reference capture should not be flagged unused: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -676,7 +708,9 @@ function foo(array $items) {
 "#,
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("$total")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$total")),
             "by-reference capture accumulator should not be flagged: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -697,7 +731,9 @@ function foo() {
 "#,
         );
         assert!(
-            diags.iter().any(|d| d.message.contains("$x")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$x")),
             "dead by-value capture write should still be flagged: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -776,7 +812,9 @@ function foo() {
 "#,
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("$filePath")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$filePath")),
             "used list-destructured variable should not be flagged: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -793,7 +831,9 @@ function foo() {
 "#,
         );
         assert!(
-            diags.iter().any(|d| d.message.contains("$fileId")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$fileId")),
             "unused list-destructured variable should be flagged: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -815,7 +855,10 @@ function foo() {
         );
         // Only $fn should not be flagged; $x is used inside the arrow fn.
         // $x should not appear as an outer-scope unused variable.
-        let x_diags: Vec<_> = diags.iter().filter(|d| d.message.contains("$x")).collect();
+        let x_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| message_text(&d.message).contains("$x"))
+            .collect();
         assert!(
             x_diags.is_empty(),
             "arrow fn param should not leak to outer scope: {:?}",
@@ -843,7 +886,7 @@ function foo() {
         );
         let exception_diags: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("$exception"))
+            .filter(|d| message_text(&d.message).contains("$exception"))
             .collect();
         assert_eq!(
             exception_diags.len(),
@@ -874,7 +917,7 @@ function foo() {
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("$unused"));
+        assert!(message_text(&diags[0].message).contains("$unused"));
     }
 
     #[test]
@@ -907,7 +950,7 @@ function foo() {
 "#,
         );
         assert_eq!(diags.len(), 1, "got: {diags:?}");
-        assert!(diags[0].message.contains("$unused"));
+        assert!(message_text(&diags[0].message).contains("$unused"));
     }
 
     #[test]
@@ -989,7 +1032,7 @@ function foo() {
 "#,
         );
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("$inner"));
+        assert!(message_text(&diags[0].message).contains("$inner"));
     }
 
     #[test]
@@ -1050,6 +1093,6 @@ function boot(string $file) {
 "#,
         );
         assert_eq!(diags.len(), 1, "got: {diags:?}");
-        assert!(diags[0].message.contains("$outer"));
+        assert!(message_text(&diags[0].message).contains("$outer"));
     }
 }

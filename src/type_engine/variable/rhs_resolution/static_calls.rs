@@ -132,6 +132,17 @@ fn static_call_on_class(
     let owner = bound_owner.as_deref().unwrap_or(owner);
 
     if let Some(argument_list) = static_call.argument_list {
+        // The stub can only say `Closure`; the closure it makes has the
+        // signature of the callable it is handed, as `$callable(...)` does.
+        if method_name.eq_ignore_ascii_case("fromCallable")
+            && owner.fqn() == "Closure"
+            && let Some(callable) = crate::call_args::first_param_arg(argument_list, "callback")
+        {
+            return super::closure_value(
+                super::calls::closure_from_callable(callable.value(), ctx),
+                ctx,
+            );
+        }
         if let Some(result) =
             try_resolve_config_method_type(&owner.fqn(), method_name, argument_list, ctx)
         {

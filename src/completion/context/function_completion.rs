@@ -4,7 +4,7 @@
 //! functions (both user-defined and built-in PHP stubs).
 use std::collections::HashSet;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::util::{short_name, strip_fqn_prefix};
@@ -65,7 +65,7 @@ impl FunctionItemBuilder {
     }
 
     fn snippet(mut self) -> Self {
-        self.insert_text_format = Some(InsertTextFormat::SNIPPET);
+        self.insert_text_format = Some(InsertTextFormat::Snippet);
         self
     }
 
@@ -91,7 +91,7 @@ impl FunctionItemBuilder {
         .ok();
         CompletionItem {
             label: self.label,
-            kind: Some(CompletionItemKind::FUNCTION),
+            kind: Some(CompletionItemKind::Function),
             detail,
             insert_text: Some(self.insert_text),
             insert_text_format: self.insert_text_format,
@@ -124,7 +124,7 @@ fn build_use_import_item(
     .ok();
     CompletionItem {
         label,
-        kind: Some(CompletionItemKind::FUNCTION),
+        kind: Some(CompletionItemKind::Function),
         insert_text: Some(fqn.to_string()),
         filter_text: Some(fqn.to_string()),
         sort_text: Some(format!("{}_{}", sort_prefix, fqn.to_lowercase())),

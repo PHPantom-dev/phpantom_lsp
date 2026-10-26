@@ -9,7 +9,7 @@
 use crate::common::{
     create_test_backend, extract_edit_text, find_actions, get_code_actions_at, lsp_pos_to_offset,
 };
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -233,10 +233,7 @@ $result = isset($x) ? $x : 'default';
     let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
-    assert_eq!(
-        simplify[0].kind,
-        Some(CodeActionKind::new("refactor.rewrite"))
-    );
+    assert_eq!(simplify[0].kind, Some(CodeActionKind::RefactorRewrite));
 }
 
 #[test]

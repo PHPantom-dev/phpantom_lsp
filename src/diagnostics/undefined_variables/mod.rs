@@ -53,7 +53,7 @@ use std::collections::HashSet;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::Fqn;
@@ -599,7 +599,7 @@ fn check_scope(
 
             ctx.diagnostics.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 UNKNOWN_VARIABLE_CODE,
                 message,
             ));

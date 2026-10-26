@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::blade::use_directive::{
     UseDirective, first_string_literal, group_members, use_directives,

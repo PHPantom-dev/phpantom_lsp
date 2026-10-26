@@ -1,5 +1,5 @@
 use super::*;
-use tower_lsp::lsp_types::Position;
+use tower_lsp_server::gen_lsp_types::Position;
 
 /// Resolve the lexical position the completion handler would pass in, then
 /// detect the Eloquent string context there.

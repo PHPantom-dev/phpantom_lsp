@@ -1,4 +1,4 @@
-use tower_lsp::lsp_types::{Location, Position};
+use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
 

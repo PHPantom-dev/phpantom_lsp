@@ -3,21 +3,21 @@
 //! `diagnostics_compound_narrowing`).
 
 use crate::common::{completion_response, create_test_backend, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 /// Open `text`, request completion at `(line, character)`, and return the
 /// method names offered.
 async fn completion_methods(text: &str, line: u32, character: u32) -> Vec<String> {
     let backend = create_test_backend();
-    let uri = Url::parse("file:///compound.php").unwrap();
+    let uri = Uri::parse("file:///compound.php").unwrap();
     open_php(&backend, &uri, text).await;
 
     let result = completion_response(&backend, &uri, line, character, None).await;
 
     match result {
-        Some(CompletionResponse::Array(items)) => items
+        Some(CompletionResponse::CompletionItemList(items)) => items
             .iter()
-            .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+            .filter(|i| i.kind == Some(CompletionItemKind::Method))
             .filter_map(|i| i.filter_text.clone())
             .collect(),
         _ => Vec::new(),

@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use tower_lsp::lsp_types::{FileChangeType, MessageType};
+use tower_lsp_server::gen_lsp_types::{FileChangeType, MessageType};
 
 use crate::Backend;
 
@@ -24,7 +24,7 @@ impl Backend {
                 Ok(index) => index,
                 Err(err) => {
                     self.log_detached(
-                        MessageType::WARNING,
+                        MessageType::Warning,
                         format!("Failed to reload Laravel schema dumps: {}", err),
                     );
                     return;
@@ -53,14 +53,14 @@ impl Backend {
         // A file that cannot be read is left as the index has it.
         let mut contents: Vec<(&PathBuf, Option<String>)> = Vec::with_capacity(changes.len());
         for (path, change_type) in changes {
-            let content = if *change_type == FileChangeType::DELETED {
+            let content = if *change_type == FileChangeType::Deleted {
                 None
             } else {
                 match std::fs::read_to_string(path) {
                     Ok(content) => Some(content),
                     Err(err) => {
                         self.log_detached(
-                            MessageType::WARNING,
+                            MessageType::Warning,
                             format!("Failed to read migration file {}: {}", path.display(), err),
                         );
                         continue;

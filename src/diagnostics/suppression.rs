@@ -3,7 +3,7 @@
 //! suppression, cross-source overlap deduplication/ordering, and
 //! `@phpantom-ignore` comment suppression.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::text_position::ranges_overlap;
@@ -79,7 +79,7 @@ pub(crate) fn suppress_imprecise_overlaps(diagnostics: &mut Vec<Diagnostic>) {
             d.code
                 .as_ref()
                 .map(|c| match c {
-                    NumberOrString::String(s) => priority_codes.contains(&s.as_str()),
+                    Code::String(s) => priority_codes.contains(&s.as_str()),
                     _ => false,
                 })
                 .unwrap_or(false)
@@ -92,7 +92,7 @@ pub(crate) fn suppress_imprecise_overlaps(diagnostics: &mut Vec<Diagnostic>) {
             .code
             .as_ref()
             .map(|c| match c {
-                NumberOrString::String(s) => s == "unresolved_member_access",
+                Code::String(s) => s == "unresolved_member_access",
                 _ => false,
             })
             .unwrap_or(false);
@@ -134,10 +134,10 @@ pub(crate) fn suppress_imprecise_overlaps(diagnostics: &mut Vec<Diagnostic>) {
 /// take precedence.
 fn severity_rank(d: &Diagnostic) -> u8 {
     match d.severity {
-        Some(DiagnosticSeverity::ERROR) => 0,
-        Some(DiagnosticSeverity::WARNING) => 1,
-        Some(DiagnosticSeverity::INFORMATION) => 2,
-        Some(DiagnosticSeverity::HINT) => 3,
+        Some(DiagnosticSeverity::Error) => 0,
+        Some(DiagnosticSeverity::Warning) => 1,
+        Some(DiagnosticSeverity::Information) => 2,
+        Some(DiagnosticSeverity::Hint) => 3,
         _ => 4,
     }
 }
@@ -234,7 +234,7 @@ pub(crate) fn filter_ignored_by_comment(diagnostics: &mut Vec<Diagnostic>, conte
                 Some(code_list) => {
                     // Check if this diagnostic's code is in the list.
                     let diag_code = d.code.as_ref().and_then(|c| match c {
-                        NumberOrString::String(s) => Some(s.as_str()),
+                        Code::String(s) => Some(s.as_str()),
                         _ => None,
                     });
                     if let Some(dc) = diag_code {
@@ -278,10 +278,10 @@ mod tests {
         Diagnostic {
             range,
             severity: Some(severity),
-            code: Some(NumberOrString::String(code.to_string())),
+            code: Some(Code::String(code.to_string())),
             code_description: None,
             source: Some("phpantom".to_string()),
-            message: message.to_string(),
+            message: message.to_string().into(),
             related_information: None,
             tags: None,
             data: None,
@@ -335,13 +335,13 @@ mod tests {
         let mut diags = vec![
             make_diagnostic(
                 range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 "unknown_class",
                 "Unknown class X",
             ),
             make_diagnostic(
                 range,
-                DiagnosticSeverity::HINT,
+                DiagnosticSeverity::Hint,
                 "unresolved_member_access",
                 "Unresolved member access on X",
             ),
@@ -350,7 +350,7 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("unknown_class".to_string()))
+            Some(Code::String("unknown_class".to_string()))
         );
     }
 
@@ -360,13 +360,13 @@ mod tests {
         let mut diags = vec![
             make_diagnostic(
                 range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 "unknown_member",
                 "Unknown member foo",
             ),
             make_diagnostic(
                 range,
-                DiagnosticSeverity::HINT,
+                DiagnosticSeverity::Hint,
                 "unresolved_member_access",
                 "Unresolved member access",
             ),
@@ -375,7 +375,7 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("unknown_member".to_string()))
+            Some(Code::String("unknown_member".to_string()))
         );
     }
 
@@ -386,13 +386,13 @@ mod tests {
         let mut diags = vec![
             make_diagnostic(
                 range_outer,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 "scalar_member_access",
                 "Cannot access member on scalar",
             ),
             make_diagnostic(
                 range_inner,
-                DiagnosticSeverity::HINT,
+                DiagnosticSeverity::Hint,
                 "unresolved_member_access",
                 "Unresolved member access",
             ),
@@ -401,7 +401,7 @@ mod tests {
         assert_eq!(diags.len(), 1);
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String("scalar_member_access".to_string()))
+            Some(Code::String("scalar_member_access".to_string()))
         );
     }
 
@@ -410,7 +410,7 @@ mod tests {
         let range = make_range(5, 0, 5, 15);
         let mut diags = vec![make_diagnostic(
             range,
-            DiagnosticSeverity::HINT,
+            DiagnosticSeverity::Hint,
             "unresolved_member_access",
             "Unresolved member access",
         )];
@@ -423,13 +423,13 @@ mod tests {
         let mut diags = vec![
             make_diagnostic(
                 make_range(5, 0, 5, 10),
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 "unknown_class",
                 "Unknown class X",
             ),
             make_diagnostic(
                 make_range(10, 0, 10, 10),
-                DiagnosticSeverity::HINT,
+                DiagnosticSeverity::Hint,
                 "unresolved_member_access",
                 "Unresolved member access on Y",
             ),
@@ -444,25 +444,25 @@ mod tests {
         let mut diags = vec![
             make_diagnostic(
                 range,
-                DiagnosticSeverity::WARNING,
+                DiagnosticSeverity::Warning,
                 "unknown_class",
                 "Unknown class X",
             ),
             make_diagnostic(
                 range,
-                DiagnosticSeverity::HINT,
+                DiagnosticSeverity::Hint,
                 "unresolved_member_access",
                 "Unresolved 1",
             ),
             make_diagnostic(
                 range,
-                DiagnosticSeverity::HINT,
+                DiagnosticSeverity::Hint,
                 "unresolved_member_access",
                 "Unresolved 2",
             ),
             make_diagnostic(
                 make_range(20, 0, 20, 10),
-                DiagnosticSeverity::HINT,
+                DiagnosticSeverity::Hint,
                 "unresolved_member_access",
                 "Unresolved 3 (different range)",
             ),
@@ -483,18 +483,20 @@ mod tests {
     fn keeps_full_line_phpstan_with_precise_diagnostic_on_same_line() {
         let phpstan = Diagnostic {
             range: make_range(5, 0, 5, u32::MAX),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("argument.type".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("argument.type".to_string())),
             source: Some("phpstan".to_string()),
-            message: "Parameter #1 $x expects int, string given.".to_string(),
+            message: "Parameter #1 $x expects int, string given."
+                .to_string()
+                .into(),
             ..Default::default()
         };
         let precise = Diagnostic {
             range: make_range(5, 10, 5, 20),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("unknown_class".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("unknown_class".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Class 'Foo' not found".to_string(),
+            message: "Class 'Foo' not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan.clone(), precise.clone()];
@@ -511,18 +513,20 @@ mod tests {
         // of which tool reported it or how precise its range is.
         let full_line_error = Diagnostic {
             range: make_range(5, 0, 5, u32::MAX),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("argument.type".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("argument.type".to_string())),
             source: Some("phpstan".to_string()),
-            message: "Parameter #1 $x expects int, string given.".to_string(),
+            message: "Parameter #1 $x expects int, string given."
+                .to_string()
+                .into(),
             ..Default::default()
         };
         let precise_warning = Diagnostic {
             range: make_range(5, 10, 5, 20),
-            severity: Some(DiagnosticSeverity::WARNING),
-            code: Some(NumberOrString::String("unknown_member".to_string())),
+            severity: Some(DiagnosticSeverity::Warning),
+            code: Some(Code::String("unknown_member".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Method 'foo' not found".to_string(),
+            message: "Method 'foo' not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![precise_warning.clone(), full_line_error.clone()];
@@ -534,18 +538,18 @@ mod tests {
     fn keeps_phpstan_type_dump_with_unknown_function() {
         let dump = Diagnostic {
             range: make_range(5, 0, 5, u32::MAX),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("phpstan.dumpType".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("phpstan.dumpType".to_string())),
             source: Some("phpstan".to_string()),
-            message: "Dumped type: Foo".to_string(),
+            message: "Dumped type: Foo".to_string().into(),
             ..Default::default()
         };
         let unknown_function = Diagnostic {
             range: make_range(5, 0, 5, 19),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("unknown_function".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("unknown_function".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Unknown function PHPStan\\dumpType".to_string(),
+            message: "Unknown function PHPStan\\dumpType".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![dump.clone(), unknown_function.clone()];
@@ -559,18 +563,18 @@ mod tests {
     fn keeps_full_line_diagnostic_regardless_of_code() {
         let phpstan = Diagnostic {
             range: make_range(5, 0, 5, u32::MAX),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("class.prefixed".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("class.prefixed".to_string())),
             source: Some("phpstan".to_string()),
-            message: "Class prefixed with vendor namespace.".to_string(),
+            message: "Class prefixed with vendor namespace.".to_string().into(),
             ..Default::default()
         };
         let syntax_error = Diagnostic {
             range: make_range(5, 3, 5, 10),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("syntax_error".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("syntax_error".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Syntax error: unexpected token `->`".to_string(),
+            message: "Syntax error: unexpected token `->`".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan, syntax_error.clone()];
@@ -582,18 +586,20 @@ mod tests {
     fn keeps_full_line_phpstan_when_no_precise_diagnostic_on_line() {
         let phpstan = Diagnostic {
             range: make_range(5, 0, 5, u32::MAX),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("argument.type".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("argument.type".to_string())),
             source: Some("phpstan".to_string()),
-            message: "Parameter #1 $x expects int, string given.".to_string(),
+            message: "Parameter #1 $x expects int, string given."
+                .to_string()
+                .into(),
             ..Default::default()
         };
         let precise_other_line = Diagnostic {
             range: make_range(10, 3, 10, 15),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("unknown_class".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("unknown_class".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Class 'Bar' not found".to_string(),
+            message: "Class 'Bar' not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan.clone(), precise_other_line.clone()];
@@ -606,18 +612,20 @@ mod tests {
         // If a future PHPStan version provides column info, don't suppress it.
         let phpstan_precise = Diagnostic {
             range: make_range(5, 8, 5, 20),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("argument.type".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("argument.type".to_string())),
             source: Some("phpstan".to_string()),
-            message: "Parameter #1 $x expects int, string given.".to_string(),
+            message: "Parameter #1 $x expects int, string given."
+                .to_string()
+                .into(),
             ..Default::default()
         };
         let native_precise = Diagnostic {
             range: make_range(5, 3, 5, 10),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("unknown_class".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("unknown_class".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Class 'Foo' not found".to_string(),
+            message: "Class 'Foo' not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan_precise.clone(), native_precise.clone()];
@@ -629,26 +637,26 @@ mod tests {
     fn keeps_multiple_full_line_diags_when_precise_exists() {
         let phpstan1 = Diagnostic {
             range: make_range(5, 0, 5, u32::MAX),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("argument.type".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("argument.type".to_string())),
             source: Some("phpstan".to_string()),
-            message: "Error one".to_string(),
+            message: "Error one".to_string().into(),
             ..Default::default()
         };
         let phpstan2 = Diagnostic {
             range: make_range(5, 0, 5, u32::MAX),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("return.type".to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String("return.type".to_string())),
             source: Some("phpstan".to_string()),
-            message: "Error two".to_string(),
+            message: "Error two".to_string().into(),
             ..Default::default()
         };
         let precise = Diagnostic {
             range: make_range(5, 2, 5, 8),
-            severity: Some(DiagnosticSeverity::WARNING),
-            code: Some(NumberOrString::String("unknown_member".to_string())),
+            severity: Some(DiagnosticSeverity::Warning),
+            code: Some(Code::String("unknown_member".to_string())),
             source: Some("phpantom".to_string()),
-            message: "Method 'foo' not found".to_string(),
+            message: "Method 'foo' not found".to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![phpstan1, phpstan2, precise.clone()];
@@ -663,13 +671,13 @@ mod tests {
         let range = make_range(7, 3, 7, 12);
         let diag1 = make_diagnostic(
             range,
-            DiagnosticSeverity::WARNING,
+            DiagnosticSeverity::Warning,
             "unknown_member",
             "Method 'foo' not found on class Bar",
         );
         let diag2 = make_diagnostic(
             range,
-            DiagnosticSeverity::HINT,
+            DiagnosticSeverity::Hint,
             "deprecated_usage",
             "Method 'foo' is deprecated",
         );
@@ -684,10 +692,10 @@ mod tests {
         // diagnostic exists, all five survive.
         let make_phpstan = |code: &str, msg: &str| Diagnostic {
             range: make_range(10, 0, 10, u32::MAX),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String(code.to_string())),
+            severity: Some(DiagnosticSeverity::Error),
+            code: Some(Code::String(code.to_string())),
             source: Some("phpstan".to_string()),
-            message: msg.to_string(),
+            message: msg.to_string().into(),
             ..Default::default()
         };
         let mut diags = vec![

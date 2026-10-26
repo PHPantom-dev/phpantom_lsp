@@ -1,11 +1,11 @@
 use crate::common::{completion_response, create_psr4_workspace, create_test_backend, open_php};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 #[tokio::test]
 async fn test_guard_clause_negated_instanceof_return_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_neg_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///guard_neg_instanceof.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -31,10 +31,10 @@ async fn test_guard_clause_negated_instanceof_return_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -49,7 +49,7 @@ async fn test_guard_clause_negated_instanceof_return_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -57,7 +57,7 @@ async fn test_guard_clause_negated_instanceof_return_narrows() {
 async fn test_guard_clause_positive_instanceof_return_excludes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_pos_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///guard_pos_instanceof.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -83,10 +83,10 @@ async fn test_guard_clause_positive_instanceof_return_excludes() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -101,7 +101,7 @@ async fn test_guard_clause_positive_instanceof_return_excludes() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -109,7 +109,7 @@ async fn test_guard_clause_positive_instanceof_return_excludes() {
 async fn test_guard_clause_throw_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_throw.php").unwrap();
+    let uri = Uri::parse("file:///guard_throw.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -135,10 +135,10 @@ async fn test_guard_clause_throw_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -153,7 +153,7 @@ async fn test_guard_clause_throw_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -161,7 +161,7 @@ async fn test_guard_clause_throw_narrows() {
 async fn test_guard_clause_multiple_sequential_guards() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_multiple.php").unwrap();
+    let uri = Uri::parse("file:///guard_multiple.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Alpha {\n",
@@ -193,10 +193,10 @@ async fn test_guard_clause_multiple_sequential_guards() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -216,7 +216,7 @@ async fn test_guard_clause_multiple_sequential_guards() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -224,7 +224,7 @@ async fn test_guard_clause_multiple_sequential_guards() {
 async fn test_guard_clause_no_narrowing_when_body_does_not_exit() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_no_exit.php").unwrap();
+    let uri = Uri::parse("file:///guard_no_exit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -250,10 +250,10 @@ async fn test_guard_clause_no_narrowing_when_body_does_not_exit() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -269,7 +269,7 @@ async fn test_guard_clause_no_narrowing_when_body_does_not_exit() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -277,7 +277,7 @@ async fn test_guard_clause_no_narrowing_when_body_does_not_exit() {
 async fn test_guard_clause_no_narrowing_when_else_exists() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_with_else.php").unwrap();
+    let uri = Uri::parse("file:///guard_with_else.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -305,10 +305,10 @@ async fn test_guard_clause_no_narrowing_when_else_exists() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -326,7 +326,7 @@ async fn test_guard_clause_no_narrowing_when_else_exists() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -334,7 +334,7 @@ async fn test_guard_clause_no_narrowing_when_else_exists() {
 async fn test_guard_clause_top_level_function() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_top_level.php").unwrap();
+    let uri = Uri::parse("file:///guard_top_level.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -358,10 +358,10 @@ async fn test_guard_clause_top_level_function() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -376,7 +376,7 @@ async fn test_guard_clause_top_level_function() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -418,7 +418,7 @@ async fn test_guard_clause_cross_file() {
         ],
     );
 
-    let uri = Url::parse("file:///guard_cross_file.php").unwrap();
+    let uri = Uri::parse("file:///guard_cross_file.php").unwrap();
     let text = concat!(
         "<?php\n",
         "use App\\Dog;\n",
@@ -440,10 +440,10 @@ async fn test_guard_clause_cross_file() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -463,7 +463,7 @@ async fn test_guard_clause_cross_file() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -471,7 +471,7 @@ async fn test_guard_clause_cross_file() {
 async fn test_guard_clause_parenthesised_condition() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_parens.php").unwrap();
+    let uri = Uri::parse("file:///guard_parens.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -497,10 +497,10 @@ async fn test_guard_clause_parenthesised_condition() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -515,7 +515,7 @@ async fn test_guard_clause_parenthesised_condition() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -523,7 +523,7 @@ async fn test_guard_clause_parenthesised_condition() {
 async fn test_guard_clause_is_a_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_is_a.php").unwrap();
+    let uri = Uri::parse("file:///guard_is_a.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -549,10 +549,10 @@ async fn test_guard_clause_is_a_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -567,7 +567,7 @@ async fn test_guard_clause_is_a_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -575,7 +575,7 @@ async fn test_guard_clause_is_a_narrows() {
 async fn test_guard_clause_no_narrowing_inside_if_body() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_inside_body.php").unwrap();
+    let uri = Uri::parse("file:///guard_inside_body.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -600,10 +600,10 @@ async fn test_guard_clause_no_narrowing_inside_if_body() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -619,7 +619,7 @@ async fn test_guard_clause_no_narrowing_inside_if_body() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -627,7 +627,7 @@ async fn test_guard_clause_no_narrowing_inside_if_body() {
 async fn test_guard_clause_mixed_type_parameter() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_mixed.php").unwrap();
+    let uri = Uri::parse("file:///guard_mixed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class User {\n",
@@ -649,10 +649,10 @@ async fn test_guard_clause_mixed_type_parameter() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -662,7 +662,7 @@ async fn test_guard_clause_mixed_type_parameter() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -670,7 +670,7 @@ async fn test_guard_clause_mixed_type_parameter() {
 async fn test_guard_clause_with_block_body() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_block.php").unwrap();
+    let uri = Uri::parse("file:///guard_block.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -698,10 +698,10 @@ async fn test_guard_clause_with_block_body() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -716,7 +716,7 @@ async fn test_guard_clause_with_block_body() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -724,7 +724,7 @@ async fn test_guard_clause_with_block_body() {
 async fn test_guard_clause_no_narrowing_when_block_does_not_end_with_exit() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_block_no_exit.php").unwrap();
+    let uri = Uri::parse("file:///guard_block_no_exit.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -750,10 +750,10 @@ async fn test_guard_clause_no_narrowing_when_block_does_not_end_with_exit() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -769,7 +769,7 @@ async fn test_guard_clause_no_narrowing_when_block_does_not_end_with_exit() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -777,7 +777,7 @@ async fn test_guard_clause_no_narrowing_when_block_does_not_end_with_exit() {
 async fn test_guard_clause_single_statement_no_braces() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_no_braces.php").unwrap();
+    let uri = Uri::parse("file:///guard_no_braces.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -801,10 +801,10 @@ async fn test_guard_clause_single_statement_no_braces() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -819,7 +819,7 @@ async fn test_guard_clause_single_statement_no_braces() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -827,7 +827,7 @@ async fn test_guard_clause_single_statement_no_braces() {
 async fn test_guard_clause_this_property() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_this_prop.php").unwrap();
+    let uri = Uri::parse("file:///guard_this_prop.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -853,10 +853,10 @@ async fn test_guard_clause_this_property() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -871,7 +871,7 @@ async fn test_guard_clause_this_property() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -879,7 +879,7 @@ async fn test_guard_clause_this_property() {
 async fn test_guard_clause_get_class_identity_check() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_get_class.php").unwrap();
+    let uri = Uri::parse("file:///guard_get_class.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -905,10 +905,10 @@ async fn test_guard_clause_get_class_identity_check() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -923,7 +923,7 @@ async fn test_guard_clause_get_class_identity_check() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -934,7 +934,7 @@ async fn test_guard_clause_get_class_identity_check() {
 async fn test_guard_clause_falsy_continue_narrows_null() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_falsy_continue.php").unwrap();
+    let uri = Uri::parse("file:///guard_falsy_continue.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class OrderLine {\n",
@@ -959,10 +959,10 @@ async fn test_guard_clause_falsy_continue_narrows_null() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -972,7 +972,7 @@ async fn test_guard_clause_falsy_continue_narrows_null() {
                 prop_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -981,7 +981,7 @@ async fn test_guard_clause_falsy_continue_narrows_null() {
 async fn test_guard_clause_null_identity_return_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_null_identity.php").unwrap();
+    let uri = Uri::parse("file:///guard_null_identity.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Formatter {\n",
@@ -1003,10 +1003,10 @@ async fn test_guard_clause_null_identity_return_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1016,7 +1016,7 @@ async fn test_guard_clause_null_identity_return_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1025,7 +1025,7 @@ async fn test_guard_clause_null_identity_return_narrows() {
 async fn test_guard_clause_null_identity_reversed_operands() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_null_reversed.php").unwrap();
+    let uri = Uri::parse("file:///guard_null_reversed.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Logger {\n",
@@ -1047,10 +1047,10 @@ async fn test_guard_clause_null_identity_reversed_operands() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1060,7 +1060,7 @@ async fn test_guard_clause_null_identity_reversed_operands() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1069,7 +1069,7 @@ async fn test_guard_clause_null_identity_reversed_operands() {
 async fn test_guard_clause_null_equality_return_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_null_eq.php").unwrap();
+    let uri = Uri::parse("file:///guard_null_eq.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Config {\n",
@@ -1091,10 +1091,10 @@ async fn test_guard_clause_null_equality_return_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1104,7 +1104,7 @@ async fn test_guard_clause_null_equality_return_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1114,7 +1114,7 @@ async fn test_guard_clause_null_equality_return_narrows() {
 async fn test_guard_clause_property_negated_instanceof_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_prop_neg_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///guard_prop_neg_instanceof.php").unwrap();
     // Faithfully reproduces the PropertyNarrowingDemo from example.php:
     // - Namespace wrapping
     // - A preceding positive instanceof if-block (non-guard)
@@ -1149,10 +1149,10 @@ async fn test_guard_clause_property_negated_instanceof_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1167,7 +1167,7 @@ async fn test_guard_clause_property_negated_instanceof_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1175,7 +1175,7 @@ async fn test_guard_clause_property_negated_instanceof_narrows() {
 async fn test_guard_clause_property_positive_instanceof_excludes() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_prop_pos_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///guard_prop_pos_instanceof.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -1201,10 +1201,10 @@ async fn test_guard_clause_property_positive_instanceof_excludes() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap())
                 .collect();
 
@@ -1219,7 +1219,7 @@ async fn test_guard_clause_property_positive_instanceof_excludes() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1227,7 +1227,7 @@ async fn test_guard_clause_property_positive_instanceof_excludes() {
 async fn test_guard_clause_null_coalesce_then_falsy_continue() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_coalesce_continue.php").unwrap();
+    let uri = Uri::parse("file:///guard_coalesce_continue.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class WarehouseOrderLine {\n",
@@ -1254,10 +1254,10 @@ async fn test_guard_clause_null_coalesce_then_falsy_continue() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let prop_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .filter(|i| i.kind == Some(CompletionItemKind::Property))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1272,7 +1272,7 @@ async fn test_guard_clause_null_coalesce_then_falsy_continue() {
                 prop_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1280,7 +1280,7 @@ async fn test_guard_clause_null_coalesce_then_falsy_continue() {
 async fn test_guard_clause_instanceof_interface_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_instanceof_interface.php").unwrap();
+    let uri = Uri::parse("file:///guard_instanceof_interface.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Identifiable {\n",
@@ -1305,10 +1305,10 @@ async fn test_guard_clause_instanceof_interface_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1323,7 +1323,7 @@ async fn test_guard_clause_instanceof_interface_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1331,7 +1331,7 @@ async fn test_guard_clause_instanceof_interface_narrows() {
 async fn test_guard_clause_instanceof_interface_positive_branch() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_instanceof_iface_positive.php").unwrap();
+    let uri = Uri::parse("file:///guard_instanceof_iface_positive.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Identifiable {\n",
@@ -1355,10 +1355,10 @@ async fn test_guard_clause_instanceof_interface_positive_branch() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1368,7 +1368,7 @@ async fn test_guard_clause_instanceof_interface_positive_branch() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1376,7 +1376,7 @@ async fn test_guard_clause_instanceof_interface_positive_branch() {
 async fn test_guard_clause_sequential_instanceof_interfaces() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_sequential_instanceof.php").unwrap();
+    let uri = Uri::parse("file:///guard_sequential_instanceof.php").unwrap();
     let text = concat!(
         "<?php\n",
         "interface Identifiable {\n",
@@ -1404,10 +1404,10 @@ async fn test_guard_clause_sequential_instanceof_interfaces() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1422,7 +1422,7 @@ async fn test_guard_clause_sequential_instanceof_interfaces() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1430,7 +1430,7 @@ async fn test_guard_clause_sequential_instanceof_interfaces() {
 async fn test_switch_default_throw_narrows_variable() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///switch_default_throw.php").unwrap();
+    let uri = Uri::parse("file:///switch_default_throw.php").unwrap();
     let text = concat!(
         "<?php\n",                                         // 0
         "class Dog { public function bark(): void {} }\n", // 1
@@ -1458,10 +1458,10 @@ async fn test_switch_default_throw_narrows_variable() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1476,7 +1476,7 @@ async fn test_switch_default_throw_narrows_variable() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }
 
@@ -1484,7 +1484,7 @@ async fn test_switch_default_throw_narrows_variable() {
 async fn test_guard_clause_colon_delimited_negated_instanceof_return_narrows() {
     let backend = create_test_backend();
 
-    let uri = Url::parse("file:///guard_neg_instanceof_colon.php").unwrap();
+    let uri = Uri::parse("file:///guard_neg_instanceof_colon.php").unwrap();
     let text = concat!(
         "<?php\n",
         "class Dog {\n",
@@ -1510,10 +1510,10 @@ async fn test_guard_clause_colon_delimited_negated_instanceof_return_narrows() {
 
     assert!(result.is_some(), "Should return completions");
     match result.unwrap() {
-        CompletionResponse::Array(items) => {
+        CompletionResponse::CompletionItemList(items) => {
             let method_names: Vec<&str> = items
                 .iter()
-                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .filter(|i| i.kind == Some(CompletionItemKind::Method))
                 .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
                 .collect();
 
@@ -1528,6 +1528,6 @@ async fn test_guard_clause_colon_delimited_negated_instanceof_return_narrows() {
                 method_names
             );
         }
-        _ => panic!("Expected CompletionResponse::Array"),
+        _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
 }

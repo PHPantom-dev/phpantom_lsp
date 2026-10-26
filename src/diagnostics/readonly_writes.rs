@@ -16,20 +16,26 @@
 //! Two shapes are reported:
 //!
 //! - **Outside the declaring class** — the write happens in a scope
-//!   that is not the declaring class (top-level code, another class, a
-//!   subclass initializing its parent's property).  This is an error
-//!   regardless of whether the property was ever initialized.
+//!   that is not the declaring class (top-level code, another class, or
+//!   before PHP 8.4 a subclass initializing its parent's property).
+//!   This is an error regardless of whether the property was ever
+//!   initialized.
 //! - **After the constructor initialized it** — the write is inside the
 //!   declaring class, but the constructor is known to have initialized
 //!   the property already (it is a promoted parameter, or the
 //!   constructor body assigns it unconditionally), so the write is a
-//!   second initialization.
+//!   second initialization.  That includes a write later in the
+//!   constructor itself.
 //!
-//! Writes inside `__construct`, `__clone` (PHP 8.3 allows readonly
-//! reinitialization while cloning), and `__unserialize` are never
-//! flagged, and neither is a write whose target the constructor may
-//! leave uninitialized: initializing a readonly property lazily from
+//! Other writes inside `__construct`, and writes in `__clone` (PHP 8.3
+//! allows readonly reinitialization while cloning) and `__unserialize`,
+//! are not flagged, and neither is a write whose target the constructor
+//! may leave uninitialized: initializing a readonly property lazily from
 //! another method of the declaring class is legal PHP.
+//!
+//! A key of `clone($obj, ['prop' => …])` writes that property on the copy
+//! and, like a write in `__clone`, is legal anywhere in the declaring
+//! class; outside it, it is reported like any other write.
 //!
 //! An *indirect* write — an array offset (`$box->items[] = 1`) or a
 //! reference (`&$box->value`) — is the exception: PHP rejects those in
@@ -43,6 +49,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use mago_syntax::cst::FunctionCall;
 use mago_syntax::cst::access::Access;
 use mago_syntax::cst::array::ArrayElement;
 use mago_syntax::cst::class_like::member::ClassLikeMemberSelector;
@@ -53,17 +60,17 @@ use mago_syntax::cst::sequence::TokenSeparatedSequence;
 use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::cst::unset::Unset;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
-use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset};
+use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset, is_subtype_of};
 use crate::hover::{MemberKindForOrigin, find_declaring_class};
-use crate::parser::{with_parse_cache, with_parsed_program};
+use crate::parser::{clone_with_writes, with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::symbol_map::SymbolKind;
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
-use crate::types::{AccessKind, ClassInfo, ClassLikeKind, PropertyInfo};
+use crate::types::{AccessKind, ClassInfo, ClassLikeKind, PhpVersion, PropertyInfo};
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::class_init_facts::{ClassInitFacts, class_init_facts};
@@ -94,6 +101,10 @@ enum WriteForm {
     /// `&$obj->prop`.  Acquiring a reference is rejected in every scope,
     /// whatever the property holds.
     Reference,
+    /// A key of `clone($obj, ['prop' => …])`.  The copy is being cloned,
+    /// so like a write in `__clone` it is legal anywhere in the declaring
+    /// class, however the constructor left the property.
+    CloneWith,
 }
 
 impl WriteForm {
@@ -128,9 +139,11 @@ struct FileWrites {
 
 // ── AST walk ────────────────────────────────────────────────────────────────
 
-struct WriteWalker;
+struct WriteWalker<'c> {
+    content: &'c str,
+}
 
-impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, FileWrites> for WriteWalker {
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, FileWrites> for WriteWalker<'_> {
     fn walk_in_expression(&self, node: &'ast Expression<'arena>, ctx: &mut FileWrites) {
         match node {
             Expression::Assignment(assign) => record_target(assign.lhs, WriteForm::Modify, ctx),
@@ -148,6 +161,16 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, FileWrites> for Wri
             // The only postfix operators are `++` and `--`.
             Expression::UnaryPostfix(unary) => record_target(unary.operand, WriteForm::Modify, ctx),
             _ => {}
+        }
+    }
+
+    fn walk_in_function_call(&self, node: &'ast FunctionCall<'arena>, ctx: &mut FileWrites) {
+        if let Some((_, writes)) = clone_with_writes(node, self.content) {
+            for write in writes {
+                ctx.targets
+                    .entry(write.start)
+                    .or_insert(WriteForm::CloneWith);
+            }
         }
     }
 
@@ -255,6 +278,9 @@ enum Verdict {
     /// The write is in the declaring scope, but the constructor has
     /// already initialized the property.
     AlreadyInitialized(String),
+    /// The write is in the constructor, after the constructor has already
+    /// initialized the property.
+    AssignedTwice(String),
     /// The write goes through the property's value (an array offset or a
     /// reference), which no scope may do.
     Indirect(String),
@@ -359,9 +385,9 @@ impl Backend {
     ) {
         let _parse_guard = with_parse_cache(content);
 
-        let writes = with_parsed_program(content, "readonly_writes", |program, _content| {
+        let writes = with_parsed_program(content, "readonly_writes", |program, content| {
             let mut writes = FileWrites::default();
-            let walker = WriteWalker;
+            let walker = WriteWalker { content };
             for statement in program.statements.iter() {
                 mago_syntax::walker::Walker::walk_statement(&walker, statement, &mut writes);
             }
@@ -423,7 +449,10 @@ impl Backend {
                     writes
                         .classes
                         .get(&class.start_offset)
-                        .is_some_and(|facts| facts.covers_initializer(span.start))
+                        .is_some_and(|facts| {
+                            facts.covers_initializer(span.start)
+                                && !facts.reassigns_in_constructor(member_name, span.start)
+                        })
                         && declares_property(class, member_name, class_loader, &mut Vec::new())
                 })
             {
@@ -434,8 +463,9 @@ impl Backend {
                 is_in_static_method: symbol_map.is_in_static_method(span.start),
                 ..loaders.resolution_ctx_at(content, span.start)
             };
-            let SubjectOutcome::Resolved(receivers) =
-                resolve_subject_outcome(subject_text, AccessKind::Arrow, &rctx)
+            let SubjectOutcome::Resolved {
+                classes: receivers, ..
+            } = resolve_subject_outcome(subject_text, AccessKind::Arrow, &rctx)
             else {
                 continue;
             };
@@ -470,6 +500,11 @@ impl Backend {
                     form.verb(),
                     owner
                 ),
+                Some(Verdict::AssignedTwice(owner)) => format!(
+                    "Cannot {} readonly property {} after the constructor has already initialized it",
+                    form.verb(),
+                    owner
+                ),
                 Some(Verdict::Indirect(owner)) => {
                     format!("Cannot indirectly modify readonly property {}", owner)
                 }
@@ -487,7 +522,7 @@ impl Backend {
 
             out.push(make_diagnostic(
                 range,
-                DiagnosticSeverity::ERROR,
+                DiagnosticSeverity::Error,
                 INVALID_READONLY_WRITE_CODE,
                 message,
             ));
@@ -559,16 +594,26 @@ impl Backend {
             return Verdict::OutsideDeclaringClass(owner);
         };
 
+        // Since PHP 8.4 a readonly property is `protected(set)`, so a
+        // subclass may initialize it too.
         let in_declaring_scope = current.fqn() == declaring.fqn()
             || (declaring.kind == ClassLikeKind::Trait
-                && declares_property(current, property, class_loader, &mut Vec::new()));
+                && declares_property(current, property, class_loader, &mut Vec::new()))
+            || (self.php_version() >= PhpVersion::new(8, 4)
+                && is_subtype_of(current, &declaring.fqn(), class_loader));
         if !in_declaring_scope {
             return Verdict::OutsideDeclaringClass(owner);
         }
 
+        if site.form == WriteForm::CloneWith {
+            return Verdict::Ok;
+        }
         let Some(facts) = writes.classes.get(&current.start_offset) else {
             return Verdict::Ok;
         };
+        if facts.reassigns_in_constructor(property, site.offset) {
+            return Verdict::AssignedTwice(owner);
+        }
         if facts.covers_initializer(site.offset) || !facts.initialized.contains(property) {
             return Verdict::Ok;
         }

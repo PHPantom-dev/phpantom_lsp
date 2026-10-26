@@ -106,11 +106,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.5"
           ini-values: zend.assertions=1
       - run: find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: php -d zend.assertions=1 examples/php/scaffolding/assertions.php
       - run: php -l examples/laravel/app/Demo.php
+      - run: find examples/symfony/src examples/symfony/config -name '*.php' -print0 | xargs -0 -n1 php -l
 
   benchmark:
     name: Benchmark
@@ -118,6 +119,12 @@ jobs:
     permissions:
       contents: write
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Both jobs push their results to gh-pages. Two pushes to main in
+    # quick succession would otherwise race, and the later push is
+    # rejected as a non-fast-forward.
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -150,6 +157,7 @@ jobs:
           rm -rf target/criterion
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
+            --bench symfony_completion \
             -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         shell: bash
@@ -205,6 +213,7 @@ jobs:
           rm -rf target/criterion
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
+            --bench symfony_completion \
             -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         if: steps.check-gh-pages.outputs.exists == 'true'
@@ -263,6 +272,10 @@ jobs:
     permissions:
       contents: write
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Shares the gh-pages lock with the Benchmark job.
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

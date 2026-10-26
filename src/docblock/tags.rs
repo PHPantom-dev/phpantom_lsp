@@ -153,6 +153,11 @@ pub fn declares_impure(info: &DocblockInfo) -> bool {
 /// Returns `None` when no `@removed` tag is present or the version
 /// cannot be parsed.
 pub fn extract_removed_version(docblock: &str) -> Option<PhpVersion> {
+    // Asked of every declaration's docblock and found in almost none, so
+    // the parse is skipped where the tag cannot be.
+    if !docblock.contains("@removed") {
+        return None;
+    }
     let info = parse_docblock_for_tags(docblock)?;
     // `@removed` is not a tag the parser models, so it arrives as
     // `TagKind::Other`.  We match by name instead.

@@ -1,6 +1,6 @@
 use crate::common::create_psr4_workspace;
 use crate::common::{open_php, references_response};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 #[tokio::test]
 async fn test_laravel_custom_builder_references_from_builder() {
@@ -86,7 +86,7 @@ User::query()->active();
         "src/Models/Post.php",
         "usage.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -95,14 +95,14 @@ User::query()->active();
         .await;
     }
 
-    let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
+    let builder_uri = Uri::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
 
     // Find references for UserBuilder::active() declaration (line 5, col 21)
     let locations = references_response(&backend, &builder_uri, Position::new(5, 21), true)
         .await
         .unwrap_or_default();
 
-    let usage_uri = Url::from_file_path(dir.path().join("usage.php")).unwrap();
+    let usage_uri = Uri::from_file_path(dir.path().join("usage.php")).unwrap();
     let usage_locs: Vec<_> = locations.iter().filter(|l| l.uri == usage_uri).collect();
 
     let lines: Vec<_> = usage_locs.iter().map(|l| l.range.start.line).collect();
@@ -214,7 +214,7 @@ User::query()->active();
         "src/Models/Post.php",
         "usage.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -223,7 +223,7 @@ User::query()->active();
         .await;
     }
 
-    let usage_uri = Url::from_file_path(dir.path().join("usage.php")).unwrap();
+    let usage_uri = Uri::from_file_path(dir.path().join("usage.php")).unwrap();
 
     // Find references for User::active() usage (line 4, col 6)
     let locations = references_response(&backend, &usage_uri, Position::new(4, 6), true)
@@ -334,7 +334,7 @@ Member::query()->active();
         "src/Models/Member.php",
         "usage.php",
     ] {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let uri = Uri::from_file_path(dir.path().join(path)).unwrap();
         open_php(
             &backend,
             &uri,
@@ -343,14 +343,14 @@ Member::query()->active();
         .await;
     }
 
-    let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
+    let builder_uri = Uri::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
 
     // Find references for UserBuilder::active() declaration (line 5, col 21)
     let locations = references_response(&backend, &builder_uri, Position::new(5, 21), true)
         .await
         .unwrap_or_default();
 
-    let usage_uri = Url::from_file_path(dir.path().join("usage.php")).unwrap();
+    let usage_uri = Uri::from_file_path(dir.path().join("usage.php")).unwrap();
     let usage_locs: Vec<_> = locations.iter().filter(|l| l.uri == usage_uri).collect();
     let lines: Vec<_> = usage_locs.iter().map(|l| l.range.start.line).collect();
 

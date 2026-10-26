@@ -2,7 +2,7 @@
 //! its file, and the file itself, which a rename or move carries along
 //! to the path [`psr4_path_for_class`] gives the new name.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::composer::psr4_path_for_class;
@@ -203,7 +203,7 @@ impl Backend {
         &self,
         old_fqn: &str,
         new_short_name: &str,
-    ) -> Option<(Url, Url)> {
+    ) -> Option<(Uri, Uri)> {
         if !self.caps().file_rename {
             return None;
         }
@@ -241,7 +241,7 @@ impl Backend {
         &self,
         old_fqn: &str,
         new_fqn: &str,
-    ) -> Option<(Url, Url)> {
+    ) -> Option<(Uri, Uri)> {
         if !self.caps().file_rename {
             return None;
         }

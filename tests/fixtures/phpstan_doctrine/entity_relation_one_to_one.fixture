@@ -1,0 +1,11 @@
+// test: One-to-one relations that disagree with their properties
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, EntityRelationRuleTest::testRule.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/Doctrine/ORM/data/EntityWithBrokenOneToOneRelations.php
+// expect_diagnostic: 29: Property PHPStan\Rules\Doctrine\ORM\EntityWithBrokenOneToOneRelations::$oneToOneNullableProperty type mapping mismatch: property can contain PHPStan\Rules\Doctrine\ORM\AnotherEntity|null but database expects PHPStan\Rules\Doctrine\ORM\AnotherEntity. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 35: Property PHPStan\Rules\Doctrine\ORM\EntityWithBrokenOneToOneRelations::$oneToOneNullableColumn type mapping mismatch: database can contain PHPStan\Rules\Doctrine\ORM\AnotherEntity|null but property expects PHPStan\Rules\Doctrine\ORM\AnotherEntity. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 48: Property PHPStan\Rules\Doctrine\ORM\EntityWithBrokenOneToOneRelations::$oneToOneWrongClass type mapping mismatch: database can contain PHPStan\Rules\Doctrine\ORM\AnotherEntity|null but property expects PHPStan\Rules\Doctrine\ORM\MyEntity|null. // SKIP: Doctrine mappings that disagree with the entity are not reported
+// expect_diagnostic: 48: Property PHPStan\Rules\Doctrine\ORM\EntityWithBrokenOneToOneRelations::$oneToOneWrongClass type mapping mismatch: property can contain PHPStan\Rules\Doctrine\ORM\MyEntity|null but database expects PHPStan\Rules\Doctrine\ORM\AnotherEntity|null. // SKIP: Doctrine mappings that disagree with the entity are not reported
+---

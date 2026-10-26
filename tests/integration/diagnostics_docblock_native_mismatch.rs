@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::common::collect_diagnostics_with;
+    use crate::common::message_text;
     use phpantom_lsp::Backend;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     fn collect(php: &str) -> Vec<Diagnostic> {
         collect_diagnostics_with(
@@ -24,14 +25,12 @@ function greet(string $name): void {}
         assert_eq!(diags.len(), 1, "got: {diags:?}");
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String(
-                "docblock_native_mismatch".to_string()
-            ))
+            Some(Code::String("docblock_native_mismatch".to_string()))
         );
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
-        assert!(diags[0].message.contains("'?string'"));
-        assert!(diags[0].message.contains("$name"));
-        assert!(diags[0].message.contains("'string'"));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
+        assert!(message_text(&diags[0].message).contains("'?string'"));
+        assert!(message_text(&diags[0].message).contains("$name"));
+        assert!(message_text(&diags[0].message).contains("'string'"));
         // The range covers `string $name` on the parameter line.
         assert_eq!(diags[0].range.start.line, 4);
         assert_eq!(diags[0].range.end.line, 4);
@@ -47,8 +46,8 @@ function takesItems(array $items): void {}
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
-        assert!(diags[0].message.contains("'list<int>|null'"));
-        assert!(diags[0].message.contains("'array'"));
+        assert!(message_text(&diags[0].message).contains("'list<int>|null'"));
+        assert!(message_text(&diags[0].message).contains("'array'"));
     }
 
     #[test]
@@ -192,12 +191,8 @@ class Entry {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
-        assert!(
-            diags[0]
-                .message
-                .contains("Documented return type 'string|null'")
-        );
-        assert!(diags[0].message.contains("'string'"));
+        assert!(message_text(&diags[0].message).contains("Documented return type 'string|null'"));
+        assert!(message_text(&diags[0].message).contains("'string'"));
     }
 
     #[test]
@@ -260,7 +255,7 @@ class Helper {
 "#;
         let diags = collect(php);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
-        assert!(diags[0].message.contains("array<int, string>|null"));
+        assert!(message_text(&diags[0].message).contains("array<int, string>|null"));
     }
 
     #[test]

@@ -11,7 +11,7 @@
 
 use std::collections::HashSet;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::backend::file_access::ImportBlock;
@@ -220,10 +220,10 @@ impl Backend {
             if let Some(range) = range {
                 out.push(make_tagged_diagnostic(
                     range,
-                    DiagnosticSeverity::HINT,
+                    DiagnosticSeverity::Hint,
                     "unused_import",
                     format!("Unused import '{}'", fqn),
-                    Some(DiagnosticTag::UNNECESSARY),
+                    Some(DiagnosticTag::Unnecessary),
                 ));
             }
         }

@@ -1,5 +1,5 @@
 //! Constructor-snippet building for `new` and attribute completion.
-use tower_lsp::lsp_types::InsertTextFormat;
+use tower_lsp_server::gen_lsp_types::InsertTextFormat;
 
 use crate::Backend;
 use crate::completion::builder::build_callable_snippet;
@@ -19,9 +19,9 @@ impl Backend {
             && !params.is_empty()
         {
             let snippet = build_callable_snippet(name, params);
-            (snippet, Some(InsertTextFormat::SNIPPET))
+            (snippet, Some(InsertTextFormat::Snippet))
         } else {
-            (format!("{name}()$0"), Some(InsertTextFormat::SNIPPET))
+            (format!("{name}()$0"), Some(InsertTextFormat::Snippet))
         }
     }
 

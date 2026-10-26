@@ -1,7 +1,7 @@
 //! PHP keyword completions for non-member expression/statement contexts.
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::class_lookup::find_class_at_offset;
 use crate::completion::class_completion::ClassNameContext;
@@ -365,7 +365,7 @@ pub(crate) fn build_keyword_completions(
         .filter(|(_, keyword)| keyword_allowed(keyword, ctx))
         .map(|(idx, keyword)| CompletionItem {
             label: (*keyword).to_string(),
-            kind: Some(CompletionItemKind::KEYWORD),
+            kind: Some(CompletionItemKind::Keyword),
             detail: Some("PHP keyword".to_string()),
             insert_text: Some((*keyword).to_string()),
             filter_text: Some((*keyword).to_string()),
@@ -384,7 +384,7 @@ pub(crate) fn build_backed_enum_type_completions(prefix: &str) -> Vec<Completion
         .filter(|(_, ty)| ty.starts_with(&prefix_lower))
         .map(|(idx, ty)| CompletionItem {
             label: (*ty).to_string(),
-            kind: Some(CompletionItemKind::KEYWORD),
+            kind: Some(CompletionItemKind::Keyword),
             detail: Some("Enum backing type".to_string()),
             insert_text: Some((*ty).to_string()),
             filter_text: Some((*ty).to_string()),

@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::Fqn;
@@ -249,7 +249,7 @@ impl Backend {
         );
 
         // Only methods: a callable names nothing else.
-        items.retain(|item| item.kind == Some(CompletionItemKind::METHOD));
+        items.retain(|item| item.kind == Some(CompletionItemKind::Method));
         if !prefix.is_empty() {
             let prefix_lower = prefix.to_lowercase();
             items.retain(|item| {
@@ -267,7 +267,7 @@ impl Backend {
             item.insert_text_format = None;
         }
 
-        (!items.is_empty()).then_some(CompletionResponse::Array(items))
+        (!items.is_empty()).then_some(CompletionResponse::CompletionItemList(items))
     }
 }
 
@@ -293,7 +293,7 @@ pub(super) fn resolve_class_name_to_fqn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::lsp_types::Position;
+    use tower_lsp_server::gen_lsp_types::Position;
 
     #[test]
     fn detects_class_const_callable() {

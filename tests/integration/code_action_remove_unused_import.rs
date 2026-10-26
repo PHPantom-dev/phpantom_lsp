@@ -3,13 +3,14 @@
 //! These exercise the full pipeline: parse a file, request code actions on
 //! an import line, and verify which removal actions are offered and what
 //! the bulk action's edit does to the file once resolved.
+use crate::common::message_text;
 
 use crate::common::{
     apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_at,
     get_code_actions_in_range, resolve_action,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 const URI: &str = "file:///test.php";
 const SINGLE: &str = "Remove unused import";
@@ -21,7 +22,7 @@ fn actions_at(
     content: &str,
     line: u32,
     character: u32,
-) -> Vec<CodeActionOrCommand> {
+) -> Vec<CodeActionResponse> {
     backend.update_ast(URI, content);
     get_code_actions_at(backend, URI, content, line, character)
 }
@@ -309,7 +310,7 @@ fn unused_imports(content: &str) -> Vec<String> {
         Backend::collect_unused_import_diagnostics,
     )
     .into_iter()
-    .map(|d| d.message)
+    .map(|d| message_text(&d.message).to_string())
     .collect();
     messages.sort();
     messages

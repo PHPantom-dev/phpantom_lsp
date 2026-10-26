@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 
@@ -40,6 +40,8 @@ struct WatchedChangeBatch {
     resource_changes: Vec<(String, PathBuf, FileChangeType)>,
     /// The directories whose cached `Pest.php` lookup the batch made stale.
     pest_dirs: Vec<String>,
+    /// Whether a file under a stub path changed.
+    stubs_changed: bool,
 }
 
 impl WatchedChangeBatch {
@@ -53,6 +55,7 @@ impl WatchedChangeBatch {
             && !self.schema_full_rebuild
             && self.migration_changes.is_empty()
             && self.pest_dirs.is_empty()
+            && !self.stubs_changed
     }
 }
 
@@ -114,6 +117,11 @@ impl Backend {
             self.reindex_watched_php_files(&batch.php_changes);
         }
 
+        if batch.stubs_changed {
+            tracing::info!("PHPantom: stub files changed, rebuilding the stub index");
+            self.refresh_stub_paths();
+        }
+
         if !batch.composer_changes.is_empty() {
             tracing::info!("PHPantom: composer files changed, rescanning vendor");
             self.rescan_composer_indexes(root, &batch.composer_changes);
@@ -153,9 +161,11 @@ impl Backend {
         // The index guards are taken per check, not across the loop:
         // migration discovery walks directories.
         let is_open = |uri: &str| self.open_files.read().contains_key(uri);
+        let is_twig = self.is_twig_project();
         let laravel_config = self.config().laravel;
         let filters = self.index_filters();
         let translations = self.laravel.string_key_cache.read().translations.clone();
+        let stubs = self.external_stubs();
         for change in changes {
             let path_str = change.uri.path();
             if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
@@ -221,14 +231,14 @@ impl Backend {
                     // scan itself put in the plan, so it needs no
                     // discovery check -- and the file is gone from disk
                     // by now, so a walk could not find it anyway.
-                    if change.typ == FileChangeType::DELETED
+                    if change.kind == FileChangeType::Deleted
                         || migration_discovery.is_discoverable(
                             root,
                             &laravel_config.migrations,
                             &file_path,
                         )
                     {
-                        batch.migration_changes.push((file_path, change.typ));
+                        batch.migration_changes.push((file_path, change.kind));
                     }
                 } else {
                     batch.schema_full_rebuild = true;
@@ -247,7 +257,10 @@ impl Backend {
             {
                 batch.translations_changed = true;
             }
-            if crate::resource_navigation::is_resource_document(path_str) {
+            // A file that can be a template is followed even while it is
+            // none, since what it references may make it one.
+            let is_twig_candidate = is_twig && crate::twig::roots::is_candidate_uri(path_str);
+            if is_twig_candidate || self.is_resource_uri(&uri_str) {
                 if is_open(&uri_str) {
                     continue;
                 }
@@ -259,7 +272,7 @@ impl Backend {
                 if filters.is_excluded_path(&file_path, false) {
                     continue;
                 }
-                if change.typ == FileChangeType::CHANGED {
+                if change.kind == FileChangeType::Changed && !is_twig_candidate {
                     let canonical_uri = crate::util::path_to_uri(&file_path);
                     if self.symbol_map_for(&uri_str).is_none()
                         && self.symbol_map_for(&canonical_uri).is_none()
@@ -269,7 +282,7 @@ impl Backend {
                 }
                 batch
                     .resource_changes
-                    .push((uri_str, file_path, change.typ));
+                    .push((uri_str, file_path, change.kind));
                 continue;
             }
             let is_php = std::path::Path::new(path_str)
@@ -280,13 +293,22 @@ impl Backend {
                 continue;
             }
 
+            let Some(file_path) = crate::util::url_to_path(&change.uri) else {
+                continue;
+            };
+
+            // Any change under a stub path can add or remove a name the
+            // stub index holds, parsed or not, open or not.  Rebuilding the
+            // index drops what was parsed from the stub files as well.
+            if stubs.contains_path(&file_path) {
+                batch.stubs_changed = true;
+                continue;
+            }
+
             // Open files are already tracked via did_open/did_change.
             if is_open(&uri_str) {
                 continue;
             }
-            let Some(file_path) = crate::util::url_to_path(&change.uri) else {
-                continue;
-            };
 
             // Excluded paths are invisible to indexing; skip their
             // events the way the workspace scanners skip the files.
@@ -294,7 +316,7 @@ impl Backend {
                 continue;
             }
 
-            if change.typ == FileChangeType::CHANGED {
+            if change.kind == FileChangeType::Changed {
                 // `parsed_uris` records the editor URI for open files and
                 // the canonical `file://` URI for lazily loaded ones;
                 // check both spellings.
@@ -307,7 +329,7 @@ impl Backend {
                 }
             }
 
-            batch.php_changes.push((uri_str, file_path, change.typ));
+            batch.php_changes.push((uri_str, file_path, change.kind));
         }
         batch
     }
@@ -343,26 +365,25 @@ impl Backend {
         if self.reindex_files_batch(php_changes) || touches_config {
             self.clear_not_found_caches();
             self.clear_resolved_class_cache();
-            self.laravel.auth_user_type_cache.write().clear();
-            *self.laravel.storage_disk_type_cache.write() = None;
-            self.laravel.aliases.invalidate();
+            self.laravel.clear_config_facts();
             self.member_completion_cache.lock().clear();
         }
     }
 
-    /// Refresh the reference index for the YAML/XML files of a watched
-    /// batch.
+    /// Refresh the reference index for the YAML, XML, and Twig files of a
+    /// watched batch.
     fn reindex_watched_resource_files(
         &self,
         resource_changes: &[(String, PathBuf, FileChangeType)],
     ) {
         tracing::info!(
-            "PHPantom: {} watched YAML/XML file(s) changed on disk, refreshing references",
+            "PHPantom: {} watched resource file(s) changed on disk, refreshing references",
             resource_changes.len()
         );
         for (uri, path, change_type) in resource_changes {
-            if *change_type == FileChangeType::DELETED {
+            if *change_type == FileChangeType::Deleted {
                 self.clear_file_maps(uri);
+                self.forget_twig_source(uri);
             } else if let Ok(content) = std::fs::read_to_string(path) {
                 self.update_resource_symbol_index(uri, &content);
             }
@@ -387,12 +408,13 @@ impl Backend {
         // Captured before the reload replaces them, so the reconciliation
         // below can tell which way the discovery inputs moved.
         let previous_inputs = self.discovery_inputs();
+        let was_diagnosing = self.diagnostics_enabled();
 
         match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
             Ok(cfg) => self.set_config(cfg),
             Err(e) => {
                 self.log_detached(
-                    MessageType::WARNING,
+                    MessageType::Warning,
                     format!("Failed to reload .phpantom.toml: {}", e),
                 );
                 return;
@@ -411,6 +433,17 @@ impl Backend {
         // rather than merely being read the next time something asks.
         self.start_workspace_diagnostics_on_reload();
         self.stop_workspace_diagnostics_on_reload();
+
+        // Open files keep what they were last shown until something
+        // re-diagnoses them, so switching diagnostics off has to clear
+        // them now and switching them back on has to fill them in.
+        if self.diagnostics_enabled() != was_diagnosing {
+            let open: Vec<String> = self.open_files.read().keys().cloned().collect();
+            self.request_full_slow_pass(&open);
+            for uri in open {
+                self.schedule_diagnostics(uri);
+            }
+        }
 
         // An `[indexing] extensions` entry (e.g. Drupal's `.module`)
         // added to the config after startup needs its own watcher
@@ -475,6 +508,8 @@ impl Backend {
         let index_filters = self.index_filters();
         let extra_extensions = index_filters.extra_extensions().to_vec();
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
+        let is_symfony = self.is_symfony_project();
+        let is_twig = self.is_twig_project();
 
         // Create, change, and delete: what every watcher but the two
         // Composer ones asks for.
@@ -495,6 +530,12 @@ impl Backend {
             ("**/composer.lock".to_string(), WatchKind::Change),
             ("**/.phpantom.toml".to_string(), watch_all),
         ]);
+        if is_symfony {
+            patterns.push(("**/*.{xlf,xliff}".to_string(), watch_all));
+        }
+        if is_twig {
+            patterns.push(("**/*.{twig,html,htm}".to_string(), watch_all));
+        }
         if is_laravel {
             patterns.extend([
                 ("**/*.json".to_string(), watch_all),
@@ -506,7 +547,7 @@ impl Backend {
         let mut watchers: Vec<FileSystemWatcher> = patterns
             .iter()
             .map(|(pattern, kind)| FileSystemWatcher {
-                glob_pattern: GlobPattern::String(pattern.clone()),
+                glob_pattern: GlobPattern::Pattern(pattern.clone()),
                 kind: Some(*kind),
             })
             .collect();
@@ -522,8 +563,8 @@ impl Backend {
                 continue;
             };
             watchers.extend(patterns.iter().map(|(pattern, kind)| FileSystemWatcher {
-                glob_pattern: GlobPattern::Relative(RelativePattern {
-                    base_uri: OneOf::Right(base.clone()),
+                glob_pattern: GlobPattern::RelativePattern(RelativePattern {
+                    base_uri: BaseUri::Uri(base.clone()),
                     pattern: pattern.clone(),
                 }),
                 kind: Some(*kind),
@@ -544,6 +585,8 @@ impl Backend {
             crate::WatchedFileInputs {
                 extra_extensions,
                 is_laravel,
+                is_symfony,
+                is_twig,
                 followed_links,
             },
         )
@@ -636,7 +679,7 @@ impl Backend {
     /// The global config lives outside every workspace, so it can never
     /// match a client-side `**/…` file watcher glob (workspace-relative by
     /// definition) and dynamic registration with an absolute
-    /// [`RelativePattern`](tower_lsp::lsp_types::RelativePattern) base is
+    /// [`RelativePattern`](tower_lsp_server::gen_lsp_types::RelativePattern) base is
     /// unevenly supported across editors. Polling one file's mtime is a
     /// single `stat` call, cheap enough to just always do ourselves rather
     /// than depend on client capabilities.

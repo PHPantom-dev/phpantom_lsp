@@ -45,7 +45,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
+use tower_lsp_server::gen_lsp_types::{Code, Diagnostic, DiagnosticSeverity};
 
 use crate::composer::ComposerPackage;
 use crate::config::PhpcsConfig;
@@ -360,8 +360,8 @@ fn parse_phpcs_message(msg: &serde_json::Value) -> Option<Diagnostic> {
 
     // PHPCS "type" is "ERROR" or "WARNING"
     let severity = match msg.get("type").and_then(|t| t.as_str()) {
-        Some("ERROR") => DiagnosticSeverity::ERROR,
-        _ => DiagnosticSeverity::WARNING,
+        Some("ERROR") => DiagnosticSeverity::Error,
+        _ => DiagnosticSeverity::Warning,
     };
 
     let fixable = msg
@@ -380,10 +380,10 @@ fn parse_phpcs_message(msg: &serde_json::Value) -> Option<Diagnostic> {
     Some(Diagnostic {
         range: crate::process::full_line_range(lsp_line),
         severity: Some(severity),
-        code: Some(NumberOrString::String(source_code.to_string())),
+        code: Some(Code::String(source_code.to_string())),
         code_description: None,
         source: Some("phpcs".to_string()),
-        message: message.to_string(),
+        message: message.to_string().into(),
         related_information: None,
         tags: None,
         data,
@@ -418,7 +418,10 @@ mod tests {
         let map = parse_phpcs_json_workspace(json, Path::new("/proj")).unwrap();
         // Clean files are dropped; relative paths resolve against the root.
         assert_eq!(map.len(), 2);
-        assert_eq!(map[Path::new("/proj/src/A.php")][0].message, "Bad indent");
+        assert_eq!(
+            crate::util::message_text(&map[Path::new("/proj/src/A.php")][0].message),
+            "Bad indent"
+        );
         assert_eq!(map[Path::new("/proj/src/B.php")][0].range.start.line, 7);
     }
 
@@ -472,24 +475,24 @@ mod tests {
         assert_eq!(diags[0].range.start.character, 0);
         assert_eq!(diags[0].range.end.line, 41);
         assert_eq!(diags[0].range.end.character, u32::MAX);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
         assert_eq!(diags[0].source.as_deref(), Some("phpcs"));
         assert_eq!(
             diags[0].code,
-            Some(NumberOrString::String(
+            Some(Code::String(
                 "PSR2.Methods.FunctionCallSignature.Indent".to_string()
             ))
         );
-        assert!(diags[0].message.contains("Line indented incorrectly"));
+        assert!(crate::util::message_text(&diags[0].message).contains("Line indented incorrectly"));
         assert_eq!(diags[0].data, Some(serde_json::json!({ "fixable": true })));
 
         // Second diagnostic — WARNING
         assert_eq!(diags[1].range.start.line, 0); // 1 - 1
         assert_eq!(diags[1].range.end.character, u32::MAX);
-        assert_eq!(diags[1].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diags[1].severity, Some(DiagnosticSeverity::Warning));
         assert_eq!(
             diags[1].code,
-            Some(NumberOrString::String(
+            Some(Code::String(
                 "PEAR.Commenting.FileComment.Missing".to_string()
             ))
         );
@@ -789,7 +792,7 @@ mod tests {
         let path = Path::new("/project/src/Foo.php");
         let diags = parse_phpcs_json(json, path).unwrap();
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Warning));
     }
 
     #[test]
@@ -859,6 +862,6 @@ mod tests {
         let path = Path::new("/project/src/Foo.php");
         let diags = parse_phpcs_json(json, path).unwrap();
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("Missing namespace"));
+        assert!(crate::util::message_text(&diags[0].message).contains("Missing namespace"));
     }
 }

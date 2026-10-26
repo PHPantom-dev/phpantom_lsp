@@ -1,0 +1,15 @@
+{% extends 'base.html.twig' %}
+
+{% block body %}
+  {# Try: find references on 'demo.title'. DemoController translates it too,
+     and translations/messages.en.yaml declares it. #}
+  <h1>{{ 'demo.title'|trans }}</h1>
+  {# Try: go-to-definition on the template names in the extends and include
+     tags, or find references on 'demo/_card.html.twig'. #}
+  {% include 'demo/_card.html.twig' %}
+  {# Try: go-to-definition on a route name below. app_demo is declared by the
+     #[Route] on DemoController::index(), app_demo_legacy in
+     config/routes.yaml. #}
+  <a href="{{ path('app_demo', {'userId': 42}) }}">{{ sender }}</a>
+  <a href="{{ path('app_demo_legacy') }}">Legacy</a>
+{% endblock %}

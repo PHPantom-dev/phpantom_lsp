@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod tests {
     use crate::common::{apply_edits, create_test_backend, open_document};
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
 
     async fn format_range(uri: &str, text: &str, start_line: u32, end_line: u32) -> String {
         let backend = create_test_backend();
-        let uri = Url::parse(uri).unwrap();
+        let uri = Uri::parse(uri).unwrap();
         open_document(&backend, &uri, "php", text).await;
 
         let edits = backend
@@ -54,6 +54,29 @@ mod tests {
                 "return $x;\n",
                 "}\n",
                 "\n",
+                "function b($y)\n",
+                "{\n",
+                "    return $y;\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_range_formatting_leaves_the_adjacent_statement_alone() {
+        let text = concat!(
+            "<?php\n",
+            "function a( $x ){ return $x; }\n",
+            "function b( $y ){ return $y; }\n",
+        );
+
+        let result = format_range("file:///range.php", text, 2, 2).await;
+
+        assert_eq!(
+            result,
+            concat!(
+                "<?php\n",
+                "function a( $x ){ return $x; }\n",
                 "function b($y)\n",
                 "{\n",
                 "    return $y;\n",

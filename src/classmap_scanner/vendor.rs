@@ -166,7 +166,7 @@ fn collect_package_sources(
                     // Check if this file registers a custom autoloader.
                     if !has_custom_autoloader
                         && let Ok(content) = read_for_scan(&file)
-                        && memmem::find(&content, b"spl_autoload_register").is_some()
+                        && registers_autoloader(&content)
                     {
                         has_custom_autoloader = true;
                     }
@@ -300,6 +300,21 @@ pub fn scan_vendor_packages_with_skip(
     let mut result = scan_files_parallel_full(&all_files, progress);
     result.package_roots = package_roots;
     result
+}
+
+/// Whether PHP source calls `spl_autoload_register`.
+///
+/// The name followed by `(` rather than the bare name, so a file that
+/// only mentions it (phpstorm-stubs' `PhpStormStubsMap.php` lists it as a
+/// map key) does not count.
+fn registers_autoloader(content: &[u8]) -> bool {
+    const NAME: &[u8] = b"spl_autoload_register";
+    memmem::find_iter(content, NAME).any(|at| {
+        content[at + NAME.len()..]
+            .iter()
+            .find(|byte| !byte.is_ascii_whitespace())
+            == Some(&b'(')
+    })
 }
 
 /// Extract string values from a JSON value that is either a single

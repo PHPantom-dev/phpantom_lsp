@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
+    use crate::common::message_text;
     use phpantom_lsp::Backend;
-    use tower_lsp::lsp_types::*;
+    use tower_lsp_server::gen_lsp_types::*;
 
     use crate::common::collect_diagnostics_with;
 
@@ -79,7 +80,7 @@ class MyProvider {
         let diags = collect(&backend, content);
         let unknown_class_diags: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("not found"))
+            .filter(|d| message_text(&d.message).contains("not found"))
             .collect();
 
         assert!(
@@ -101,7 +102,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            diags.iter().any(|d| d.message.contains("UnknownThing")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("UnknownThing")),
             "expected diagnostic for UnknownThing, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -114,7 +117,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            diags.iter().any(|d| d.message.contains("MissingClass")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("MissingClass")),
             "expected diagnostic for MissingClass, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -129,7 +134,7 @@ class MyProvider {
         assert!(
             diags
                 .iter()
-                .any(|d| d.message.contains("Some\\Missing\\FqnClass")),
+                .any(|d| message_text(&d.message).contains("Some\\Missing\\FqnClass")),
             "expected diagnostic for FqnClass, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -144,7 +149,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("Foo")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Foo")),
             "should not flag local class Foo, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -168,7 +175,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("Request")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Request")),
             "should not flag imported class Request, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -191,9 +200,9 @@ class MyProvider {
         let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| {
-                d.message.contains("'self'")
-                    || d.message.contains("'static'")
-                    || d.message.contains("'parent'")
+                message_text(&d.message).contains("'self'")
+                    || message_text(&d.message).contains("'static'")
+                    || message_text(&d.message).contains("'parent'")
             }),
             "should not flag self/static/parent, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
@@ -214,7 +223,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("Exception")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Exception")),
             "should not flag stub class Exception, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -237,7 +248,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("Helper")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Helper")),
             "should not flag same-namespace class Helper, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -253,9 +266,9 @@ class MyProvider {
         let diags = collect(&backend, content);
         let ghost_diag = diags
             .iter()
-            .find(|d| d.message.contains("Ghost"))
+            .find(|d| message_text(&d.message).contains("Ghost"))
             .expect("should have diagnostic for Ghost");
-        assert_eq!(ghost_diag.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(ghost_diag.severity, Some(DiagnosticSeverity::Warning));
     }
 
     #[test]
@@ -266,11 +279,11 @@ class MyProvider {
         let diags = collect(&backend, content);
         let ghost_diag = diags
             .iter()
-            .find(|d| d.message.contains("Ghost"))
+            .find(|d| message_text(&d.message).contains("Ghost"))
             .expect("should have diagnostic for Ghost");
         assert_eq!(
             ghost_diag.code,
-            Some(NumberOrString::String("unknown_class".to_string()))
+            Some(Code::String("unknown_class".to_string()))
         );
         assert_eq!(ghost_diag.source, Some("phpantom".to_string()));
     }
@@ -286,7 +299,7 @@ class MyProvider {
         let diags = collect(&backend, content);
         let ghost_diag = diags
             .iter()
-            .find(|d| d.message.contains("Ghost"))
+            .find(|d| message_text(&d.message).contains("Ghost"))
             .expect("should have diagnostic for Ghost");
 
         // The range should be on line 3 and cover "Ghost" (5 chars).
@@ -314,7 +327,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("GlobalHelper")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("GlobalHelper")),
             "should not flag global class without namespace, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -344,12 +359,16 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("TValue")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("TValue")),
             "should not flag @template param TValue, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("TKey")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("TKey")),
             "should not flag @template param TKey, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -374,7 +393,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("'T'")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("'T'")),
             "should not flag method-level @template param T, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -395,7 +416,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("TVal")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("TVal")),
             "should not flag a @method tag's own inline template param, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -410,11 +433,15 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            diags.iter().any(|d| d.message.contains("Alpha")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Alpha")),
             "expected diagnostic for Alpha"
         );
         assert!(
-            diags.iter().any(|d| d.message.contains("Beta")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Beta")),
             "expected diagnostic for Beta"
         );
     }
@@ -443,12 +470,16 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("UserData")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("UserData")),
             "should not flag @phpstan-type alias UserData, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("StatusInfo")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("StatusInfo")),
             "should not flag @phpstan-type alias StatusInfo, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -492,7 +523,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("Score")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Score")),
             "should not flag @phpstan-import-type alias Score, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -539,7 +572,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("Score")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Score")),
             "should not flag two-space @phpstan-import-type alias Score, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -563,7 +598,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("ColumnSchema")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("ColumnSchema")),
             "should not flag @phpstan-type alias ColumnSchema used with covariant keyword, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -584,7 +621,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("JetBrains")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("JetBrains")),
             "should not flag attribute class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -607,7 +646,8 @@ class MyProvider {
         assert!(
             !diags
                 .iter()
-                .any(|d| d.message.contains("SomeVendor") || d.message.contains("CustomAttr")),
+                .any(|d| message_text(&d.message).contains("SomeVendor")
+                    || message_text(&d.message).contains("CustomAttr")),
             "should not flag attribute on method, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -639,12 +679,16 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("suggestions")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("suggestions")),
             "should not flag 'suggestions' from description text, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
         assert!(
-            !diags.iter().any(|d| d.message.contains("propagate")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("propagate")),
             "should not flag 'propagate' from description text, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -667,7 +711,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains('\u{2014}')),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains('\u{2014}')),
             "should not flag em-dash from description text, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -694,7 +740,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("\"foo\"")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("\"foo\"")),
             "should not flag string literal '\"foo\"' as unknown class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -721,7 +769,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("'bar'")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("'bar'")),
             "should not flag single-quoted literal as unknown class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -748,7 +798,7 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("0")),
+            !diags.iter().any(|d| message_text(&d.message).contains("0")),
             "should not flag numeric literal as unknown class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -777,7 +827,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("covariant")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("covariant")),
             "should not flag 'covariant array' as unknown class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -803,7 +855,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("contravariant")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("contravariant")),
             "should not flag 'contravariant Handler' as unknown class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -824,7 +878,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("$data")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("$data")),
             "by-reference @param &$data must not be flagged as unknown class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -847,7 +903,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("PHPStan")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("PHPStan")),
             "namespaced constant \\PHPStan\\PHP_VERSION_ID must not be flagged as unknown class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -939,7 +997,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            diags.iter().any(|d| d.message.contains("Carbon")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Carbon")),
             "expected unknown-class diagnostic for Carbon even when Carbon\\Carbon is in uri_classes_index, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -954,7 +1014,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            diags.iter().any(|d| d.message.contains("Request")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Request")),
             "expected unknown-class diagnostic for Request in no-namespace file, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -969,7 +1031,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            diags.iter().any(|d| d.message.contains("Carbon")),
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Carbon")),
             "expected unknown-class diagnostic for Carbon in no-namespace file, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -995,7 +1059,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("Carbon")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Carbon")),
             "should not flag imported Carbon class, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -1042,10 +1108,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags
-                .iter()
-                .any(|d| d.message.contains("ComplementsScenarioValidation")
-                    || d.message.contains("ProductByModelValidation")),
+            !diags.iter().any(|d| message_text(&d.message)
+                .contains("ComplementsScenarioValidation")
+                || message_text(&d.message).contains("ProductByModelValidation")),
             "should not flag classes imported via multiline grouped use, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -1087,7 +1152,9 @@ class MyProvider {
 
         let diags = collect(&backend, content);
         assert!(
-            !diags.iter().any(|d| d.message.contains("Mockery")),
+            !diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("Mockery")),
             "should not flag Mockery resolved via fqn_uri_index lazy load, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
@@ -1134,7 +1201,7 @@ function givesNumber(): number { return 1; }
 "#;
 
         let diags = collect(&backend, content);
-        let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+        let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
         assert_eq!(diags.len(), 3, "got {messages:?}");
         for name in ["resource", "integer", "number"] {
             assert!(
@@ -1337,7 +1404,7 @@ namespace B {
 "#;
 
         let diags = collect(&backend, content);
-        let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+        let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
         assert_eq!(
             messages,
             vec!["Class 'B\\Foo' not found"],

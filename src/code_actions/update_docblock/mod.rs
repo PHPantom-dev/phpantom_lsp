@@ -20,7 +20,7 @@ mod changes;
 mod find;
 mod rewrite;
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::php_type::PhpType;
@@ -124,9 +124,9 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
-        let doc_uri: Url = match uri.parse() {
+        let doc_uri: Uri = match uri.parse() {
             Ok(u) => u,
             Err(_) => return,
         };
@@ -185,9 +185,9 @@ impl Backend {
             return;
         }
 
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title: "Update docblock to match signature".to_string(),
-            kind: Some(CodeActionKind::QUICKFIX),
+            kind: Some(CodeActionKind::QuickFix),
             diagnostics: None,
             edit: Some(crate::code_actions::single_edit(
                 doc_uri,
@@ -198,6 +198,7 @@ impl Backend {
             is_preferred: Some(true),
             disabled: None,
             data: None,
+            tags: None,
         }));
     }
 }

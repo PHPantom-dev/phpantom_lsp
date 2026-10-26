@@ -163,14 +163,15 @@ fn type_hint_to_classes_typed_depth(
     }
 
     match ty.kind() {
-        // ── Leniency / list-shape / template / unsealed / class-name markers ─
-        // Unreachable via `kind()`, which sees through all five markers,
+        // ── Leniency / list-shape / template / unsealed / exact-value markers
+        // Unreachable via `kind()`, which sees through all six markers,
         // but the arms keep this match exhaustive over the type language.
         TypeKind::UnsealedShape(_) => vec![],
         TypeKind::Benevolent(inner)
         | TypeKind::ListShape(inner)
         | TypeKind::TemplateParam(_, inner)
-        | TypeKind::ClassNameLiteral(inner) => type_hint_to_classes_typed_depth(
+        | TypeKind::ClassNameLiteral(inner)
+        | TypeKind::EnumCase(inner, _) => type_hint_to_classes_typed_depth(
             inner,
             owning_class_name,
             all_classes,

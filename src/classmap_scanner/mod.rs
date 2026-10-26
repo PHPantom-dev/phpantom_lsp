@@ -85,7 +85,9 @@ mod lexer;
 mod vendor;
 mod walk;
 
-pub(crate) use discovery::collect_include_files;
+pub(crate) use discovery::{
+    collect_include_files, is_phpstorm_stubs_checkout, scan_roots_full, scan_stub_paths,
+};
 pub use discovery::{
     scan_directories, scan_drupal_directories, scan_include_paths, scan_psr4_directories,
     scan_psr4_directories_with_skip, scan_workspace_fallback, scan_workspace_fallback_full,

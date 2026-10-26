@@ -7,13 +7,14 @@
 //! ability that exists nowhere — or that exists but not for the model the
 //! check names — is flagged.
 
+use crate::common::message_text;
 use crate::common::{
     LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
     create_psr4_workspace, definition_locations, goto_definition_at, hover_text_at,
     open_initialized_php, open_php_str, position_after,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::LanguageServer;
+use tower_lsp_server::gen_lsp_types::*;
 
 const PROVIDERS_PHP: &str = "\
 <?php
@@ -108,7 +109,7 @@ async fn definition_uris(
     uri: &str,
     position: Position,
 ) -> Vec<String> {
-    let uri = Url::parse(uri).unwrap();
+    let uri = Uri::parse(uri).unwrap();
     let response = goto_definition_at(backend, &uri, position.line, position.character).await;
     definition_locations(response)
         .into_iter()
@@ -119,9 +120,7 @@ async fn definition_uris(
 fn ability_diagnostics(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     diags
         .iter()
-        .filter(|d| {
-            matches!(&d.code, Some(NumberOrString::String(c)) if c == "invalid_laravel_ability")
-        })
+        .filter(|d| matches!(&d.code, Some(Code::String(c)) if c == "invalid_laravel_ability"))
         .collect()
 }
 
@@ -144,7 +143,7 @@ class Consumer {
     let position = position_after(consumer, "allows('");
     let labels = complete_labels_at_opened(
         &backend,
-        &Url::parse(&uri).unwrap(),
+        &Uri::parse(&uri).unwrap(),
         position.line,
         position.character,
     )
@@ -189,7 +188,7 @@ class Consumer {
     let position = position_after(consumer, "can('");
     let can_labels = complete_labels_at_opened(
         &backend,
-        &Url::parse(&uri).unwrap(),
+        &Uri::parse(&uri).unwrap(),
         position.line,
         position.character,
     )
@@ -202,7 +201,7 @@ class Consumer {
     let position = position_after(consumer, "authorize('");
     let authorize_labels = complete_labels_at_opened(
         &backend,
-        &Url::parse(&uri).unwrap(),
+        &Uri::parse(&uri).unwrap(),
         position.line,
         position.character,
     )
@@ -231,7 +230,7 @@ class Consumer {
     let position = position_after(consumer, "can('");
     let labels = complete_labels_at_opened(
         &backend,
-        &Url::parse(&uri).unwrap(),
+        &Uri::parse(&uri).unwrap(),
         position.line,
         position.character,
     )
@@ -261,7 +260,7 @@ class Consumer {
     let position = position_after(consumer, "allows('mana");
     let hover = hover_text_at(
         &backend,
-        &Url::parse(&uri).unwrap(),
+        &Uri::parse(&uri).unwrap(),
         position.line,
         position.character,
     )
@@ -298,7 +297,7 @@ class Consumer {
     let position = position_after(consumer, "can('upd");
     let hover = hover_text_at(
         &backend,
-        &Url::parse(&uri).unwrap(),
+        &Uri::parse(&uri).unwrap(),
         position.line,
         position.character,
     )
@@ -516,7 +515,7 @@ class Consumer {
         "only the typo should be flagged, got {flagged:?}"
     );
     assert!(
-        flagged[0].message.contains("manage-billling"),
+        message_text(&flagged[0].message).contains("manage-billling"),
         "message should name the bad ability, got {:?}",
         flagged[0].message
     );
@@ -547,7 +546,7 @@ class Consumer {
         "only the typo should be flagged, got {flagged:?}"
     );
     assert!(
-        flagged[0].message.contains("manage-billling"),
+        message_text(&flagged[0].message).contains("manage-billling"),
         "message should name the bad ability, got {:?}",
         flagged[0].message
     );
@@ -586,9 +585,9 @@ class Consumer {
         "only the wrong-model ability should be flagged, got {flagged:?}"
     );
     assert!(
-        flagged[0].message.contains("publish")
-            && flagged[0].message.contains("App\\Models\\Post")
-            && flagged[0].message.contains("PostPolicy"),
+        message_text(&flagged[0].message).contains("publish")
+            && message_text(&flagged[0].message).contains("App\\Models\\Post")
+            && message_text(&flagged[0].message).contains("PostPolicy"),
         "message should name the ability, the model, and its policy, got {:?}",
         flagged[0].message
     );
@@ -621,7 +620,8 @@ class Consumer {
         "only the ability the video policy lacks should be flagged, got {flagged:?}"
     );
     assert!(
-        flagged[0].message.contains("update") && flagged[0].message.contains("LegacyVideoPolicy"),
+        message_text(&flagged[0].message).contains("update")
+            && message_text(&flagged[0].message).contains("LegacyVideoPolicy"),
         "message should name the registered policy, got {:?}",
         flagged[0].message
     );
@@ -655,7 +655,7 @@ class Consumer {
 #[tokio::test]
 async fn the_gate_define_registration_itself_is_never_flagged() {
     let provider_uri = |dir: &tempfile::TempDir| {
-        Url::from_file_path(dir.path().join("src/Providers/AuthServiceProvider.php"))
+        Uri::from_file_path(dir.path().join("src/Providers/AuthServiceProvider.php"))
             .unwrap()
             .to_string()
     };
@@ -777,7 +777,7 @@ class Consumer {
         "only the typo should be flagged, got {flagged:?}"
     );
     assert!(
-        flagged[0].message.contains("updatte"),
+        message_text(&flagged[0].message).contains("updatte"),
         "message should name the bad ability, got {:?}",
         flagged[0].message
     );
@@ -1028,7 +1028,7 @@ class Consumer {
         1,
         "only the typo should be flagged, got {flagged:?}"
     );
-    assert!(flagged[0].message.contains("manage-billling"));
+    assert!(message_text(&flagged[0].message).contains("manage-billling"));
 }
 
 /// A provider file can disappear between being indexed and being scanned — a
@@ -1166,7 +1166,7 @@ async fn the_can_blade_directive_checks_its_ability() {
     let path = dir.path().join("resources/views/post.blade.php");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, template).unwrap();
-    let uri = Url::from_file_path(&path).unwrap().to_string();
+    let uri = Uri::from_file_path(&path).unwrap().to_string();
     open_php_str(&backend, &uri, template).await;
 
     let mut diags = Vec::new();
@@ -1178,7 +1178,7 @@ async fn the_can_blade_directive_checks_its_ability() {
         "only the typo should be flagged, got {flagged:?}"
     );
     assert!(
-        flagged[0].message.contains("updatte"),
+        message_text(&flagged[0].message).contains("updatte"),
         "message should name the bad ability, got {:?}",
         flagged[0].message
     );
@@ -1187,7 +1187,7 @@ async fn the_can_blade_directive_checks_its_ability() {
     assert!(
         !diags
             .iter()
-            .any(|d| d.message.contains("blade_can_directive")),
+            .any(|d| message_text(&d.message).contains("blade_can_directive")),
         "the lowered call must not surface in diagnostics, got {diags:?}"
     );
 }
@@ -1211,9 +1211,9 @@ class Consumer {
 
     let references = backend
         .references(ReferenceParams {
-            text_document_position: TextDocumentPositionParams {
+            text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
-                    uri: Url::parse(&uri).unwrap(),
+                    uri: Uri::parse(&uri).unwrap(),
                 },
                 position: position_after(consumer, "allows('mana"),
             },

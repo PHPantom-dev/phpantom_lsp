@@ -154,13 +154,13 @@ impl Backend {
     /// than one class renders the template, the first by name wins, so the
     /// answer does not depend on the order the files were parsed in.
     fn render_backing_class(&self, view_names: &[String]) -> Option<Arc<ClassInfo>> {
-        use crate::symbol_map::{LaravelStringKind, SymbolKind};
+        use crate::symbol_map::{StringKeyKind, SymbolKind};
 
         let keys: Vec<crate::reference_index::ReferenceIndexKey> = view_names
             .iter()
             .map(
-                |name| crate::reference_index::ReferenceIndexKey::LaravelString {
-                    kind: LaravelStringKind::View,
+                |name| crate::reference_index::ReferenceIndexKey::StringKey {
+                    kind: StringKeyKind::View,
                     key: name.clone(),
                 },
             )
@@ -171,8 +171,8 @@ impl Backend {
                 continue;
             }
             let mut offsets = map.spans.iter().filter_map(|span| match &span.kind {
-                SymbolKind::LaravelStringKey {
-                    kind: LaravelStringKind::View,
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::View,
                     key,
                     ..
                 } if view_names.contains(key) => Some(span.start),

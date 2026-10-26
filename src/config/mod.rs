@@ -21,6 +21,7 @@ use serde::Deserialize;
 mod diagnostics;
 mod indexing;
 mod laravel;
+mod stubs;
 #[cfg(test)]
 mod tests;
 mod tools;
@@ -28,6 +29,7 @@ mod tools;
 pub use diagnostics::{DiagnosticsConfig, IgnoreRule};
 pub use indexing::{ClientIndexingOptions, IndexingConfig, IndexingStrategy};
 pub use laravel::{LaravelConfig, LaravelMigrationsConfig, LaravelSchemaConfig};
+pub use stubs::{ClientStubOptions, StubsConfig};
 pub use tools::{FormattingConfig, MagoConfig, PhpStanConfig, PhpcsConfig, PhpmdConfig};
 
 /// Top-level configuration parsed from `.phpantom.toml`.
@@ -40,6 +42,8 @@ pub struct Config {
     pub diagnostics: DiagnosticsConfig,
     /// Indexing strategy and file discovery settings.
     pub indexing: IndexingConfig,
+    /// Stub files whose declarations win.
+    pub stubs: StubsConfig,
     /// Semantic token highlighting settings.
     pub semantic_tokens: SemanticTokensConfig,
     /// Formatting proxy settings.

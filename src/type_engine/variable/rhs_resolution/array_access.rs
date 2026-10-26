@@ -257,6 +257,28 @@ fn index_segment(
                 PhpType::null(),
             ]));
         }
+        // A value of `A&B` is both, so a read yields what every member
+        // promises at once: `array<string, mixed>&array{at: Carbon}` reads
+        // `at` as `Carbon`, since `mixed` adds nothing to it.
+        TypeKind::Intersection(members) => {
+            let mut answers: Vec<PhpType> = Vec::with_capacity(members.len());
+            let mut any_mixed = false;
+            for member in members.iter() {
+                match index_segment(member, seg, ctx) {
+                    Some(value) if value.is_mixed() => any_mixed = true,
+                    Some(value) if !answers.contains(&value) => answers.push(value),
+                    _ => {}
+                }
+            }
+            let most_specific = answers
+                .iter()
+                .position(|a| answers.iter().all(|b| a.is_subtype_of(b)));
+            return match most_specific {
+                Some(idx) => Some(answers.swap_remove(idx)),
+                None if answers.is_empty() => any_mixed.then(PhpType::mixed),
+                None => Some(PhpType::intersection(answers)),
+            };
+        }
         _ => {}
     }
 

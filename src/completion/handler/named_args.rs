@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::{CompletionItem, Position};
+use tower_lsp_server::gen_lsp_types::{CompletionItem, Position};
 
 use crate::Backend;
 use crate::completion::named_args::{

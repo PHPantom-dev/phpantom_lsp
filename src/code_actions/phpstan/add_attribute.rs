@@ -19,7 +19,7 @@
 //! Phase 2 (`resolve_add_attribute`) recomputes the workspace edit on
 //! demand when the user picks the action.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use super::attributes::attributed_member_at;
 use crate::Backend;
@@ -85,7 +85,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -109,7 +109,8 @@ impl Backend {
             }
 
             // ── Phase 1: emit lightweight action with data ──────────
-            let method_name = phpstan_member_name(&diag.message).unwrap_or("method");
+            let method_name =
+                phpstan_member_name(crate::util::message_text(&diag.message)).unwrap_or("method");
             let written = if attribute.import { "" } else { "\\" };
             let title = format!("Add #[{written}{}] to {method_name}", attribute.name);
 
@@ -194,7 +195,7 @@ impl Backend {
             }
         }
 
-        let doc_uri: Url = uri.parse().ok()?;
+        let doc_uri: Uri = uri.parse().ok()?;
         Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
 }

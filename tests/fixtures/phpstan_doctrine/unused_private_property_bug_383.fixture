@@ -1,0 +1,10 @@
+// test: Relations Doctrine writes are not unused
+// feature: diagnostics
+// Ported from PHPStan's Doctrine extension, UnusedPrivatePropertyRuleTest::testBug383.
+// PHPantom has no check this rule corresponds to yet, so no code is compared.
+// project: phpstan_doctrine
+// file: rules/DeadCode/data/bug-383.php
+// expect_diagnostic: 13: Property PHPStan\Rules\Doctrine\ORMAttributes\Bug383\Campus::$id is never written, only read. // SKIP: private properties nothing reads or writes are not reported
+// expect_diagnostic: 19: Property PHPStan\Rules\Doctrine\ORMAttributes\Bug383\Campus::$students is never written, only read. // SKIP: private properties nothing reads or writes are not reported
+// expect_diagnostic: 29: Property PHPStan\Rules\Doctrine\ORMAttributes\Bug383\Student::$campus is unused. // SKIP: private properties nothing reads or writes are not reported
+---

@@ -18,7 +18,7 @@
 //! payload but no `edit`.  Phase 2 (`resolve_remove_unused_return_type`)
 //! recomputes the workspace edit on demand when the user picks the action.
 
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::phpstan::fix_return_type::{Anchor, target_function};
@@ -154,7 +154,7 @@ impl Backend {
         uri: &str,
         content: &str,
         params: &CodeActionParams,
-        out: &mut Vec<CodeActionOrCommand>,
+        out: &mut Vec<CodeActionResponse>,
     ) {
         let phpstan_diags = self.phpstan_diags_overlapping(uri, &params.range);
 
@@ -167,7 +167,7 @@ impl Backend {
                 continue;
             }
 
-            let unused_type = match extract_unused_type(&diag.message) {
+            let unused_type = match extract_unused_type(crate::util::message_text(&diag.message)) {
                 Some(t) => t,
                 None => continue,
             };
@@ -175,9 +175,12 @@ impl Backend {
             let diag_line = diag.range.start.line as usize;
 
             // The diagnostic is reported on the function's declaration.
-            let Some(target) =
-                target_function(content, diag_line, Anchor::Declaration, &diag.message)
-            else {
+            let Some(target) = target_function(
+                content,
+                diag_line,
+                Anchor::Declaration,
+                crate::util::message_text(&diag.message),
+            ) else {
                 continue;
             };
 
@@ -218,7 +221,7 @@ impl Backend {
         let unused_type = extra.get("unused_type")?.as_str()?;
         let message = extra.get("message")?.as_str()?;
 
-        let doc_uri: Url = data.uri.parse().ok()?;
+        let doc_uri: Uri = data.uri.parse().ok()?;
         let target = target_function(content, diag_line, Anchor::Declaration, message)?;
 
         let mut edits = Vec::new();

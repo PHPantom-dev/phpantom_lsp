@@ -5,6 +5,7 @@
  *
  * The diagnostics PHPantom reports: unknown classes and members, member
  * access on a scalar, argument counts, writes to readonly properties,
+ * the properties clone() writes, typed properties nothing initializes,
  * docblocks that contradict their type hint, an invalid class-like kind,
  * and deprecation. These files deliberately contain a fixed set of errors,
  * so the squiggles you see here are the demo, not a mistake.
@@ -208,6 +209,29 @@ class UnresolvedMemberAccessDemo
 }
 
 
+// ── Diagnostic: Partial Union Members (opt-in) ──────────────────────────────
+// A member that only some classes of a union declare fails whenever one of
+// the others arrives.  PHPantom stays silent about it by default, since the
+// member exists on at least one branch.  Enable it in .phpantom.toml:
+//
+//   [diagnostics]
+//   partial-union-members = true
+
+class PartialUnionMembersDemo
+{
+    public function demo(Scaffolding\Pen|Scaffolding\Pencil $tool): void
+    {
+        $tool->label();     // fine: both Pen and Pencil declare it
+        // With the diagnostic enabled, a warning appears on the next line:
+        $tool->write();     // Method 'write' exists on Pen but not on Pencil
+
+        if ($tool instanceof Scaffolding\Pen) {
+            $tool->write(); // fine: narrowed to Pen
+        }
+    }
+}
+
+
 // ── Diagnostic: Argument Count ──────────────────────────────────────────────
 // PHPantom flags calls that pass too few or too many arguments.  Variadic
 // parameters accept unlimited trailing args.  Argument unpacking (`...$args`)
@@ -312,8 +336,11 @@ class TypeErrorDemo
         $this->requiresConfig(['host' => 'localhost']);
 
         // No diagnostic — every required key is there. Order does not
-        // matter, an extra key is harmless, and `timeout` is optional:
+        // matter, and `timeout` is optional:
         $this->requiresConfig(['port' => 3306, 'host' => 'localhost']);
+
+        // Type error — a shape without a trailing `...` declares every key
+        // it handles, so `debug` is one it does not accept:
         $this->requiresConfig(['host' => 'localhost', 'port' => 3306, 'debug' => true]);
 
         // No diagnostic — a shape built up over several statements records
@@ -415,6 +442,182 @@ class ReadonlyWriteDemo
 
         // No diagnostic — `$label` is writable:
         $coordinate->label = 'origin';
+    }
+}
+
+
+// ── Diagnostic: Properties clone() Writes ───────────────────────────────────
+// PHP 8.5's `clone($object, [...])` sets each listed property on the copy,
+// with the same rules as an assignment from the calling code.  PHPantom
+// checks every literal key like `$copy->key = value`.
+//
+// Try: rename `label` from its key below; the property follows.
+
+class CloneWithDemo
+{
+    public function demo(): void
+    {
+        $coordinate = new Scaffolding\ScaffoldingCoordinate(1, 2);
+
+        // No diagnostic — `$label` is a writable string property:
+        $copy = clone($coordinate, ['label' => 'copy']);
+        echo $copy->label;
+
+        // Error — the class has no `$z` property:
+        $copy = clone($coordinate, ['z' => 3]);
+
+        // Error — `$x` is readonly, and this is not its declaring class:
+        $copy = clone($coordinate, ['x' => 10]);
+
+        // Error — `$label` expects a string:
+        $copy = clone($coordinate, ['label' => []]);
+    }
+}
+
+
+// ── Diagnostic: Uninitialized Properties ────────────────────────────────────
+// A typed property without a default starts uninitialized, and reading it
+// before anything writes it throws.  PHPantom flags a property that only the
+// class itself may write (private, protected in a final class, or readonly)
+// when nothing in the class ever writes it.  A write from any method counts,
+// and so does a framework that fills the property: an attribute, or a
+// Doctrine generated identifier.  A public property is left to whoever
+// creates the object, so it is flagged where an object fresh from `new` is
+// read before anything writes it.
+
+final class UninitializedPropertyDemo
+{
+    // Warning — nothing ever writes `$createdAt`:
+    private \DateTimeImmutable $createdAt;
+
+    // No diagnostic — the constructor initializes `$name`:
+    private string $name;
+
+    // No diagnostic — `setNote()` writes `$note`:
+    private string $note;
+
+    public readonly int $id;
+
+    // No diagnostic here — whoever creates the object may write `$label`:
+    public string $label;
+
+    public function __construct(string $name, int $id)
+    {
+        $this->name = $name;
+        $this->id = $id;
+
+        // Error — the constructor already initialized `$id`:
+        $this->id = $id + 1;
+    }
+
+    public function setNote(string $note): void
+    {
+        $this->note = $note;
+    }
+
+    public function describe(): string
+    {
+        return $this->name . ': ' . $this->note . ' ' . $this->createdAt->format('Y');
+    }
+}
+
+final class UninitializedReadDemo
+{
+    public function labelled(): string
+    {
+        $demo = new UninitializedPropertyDemo('demo', 1);
+
+        // Warning — nothing wrote `$label` before this read:
+        $label = $demo->label;
+
+        $demo->label = 'Demo';
+
+        // No diagnostic — `$label` is written now:
+        return $label . $demo->label;
+    }
+}
+
+
+// ── Diagnostic: Discarded #[\NoDiscard] Results ─────────────────────────────
+// PHP 8.5 warns when a function or method marked `#[\NoDiscard]` is called as
+// a statement of its own, throwing its result away.  Cast the call to
+// `(void)` to discard the result on purpose.
+
+class DiscardedResultDemo
+{
+    #[\NoDiscard]
+    public function reserveSlot(): int
+    {
+        return 42;
+    }
+
+    public function demo(): void
+    {
+        // Warning — the reserved slot number is thrown away:
+        $this->reserveSlot();
+
+        // No diagnostic — the result is used:
+        echo $this->reserveSlot();
+
+        // No diagnostic — discarded on purpose:
+        (void) $this->reserveSlot();
+    }
+}
+
+
+// ── Diagnostic: Unhandled Match Values ──────────────────────────────────────
+// A `match` without a `default` arm throws `UnhandledMatchError` for any value
+// none of its arms names.  When the subject is an enum, a `bool`, or a set of
+// literals, the values no arm handles are reported.
+
+class UnhandledMatchDemo
+{
+    public function badge(Scaffolding\Status $status): string
+    {
+        // Error — Status::Pending has no arm:
+        return match ($status) {
+            Scaffolding\Status::Active => 'green',
+            Scaffolding\Status::Inactive => 'grey',
+        };
+    }
+
+    public function label(Scaffolding\Status $status): string
+    {
+        // No diagnostic — the guard already ruled Status::Pending out:
+        if ($status === Scaffolding\Status::Pending) {
+            return 'waiting';
+        }
+        return match ($status) {
+            Scaffolding\Status::Active => 'on',
+            Scaffolding\Status::Inactive => 'off',
+        };
+    }
+}
+
+
+// ── Diagnostic: Dynamic Member Names ────────────────────────────────────────
+// A member name written as an expression has to be usable as a name.  A
+// property name is converted to a string, so a `Stringable` object works and
+// any other object does not.  A method name must already be a string: PHP
+// never calls `__toString()` for it.
+
+class DynamicMemberNameDemo
+{
+    public string $title = 'demo';
+
+    public function names(Scaffolding\ScaffoldingFieldLabel $label, \stdClass $bag, string $method): void
+    {
+        // No diagnostic — the label converts to the property name 'title':
+        echo $this->{$label};
+
+        // Error — a stdClass cannot be converted to a string:
+        echo $this->{$bag};
+
+        // Error — PHP does not convert a method name, even a Stringable one:
+        $this->{$label}();
+
+        // No diagnostic — a string names the method:
+        $this->{$method}();
     }
 }
 
@@ -649,4 +852,24 @@ class InvalidClassKindDemo
 
     // These also produce diagnostics but would crash at class-load time,
     // so they are commented out.  See the AGENTS.md hoisting pitfall note.
+}
+
+
+// ── Diagnostic: #[\Override] With Nothing to Override ───────────────────────
+// PHP refuses to load a class whose method (8.3+) or property (8.5+) is
+// marked #[\Override] when no parent class or interface declares it, so the
+// mistake is reported as an error.
+
+abstract class OverrideAttributeDemo extends Scaffolding\Model
+{
+    #[\Override]
+    public function getName(): string // fine: Model declares getName()
+    {
+        return 'demo';
+    }
+
+    // Try: uncomment the method below to see the error (PHP would refuse
+    // to load the class, so it stays commented out):
+    // #[\Override]
+    // public function getNickname(): string { return 'demo'; }
 }

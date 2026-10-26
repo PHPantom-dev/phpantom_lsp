@@ -9,7 +9,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::sequence::Sequence;
 use serde::{Deserialize, Serialize};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::gen_lsp_types::*;
 
 use crate::symbol_map::SymbolSpan;
 
@@ -20,7 +20,7 @@ use crate::symbol_map::SymbolSpan;
 /// Nearly every code action produces edits for exactly one document.  This
 /// wraps the `changes` map construction so handlers don't each open-code the
 /// `document_changes: None` / `change_annotations: None` boilerplate.
-pub(crate) fn single_file_edit(uri: Url, edits: Vec<TextEdit>) -> WorkspaceEdit {
+pub(crate) fn single_file_edit(uri: Uri, edits: Vec<TextEdit>) -> WorkspaceEdit {
     let mut changes = HashMap::new();
     changes.insert(uri, edits);
     multi_file_edit(changes)
@@ -28,7 +28,7 @@ pub(crate) fn single_file_edit(uri: Url, edits: Vec<TextEdit>) -> WorkspaceEdit 
 
 /// Build a [`WorkspaceEdit`] that applies text edits to any number of
 /// files, none of which is created, renamed, or deleted.
-pub(crate) fn multi_file_edit(changes: HashMap<Url, Vec<TextEdit>>) -> WorkspaceEdit {
+pub(crate) fn multi_file_edit(changes: HashMap<Uri, Vec<TextEdit>>) -> WorkspaceEdit {
     WorkspaceEdit {
         changes: Some(changes),
         document_changes: None,
@@ -81,7 +81,7 @@ pub(crate) fn sort_edits_by_position(edits: &mut [TextEdit]) {
 ///
 /// Convenience wrapper over [`single_file_edit`] for the common case of one
 /// range → one replacement string.
-pub(crate) fn single_edit(uri: Url, range: Range, new_text: String) -> WorkspaceEdit {
+pub(crate) fn single_edit(uri: Uri, range: Range, new_text: String) -> WorkspaceEdit {
     single_file_edit(uri, vec![TextEdit { range, new_text }])
 }
 
@@ -96,22 +96,24 @@ pub(crate) fn single_edit(uri: Url, range: Range, new_text: String) -> Workspace
 /// `Backend::supports_file_rename`); one that has not ignores the whole
 /// edit.
 pub(crate) fn document_changes_edit(
-    ops: impl IntoIterator<Item = ResourceOp>,
-    edits: impl IntoIterator<Item = (Url, Vec<TextEdit>)>,
+    ops: impl IntoIterator<Item = DocumentChange>,
+    edits: impl IntoIterator<Item = (Uri, Vec<TextEdit>)>,
 ) -> WorkspaceEdit {
     let operations = ops
         .into_iter()
-        .map(DocumentChangeOperation::Op)
         .chain(edits.into_iter().map(|(uri, edits)| {
-            DocumentChangeOperation::Edit(TextDocumentEdit {
-                text_document: OptionalVersionedTextDocumentIdentifier { uri, version: None },
-                edits: edits.into_iter().map(OneOf::Left).collect(),
+            DocumentChange::TextDocumentEdit(TextDocumentEdit {
+                text_document: OptionalVersionedTextDocumentIdentifier {
+                    text_document_identifier: TextDocumentIdentifier { uri },
+                    version: None,
+                },
+                edits: edits.into_iter().map(Edit::TextEdit).collect(),
             })
         }))
         .collect();
     WorkspaceEdit {
         changes: None,
-        document_changes: Some(DocumentChanges::Operations(operations)),
+        document_changes: Some(operations),
         change_annotations: None,
     }
 }
@@ -119,11 +121,11 @@ pub(crate) fn document_changes_edit(
 /// Build a `WorkspaceEdit` that creates `uri` holding `content`, followed
 /// by `edits` to files that already exist.
 pub(crate) fn create_file_edit(
-    uri: Url,
+    uri: Uri,
     content: String,
-    edits: Vec<(Url, Vec<TextEdit>)>,
+    edits: Vec<(Uri, Vec<TextEdit>)>,
 ) -> WorkspaceEdit {
-    let create = ResourceOp::Create(CreateFile {
+    let create = DocumentChange::CreateFile(CreateFile {
         uri: uri.clone(),
         options: Some(CreateFileOptions {
             overwrite: Some(false),
@@ -151,26 +153,29 @@ pub(crate) fn create_file_edit(
 pub(crate) enum FileTextEdits<'a> {
     /// The edits of a `changes` entry.
     Plain(&'a mut Vec<TextEdit>),
-    /// The edits of a `TextDocumentEdit`, each plain or annotated.
-    Document(&'a mut Vec<OneOf<TextEdit, AnnotatedTextEdit>>),
+    /// The edits of a `TextDocumentEdit`, each plain, annotated, or a
+    /// snippet.
+    Document(&'a mut Vec<Edit>),
 }
 
 impl FileTextEdits<'_> {
     /// Keep only the edits `keep` returns `true` for, handing it each edit's
     /// plain [`TextEdit`] (an annotated edit's inner one) to inspect or
-    /// rewrite.
+    /// rewrite. A snippet edit has no plain form and is kept as is.
     pub(crate) fn retain_mut(&mut self, mut keep: impl FnMut(&mut TextEdit) -> bool) {
         match self {
             Self::Plain(edits) => edits.retain_mut(keep),
-            Self::Document(edits) => edits.retain_mut(|edit| keep(plain_text_edit(edit))),
+            Self::Document(edits) => {
+                edits.retain_mut(|edit| plain_text_edit(edit).is_none_or(&mut keep))
+            }
         }
     }
 
     /// Run `f` on every edit's plain [`TextEdit`].
-    pub(crate) fn for_each_mut(&mut self, mut f: impl FnMut(&mut TextEdit)) {
+    pub(crate) fn for_each_mut(&mut self, f: impl FnMut(&mut TextEdit)) {
         match self {
             Self::Plain(edits) => edits.iter_mut().for_each(f),
-            Self::Document(edits) => edits.iter_mut().for_each(|edit| f(plain_text_edit(edit))),
+            Self::Document(edits) => edits.iter_mut().filter_map(plain_text_edit).for_each(f),
         }
     }
 
@@ -182,10 +187,11 @@ impl FileTextEdits<'_> {
     }
 }
 
-fn plain_text_edit(edit: &mut OneOf<TextEdit, AnnotatedTextEdit>) -> &mut TextEdit {
+fn plain_text_edit(edit: &mut Edit) -> Option<&mut TextEdit> {
     match edit {
-        OneOf::Left(edit) => edit,
-        OneOf::Right(edit) => &mut edit.text_edit,
+        Edit::TextEdit(edit) => Some(edit),
+        Edit::AnnotatedTextEdit(edit) => Some(&mut edit.text_edit),
+        Edit::SnippetTextEdit(_) => None,
     }
 }
 
@@ -196,7 +202,7 @@ fn plain_text_edit(edit: &mut OneOf<TextEdit, AnnotatedTextEdit>) -> &mut TextEd
 /// creation, rename, or deletion), which carries no text edits to visit.
 pub(crate) fn visit_file_text_edits(
     edit: &mut WorkspaceEdit,
-    mut visit: impl FnMut(&Url, FileTextEdits<'_>),
+    mut visit: impl FnMut(&Uri, FileTextEdits<'_>),
 ) -> bool {
     if let Some(changes) = edit.changes.as_mut() {
         for (uri, edits) in changes.iter_mut() {
@@ -204,27 +210,16 @@ pub(crate) fn visit_file_text_edits(
         }
     }
     let mut has_resource_op = false;
-    match edit.document_changes.as_mut() {
-        Some(DocumentChanges::Edits(documents)) => {
-            for document in documents {
-                visit(
-                    &document.text_document.uri,
-                    FileTextEdits::Document(&mut document.edits),
-                );
-            }
+    for operation in edit.document_changes.iter_mut().flatten() {
+        match operation {
+            DocumentChange::TextDocumentEdit(document) => visit(
+                &document.text_document.text_document_identifier.uri,
+                FileTextEdits::Document(&mut document.edits),
+            ),
+            DocumentChange::CreateFile(_)
+            | DocumentChange::RenameFile(_)
+            | DocumentChange::DeleteFile(_) => has_resource_op = true,
         }
-        Some(DocumentChanges::Operations(operations)) => {
-            for operation in operations {
-                match operation {
-                    DocumentChangeOperation::Edit(document) => visit(
-                        &document.text_document.uri,
-                        FileTextEdits::Document(&mut document.edits),
-                    ),
-                    DocumentChangeOperation::Op(_) => has_resource_op = true,
-                }
-            }
-        }
-        None => {}
     }
     has_resource_op
 }
@@ -334,23 +329,26 @@ pub(crate) fn deferred_quickfix(
     diagnostics: Vec<Diagnostic>,
     is_preferred: bool,
     extra: serde_json::Value,
-) -> CodeActionOrCommand {
+) -> CodeActionResponse {
     let mut extra = match extra {
         serde_json::Value::Object(fields) => fields,
         _ => serde_json::Map::new(),
     };
     if let Some(diag) = diagnostics.first() {
         let code = match &diag.code {
-            Some(NumberOrString::String(code)) => code.as_str(),
+            Some(Code::String(code)) => code.as_str(),
             _ => "",
         };
-        extra.insert("diagnostic_message".into(), diag.message.clone().into());
+        extra.insert(
+            "diagnostic_message".into(),
+            crate::util::message_text(&diag.message).into(),
+        );
         extra.insert("diagnostic_line".into(), diag.range.start.line.into());
         extra.insert("diagnostic_code".into(), code.into());
     }
-    CodeActionOrCommand::CodeAction(CodeAction {
+    CodeActionResponse::CodeAction(CodeAction {
         title,
-        kind: Some(CodeActionKind::QUICKFIX),
+        kind: Some(CodeActionKind::QuickFix),
         diagnostics: Some(diagnostics),
         edit: None,
         command: None,
@@ -362,6 +360,7 @@ pub(crate) fn deferred_quickfix(
             range,
             serde_json::Value::Object(extra),
         )),
+        tags: None,
     })
 }
 
@@ -369,15 +368,15 @@ pub(crate) fn deferred_quickfix(
 /// the document `uri` holding `content` with `replacement`.
 pub(crate) fn rewrite_action(
     title: String,
-    uri: Url,
+    uri: Uri,
     content: &str,
     (start, end): (usize, usize),
     replacement: String,
     is_preferred: bool,
-) -> CodeActionOrCommand {
-    CodeActionOrCommand::CodeAction(CodeAction {
+) -> CodeActionResponse {
+    CodeActionResponse::CodeAction(CodeAction {
         title,
-        kind: Some(CodeActionKind::REFACTOR_REWRITE),
+        kind: Some(CodeActionKind::RefactorRewrite),
         diagnostics: None,
         edit: Some(single_edit(
             uri,
@@ -388,6 +387,7 @@ pub(crate) fn rewrite_action(
         is_preferred: Some(is_preferred),
         disabled: None,
         data: None,
+        tags: None,
     })
 }
 
@@ -398,7 +398,7 @@ pub(crate) fn rewrite_action(
 /// The variants are told apart by the `all_occurrences` flag in their
 /// data and by their kinds, `action_kind` and `{action_kind}All`.
 pub(crate) fn push_extract_actions(
-    out: &mut Vec<CodeActionOrCommand>,
+    out: &mut Vec<CodeActionResponse>,
     uri: &str,
     range: &Range,
     content: &str,
@@ -413,9 +413,9 @@ pub(crate) fn push_extract_actions(
         .is_some_and(|pos| content[pos + needle.len()..].contains(needle));
 
     let mut push = |title: String, kind: &str, all_occurrences: bool| {
-        out.push(CodeActionOrCommand::CodeAction(CodeAction {
+        out.push(CodeActionResponse::CodeAction(CodeAction {
             title,
-            kind: Some(CodeActionKind::REFACTOR_EXTRACT),
+            kind: Some(CodeActionKind::RefactorExtract),
             diagnostics: None,
             edit: None,
             command: None,
@@ -427,6 +427,7 @@ pub(crate) fn push_extract_actions(
                 range,
                 serde_json::json!({ "all_occurrences": all_occurrences }),
             )),
+            tags: None,
         }));
     };
     if has_other_occurrences {
