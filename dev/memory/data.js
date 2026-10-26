@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793038375520,
+  "lastUpdate": 1793041236416,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6696,6 +6696,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 75.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "3257338+arcticfulmar@users.noreply.github.com",
+            "name": "Steve A",
+            "username": "arcticfulmar"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3b2921961a08d0256e9a2fb5342aa534d9bbfa2b",
+          "message": "Fix/caller import leak (#457)",
+          "timestamp": "2026-10-26T19:38:14+01:00",
+          "tree_id": "aef28fe3d93fc4113b8b549d9ab7fd9c01032bea",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3b2921961a08d0256e9a2fb5342aa534d9bbfa2b"
+        },
+        "date": 1793041224620,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 84.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 73.7,
             "unit": "MiB"
           }
         ]
