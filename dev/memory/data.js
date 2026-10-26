@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792962653226,
+  "lastUpdate": 1793013142726,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6618,6 +6618,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 76.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "69921f7b992ddd969d870cb430fe1f638bd488e3",
+          "message": "Code actions in Blade templates",
+          "timestamp": "2026-10-26T11:54:53+01:00",
+          "tree_id": "77c8ecc1b1cc56aaf1fc11719b4b691b4722f2b0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/69921f7b992ddd969d870cb430fe1f638bd488e3"
+        },
+        "date": 1793013129184,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.7,
             "unit": "MiB"
           }
         ]
