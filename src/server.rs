@@ -634,13 +634,6 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<CodeActionResponse>>> {
         let uri = params.text_document.uri.to_string();
 
-        // Code actions are not yet Blade-aware (edits target virtual PHP
-        // coordinates and may insert code outside valid PHP regions).
-        // Disabled until Phase 2 component support lands.
-        if self.is_blade_file(&uri) {
-            return Ok(None);
-        }
-
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         run_blocking_cancel_safe("code_action", move || {

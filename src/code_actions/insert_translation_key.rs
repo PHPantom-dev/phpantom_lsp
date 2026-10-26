@@ -18,10 +18,23 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionResponse>,
     ) {
-        let diagnostics: Vec<_> = params.context.diagnostics.iter().filter(|diagnostic| {
-            matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_trans")
-                && ranges_overlap(&diagnostic.range, &params.range)
-        }).collect();
+        // A template's diagnostics are reported in its own coordinates, and
+        // compared here with ranges in the virtual PHP it lowers to.
+        let diagnostics: Vec<_> = params
+            .context
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                matches!(&diagnostic.code, Some(Code::String(code)) if code == "invalid_laravel_trans")
+            })
+            .map(|diagnostic| {
+                (
+                    diagnostic,
+                    self.translate_blade_range_to_php(uri, diagnostic.range),
+                )
+            })
+            .filter(|(_, range)| ranges_overlap(range, &params.range))
+            .collect();
         if diagnostics.is_empty() {
             return;
         }
@@ -44,9 +57,9 @@ impl Backend {
                 continue;
             };
             let range = byte_range_to_lsp_range(content, span.start as usize, span.end as usize);
-            let Some(diagnostic) = diagnostics
+            let Some((diagnostic, _)) = diagnostics
                 .iter()
-                .find(|diagnostic| ranges_overlap(&range, &diagnostic.range))
+                .find(|(_, diagnostic_range)| ranges_overlap(&range, diagnostic_range))
             else {
                 continue;
             };

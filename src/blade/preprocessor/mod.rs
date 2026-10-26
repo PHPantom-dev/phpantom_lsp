@@ -141,7 +141,10 @@ pub fn preprocess_with_vars(
     directives: &BladeDirectives,
 ) -> (String, BladeSourceMap) {
     let mut virtual_php = String::with_capacity(content.len() + 512);
-    let mut source_map = BladeSourceMap::default();
+    let mut source_map = BladeSourceMap {
+        template_len: content.len(),
+        ..BladeSourceMap::default()
+    };
 
     let uses_insert_at = prologue::emit(
         content,

@@ -305,6 +305,13 @@ impl Backend {
             return Vec::new();
         };
 
+        // A template's virtual PHP also names classes in its prologue and in
+        // the PHP a component tag lowers to; only the names it wrote count.
+        let template = self.template_text(uri);
+        if template.is_none() && self.is_blade_file(uri) {
+            return Vec::new();
+        }
+
         let mut seen: HashSet<(usize, String)> = HashSet::new();
         let mut unresolved: Vec<Vec<(String, ClassRefContext)>> = vec![Vec::new(); blocks.len()];
 
@@ -317,6 +324,11 @@ impl Backend {
             let Some((ref_name, ref_context)) = unqualified_class_name(span, source) else {
                 continue;
             };
+            if template.as_ref().is_some_and(|template| {
+                !template.wrote_bytes(span.start as usize, span.end as usize)
+            }) {
+                continue;
+            }
 
             let index = ImportBlock::index_at(&blocks, span.start as usize);
 

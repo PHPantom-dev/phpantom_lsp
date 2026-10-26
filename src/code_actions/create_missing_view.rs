@@ -95,8 +95,18 @@ impl Backend {
                 continue;
             };
 
+            // The diagnostic the action fixes is reported in the template's
+            // own coordinates when the call sits in one.
+            let Some(diagnostic_range) = self.offset_range_to_lsp_range(
+                uri,
+                content,
+                span.start as usize,
+                span.end as usize,
+            ) else {
+                continue;
+            };
             let diagnostic = make_diagnostic(
-                range,
+                diagnostic_range,
                 DiagnosticSeverity::Warning,
                 code,
                 format!("Unknown {}: '{}'", label, key),

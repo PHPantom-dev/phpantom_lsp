@@ -37,7 +37,27 @@ No outstanding items.
 
 ## Narrowing
 
-No outstanding items.
+### B683. A truthiness check does not remove `void` from a union
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+/** @return void|string */
+function maybe() { if (rand(0, 1)) { return 'x'; } }
+
+function a(): ?string { return maybe() ?: null; }
+function c(): ?string { $r = maybe(); if (!$r) { return null; } return $r; }
+```
+
+Both functions report `Return type void|non-falsy-string… is
+incompatible with declared return type ?string`. The truthy branch
+narrows `string` to `non-falsy-string` but keeps `void`, although a
+`void` result is `null` at runtime and so always falsy. The same applies
+to `$r ? $r : null`. Truthy narrowing should drop `void` the way it drops
+`null`.
+
+Found in a WordPress theme returning `wp_list_comments([...]) ?: null`
+(the stubs declare `@return void|string`).
 
 ## Array types
 

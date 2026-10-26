@@ -21,6 +21,7 @@ pub(crate) mod shared_vars;
 pub(crate) mod signature;
 pub mod source_map;
 pub(crate) mod state;
+pub(crate) mod template_edits;
 pub(crate) mod translate;
 pub(crate) mod typed_receiver;
 pub(crate) mod use_block;

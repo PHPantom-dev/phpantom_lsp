@@ -24,7 +24,10 @@ use std::collections::HashSet;
 
 use tower_lsp_server::gen_lsp_types::*;
 
-use super::use_line_deletion::{build_line_deletion_edit, range_touches_use_import};
+use super::use_line_deletion::{
+    build_line_deletion_edit, build_use_directive_deletion_edit, range_touches_template_import,
+    range_touches_use_import,
+};
 use super::{CodeActionData, make_code_action_data};
 use crate::Backend;
 use crate::text_position::ranges_overlap;
@@ -38,6 +41,11 @@ impl Backend {
     /// imports" action.
     ///
     /// Phase 1 only — edits are deferred to [`resolve_remove_unused_import`].
+    ///
+    /// For a Blade template `params` carries the request range in the
+    /// template's own coordinates, the ones its diagnostics are reported
+    /// in, while `content` is the virtual PHP the diagnostics are computed
+    /// from.
     pub(crate) fn collect_remove_unused_import_actions(
         &self,
         uri: &str,
@@ -90,7 +98,13 @@ impl Backend {
         // Only offer when the request touches a namespace-level `use`
         // import (used or unused), so it doesn't pop up on unrelated
         // lines elsewhere in the file.
-        if range_touches_use_import(content, &params.range) {
+        let touches_import = match self.blade_template_content(uri) {
+            Some(template) => {
+                range_touches_template_import(&template, &params.range, &all_unused_diags)
+            }
+            None => range_touches_use_import(content, &params.range),
+        };
+        if touches_import {
             out.push(CodeActionResponse::CodeAction(CodeAction {
                 title: "Remove all unused imports".to_string(),
                 kind: Some(CodeActionKind::SourceOrganizeImports),
@@ -116,6 +130,11 @@ impl Backend {
     /// Recomputes the deletion edits from the diagnostics attached to
     /// the action.  Each diagnostic's range identifies the `use`
     /// statement to remove.
+    ///
+    /// A Blade template's diagnostics are reported in its own coordinates,
+    /// so its edits are planned against its own text, where an import is
+    /// the `@use` directive or a `use` statement in a block of PHP, and
+    /// are not translated afterwards.
     pub(crate) fn resolve_remove_unused_import(
         &self,
         data: &CodeActionData,
@@ -128,6 +147,20 @@ impl Backend {
         if diags.is_empty() {
             return None;
         }
+
+        let template = self.blade_template_content(&data.uri);
+        let deletion =
+            |range: &Range, removed_import_lines: &HashSet<usize>, all: &[Range]| match template
+                .as_deref()
+            {
+                Some(template) => {
+                    build_use_directive_deletion_edit(template, range, removed_import_lines, all)
+                        .unwrap_or_else(|| {
+                            build_line_deletion_edit(template, range, removed_import_lines, all)
+                        })
+                }
+                None => build_line_deletion_edit(content, range, removed_import_lines, all),
+            };
 
         let is_bulk = data.action_kind == "quickfix.removeAllUnusedImports";
 
@@ -150,9 +183,7 @@ impl Backend {
 
             let mut edits: Vec<TextEdit> = fresh_diags
                 .iter()
-                .map(|d| {
-                    build_line_deletion_edit(content, &d.range, &removed_import_lines, &all_ranges)
-                })
+                .map(|d| deletion(&d.range, &removed_import_lines, &all_ranges))
                 .collect();
 
             // Sort edits in reverse order so that byte offsets remain
@@ -166,8 +197,7 @@ impl Backend {
         } else {
             let diag = &diags[0];
             let removed_import_lines = HashSet::from([diag.range.start.line as usize]);
-            let removal_edit = build_line_deletion_edit(
-                content,
+            let removal_edit = deletion(
                 &diag.range,
                 &removed_import_lines,
                 std::slice::from_ref(&diag.range),

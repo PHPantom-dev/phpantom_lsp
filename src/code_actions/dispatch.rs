@@ -5,6 +5,7 @@
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::blade::template_edits::TemplateText;
 
 use super::{CodeActionData, visit_file_text_edits};
 
@@ -49,6 +50,11 @@ type CollectFn = fn(&Backend, &str, &str, &CodeActionParams, &mut Vec<CodeAction
 enum TemplatePolicy {
     /// Offer the actions, translated back into the template.
     Offer,
+    /// Offer the actions, but hand the collector the request range in the
+    /// template's own coordinates: it matches the range against
+    /// diagnostics, which a template's are reported in, and its edits are
+    /// planned against the template's own text.
+    TemplateRange,
     /// Never offer the actions in a template: they are planned against the
     /// raw file (the external tools' fixes), are about class files (fix
     /// namespace, fix class name), or place code in the wrapper the
@@ -69,6 +75,14 @@ const fn offer(collect: CollectFn) -> Collector {
     Collector {
         collect,
         template: TemplatePolicy::Offer,
+        in_resource: false,
+    }
+}
+
+const fn template_range(collect: CollectFn) -> Collector {
+    Collector {
+        collect,
+        template: TemplatePolicy::TemplateRange,
         in_resource: false,
     }
 }
@@ -94,7 +108,7 @@ static COLLECTORS: &[Collector] = &[
     offer(Backend::collect_import_class_actions),
     offer(Backend::collect_replace_fqcn_actions),
     offer(Backend::collect_import_all_classes_action),
-    offer(Backend::collect_remove_unused_import_actions),
+    template_range(Backend::collect_remove_unused_import_actions),
     offer(Backend::collect_sort_use_statements_action),
     offer(Backend::collect_implement_methods_actions),
     offer(Backend::collect_replace_deprecated_actions),
@@ -139,6 +153,32 @@ impl Backend {
     ) -> Vec<CodeActionResponse> {
         let mut actions = Vec::new();
 
+        // A template is planned against the virtual PHP it lowers to, so
+        // the request range moves into it.  The diagnostics in the request
+        // context stay in the template's coordinates, which is where the
+        // collectors report a template's diagnostics, and what the editor
+        // matches an action's diagnostics against.
+        let is_template = self.is_blade_file(uri);
+        let template = if is_template {
+            // Nothing to offer for a template edited since it was lowered.
+            let Some(template) = self.template_text(uri) else {
+                return actions;
+            };
+            Some(template)
+        } else {
+            None
+        };
+        let template_params = params;
+        let translated;
+        let params = if is_template {
+            let mut moved = params.clone();
+            moved.range = self.translate_blade_range_to_php(uri, params.range);
+            translated = moved;
+            &translated
+        } else {
+            params
+        };
+
         let adjusted = skip_leading_whitespace(content, params);
         let params = adjusted.as_ref().unwrap_or(params);
 
@@ -147,7 +187,6 @@ impl Backend {
         // collector below instead of once each.
         let _scope = self.enter_request_scope_borrowed(content);
 
-        let is_template = self.is_blade_file(uri);
         let is_resource = self.is_resource_uri(uri);
         for collector in COLLECTORS {
             if is_template && collector.template == TemplatePolicy::Skip
@@ -155,26 +194,31 @@ impl Backend {
             {
                 continue;
             }
+            let params = match collector.template {
+                TemplatePolicy::TemplateRange if is_template => template_params,
+                _ => params,
+            };
             (collector.collect)(self, uri, content, params, &mut actions);
         }
 
         // Every collector plans its edits against the PHP a template lowers
-        // to; the editor applies them to the template itself.
-        let eol = crate::text_position::line_ending(content);
-        for action in &mut actions {
-            if let CodeActionResponse::CodeAction(CodeAction {
+        // to; the editor applies them to the template itself, and an action
+        // that cannot be moved there whole is not offered.
+        let eol = Self::request_line_ending(template.as_ref(), content);
+        actions.retain_mut(|action| match action {
+            CodeActionResponse::CodeAction(CodeAction {
                 edit: Some(edit), ..
-            }) = action
-            {
-                self.translate_workspace_edit(edit);
-                self.match_workspace_edit_line_endings(edit, uri, eol);
-            }
-        }
+            }) => self.finish_action_edit(edit, uri, eol, template.as_ref(), false),
+            _ => true,
+        });
 
-        if !self.caps().code_action_resolve {
+        // A deferred action can resolve to nothing in a template (an
+        // extraction whose statement starts in the PHP an echo lowers to),
+        // so a template's are resolved before the list goes out.
+        if is_template || !self.caps().code_action_resolve {
             actions.retain_mut(|action| match action {
                 CodeActionResponse::CodeAction(action) => {
-                    self.inline_deferred_edit(action, content)
+                    self.inline_deferred_edit(action, content, template.as_ref())
                 }
                 CodeActionResponse::Command(_) => true,
             });
@@ -183,11 +227,41 @@ impl Backend {
         actions
     }
 
+    /// The line terminator of the file a request was made in: the
+    /// template's own for a template, whose virtual PHP is always `\n`.
+    fn request_line_ending(template: Option<&TemplateText>, content: &str) -> &'static str {
+        crate::text_position::line_ending(template.map_or(content, TemplateText::template))
+    }
+
+    /// Move an action's edit into the coordinates of the files it edits
+    /// and give its text their line terminators.  Returns `false` when the
+    /// edit cannot be moved into a template whole, and the action has
+    /// nothing to offer.
+    fn finish_action_edit(
+        &self,
+        edit: &mut WorkspaceEdit,
+        uri: &str,
+        eol: &'static str,
+        template: Option<&TemplateText>,
+        planned_in_template: bool,
+    ) -> bool {
+        if !self.translate_action_edit(edit, template, planned_in_template) {
+            return false;
+        }
+        self.match_workspace_edit_line_endings(edit, uri, eol);
+        true
+    }
+
     /// Fill in the edit of a deferred action for a client that cannot call
     /// `codeAction/resolve`, and drop the `data` it would never use.
     /// Returns `false` when the edit cannot be computed, since the action
     /// would do nothing.
-    fn inline_deferred_edit(&self, action: &mut CodeAction, content: &str) -> bool {
+    fn inline_deferred_edit(
+        &self,
+        action: &mut CodeAction,
+        content: &str,
+        template: Option<&TemplateText>,
+    ) -> bool {
         if action.edit.is_some() {
             return true;
         }
@@ -195,7 +269,7 @@ impl Backend {
             return true;
         };
         action.data = None;
-        let Some(edit) = self.compute_deferred_edit(action, &data, content) else {
+        let Some(edit) = self.compute_deferred_edit(action, &data, content, template) else {
             return false;
         };
         action.edit = Some(edit);
@@ -218,12 +292,19 @@ impl Backend {
         };
 
         // A template's action was planned against its virtual PHP, so the
-        // resolve reads the same text.
+        // resolve reads the same text, and has nothing to resolve to once
+        // the template no longer matches it.
+        let template = self.template_text(&data.uri);
+        if template.is_none() && self.is_blade_file(&data.uri) {
+            return (action, None);
+        }
         let Some(content) = self.analysable_content(&data.uri) else {
             return (action, None);
         };
 
-        let Some(edit) = self.compute_deferred_edit(&mut action, &data, &content) else {
+        let Some(edit) =
+            self.compute_deferred_edit(&mut action, &data, &content, template.as_ref())
+        else {
             return (action, None);
         };
         action.edit = Some(edit);
@@ -271,12 +352,15 @@ impl Backend {
 
     /// Compute the workspace edit of a deferred action, already translated
     /// for templates.  Returns `None` when the file changed since the
-    /// action was offered or the kind is unknown.
+    /// action was offered, the kind is unknown, or the edit cannot be moved
+    /// into the template whole.  `template` is the template the action was
+    /// offered on, when it was.
     fn compute_deferred_edit(
         &self,
         action: &mut CodeAction,
         data: &CodeActionData,
         content: &str,
+        template: Option<&TemplateText>,
     ) -> Option<WorkspaceEdit> {
         // Resolving an action can need types (an extracted function's
         // return type, a docblock's inferred `@return`) and walks the AST
@@ -360,13 +444,15 @@ impl Backend {
         };
 
         let mut edit = result?;
-        self.translate_workspace_edit(&mut edit);
-        self.match_workspace_edit_line_endings(
-            &mut edit,
-            &data.uri,
-            crate::text_position::line_ending(content),
+        // A template's unused imports are removed as the directives it
+        // writes them as, planned against its own text.
+        let planned_in_template = matches!(
+            data.action_kind.as_str(),
+            "quickfix.removeUnusedImport" | "quickfix.removeAllUnusedImports"
         );
-        Some(edit)
+        let eol = Self::request_line_ending(template, content);
+        self.finish_action_edit(&mut edit, &data.uri, eol, template, planned_in_template)
+            .then_some(edit)
     }
 
     /// Give the text of every edit in `edit` the line terminator of the

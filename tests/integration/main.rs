@@ -26,6 +26,7 @@ mod code_action_add_iterable_type;
 mod code_action_add_override;
 mod code_action_add_return_type_will_change;
 mod code_action_add_throws;
+mod code_action_blade;
 mod code_action_change_visibility;
 mod code_action_convert_switch_to_match;
 mod code_action_convert_to_instance_variable;

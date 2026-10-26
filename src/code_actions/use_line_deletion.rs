@@ -37,6 +37,31 @@ pub(crate) fn range_touches_use_import(content: &str, range: &Range) -> bool {
     })
 }
 
+/// [`range_touches_use_import`] for a Blade template, whose imports are its
+/// `@use` directives and the `use` statements in its blocks of PHP.
+///
+/// `range` and `unused` (the template's unused-import diagnostics, which
+/// cover a `use` statement in a block of PHP as well as a directive) are
+/// in the template's own coordinates.  A line holding a directive or an
+/// unused import counts.
+pub(crate) fn range_touches_template_import(
+    template: &str,
+    range: &Range,
+    unused: &[Diagnostic],
+) -> bool {
+    let (first, last) = (range.start.line, range.end.line);
+    let touches = |start: u32, end: u32| start <= last && first <= end;
+    unused
+        .iter()
+        .any(|diagnostic| touches(diagnostic.range.start.line, diagnostic.range.end.line))
+        || use_directives(template).any(|directive| {
+            touches(
+                offset_to_position(template, directive.span.start).line,
+                offset_to_position(template, directive.span.end).line,
+            )
+        })
+}
+
 /// Build a `TextEdit` that deletes the full line(s) covered by `range`,
 /// including the trailing newline.
 ///
