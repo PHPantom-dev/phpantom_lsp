@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793045399240,
+  "lastUpdate": 1793046615704,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6774,6 +6774,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 75.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "deadsquirrel93@gmail.com",
+            "name": "Nikita",
+            "username": "Deadsquirrel93"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6866e914e207bfaa79df86216fe608b228227985",
+          "message": "A class constant is no longer renamed or counted together with a same-named method or property (#495)",
+          "timestamp": "2026-10-26T21:11:10+01:00",
+          "tree_id": "0bba99360d248db31b666f4a7ae8e8c9e528bb5f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6866e914e207bfaa79df86216fe608b228227985"
+        },
+        "date": 1793046604051,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 76.6,
             "unit": "MiB"
           }
         ]
