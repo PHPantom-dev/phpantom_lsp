@@ -1507,6 +1507,12 @@
 <li>Add <code>///</code> doc comments to all public functions and struct fields</li>
 </ul>
 <h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
+<p>CI runs the test suite with coverage across six parallel Nextest shards.
+The <code>Test</code> check passes only after every shard succeeds and their coverage
+reports are uploaded together to Codecov. To reproduce one shard locally
+(replace <code>1</code> with the shard number):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>llvm-cov<span class="w"> </span>nextest<span class="w"> </span>--partition<span class="w"> </span>hash:1/6<span class="w"> </span>--lcov<span class="w"> </span>--output-path<span class="w"> </span>lcov.info
+</code></pre></div>
 <ul>
 <li>Integration tests go in <code>tests/integration/</code>, one file per feature area (<code>completion_*.rs</code>, <code>definition_*.rs</code>, <code>code_action_*.rs</code>, ...)</li>
 <li>Use <code>create_test_backend()</code> from <code>tests/integration/common/mod.rs</code> for same-file tests</li>
@@ -1528,21 +1534,21 @@
 <li>End with <code>Contributed by @username</code> if you are not the maintainer. Don't reference the issue a change fixes.</li>
 </ul>
 <p>Example:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">-</span><span class="w"> </span><span class="gs">**`analyze` takes more than one path.**</span> <span class="sb">`phpantom_lsp analyze app/ lib/Helper.php tests/`</span> checks everything named, so a pre-commit hook or CI step can pass only the changed files.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">-</span><span class="w"> </span><span class="gs">**`analyze` takes more than one path.**</span> <span class="sb">`phpantom_lsp analyze app/ lib/Helper.php tests/`</span> checks everything named, so a pre-commit hook or CI step can pass only the changed files.
 </code></pre></div>
 <h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
 <p>The documentation site is built with <a href="https://zensical.org/">Zensical</a>.
 The only dependency you need is <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a>.</p>
 <p>Preview the docs locally with live reload:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve
 </code></pre></div>
 <p>Then open <code>http://127.0.0.1:8000</code> in your browser. Changes to files in
 <code>docs/</code> and <code>zensical.toml</code> are reflected immediately. If port 8000 is
 already in use, pick a different one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve<span class="w"> </span>-a<span class="w"> </span><span class="m">127</span>.0.0.1:8200
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve<span class="w"> </span>-a<span class="w"> </span><span class="m">127</span>.0.0.1:8200
 </code></pre></div>
 <p>Build the docs for offline use:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>build
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>build
 </code></pre></div>
 <p>The output is written to <code>site/</code> (gitignored). <code>uv</code> handles creating
 a virtual environment and installing all Python dependencies
