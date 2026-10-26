@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793013142726,
+  "lastUpdate": 1793038375520,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6657,6 +6657,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 74.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cf8c633fd2d6f91c171d88ad2ad8043d3e907c44",
+          "message": "feat(laravel): discover sibling resource registrations (#500)",
+          "timestamp": "2026-10-26T18:57:44+01:00",
+          "tree_id": "896e1ef42fd55fe5fa0b54e79ad8449d68f1bc20",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/cf8c633fd2d6f91c171d88ad2ad8043d3e907c44"
+        },
+        "date": 1793038363874,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 87,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 75.6,
             "unit": "MiB"
           }
         ]
