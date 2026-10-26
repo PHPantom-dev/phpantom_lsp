@@ -224,6 +224,12 @@ fn resource_call_info<'a>(
         (b"apiResource".as_slice(), ResourceKind::ApiResource, false),
         (b"resources".as_slice(), ResourceKind::Resource, true),
         (b"apiResources".as_slice(), ResourceKind::ApiResource, true),
+        // Soft deletion changes route bindings, not route names or URIs.
+        (
+            b"softDeletableResources".as_slice(),
+            ResourceKind::Resource,
+            true,
+        ),
         (b"singleton".as_slice(), ResourceKind::Singleton, false),
         (
             b"apiSingleton".as_slice(),

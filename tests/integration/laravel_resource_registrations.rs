@@ -6,9 +6,9 @@ use crate::common::{
     position_of,
 };
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::Url;
+use tower_lsp_server::gen_lsp_types::Uri;
 
-async fn workspace(routes: &str, body: &str) -> (Backend, tempfile::TempDir, Url, String) {
+async fn workspace(routes: &str, body: &str) -> (Backend, tempfile::TempDir, Uri, String) {
     let consumer = format!(
         "<?php\nnamespace App;\nclass Links {{\n    public function show(): void {{\n{body}\n    }}\n}}\n"
     );
@@ -457,7 +457,7 @@ Route::singleton('profile', ProfileController::class);
         "        route('photos.show');\n        route('videos.update');\n        route('profile.edit');",
     )
     .await;
-    let routes_uri = Url::from_file_path(dir.path().join("routes/web.php")).unwrap();
+    let routes_uri = Uri::from_file_path(dir.path().join("routes/web.php")).unwrap();
     for (name, literal) in [
         ("photos.show", "'photos'"),
         ("videos.update", "'videos'"),

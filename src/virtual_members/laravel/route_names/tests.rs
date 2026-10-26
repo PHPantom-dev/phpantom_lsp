@@ -533,6 +533,24 @@ fn resource_maps_keep_literal_entries_and_skip_unrecoverable_names() {
     assert!(routes_of("<?php Route::resources(...$args);").is_empty());
 }
 
+#[test]
+fn soft_deletable_resources_generate_the_conventional_routes() {
+    let content = "<?php Route::softDeletableResources(['photos' => C::class], ['except' => ['create', 'edit']]);";
+    let mut names: Vec<String> = routes_of(content).into_iter().map(|r| r.name).collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            "photos.destroy",
+            "photos.index",
+            "photos.show",
+            "photos.store",
+            "photos.update"
+        ]
+    );
+    assert_eq!(uri_of(content, "photos.show"), "photos/{photo}");
+}
+
 /// `->name()` on a resource registration is Laravel's per-method name
 /// override (`name($method, $name)`), not a route name of its own.  The
 /// override is the *whole* name, so it replaces `photos.index` rather than
