@@ -912,6 +912,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b683-a-conditional-append-drops-the-alternatives-where-only-a-later-append-ran" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B683. A conditional append drops the alternatives where only a later append ran
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -972,6 +989,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Name resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b684-a-class-one-composer-project-installs-resolves-in-every-other-project-of-the-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B684. A class one Composer project installs resolves in every other project of the workspace
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1564,6 +1598,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b683-a-conditional-append-drops-the-alternatives-where-only-a-later-append-ran" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B683. A conditional append drops the alternatives where only a later append ran
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1624,6 +1675,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Name resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b684-a-class-one-composer-project-installs-resolves-in-every-other-project-of-the-workspace" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B684. A class one Composer project installs resolves in every other project of the workspace
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1734,7 +1802,33 @@ to <code>$r ? $r : null</code>. Truthy narrowing should drop <code>void</code> t
 <p>Found in a WordPress theme returning <code>wp_list_comments([...]) ?: null</code>
 (the stubs declare <code>@return void|string</code>).</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b683-a-conditional-append-drops-the-alternatives-where-only-a-later-append-ran">B683. A conditional append drops the alternatives where only a later append ran<a class="headerlink" href="#b683-a-conditional-append-drops-the-alternatives-where-only-a-later-append-ran" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function f(bool $a, bool $b): void {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    $c = [];</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    if ($a) { $c[] = 1; }</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    if ($b) { $c[] = 2; }</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    // inferred: array{}|array{1}|array{1, 2}, missing array{2}</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    if (count($c) === 1) {</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">        // narrowed to array{1}, but $c can be [2] here</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    }</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">}</span>
+</code></pre></div>
+<p>Appending to a union of shapes extends only one alternative, so the
+<code>array{2}</code> path (first <code>if</code> skipped, second taken) is lost. With
+distinct shapes per append (<code>$menu[] = ['name' =&gt; 'n0', …]</code>, the
+OpenCart admin menu pattern) the result is even narrower:
+<code>array{}|array{a0, a1}</code> after two conditional appends, dropping both
+single-entry arrays.</p>
+<p>Appending to every alternative is the sound fix, but it doubles the
+union at each conditional append, so it has to come with a
+generalisation of unions of constant arrays the way PHPStan's
+<code>TypeCombinator::union</code> does it: merge them into one shape with
+optional trailing entries (<code>array{}|array{0: A|B, 1?: B}</code>), or into
+<code>list&lt;…&gt;</code> once the shapes stop being worth keeping apart.</p>
+<p><strong>Where to look:</strong> the array-append handling in
+<code>src/type_engine/variable/forward_walk/array_assignment.rs</code>, and union
+normalisation of shapes in <code>src/php_type/normalize.rs</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
@@ -1742,22 +1836,22 @@ to <code>$r ? $r : null</code>. Truthy narrowing should drop <code>void</code> t
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <h3 id="b682-a-templated-override-keeps-the-parents-wider-return-beside-its-own-native-type">B682. A templated override keeps the parent's wider <code>@return</code> beside its own native type<a class="headerlink" href="#b682-a-templated-override-keeps-the-parents-wider-return-beside-its-own-native-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">interface View { public function name(): string; }</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">interface Htmlable {}</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">abstract class Component {</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    /** @return View|Htmlable|\Closure|string */</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    abstract public function render();</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">/** @template TModel */</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">final class PerPage extends Component {</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">    public function render(): View { throw new Exception(); }</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">}</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">function f(PerPage $p): void {</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">    $p-&gt;render()-&gt;name();   // resolves on View|Htmlable|Closure</span>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">interface View { public function name(): string; }</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">interface Htmlable {}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">abstract class Component {</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    /** @return View|Htmlable|\Closure|string */</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    abstract public function render();</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">}</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">/** @template TModel */</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">final class PerPage extends Component {</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">    public function render(): View { throw new Exception(); }</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">}</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">function f(PerPage $p): void {</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">    $p-&gt;render()-&gt;name();   // resolves on View|Htmlable|Closure</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>render()</code> declares <code>: View</code> and has no docblock, so its return type is
 <code>View</code>. It resolves to <code>View|Htmlable|Closure</code> instead: the inheritance
@@ -1773,7 +1867,31 @@ is not a subtype of the native type.</p>
 Laravel project: a Blade component's <code>render(): View</code> reported <code>name()</code>
 as missing on <code>Htmlable</code> and <code>Closure</code>.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b684-a-class-one-composer-project-installs-resolves-in-every-other-project-of-the-workspace">B684. A class one Composer project installs resolves in every other project of the workspace<a class="headerlink" href="#b684-a-class-one-composer-project-installs-resolves-in-every-other-project-of-the-workspace" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>repo/
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>├── composer.json
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>├── platform/            ← requires guzzlehttp/guzzle
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>│   ├── composer.json
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>│   └── vendor/
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>└── mobile/              ← does not
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    ├── composer.json
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    └── vendor/
+</code></pre></div>
+<p>A file under <code>mobile/</code> that names <code>GuzzleHttp\Client</code> gets completion,
+hover and no <code>unknown_class</code>, although running it would fail: the
+class only exists in <code>platform/vendor/</code>. Every Composer project of a
+workspace (a monorepo's subprojects, or projects nested below a root
+<code>composer.json</code>) feeds one shared class index, so a lookup does not
+know which project the file asking belongs to. Two projects installing
+different versions of one package also share whichever copy was
+indexed first.</p>
+<p>Lookups from a file need to go through the index of the project that
+holds it, falling back to the shared one only for the project's own
+sources and the workspace's loose files.</p>
+<p><strong>Where to look:</strong> <code>ComposerProjectPaths</code> in <code>src/workspace_env.rs</code>
+(each project's vendor and PSR-4 mappings are already recorded), and
+the class lookup in <code>src/resolution/</code>.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
