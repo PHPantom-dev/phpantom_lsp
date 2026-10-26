@@ -1071,6 +1071,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b688-go-to-definition-and-hover-on-a-class-constant-pick-a-same-named-property" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B688. Go-to-definition and hover on a class constant pick a same-named property
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1785,6 +1796,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b688-go-to-definition-and-hover-on-a-class-constant-pick-a-same-named-property" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B688. Go-to-definition and hover on a class constant pick a same-named property
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2000,6 +2022,23 @@ every request that maps symbol-map offsets onto the current buffer answers
 Document highlight has no refresh, so it needs either the same decline (the
 client re-requests on the next cursor move) or to wait for the pending
 parse.</p>
+<h3 id="b688-go-to-definition-and-hover-on-a-class-constant-pick-a-same-named-property">B688. Go-to-definition and hover on a class constant pick a same-named property<a class="headerlink" href="#b688-go-to-definition-and-hover-on-a-class-constant-pick-a-same-named-property" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Config {</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    const path = '/etc';</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    public static string $path = '/tmp';</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">}</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">echo Config::path; // jumps to and hovers `$path`, not the constant</span>
+</code></pre></div>
+<p>The same happens with <code>self::name</code> in a class that has both <code>const name</code>
+and a <code>$name</code> property.</p>
+<p><strong>Where to change:</strong> <code>classify_member</code> in <code>src/definition/member/mod.rs</code>
+gets <code>MemberAccessHint::PropertyAccess</code> for every non-call access and
+prefers a property over a constant. A <code>Foo::BAR</code> access can only read a
+constant (or enum case), so the hint has to carry that, and hover's
+member lookup needs the same distinction. Find References and rename
+already tell the two apart (<code>MemberRefKind::of_access</code> in
+<code>src/references/members.rs</code>).</p>
 
 
 
