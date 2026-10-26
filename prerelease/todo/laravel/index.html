@@ -1360,17 +1360,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l44-sibling-resource-registrations-and-degenerate-resource-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L44. Sibling resource registrations and degenerate resource names
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l46-can-on-a-user-model-the-receiver-does-not-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1397,6 +1386,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L50. "Create route" quick-fix for an unresolved route name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l61-resolve-aliased-facade-imports-during-route-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L61. Resolve aliased facade imports during route discovery
       </span>
     </span>
   </a>
@@ -2033,17 +2033,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l44-sibling-resource-registrations-and-degenerate-resource-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L44. Sibling resource registrations and degenerate resource names
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l46-can-on-a-user-model-the-receiver-does-not-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2070,6 +2059,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L50. "Create route" quick-fix for an unresolved route name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l61-resolve-aliased-facade-imports-during-route-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L61. Resolve aliased facade imports during route discovery
       </span>
     </span>
   </a>
@@ -2759,31 +2759,6 @@ translation keys. Surface as an opt-in workspace report
 always-on diagnostics — dynamic construction (<code>view("emails.$type")</code>)
 makes "unused" inherently a heuristic, so it must read as "no static
 reference found," never as an error.</p>
-<h4 id="l44-sibling-resource-registrations-and-degenerate-resource-names">L44. Sibling resource registrations and degenerate resource names<a class="headerlink" href="#l44-sibling-resource-registrations-and-degenerate-resource-names" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p><code>Route::resource()</code> and <code>Route::apiResource()</code> are recognized, but the
-registrations that generate route names the same way are not, so every
-<code>route()</code> call naming one is reported as an unknown route:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">Route::resources(['photos' =&gt; PhotoController::class]);</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">Route::apiResources(['photos' =&gt; PhotoController::class]);</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">Route::singleton('profile', ProfileController::class);</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">Route::apiSingleton('profile', ProfileController::class);</span>
-</code></pre></div>
-<p><code>resources()</code> / <code>apiResources()</code> expand to the same seven (or five)
-conventional names per entry. <code>singleton()</code> generates <code>show</code>, <code>edit</code>, and
-<code>update</code> at <code>profile</code>, <code>profile/edit</code>, and <code>profile</code>, with <code>store</code> and
-<code>destroy</code> added by <code>-&gt;creatable()</code> / <code>-&gt;destroyable()</code>.</p>
-<p>Separately, a resource name with a leading or trailing slash is trimmed
-before the name is derived, where Laravel keeps it and produces a
-degenerate-but-real route set: <code>Route::resource('/photos/', …)</code> names its
-routes <code>index</code>/<code>show</code> (no <code>photos.</code> prefix) rather than <code>photos.index</code>.
-The same applies to an empty name and to doubled dots (<code>photos..comments</code>).
-These are absurd inputs that Laravel handles badly too, so the current
-tidying is arguably more useful; the divergence is recorded here rather
-than fixed because it makes the unknown-route diagnostic disagree with the
-framework in both directions.</p>
-<p><strong>Where to look:</strong> <code>virtual_members/laravel/route_names/resources.rs</code>,
-alongside the existing <code>resource_registration</code> handling.</p>
 <h4 id="l46-can-on-a-user-model-the-receiver-does-not-name">L46. <code>-&gt;can()</code> on a user model the receiver does not name<a class="headerlink" href="#l46-can-on-a-user-model-the-receiver-does-not-name" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
 <p>Authorization abilities are recognized on <code>Gate::allows()</code>,
@@ -2843,6 +2818,20 @@ where possible and otherwise leaving placeholders.</p>
 pattern used by other "declare the missing thing" fixes;
 <code>virtual_members/laravel/route_names/</code> for the existing scanner
 this reuses for the diagnostic and the insertion point.</p>
+<h4 id="l61-resolve-aliased-facade-imports-during-route-discovery">L61. Resolve aliased facade imports during route discovery<a class="headerlink" href="#l61-resolve-aliased-facade-imports-during-route-discovery" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Route discovery recognizes <code>Route</code> and its fully qualified facade name,
+but does not resolve renamed imports. For example,
+<code>use Illuminate\Support\Facades\Route as Routes;</code> followed by
+<code>Routes::resource('photos', PhotoController::class)</code> leaves <code>photos.show</code>
+out of completion and reports it as an unknown route. This also affects
+ordinary named routes and the plural and singleton registration forms.
+Resolve the receiver through the source file's namespace and imports,
+including grouped imports, without treating unrelated classes named
+<code>Route</code> as the framework facade.</p>
+<p><strong>Where to look:</strong> <code>virtual_members/laravel/route_names/discovery.rs</code> and
+<code>virtual_members/laravel/route_names/traversal.rs</code>, particularly
+<code>GroupPrefix::chain_reaches_router()</code> and <code>is_facade()</code>.</p>
 
 
 
