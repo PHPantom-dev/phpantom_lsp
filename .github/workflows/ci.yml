@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Test benchmark sharding
+        run: python3 -m unittest discover -s benches -p 'test_ci_benchmarks.py'
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -220,24 +222,15 @@ jobs:
           auto-push: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  benchmark-pr:
-    name: Benchmark (PR comparison)
+  benchmark-build-pr:
+    name: Benchmark (build)
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    outputs:
+      baseline-exists: ${{ steps.check-gh-pages.outputs.exists }}
+      shards: ${{ steps.prepare.outputs.shards }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ env.CARGO_BUILD_TARGET }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: build
-      - name: Set up musl build
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools mold
-          mkdir -p .cargo
-          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - name: Check gh-pages branch exists
         id: check-gh-pages
         run: |
@@ -247,27 +240,127 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "⚠️ gh-pages branch does not exist yet — skipping PR benchmark comparison"
           fi
-      - name: Run benchmarks
+      - uses: dtolnay/rust-toolchain@stable
         if: steps.check-gh-pages.outputs.exists == 'true'
+        with:
+          targets: ${{ env.CARGO_BUILD_TARGET }}
+      - uses: Swatinem/rust-cache@v2
+        if: steps.check-gh-pages.outputs.exists == 'true'
+        with:
+          shared-key: build
+      - name: Set up musl build
+        if: steps.check-gh-pages.outputs.exists == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools mold
+          mkdir -p .cargo
+          printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
+      - name: Build and partition benchmarks
+        id: prepare
+        if: steps.check-gh-pages.outputs.exists == 'true'
+        env:
+          SHARD_COUNT: 4
         shell: bash
         run: |
-          rm -rf target/criterion
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
-            --bench symfony_completion \
-            -- --output-format bencher | tee raw_output.txt
-      - name: Convert to milliseconds
+            --bench symfony_completion --no-run --message-format=json \
+            > benchmark-build.jsonl
+          python3 benches/ci_benchmarks.py prepare \
+            --build-dir benchmark-build --shards "$SHARD_COUNT" \
+            < benchmark-build.jsonl
+          python3 -c 'import json, os; print("shards=" + json.dumps(list(range(1, int(os.environ["SHARD_COUNT"]) + 1))))' >> "$GITHUB_OUTPUT"
+      - name: Save benchmark executables
         if: steps.check-gh-pages.outputs.exists == 'true'
-        shell: bash
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-executables
+          path: benchmark-build/binaries.tar
+          if-no-files-found: error
+          retention-days: 1
+      - name: Save benchmark manifest
+        if: steps.check-gh-pages.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-manifest
+          path: benchmark-build/manifest.json
+          if-no-files-found: error
+          retention-days: 1
+
+  benchmark-shard-pr:
+    name: Benchmark (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-latest
+    needs: benchmark-build-pr
+    if: needs.benchmark-build-pr.outputs.baseline-exists == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.benchmark-build-pr.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark-executables
+          path: benchmark-build
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark-manifest
+          path: benchmark-build
+      # Tar preserves executable permissions; these static musl binaries
+      # need no Rust toolchain or build dependencies on the measurement runners.
+      - name: Run benchmark shard
         run: |
-          python3 benches/format_bench_output.py < raw_output.txt > output.json || {
-            echo "::group::raw_output.txt"
-            cat raw_output.txt
-            echo "::endgroup::"
-            exit 1
-          }
+          tar -xf benchmark-build/binaries.tar -C benchmark-build
+          python3 benches/ci_benchmarks.py run \
+            --build-dir benchmark-build --shard "${{ matrix.shard }}" \
+            --output "shard-${{ matrix.shard }}.json"
+      - name: Save benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.shard }}
+          path: shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # Preserve the required check and compare only a complete set of results.
+  benchmark-pr:
+    name: Benchmark (PR comparison)
+    runs-on: ubuntu-latest
+    needs: [benchmark-build-pr, benchmark-shard-pr]
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - name: Check benchmark jobs passed
+        env:
+          BUILD_RESULT: ${{ needs.benchmark-build-pr.result }}
+          BASELINE_EXISTS: ${{ needs.benchmark-build-pr.outputs.baseline-exists }}
+          SHARD_RESULT: ${{ needs.benchmark-shard-pr.result }}
+        run: |
+          test "$BUILD_RESULT" = success
+          case "$BASELINE_EXISTS" in
+            true) test "$SHARD_RESULT" = success ;;
+            false) test "$SHARD_RESULT" = skipped ;;
+            *) exit 1 ;;
+          esac
+      - uses: actions/checkout@v4
+        if: needs.benchmark-build-pr.outputs.baseline-exists == 'true'
+      - uses: actions/download-artifact@v4
+        if: needs.benchmark-build-pr.outputs.baseline-exists == 'true'
+        with:
+          name: benchmark-manifest
+          path: benchmark-build
+      - uses: actions/download-artifact@v4
+        if: needs.benchmark-build-pr.outputs.baseline-exists == 'true'
+        with:
+          pattern: benchmark-results-*
+          path: benchmark-results
+          merge-multiple: true
+      - name: Check and combine benchmark results
+        if: needs.benchmark-build-pr.outputs.baseline-exists == 'true'
+        run: >-
+          python3 benches/ci_benchmarks.py merge --build-dir benchmark-build
+          --reports-dir benchmark-results --output output.json
       - name: Compare against baseline
-        if: steps.check-gh-pages.outputs.exists == 'true'
+        if: needs.benchmark-build-pr.outputs.baseline-exists == 'true'
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: PHPantom Benchmarks
