@@ -1182,17 +1182,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#l42-morph-alias-completion-in-array-positions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L42. Morph alias completion in array positions
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1855,17 +1844,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#l42-morph-alias-completion-in-array-positions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L42. Morph alias completion in array positions
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2503,27 +2481,6 @@ chain:</p>
 <p><strong>Where to change:</strong> a stub patch on <code>RedirectResponse::__call</code>
 that returns <code>static</code> when the method name starts with <code>with</code>, or a
 small virtual member provider for the one class.</p>
-<hr />
-<h4 id="l42-morph-alias-completion-in-array-positions">L42. Morph alias completion in array positions<a class="headerlink" href="#l42-morph-alias-completion-in-array-positions" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>Morph aliases complete inside <code>Relation::getMorphedModel('|')</code> and
-<code>Model::getActualClassNameForMorph('|')</code>, but not in the two array
-positions where they are most often written:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">Relation::morphMap(['|' =&gt; Post::class]);</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">$query-&gt;whereHasMorph('commentable', ['|']);</span>
-</code></pre></div>
-<p>The blocker is not the alias index but the context detector
-(<code>string_argument_context</code> in <code>completion/laravel_string_keys/context.rs</code>).
-It already handles named arguments and array <em>values</em> in the first
-argument, but rejects array <em>keys</em> on purpose
-(<code>string_literal_is_array_key</code>) and does not look at arrays in later
-argument positions. <code>whereHasMorph</code> is also not a completion trigger
-yet.</p>
-<p><strong>Where to change:</strong> let the detector report array keys and later
-argument positions, together with the call being made, so each string
-kind can opt in. Every string kind benefits: the same limitation is why
-a config key inside <code>Config::set(['a.b' =&gt; …])</code> does not complete
-either.</p>
 <hr />
 <h2 id="laravel-string-context-intelligence-completion-hover-diagnostics">Laravel string-context intelligence (completion, hover, diagnostics)<a class="headerlink" href="#laravel-string-context-intelligence-completion-hover-diagnostics" title="Permanent link">&para;</a></h2>
 <p>This is the set of features that live <em>inside string literals</em> passed to
