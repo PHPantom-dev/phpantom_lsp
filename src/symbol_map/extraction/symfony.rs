@@ -1308,7 +1308,7 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, true, true,
+            program, php, &names, true, true, None,
         )
     }
 
@@ -1634,7 +1634,7 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, false,
+            program, php, &names, false, false, None,
         );
         assert!(map.typed_receiver_sites.is_empty());
     }
@@ -1648,7 +1648,7 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, true,
+            program, php, &names, false, true, None,
         );
         assert_eq!(
             receivers(&map),

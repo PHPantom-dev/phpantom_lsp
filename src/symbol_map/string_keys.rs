@@ -105,6 +105,10 @@ pub(crate) enum StringKeyKind {
     /// `framework.messenger.buses`, and read by `default_bus`,
     /// `#[AsMessageHandler(bus: …)]`, and a `BusNameStamp`.
     MessengerBus,
+    /// A Yii view: the template a view renderer's `render()` family or a
+    /// view's own `render()` loads, keyed by the path it names (see
+    /// `yii::views`).
+    YiiView,
 }
 
 impl StringKeyKind {
@@ -116,6 +120,11 @@ impl StringKeyKind {
     /// Whether this key is a Symfony translation key or domain.
     pub(crate) const fn is_symfony_translation(self) -> bool {
         matches!(self, Self::SymfonyTranslation | Self::TranslationDomain)
+    }
+
+    /// Whether this key belongs to Yii.
+    pub(crate) const fn is_yii(self) -> bool {
+        matches!(self, Self::YiiView)
     }
 
     /// Whether this key belongs to Symfony rather than to Laravel.
@@ -393,6 +402,11 @@ const SYMFONY_EVENT_DISPATCHER_CONTRACT: &str =
     "Symfony\\Contracts\\EventDispatcher\\EventDispatcherInterface";
 const SYMFONY_EVENT_DISPATCHER: &str =
     "Symfony\\Component\\EventDispatcher\\EventDispatcherInterface";
+const YII_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\Renderer\\ViewRenderer";
+const YII_WEB_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\Renderer\\WebViewRenderer";
+/// The renderer before `yiisoft/yii-view-renderer` 7 moved it.
+const YII_LEGACY_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\ViewRenderer";
+const YII_VIEW: &str = "Yiisoft\\View\\ViewInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -460,6 +474,9 @@ pub(crate) enum ReceiverClass {
     /// `hasListeners()`, `getListeners()`, and `getListenerPriority()`
     /// look listeners up by it.
     EventListeners,
+    /// What renders a Yii view by its first argument: a view renderer's
+    /// `render()` family, and a view's own `render()` inside a template.
+    YiiViewRenderer,
 }
 
 impl ReceiverClass {
@@ -468,7 +485,7 @@ impl ReceiverClass {
     pub(crate) fn targets(self) -> &'static [(&'static str, StringKeyKind)] {
         use StringKeyKind::{
             ContainerParameter, ServiceId, SymfonyEvent, SymfonyRoute, SymfonyTranslation,
-            TranslationDomain, TwigTemplate, View,
+            TranslationDomain, TwigTemplate, View, YiiView,
         };
         match self {
             // The concrete `Illuminate\View\Factory` implements the
@@ -517,6 +534,12 @@ impl ReceiverClass {
             // contract covers both.
             Self::EventDispatcher => &[(SYMFONY_EVENT_DISPATCHER_CONTRACT, SymfonyEvent)],
             Self::EventListeners => &[(SYMFONY_EVENT_DISPATCHER, SymfonyEvent)],
+            Self::YiiViewRenderer => &[
+                (YII_WEB_VIEW_RENDERER, YiiView),
+                (YII_VIEW_RENDERER, YiiView),
+                (YII_LEGACY_VIEW_RENDERER, YiiView),
+                (YII_VIEW, YiiView),
+            ],
         }
     }
 

@@ -200,6 +200,29 @@ pub(crate) fn is_twig_project(package: &ComposerPackage) -> bool {
             })
 }
 
+/// The packages that render Yii views: the view layer itself and the
+/// renderer an application's actions use, under its current and its former
+/// name.
+const YII_VIEW_PACKAGES: [&str; 3] = [
+    "yiisoft/view",
+    "yiisoft/yii-view-renderer",
+    "yiisoft/yii-view",
+];
+
+/// Detect whether the project renders Yii views, which view names are read
+/// in.
+pub(crate) fn is_yii_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            YII_VIEW_PACKAGES
+                .iter()
+                .any(|package| name.eq_ignore_ascii_case(package))
+        })
+}
+
 /// Detect whether the project is a Laravel *application* rather than a
 /// library that uses an Illuminate component.
 ///

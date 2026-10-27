@@ -2,7 +2,8 @@
 //!
 //! Shows reference and implementation counts, override/implement
 //! annotations, the links between a Doctrine entity and its repository,
-//! and the links between a Messenger message and its handlers.
+//! the links between a Messenger message and its handlers, and the renders
+//! of a Yii template.
 
 use std::sync::Arc;
 
@@ -269,11 +270,45 @@ impl Backend {
             }
         }
 
+        // A template declares no class, so only such a file is looked up
+        // among the renders.
+        if classes.is_empty()
+            && self.is_yii_project()
+            && let Some(lens) = self.build_yii_view_render_lens(uri)
+        {
+            lenses.push(lens);
+        }
+
         if lenses.is_empty() {
             None
         } else {
             Some(lenses)
         }
+    }
+
+    /// The lens at the top of a Yii template listing the calls that render
+    /// it, or `None` when nothing does.
+    fn build_yii_view_render_lens(&self, uri: &str) -> Option<CodeLens> {
+        let path = crate::util::uri_to_path(uri)?;
+        let renders = self.yii_view_renders_of(&path);
+        if renders.is_empty() {
+            return None;
+        }
+        let position = Position::new(0, 0);
+        Some(CodeLens {
+            range: Range {
+                start: position,
+                end: position,
+            },
+            command: Some(Self::locations_lens_command(
+                crate::util::parse_url(uri)?,
+                position,
+                renders,
+                "render",
+                "renders",
+            )),
+            data: None,
+        })
     }
 
     /// Build a declaration reference lens from the candidate index.

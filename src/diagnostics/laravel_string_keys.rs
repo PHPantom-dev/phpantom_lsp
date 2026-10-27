@@ -5,7 +5,7 @@
 //! against what the project actually registers (routes, config keys,
 //! views, translation keys, console commands, morph aliases, gate
 //! abilities, Symfony service IDs, container parameters, routes and Twig
-//! templates), and report the ones nothing declares.
+//! templates, Yii views), and report the ones nothing declares.
 
 use std::sync::Arc;
 
@@ -39,6 +39,7 @@ enum CheckedStringKind {
     SymfonyRoute,
     TwigTemplate,
     MessengerBus,
+    YiiView,
 }
 
 impl CheckedStringKind {
@@ -61,6 +62,7 @@ impl CheckedStringKind {
             StringKeyKind::SymfonyRoute => Self::SymfonyRoute,
             StringKeyKind::TwigTemplate => Self::TwigTemplate,
             StringKeyKind::MessengerBus => Self::MessengerBus,
+            StringKeyKind::YiiView => Self::YiiView,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -360,6 +362,12 @@ impl<'a> DeclaredKeys<'a> {
             }
             CheckedStringKind::TwigTemplate => self.judge_twig_template(key),
             CheckedStringKind::MessengerBus => self.judge_messenger_bus(key),
+            // A view whose alias the project does not declare cannot be
+            // told missing.
+            CheckedStringKind::YiiView => self
+                .backend
+                .yii_view_exists(key)
+                .map(|exists| (exists, "view", "invalid_yii_view")),
         }
     }
 
@@ -684,11 +692,18 @@ impl Backend {
             if let Some((false, label, code)) = declared.judge(kind, key)
                 && let Some(range) = range(start, end)
             {
+                // A Yii view is keyed by the whole path it names, which
+                // reads best from the workspace root.
+                let shown = if kind == CheckedStringKind::YiiView {
+                    std::borrow::Cow::Owned(self.yii_view_display(key))
+                } else {
+                    std::borrow::Cow::Borrowed(key)
+                };
                 out.push(helpers::make_diagnostic(
                     range,
                     DiagnosticSeverity::Warning,
                     code,
-                    format!("Unknown {}: '{}'", label, key),
+                    format!("Unknown {}: '{}'", label, shown),
                 ));
             }
         }

@@ -27,6 +27,9 @@ final readonly class PostController
 
     public function index(): ResponseInterface
     {
+        // Try: go to the definition of 'index', which opens
+        // resources/views/blog/index.php, or clear the name and complete it
+        // from the views in that directory.
         return $this->viewRenderer->render('index', ['posts' => $this->posts->latest()]);
     }
 

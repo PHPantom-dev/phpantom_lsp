@@ -71,11 +71,18 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     ctx.in_mailable = class_extends_named(class, b"Mailable");
     let prev_covers_default_class = ctx.covers_default_class;
     ctx.covers_default_class = covers_default_class;
+    let yii_view_scope = yii_class_scope(class, ctx);
+    let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, yii_view_scope);
+    let prev_yii_class_name_offset = ctx
+        .yii_class_name_offset
+        .replace(class.name.span.start.offset);
 
     for member in class.members.iter() {
         extract_from_class_member(member, ctx);
     }
 
+    ctx.yii_class_name_offset = prev_yii_class_name_offset;
+    ctx.yii_view_scope = prev_yii_view_scope;
     ctx.covers_default_class = prev_covers_default_class;
     ctx.in_mailable = prev_in_mailable;
     ctx.in_console_command = prev_in_console_command;
@@ -203,9 +210,13 @@ pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut Extract
         ctx.template_defs.extend(found.method_templates);
     }
 
+    // A view a trait or an enum renders is under a view path its code
+    // does not show.
+    let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, YiiViewScope::Class(None));
     for member in trait_def.members.iter() {
         extract_from_class_member(member, ctx);
     }
+    ctx.yii_view_scope = prev_yii_view_scope;
 }
 
 pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut ExtractionCtx<'a>) {
@@ -244,9 +255,13 @@ pub(super) fn extract_from_enum<'a>(enum_def: &'a Enum<'a>, ctx: &mut Extraction
         ctx.template_defs.extend(found.method_templates);
     }
 
+    // A view a trait or an enum renders is under a view path its code
+    // does not show.
+    let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, YiiViewScope::Class(None));
     for member in enum_def.members.iter() {
         extract_from_class_member(member, ctx);
     }
+    ctx.yii_view_scope = prev_yii_view_scope;
 }
 
 // ─── Class member extractors ────────────────────────────────────────────────

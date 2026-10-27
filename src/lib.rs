@@ -335,6 +335,7 @@ pub(crate) mod virtual_members;
 mod wasm_wasi;
 mod workspace_env;
 mod workspace_symbols;
+mod yii;
 
 #[cfg(test)]
 pub mod test_fixtures;
@@ -521,6 +522,12 @@ pub struct BackendState {
     pub(crate) is_twig: Arc<std::sync::atomic::AtomicBool>,
     /// The project's Twig template files and the roots they live under.
     pub(crate) twig: twig::TwigState,
+    /// Whether the project renders Yii views, which view names are read
+    /// in.  See [`crate::composer::is_yii_project`].  Starts `true` so a
+    /// workspace with no `composer.json` to classify behaves as before.
+    pub(crate) is_yii: Arc<std::sync::atomic::AtomicBool>,
+    /// The Yii path aliases the project's configuration declares.
+    pub(crate) yii: yii::YiiState,
     /// The `Pest.php` files of the project's test directories, read on
     /// first use and dropped when one is saved.  `None` until then.
     pub(crate) pest_configs: Arc<RwLock<Option<pest::PestConfigs>>>,

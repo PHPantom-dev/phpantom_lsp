@@ -56,7 +56,7 @@ is accounted for. To reproduce a shard locally from the repository root:
 
 ```bash
 cargo bench --bench completion --bench references --bench laravel_completion \
-  --bench custom_builder --bench symfony_completion \
+  --bench custom_builder --bench symfony_completion --bench yii_completion \
   --no-run --message-format=json > /tmp/benchmark-build.jsonl
 python3 benches/ci_benchmarks.py prepare --build-dir /tmp/phpantom-benchmarks \
   --shards 4 < /tmp/benchmark-build.jsonl

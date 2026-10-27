@@ -31,7 +31,9 @@ pub(crate) use context::{ArgumentSlot, attribute_class_start, scalar_argument_at
 pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
         StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::Property,
-        StringKeyKind::View | StringKeyKind::TwigTemplate => CompletionItemKind::File,
+        StringKeyKind::View | StringKeyKind::TwigTemplate | StringKeyKind::YiiView => {
+            CompletionItemKind::File
+        }
         StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
         StringKeyKind::TranslationDomain => CompletionItemKind::Module,
         StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
@@ -98,7 +100,7 @@ impl Backend {
 
     /// Every name a string key of `kind` could be, unfiltered.
     ///
-    /// Three kinds have no list to offer. A Blade section or stack name is
+    /// Four kinds have no list to offer. A Blade section or stack name is
     /// completed from the raw template instead
     /// (`crate::completion::handler::blade_block_name`): what a name may be
     /// depends on the layouts above the file, and the edit has to land in
@@ -106,7 +108,8 @@ impl Backend {
     /// A container binding key is written where a class name is equally
     /// valid, which ordinary class completion already offers, and the set of
     /// keys is open besides — a list of them would read as the whole answer
-    /// when it is not.
+    /// when it is not.  A Yii view is completed a directory at a time from
+    /// the files under the view path (`crate::completion::yii_views`).
     fn string_key_candidates(&self, kind: &StringKeyKind, typed_prefix: &str) -> Arc<[String]> {
         match kind {
             StringKeyKind::Route => self.cached_route_names(),
@@ -178,7 +181,8 @@ impl Backend {
             | StringKeyKind::SymfonyConfigKey
             | StringKeyKind::Section
             | StringKeyKind::Stack
-            | StringKeyKind::ContainerBinding => Arc::new([]),
+            | StringKeyKind::ContainerBinding
+            | StringKeyKind::YiiView => Arc::new([]),
         }
     }
 

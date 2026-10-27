@@ -95,6 +95,9 @@ check('latest() returns a list of Post', array_is_list($repository->latest()) &&
 $renderer = $container->get(WebViewRenderer::class)->withViewPath('@views/blog');
 check("The 'index' view is resources/views/blog/index.php", $renderer->getViewPath() === __DIR__ . '/resources/views/blog' && is_file(__DIR__ . '/resources/views/blog/index.php'));
 
+check("'_card' is the file beside index.php", is_file(__DIR__ . '/resources/views/blog/_card.php'));
+check("__DIR__ . '/template' is template.php beside the home page action", is_file(__DIR__ . '/src/Web/HomePage/template.php'));
+
 $html = $renderer->renderPartialAsString('index', ['posts' => $repository->latest()]);
 check("index.php renders '_card' for each post", substr_count($html, '<article>') === 2);
 check("index.php links each post through generate('blog/post', ...)", str_contains($html, 'href="/blog/hello-yii"'));

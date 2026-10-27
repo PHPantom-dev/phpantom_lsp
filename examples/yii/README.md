@@ -22,6 +22,14 @@ a DI definition, each declared the way a real Yii 3 project declares them.
 - Open `resources/views/blog/index.php`. Hover `$post` inside the loop, or
   complete after `$post->`. The template declares the variables the
   controller passes it with `@var`.
+- In `PostController::index()`, go to the definition of `'index'`. The
+  controller's `withViewPath('@views/blog')` and the `@views` alias in
+  `config/common/aliases.php` make it `resources/views/blog/index.php`. Clear
+  the name to complete it from the views there, and misspell it to see it
+  reported. `src/Web/HomePage/Action.php` names its template as
+  `__DIR__ . '/template'` instead, and `index.php` renders `'_card'` from
+  beside itself. Open `resources/views/blog/_card.php` for the lens listing
+  the calls that render it.
 
 ## Getting started
 

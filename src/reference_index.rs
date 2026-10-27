@@ -717,10 +717,13 @@ impl Backend {
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let is_symfony = self.is_symfony_project();
         let is_twig = self.is_twig_project();
+        let is_yii = self.is_yii_project();
         for site in &symbol_map.typed_receiver_sites {
             let kind = site.receiver.key_kind();
             let enabled = if kind == StringKeyKind::TwigTemplate {
                 is_twig
+            } else if kind.is_yii() {
+                is_yii
             } else if kind.is_symfony() {
                 is_symfony
             } else {

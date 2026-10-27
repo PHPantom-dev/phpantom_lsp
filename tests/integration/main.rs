@@ -294,3 +294,4 @@ mod type_definition;
 mod type_hierarchy;
 mod watched_files;
 mod workspace_symbols;
+mod yii_views;

@@ -17,13 +17,9 @@ navigation, which `analyze` cannot measure.
 
 **Benchmarks.** `benches/memory_usage.py` measures memory on
 `yiisoft/demo-blog` (`memory_yii_action`), next to the Laravel and
-Symfony scenarios. There is no completion benchmark yet because Yii has
-no name completion to measure: the first item that adds one (Y2, Y3,
-Y5, or Y6) creates `benches/yii_completion.rs`, modelled on
-`benches/symfony_completion.rs` (a generated mid-sized application with
-a case per kind of name), wires it into the `cargo bench` lists in
-`.github/workflows/ci.yml` and `docs/CONTRIBUTING.md`, and every later
-one adds its case to it.
+Symfony scenarios. `benches/yii_completion.rs` measures name completion
+on a generated mid-sized application, with a case per kind of name, and
+every item that adds a completion adds its case to it.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
@@ -76,43 +72,6 @@ Two shapes from `yiisoft/demo-blog` to cover:
 
 **Where to look:** the route-name support for Laravel and Symfony
 (`src/symbol_map/extraction/symfony.rs`, `src/symfony/routes.rs`).
-
----
-
-## Y3. View names and their templates
-
-**Impact: High · Complexity: Medium**
-
-```php
-return $this->viewRenderer->render('index', ['posts' => $posts]);
-
-return $this->viewRenderer->render(__DIR__ . '/template', ['form' => $form]);
-```
-
-A view is named one of two ways, and both are common:
-
-- **By name**, resolved against the renderer's view path, set with
-  `withViewPath()` or derived from the controller (`withController()`),
-  usually an `@views/...` alias (Y5). This is the `yiisoft/app` style.
-- **By path**, `__DIR__ . '/template'`, a template next to the action
-  class. The renderer adds the `.php` extension, so the path never names
-  the file exactly. `yiisoft/demo-blog` renders every view this way, and
-  apps that render through a wrapper of their own
-  (`$this->responseFactory->render(...)`) still pass the path through.
-
-Navigate from either form to the template file and back from a
-template to the calls that render it, complete view names from the
-template directory, and report a literal name or path no file matches.
-A view rendered from inside a template (`$this->render('_form', …)`)
-resolves against the same view path, and one starting with `./` or
-`../` against the template's own directory. The include links in
-`src/document_links.rs` already resolve `__DIR__ . '/x.php'` for
-`require`; the path form is the same evaluation without the extension.
-
-**Where to look:** Laravel's view names
-(`src/virtual_members/laravel/view_names.rs`) and the Twig template-name
-support. Check the renderer's current class and method names in
-`yiisoft/yii-view-renderer` first, since the package has renamed them.
 
 ---
 
@@ -182,8 +141,12 @@ An alias (`yiisoft/aliases`) names a path in a string starting with
 `@`, and aliases are defined in terms of each other. Navigate from an
 alias in any string to its definition, complete alias names, and,
 where the definition resolves to a path in the project, navigate from
-the whole string to the file or directory it names. Y3 builds on this
-for `@views/...` view paths.
+the whole string to the file or directory it names.
+
+View names already resolve their `@views/...` paths through
+`src/yii/aliases.rs`, which reads the aliases from every params file
+under `config/` that names `yiisoft/aliases`. It records only the path
+each alias resolves to, so this item adds where each one is declared.
 
 ---
 
@@ -207,9 +170,53 @@ comes from the same `configuration.php` reading Y4 needs.
 
 ---
 
+## Y9. Views a template renders by name
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+// PostController, with withViewPath('@views')
+return $this->viewRenderer->render('blog/index');
+
+// resources/views/blog/index.php
+<?= $this->render('_card') ?>
+```
+
+A view a template renders by name (`$this->render('_card')`) is relative
+to the view path of the renderer that rendered the template, not to the
+template's own directory. PHPantom resolves it against the directory,
+which is the same thing whenever the template was rendered by a bare
+name, the common case. When it was rendered as `blog/index` from
+`@views`, Yii looks for `@views/_card`, while PHPantom finds
+`@views/blog/_card`. Resolve the name against the view paths of the
+calls that render the template, the same reverse lookup the lens on a
+template makes, and fall back to its directory when nothing renders it.
+
+---
+
+## Y10. The renderer's configured view path
+
+**Impact: Medium · Complexity: Medium** (builds on Y6)
+
+```php
+// config/common/params.php
+'yiisoft/yii-view-renderer' => [
+    'viewPath' => '@views',
+],
+```
+
+A class that never calls `withViewPath()` renders against the view path
+the DI configuration gives the renderer, from
+`params['yiisoft/yii-view-renderer']['viewPath']`. PHPantom does not read
+it, so a name such a class renders does not navigate, complete, or get
+reported. Read the value from the params the same way Y6 does, and use
+it as the base wherever the class gives none.
+
+---
+
 ## Y7. Render parameters against the template's `@var` list
 
-**Impact: Medium · Complexity: Medium-High** (depends on Y3)
+**Impact: Medium · Complexity: Medium-High**
 
 ```php
 // Action.php

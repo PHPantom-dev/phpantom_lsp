@@ -51,6 +51,9 @@ impl Backend {
 
         // A translation key is shown as the message it looks up.
         let mut shown = key;
+        // A Yii view is keyed by the path it names, which reads best from
+        // the workspace root.
+        let view_path;
         let (label, detail) = match kind {
             StringKeyKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
             StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
@@ -280,6 +283,19 @@ impl Backend {
                         |path| format!("Declared in `{}`", path),
                     );
                 ("Configuration key", detail)
+            }
+            StringKeyKind::YiiView => {
+                view_path = self.yii_view_display(key);
+                shown = &view_path;
+                let detail = self
+                    .yii_view_file(key)
+                    .and_then(|file| crate::util::path_to_url(&file))
+                    .and_then(|uri| self.workspace_relative_path(uri.as_str()))
+                    .map_or_else(
+                        || "No template is there".to_string(),
+                        |path| format!("`{}`", path),
+                    );
+                ("View", detail)
             }
         };
 

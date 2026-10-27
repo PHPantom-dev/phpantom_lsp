@@ -76,6 +76,7 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::SymfonyConfigKey
         | StringKeyKind::SymfonyEvent
         | StringKeyKind::MessengerBus => backend.symfony_declaration_locations(*kind, key),
+        StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
     }
 }
 
@@ -274,6 +275,11 @@ pub(crate) fn find_laravel_string_key_references(
         // below.
         StringKeyKind::TranslationDomain => {
             find_string_key_usages(kind, key, backend, snapshot, false)
+        }
+        // Two spellings of one view share no key, so the renders are found
+        // by the file they name rather than in the key's snapshot.
+        StringKeyKind::YiiView => {
+            return backend.find_yii_view_references(key, include_declaration);
         }
     };
 

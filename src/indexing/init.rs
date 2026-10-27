@@ -127,6 +127,7 @@ impl Backend {
         self.set_is_doctrine(packages().any(composer::is_doctrine_project));
         self.set_is_symfony(packages().any(composer::is_symfony_project));
         self.set_is_twig(packages().any(composer::is_twig_project));
+        self.set_is_yii(packages().any(composer::is_yii_project));
 
         // A permission package answers authorization checks from the database,
         // so the abilities this project uses are not written in its source and
@@ -438,6 +439,7 @@ impl Backend {
         let mut any_doctrine = false;
         let mut any_symfony = false;
         let mut any_twig = false;
+        let mut any_yii = false;
 
         for (sub_idx, (sub_root, _)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;
@@ -467,6 +469,7 @@ impl Backend {
                 any_doctrine |= composer::is_doctrine_project(pkg);
                 any_symfony |= composer::is_symfony_project(pkg);
                 any_twig |= composer::is_twig_project(pkg);
+                any_yii |= composer::is_yii_project(pkg);
                 any_application |=
                     composer::is_application_project(pkg) || sub_root.join("artisan").is_file();
             }
@@ -489,6 +492,7 @@ impl Backend {
         self.set_is_doctrine(any_doctrine);
         self.set_is_symfony(any_symfony);
         self.set_is_twig(any_twig);
+        self.set_is_yii(any_yii);
         self.laravel
             .gates
             .write()

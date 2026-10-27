@@ -137,6 +137,15 @@ struct ExtractionCtx<'a> {
     /// `render()` calls recorded for the type engine to confirm as naming
     /// a template.
     twig: bool,
+    /// The directory of the file, when the project renders Yii views.
+    /// Gates the render calls recorded as naming a view, and is what a
+    /// path built from `__DIR__` evaluates against.
+    yii_dir: Option<&'a std::path::Path>,
+    /// What a view name in the code being extracted is relative to.
+    yii_view_scope: YiiViewScope,
+    /// Where the name of the class being extracted is written, for the
+    /// controller a renderer's `withController($this)` names.
+    yii_class_name_offset: Option<u32>,
     /// Whether the file names anything from Symfony's container
     /// configurator namespace, checked once lazily.
     uses_symfony_configurators: Option<bool>,
@@ -249,6 +258,7 @@ mod phpunit;
 mod statements;
 mod subject_text;
 mod symfony;
+mod yii;
 
 use class_like::*;
 use expressions::*;
@@ -258,12 +268,14 @@ use phpunit::*;
 use statements::*;
 use subject_text::*;
 use symfony::*;
+use yii::*;
 
 pub(crate) use symfony::{
     configurator_function_kind, is_autowire_attribute, is_bus_name_stamp,
     is_event_listener_attribute, is_message_handler_attribute, is_template_attribute,
     is_translatable_message, is_translate_function, symfony_receiver_method,
 };
+pub(crate) use yii::{chain_view_base, class_view_base};
 
 /// Descend generically through a node the typed dispatchers have no arm for,
 /// re-entering the typed extractors at the next expression or statement
@@ -290,7 +302,7 @@ fn descend_unhandled<'a>(node: Node<'a, 'a>, ctx: &mut ExtractionCtx<'a>, scope_
 /// every navigable symbol occurrence.
 #[cfg(test)]
 pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> SymbolMap {
-    extract_symbol_map_inner(program, content, None, true, true)
+    extract_symbol_map_inner(program, content, None, true, true, None)
 }
 
 /// Build a [`SymbolMap`] using the semantic names produced by `mago-names`.
@@ -300,7 +312,8 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
     content: &str,
     resolved_names: &OwnedResolvedNames,
 ) -> SymbolMap {
-    let mut map = extract_symbol_map_inner(program, content, Some(resolved_names), true, true);
+    let mut map =
+        extract_symbol_map_inner(program, content, Some(resolved_names), true, true, None);
     map.refresh_conditional_string_key_spans(None, |_| false);
     map
 }
@@ -309,15 +322,24 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
 /// dormant candidates for the publication lifecycle to settle.
 ///
 /// `symfony` says whether the project builds a Symfony service container,
-/// and `twig` whether it uses Twig.
+/// `twig` whether it uses Twig, and `yii_dir` is the file's directory when
+/// the project renders Yii views.
 pub(crate) fn extract_symbol_map_for_index(
     program: &Program<'_>,
     content: &str,
     resolved_names: &OwnedResolvedNames,
     symfony: bool,
     twig: bool,
+    yii_dir: Option<&std::path::Path>,
 ) -> SymbolMap {
-    extract_symbol_map_inner(program, content, Some(resolved_names), symfony, twig)
+    extract_symbol_map_inner(
+        program,
+        content,
+        Some(resolved_names),
+        symfony,
+        twig,
+        yii_dir,
+    )
 }
 
 fn extract_symbol_map_inner(
@@ -326,6 +348,7 @@ fn extract_symbol_map_inner(
     resolved_names: Option<&OwnedResolvedNames>,
     symfony: bool,
     twig: bool,
+    yii_dir: Option<&std::path::Path>,
 ) -> SymbolMap {
     let mut ctx = ExtractionCtx {
         spans: Vec::new(),
@@ -365,6 +388,9 @@ fn extract_symbol_map_inner(
         twig,
         uses_symfony_configurators: None,
         uses_symfony_routing_configurators: None,
+        yii_dir,
+        yii_view_scope: YiiViewScope::Template,
+        yii_class_name_offset: None,
     };
 
     for stmt in program.statements.iter() {

@@ -201,7 +201,7 @@ jobs:
           rm -rf target/criterion
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
-            --bench symfony_completion \
+            --bench symfony_completion --bench yii_completion \
             -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         shell: bash
@@ -265,7 +265,8 @@ jobs:
         run: |
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
-            --bench symfony_completion --no-run --message-format=json \
+            --bench symfony_completion --bench yii_completion \
+            --no-run --message-format=json \
             > benchmark-build.jsonl
           python3 benches/ci_benchmarks.py prepare \
             --build-dir benchmark-build --shards "$SHARD_COUNT" \

@@ -101,6 +101,7 @@ src/
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
 ├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
 ├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner
+├── yii/                    # Yii views and the path aliases they are named through: the alias table read from the params files, view keys resolved to templates
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 ├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
@@ -284,7 +285,8 @@ emits it.
 The spans come from two places, and nowhere else:
 
 - **PHP** is read from the AST during symbol-map extraction
-  (`symbol_map/extraction/laravel/` and `symbol_map/extraction/symfony.rs`).
+  (`symbol_map/extraction/laravel/`, `symbol_map/extraction/symfony.rs`,
+  and `symbol_map/extraction/yii.rs`).
   A function, an attribute, or a `new` is recognised by its resolved name.
   A method call whose name is too common to claim on sight (`get()`,
   `set()`, `render()`, `dispatch()`) is recorded as a candidate
@@ -313,6 +315,12 @@ document and watched-file lifecycle, and the reference index files every
 span by its key, so references need no second walk. All of it is gated on
 the project: Symfony names are only read when the project builds a Symfony
 container, and Laravel's only when it is a Laravel application.
+
+A Yii view is keyed by the path it names rather than by a name a file
+declares, with its alias left in (`@views/blog/index`), so two spellings
+of one template share no key. Its references are found by resolving each
+view key in the workspace to a file and comparing files, and the template
+itself declares nothing: the CodeLens at its top runs the same search.
 
 ## Go-to-Type-Definition Architecture
 

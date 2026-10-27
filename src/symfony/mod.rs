@@ -150,6 +150,8 @@ impl Backend {
     pub(crate) fn string_key_kind_enabled(&self, kind: StringKeyKind) -> bool {
         if kind == StringKeyKind::TwigTemplate {
             self.is_twig_project()
+        } else if kind.is_yii() {
+            self.is_yii_project()
         } else if kind.is_symfony() {
             self.is_symfony_project()
         } else {
