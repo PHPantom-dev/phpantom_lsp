@@ -939,23 +939,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b686-another-composer-projects-own-sources-resolve-in-every-project-of-the-workspace" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B686. Another Composer project's own sources resolve in every project of the workspace
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1557,23 +1540,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Name resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b686-another-composer-projects-own-sources-resolve-in-every-project-of-the-workspace" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B686. Another Composer project's own sources resolve in every project of the workspace
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1659,21 +1625,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b686-another-composer-projects-own-sources-resolve-in-every-project-of-the-workspace">B686. Another Composer project's own sources resolve in every project of the workspace<a class="headerlink" href="#b686-another-composer-projects-own-sources-resolve-in-every-project-of-the-workspace" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>A file under <code>mobile/</code> can name a class from <code>platform/src/</code> and gets
-completion, hover and no <code>unknown_class</code>, although <code>mobile/</code>'s
-autoloader cannot load it. A file now only sees its own project's
-<code>vendor/</code> (see <code>ProjectScope</code> in <code>src/resolution/project_scope.rs</code>), but
-the PSR-4 sources of every project stay visible to all of them, since
-<code>psr4_mappings</code> is one workspace-wide list.</p>
-<p>Hiding them needs care: a path repository symlinked into a project's
-<code>vendor/</code> is that project's dependency even though its files live
-under another project's tree, and the workspace's loose files must stay
-visible to everyone.</p>
-<p><strong>Where to look:</strong> <code>ProjectScope::sees</code>, and Phase 2 of
-<code>find_or_load_class_inner</code> in <code>src/resolution/classes.rs</code>, which
-resolves through the shared <code>psr4_mappings</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
