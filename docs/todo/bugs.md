@@ -113,22 +113,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B694. A closure's inferred return type drops a method call on its own parameter
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-$a = fn(User $u) => $u;            // Closure(User): User
-$b = fn(User $u) => $u->label();   // Closure(User), expected Closure(User): string
-$b($user);                         // unknown, expected string
-```
-
-`infer_closure_literal_type` (`rhs_resolution/calls.rs`) seeds the
-closure's typed parameters through `scope_var_resolver` before resolving the
-body, which is enough for a bare `$u`. A member call on `$u` loses it
-(`$u?->label()` too), so the receiver's resolution apparently does not go
-through the seeded resolver; the body comes back empty and the closure gets
-no return type. A body that does not depend on the call's type, such as
-`strlen($u->label())`, is unaffected. Anything that
-reads the closure's return afterwards, such as calling it or checking it
-against a declared `callable(...): string`, sees nothing.
+No outstanding items.

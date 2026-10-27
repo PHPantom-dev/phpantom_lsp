@@ -75,6 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Closures that return a method call on their own parameter.** `fn (User $u) => $u->label()` now gets the method's return type, so calling the closure, or passing it where a `callable(User): string` is expected, sees what it returns.
 - **Closures and variables inside `<?= ?>` echo tags.** In a plain PHP template, a closure written inside an echo tag now knows the types of its parameters, so their members resolve instead of being reported as unverifiable. A variable assigned or read inside an echo tag counts as defined or used.
 - **`@see` in a plain comment.** A `// @see Foo::bar()` inside a method body now counts as a use of the `Foo` import, so it is no longer reported unused or deleted by "Remove unused imports", and go-to-definition, find-references and rename follow it like a docblock `@see`.
 - **Each Composer project of a workspace sees only its own dependencies.** In a monorepo, or a workspace with Composer projects nested below its root, a class that only another project installed or declares is now reported as unknown and no longer completes, and when two projects install different versions of a package, each file resolves the version its own project installed.
