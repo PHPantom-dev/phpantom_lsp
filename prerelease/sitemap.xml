@@ -94,6 +94,9 @@
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/wordpress/</loc>
       </url>
       <url>
+        <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/yii/</loc>
+      </url>
+      <url>
         <loc>https://phpantom-dev.github.io/phpantom_lsp/prerelease/wasm/</loc>
       </url>
 </urlset>

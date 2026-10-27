@@ -1946,7 +1946,9 @@ promoted (and static, since PHP 8.5), can be read from anywhere but
 written only from inside its scope. <code>PropertyInfo</code> records a single
 visibility (<code>extract_visibility</code> in <code>parser/params.rs</code> keeps the first
 modifier it finds), so a write from outside goes unreported, and
-completion offers the property in write positions too.</p>
+completion offers the property in write positions too. Hover drops the
+set-visibility as well, showing <code>public PostTitle $title</code> for a
+<code>public private(set)</code> property.</p>
 <p><strong>Fix:</strong> Carry the operation on the <code>MemberAccess</code> span — read, write,
 <code>isset</code>, <code>unset</code> — the way <code>readonly_writes.rs</code> recovers write targets
 from the AST, and require the handler that matches it. The same
