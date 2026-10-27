@@ -404,3 +404,35 @@ fn a_name_that_only_appears_as_text_does_not_keep_its_import() {
     let actions = actions_at(&backend, content, 1, 4);
     assert!(find_action(&actions, SINGLE).is_some());
 }
+
+/// An `@see` tag in a plain `//`, `#` or `/* */` comment references the
+/// class it names, as one in a docblock does; prose in a comment does not.
+#[test]
+fn an_import_named_by_a_see_tag_in_a_plain_comment_is_used() {
+    let content = r#"<?php
+namespace App;
+
+use Http\UsersController;
+use Http\OrdersController;
+use Http\Invoice;
+use Http\Mentioned;
+use Http\Emailed;
+
+final class SanctumSession {
+    public function handle(): void {
+        // @see UsersController::impersonate()
+        # see also {@see OrdersController}.
+        /* @see Invoice */
+        // The Mentioned controller is not a reference.
+        // mail@seemail Emailed is not either.
+    }
+}
+"#;
+    assert_eq!(
+        unused_imports(content),
+        [
+            "Unused import 'Http\\Emailed'",
+            "Unused import 'Http\\Mentioned'",
+        ]
+    );
+}

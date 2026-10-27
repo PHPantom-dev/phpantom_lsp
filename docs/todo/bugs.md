@@ -127,28 +127,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B691. An import named only by a `// @see` line comment is reported unused
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-use App\Http\Controllers\UsersController;
-
-final class SanctumSession {
-    public function handle(): void {
-        // @see UsersController::impersonate()
-        $this->restore();
-    }
-}
-```
-
-`unused_import` counts docblock names as uses, but not names in a `//`
-comment, so this import is reported and "Remove unused imports" would
-delete it. The `@see` then no longer resolves in any tool that follows
-it. php-cs-fixer's `no_unused_imports` treats a name in any comment as a
-use. Decide whether a `@see` tag (or any class name) in a line comment is
-a reference. If it is, emit it as a `ClassReference` in the symbol map,
-the way docblock `@see` targets are, so that go-to-definition and rename
-follow it too, not only this diagnostic.
-
-Found twice in a Laravel project, both inside method bodies.
+No outstanding items.

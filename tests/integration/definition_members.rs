@@ -3065,6 +3065,42 @@ async fn test_goto_definition_see_tag_inline_in_expression() {
 }
 
 #[tokio::test]
+async fn test_goto_definition_see_tag_in_line_comment() {
+    let backend = create_test_backend();
+
+    let uri = Uri::parse("file:///test_see_line_comment.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    public function load(): void {}\n",
+        "}\n",
+        "function f(): void {\n",
+        "    // @see Config::load()\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    // On "Config" in the comment.
+    let result = goto_definition_at(&backend, &uri, 5, 13).await;
+    match result {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
+            assert_eq!(location.range.start.line, 1, "Config is defined on line 1");
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // On "load" in the comment.
+    let result = goto_definition_at(&backend, &uri, 5, 21).await;
+    match result {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
+            assert_eq!(location.range.start.line, 2, "load is defined on line 2");
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
 async fn test_goto_definition_see_tag_cross_file_no_namespace() {
     // @see in a file without namespace pointing to a class in another file.
     let (backend, _dir) = create_psr4_workspace(

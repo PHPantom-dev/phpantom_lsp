@@ -464,6 +464,49 @@ fn emit_see_tag_symbol(
     emit_see_reference(reference, offset, spans);
 }
 
+/// Emit the symbols that `@see` tags name in a plain (`//`, `#` or `/* */`)
+/// comment.
+///
+/// Code often points at a related method from a line comment inside a body
+/// (`// @see UsersController::impersonate()`), and the import that name goes
+/// through has to count as used for the reference to keep resolving.  Plain
+/// comments have no PHPDoc grammar, so the tag is found in the raw text: an
+/// `@see` (or `{@see`) that starts a word, then the first token after it.
+pub(super) fn extract_comment_see_symbols(
+    comment: &str,
+    base_offset: u32,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    const TAG: &str = "@see";
+    let bytes = comment.as_bytes();
+    let mut search_from = 0;
+    while let Some(found) = comment[search_from..].find(TAG) {
+        let tag_start = search_from + found;
+        let after_tag = tag_start + TAG.len();
+        search_from = after_tag;
+
+        let starts_word = tag_start == 0
+            || !matches!(bytes[tag_start - 1], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_');
+        if !starts_word || !matches!(bytes.get(after_tag), Some(b' ' | b'\t')) {
+            continue;
+        }
+
+        let rest = &comment[after_tag..];
+        let trimmed = rest.trim_start_matches([' ', '\t']);
+        let reference = trimmed
+            .split(|c: char| c.is_whitespace() || c == '}')
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(['.', ',', ';', ':']);
+        if reference.is_empty() {
+            continue;
+        }
+
+        let offset = base_offset + (after_tag + rest.len() - trimmed.len()) as u32;
+        emit_see_reference(reference, offset, spans);
+    }
+}
+
 // ─── PHPUnit coverage metadata ──────────────────────────────────────────────
 
 const COVERS_DEFAULT_CLASS_TAG: &str = "@coversDefaultClass";
