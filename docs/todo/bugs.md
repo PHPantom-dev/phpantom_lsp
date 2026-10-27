@@ -75,47 +75,7 @@ No outstanding items.
 
 ## Templates
 
-### B690. A member access through an override with a native return type loses the call's method template
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-interface Node {
-    /**
-     * @template T of Node
-     * @param class-string<T> $type
-     * @return T|null
-     */
-    public function first($type): ?self;
-}
-abstract class Base implements Node {
-    public function first($type): ?Node { return null; }
-}
-final class Leaf extends Base { public function leafOnly(): int { return 1; } }
-
-function f(Base $b): void {
-    $v = $b->first(Leaf::class);   // hover and argument checks: Leaf|null
-    $v->leafOnly();                // Method 'leafOnly' not found on class 'Node'
-    $b->first(Leaf::class)->leafOnly();   // same
-}
-```
-
-The two consumers disagree about the same value. The forward walker
-types `$v` as `Leaf|null`, so hover and argument checks are right, but
-the member-access subject resolver (`resolve_subject_outcome` →
-`resolve_target_classes`, used by `unknown_member`) resolves `$v` to the
-override's native `Node`. The same call through a `Node` or a `Leaf`
-receiver resolves to `Leaf`, as does `Base::first()` without a native
-return type. So the subject path looks the method up on the receiver's
-own class, where the override has no `@template` until the inheritance
-merge adds it, and does not prefer the merged method the way
-`resolve_owner_method_call` (`rhs_resolution/owner_method_call.rs`)
-does. Fix the subject path to read the merged method so the two cannot
-diverge, rather than adding a second preference rule.
-
-Predates the 2026-10-12 sweep. Found while reducing a PDepend regression
-with a scratch project. PDepend's own calls go through subclasses, so
-they do not hit it.
+No outstanding items.
 
 ## Name resolution
 

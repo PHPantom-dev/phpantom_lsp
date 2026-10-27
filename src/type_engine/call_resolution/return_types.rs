@@ -123,6 +123,24 @@ impl<'a> MethodReturnCtx<'a> {
 /// See [`MethodReturnCtx::call_args`].
 pub(crate) type CallSiteArgResolver<'a> = Option<&'a dyn Fn() -> Vec<PhpType>>;
 
+/// Whether a call answers with the merged method rather than the class's
+/// own declaration of it.
+///
+/// An override with no docblock of its own carries only its native hint,
+/// while the merged method carries what it inherits from interfaces and
+/// parents: a `@return` (with `@implements` substitutions and any
+/// `@template` already applied) or a conditional return type.  The
+/// effective type is stored name-resolved while the native hint keeps the
+/// spelling from the source, so the two are compared as types.
+pub(crate) fn answers_with_merged_method(own: &MethodInfo, merged: &MethodInfo) -> bool {
+    let echoes_native = |m: &MethodInfo| match (&m.return_type, &m.native_return_type) {
+        (Some(ret), Some(native)) => ret.equivalent(native),
+        (ret, native) => ret == native,
+    };
+    (echoes_native(own) && !echoes_native(merged))
+        || (own.conditional_return().is_none() && merged.conditional_return().is_some())
+}
+
 /// Build a [`VarClassStringResolver`] closure from a [`ResolutionCtx`].
 ///
 /// The returned closure resolves a variable name (e.g. `"$requestType"`)
@@ -623,18 +641,30 @@ impl Backend {
             "__call"
         };
 
+        // Walk up the inheritance chain (also merges interface members
+        // with `@implements` generic substitutions applied).
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            class_info,
+            class_loader,
+            mr_ctx.cache,
+        );
+
         // First check the class itself. Skip this fast path when the
         // declared return type is self-like: a Laravel/Mockery patch may
         // rewrite a bare `self`/`static`/`$this` return to a different
         // concrete type (e.g. `Mockery\LegacyMockInterface::shouldHaveReceived()`
         // really returns `Mockery\VerificationDirector`), and patches are
         // only applied during the merged resolution below. Trusting the
-        // raw declaration here would bypass the patch entirely.
+        // raw declaration here would bypass the patch entirely.  Skip it
+        // too when the declaration only restates what it inherits.
         if let Some(method) = class_info.get_method(method_name)
             && !method
                 .return_type
                 .as_ref()
                 .is_some_and(PhpType::is_self_like)
+            && !merged
+                .get_method(method_name)
+                .is_some_and(|mm| answers_with_merged_method(method, mm))
         {
             let result = resolve_method(method);
             if !result.is_empty() {
@@ -644,14 +674,6 @@ impl Backend {
             // return type here but have one filled in from an interface
             // via `@implements` generic resolution.
         }
-
-        // Walk up the inheritance chain (also merges interface members
-        // with `@implements` generic substitutions applied).
-        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-            class_info,
-            class_loader,
-            mr_ctx.cache,
-        );
 
         // Look up the magic method once; used for both validation and
         // fallback below.
