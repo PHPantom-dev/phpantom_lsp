@@ -5197,6 +5197,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>[indexing] exclude</code> covers Composer's class lists.</strong> A class Composer's classmap or PSR-0 map names no longer resolves from a path you excluded, so excluding a path mid-session and restarting give the same result.</li>
 <li><strong>Filtered code action menus.</strong> When the editor asks for one kind of code action, such as only quick fixes or only the organize-imports action run on save, only actions of that kind are returned instead of every action mixed together. Every kind of action PHPantom offers is now listed among the kinds it advertises.</li>
 <li><strong>Closures that return a method call on their own parameter.</strong> <code>fn (User $u) =&gt; $u-&gt;label()</code> now gets the method's return type, so calling the closure, or passing it where a <code>callable(User): string</code> is expected, sees what it returns.</li>
 <li><strong>A typed closure decides a callback's template.</strong> A closure such as <code>fn(User $user) =&gt; …</code> passed where a <code>callable(T): string</code> is expected now binds <code>T</code> to <code>User</code>, so it is no longer reported for accepting less than the template's bound. A closure whose parameter falls outside the bound is still reported.</li>
