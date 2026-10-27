@@ -82,7 +82,7 @@ fn inherited_return_type(
     let Some(ref native) = existing.native_return_type else {
         return Some(inherited);
     };
-    let inherited = within_native_class(inherited, existing, class_loader)?;
+    let inherited = within_native_class(inherited, existing, ancestor, class_loader)?;
     Some(inherited.without_alternatives_the_native_type_forbids(native))
 }
 
@@ -97,9 +97,15 @@ fn inherited_return_type(
 /// override's class or one of its subclasses still refines it, and one
 /// that cannot be classified (a template, `static`, a class that does not
 /// load) is kept, since dropping it could not be proved right.
+///
+/// The ancestor's class-level templates are already substituted (or
+/// bound-filled) by the caller, but its method-level ones reach here as
+/// bare names, so those are checked against `ancestor` before the loader
+/// gets a chance to mistake `T` for an unrelated global class `T`.
 fn within_native_class(
     inherited: PhpType,
     existing: &MethodInfo,
+    ancestor: &MethodInfo,
     class_loader: ClassLoader<'_>,
 ) -> Option<PhpType> {
     // With no docblock of its own, the effective return type is the native
@@ -121,6 +127,13 @@ fn within_native_class(
         let Some(class) = member.base_name() else {
             return true;
         };
+        if ancestor
+            .template_params()
+            .iter()
+            .any(|t| t.as_str() == class)
+        {
+            return true;
+        }
         match class_loader(crate::class_lookup::Fqn::new(class)) {
             Some(info) => crate::class_lookup::is_subtype_of(&info, own_class, class_loader),
             None => true,

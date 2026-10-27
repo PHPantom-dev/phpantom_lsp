@@ -17017,3 +17017,34 @@ function f(PerPage $p): void {{
         assert!(!text.contains("Closure"), "{template:?}: {text}");
     }
 }
+
+/// A parent's method-level template in `@return` survives an override's
+/// native class hint even when a global class shares the template's name.
+#[test]
+fn hover_override_native_return_keeps_method_template_shadowing_a_class() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class T {}
+interface Node {
+    /**
+     * @template T of Node
+     * @param class-string<T> $type
+     * @return T|null
+     */
+    public function first($type): ?self;
+}
+abstract class Base implements Node {
+    public function first($type): ?Node { return null; }
+}
+final class Leaf extends Base {}
+
+function f(Base $b): void {
+    $v = $b->first(Leaf::class);
+    $v;
+}
+"#;
+    let hover =
+        hover_at(&backend, "file:///test.php", content, 17, 5).expect("expected hover on $v");
+    let text = hover_text(&hover);
+    assert!(text.contains("Leaf"), "{text}");
+}
