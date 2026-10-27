@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793127637890,
+  "lastUpdate": 1793130264819,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7281,6 +7281,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 74.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d71e626d4a35d4cd0012cc31945a939644966bf3",
+          "message": "Add basic Yii support",
+          "timestamp": "2026-10-27T20:26:15+01:00",
+          "tree_id": "05141af44b7f447aa8b89120f645a72fbdd7cc79",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d71e626d4a35d4cd0012cc31945a939644966bf3"
+        },
+        "date": 1793130250245,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 77.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 102.3,
             "unit": "MiB"
           }
         ]
