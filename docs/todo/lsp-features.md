@@ -633,25 +633,6 @@ recognises as rendering a template.
 
 ---
 
-## F35. Suggest a close name for an unknown template or view
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-return $this->render('blog/shw.html.twig');   // blog/show.html.twig exists
-return view('emails.welcom');                  // emails.welcome exists
-```
-
-An unknown Twig template or Laravel view offers only "Create missing
-template/view", which is the wrong fix for a typo. Offer the closest
-declared names first ("Change to 'blog/show.html.twig'"), ranked by edit
-distance and limited to a few, the way Symfony's language tools do. Both
-kinds already go through one collector, so one change serves both.
-
-**Where to look:** `src/code_actions/create_missing_view.rs`.
-
----
-
 ## F36. Twig block navigation
 
 **Impact: Medium · Complexity: Medium**

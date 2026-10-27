@@ -737,6 +737,7 @@ class Demo
         // welcome.blade.php declares a @bladestan-signature, so this call
         // is checked against it the way a function call is checked against
         // its parameters.
+        // Try: change 'welcome' to 'welcom' and apply "Change to 'welcome'".
         $posts = BlogPost::where('published', true)->get();
         $user = BlogAuthor::first();
         view('welcome', compact('posts', 'user'));

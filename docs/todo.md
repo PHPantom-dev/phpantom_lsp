@@ -54,7 +54,6 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | F59 | [Send Twig, YAML, and XML documents to the server from Zed](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed) (Zed PR) | Medium | Low |
 | P86 | [A Symfony app's generated `config/reference.php` is slow to parse](todo/performance.md#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse) | Medium | Medium |
-| F35 | [Suggest a close name for an unknown template or view](todo/lsp-features.md#f35-suggest-a-close-name-for-an-unknown-template-or-view) | Low-Medium  | Low         |
 | F27 | [Symfony route parameters](todo/lsp-features.md#f27-symfony-route-parameters) (blocks full Symfony support) | Medium      | Medium      |
 | F29 | [Report Symfony translation keys nothing declares](todo/lsp-features.md#f29-report-symfony-translation-keys-nothing-declares) (blocks full Symfony support) | Medium      | Medium      |
 | F32 | [Report unknown Symfony names in Twig templates](todo/lsp-features.md#f32-report-unknown-symfony-names-in-twig-templates) (blocks full Twig support) | Medium      | Medium      |
