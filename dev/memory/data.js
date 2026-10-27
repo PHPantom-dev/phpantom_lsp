@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793140527799,
+  "lastUpdate": 1793140795333,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7457,6 +7457,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 102.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "56bba1026c2ab3f6a8253b104126cbd12d60e73e",
+          "message": "A typed closure decides a callback's template",
+          "timestamp": "2026-10-27T23:03:27+01:00",
+          "tree_id": "ebf683dcb397e945fd0102245cfa8e2a686f2cc3",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/56bba1026c2ab3f6a8253b104126cbd12d60e73e"
+        },
+        "date": 1793140783878,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 75,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 99.8,
             "unit": "MiB"
           }
         ]
