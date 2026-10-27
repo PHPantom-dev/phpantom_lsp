@@ -1026,17 +1026,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b685-range-features-answer-from-a-symbol-map-that-lags-the-buffer" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B685. Range features answer from a symbol map that lags the buffer
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1706,17 +1695,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b685-range-features-answer-from-a-symbol-map-that-lags-the-buffer" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B685. Range features answer from a symbol map that lags the buffer
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1866,31 +1844,6 @@ the completion reading that index before the work it waits for has
 finished, or at state leaking in from another test on the same thread.
 Find which, and make the test (or the code under it) wait for what it
 needs.</p>
-<h3 id="b685-range-features-answer-from-a-symbol-map-that-lags-the-buffer">B685. Range features answer from a symbol map that lags the buffer<a class="headerlink" href="#b685-range-features-answer-from-a-symbol-map-that-lags-the-buffer" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p><code>did_change</code> rebuilds a file's symbol map on a background task, so a
-request that arrives between a keystroke and that rebuild sees a map built
-from the previous text. Inlay hints detect this with
-<code>SymbolMap::matches_source</code> and answer <code>ContentModified</code>, which keeps the
-client's current hints until the <code>inlayHint/refresh</code> sent after the commit.
-The other features that read offsets out of the map each handle it their
-own way or not at all:</p>
-<ul>
-<li>Semantic tokens (<code>collect_tokens</code>) answer an empty token set, so the
-  editor drops all highlighting until the refresh repaints it (a flicker on
-  every edit that outruns the parse).</li>
-<li>Code lens (<code>class_declaration_name_offset</code> and the class offsets from
-  <code>uri_classes_index</code>) and document highlight (<code>lookup_symbol_at_position</code>)
-  convert the old offsets against the new content without checking, so a
-  lens or highlight can land a keystroke's worth away from its symbol.</li>
-</ul>
-<p>The decline should be one shared decision rather than a per-feature one:
-every request that maps symbol-map offsets onto the current buffer answers
-<code>ContentModified</code> when the map does not match it, and relies on the refresh
-<code>did_change</code> already sends for semantic tokens, inlay hints, and code lens.
-Document highlight has no refresh, so it needs either the same decline (the
-client re-requests on the next cursor move) or to wait for the pending
-parse.</p>
 
 
 
