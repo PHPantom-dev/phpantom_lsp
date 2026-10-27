@@ -86,12 +86,13 @@ impl Backend {
             return Some(response);
         }
 
-        // ── Symfony names ───────────────────────────────────────
+        // ── Symfony and Yii names ───────────────────────────────
         // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`,
-        // `$translator->trans('|')`, and in any project that uses Twig,
-        // `$twig->render('|')`.
+        // `$translator->trans('|')`, in any project that uses Twig,
+        // `$twig->render('|')`, and in a Yii one `$urls->generate('|')` and
+        // `#[RouteArgument('|')]`.
         if matches!(string_ctx, StringContext::InStringLiteral)
-            && (self.is_symfony_project() || self.is_twig_project())
+            && (self.is_symfony_project() || self.is_twig_project() || self.is_yii_project())
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_symfony_string_key_completion(uri, content, position, code, ctx)
@@ -106,6 +107,18 @@ impl Backend {
             && self.is_yii_project()
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) = self.try_yii_view_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── Yii route arguments ─────────────────────────────────
+        // The keys of `$urls->generate('blog/post', ['|' => …])` are the
+        // placeholders of the named route's path.
+        if self.is_yii_project()
+            && matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_yii_route_param_completion(content, position, code, ctx)
         {
             return Some(response);
         }

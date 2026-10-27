@@ -184,11 +184,13 @@ pub(super) fn index_project(
     // the resource files are indexed, the way the editor does.  On a
     // full run the files are already parsed, so this only adds the walk.
     // A Symfony project's service IDs and parameters are declared in its
-    // YAML and XML configuration, and a project's Twig templates are found
-    // only by that walk.
+    // YAML and XML configuration, a project's Twig templates are found
+    // only by that walk, and a Yii project's routes are declared in its
+    // `config/`, which no autoloader names.
     if backend.resolved_class_cache.read().laravel().is_enabled()
         || backend.is_symfony_project()
         || backend.is_twig_project()
+        || backend.is_yii_project()
     {
         backend.ensure_workspace_index_ready_with_progress(None);
     } else {

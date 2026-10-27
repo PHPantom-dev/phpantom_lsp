@@ -1385,6 +1385,18 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             sym.add(
                 sm.container_values.capacity() * size_of::<crate::symbol_map::ContainerValueSite>(),
             );
+            sym.add(sm.routes.capacity() * size_of::<crate::symbol_map::RouteSite>());
+            for route in &sm.routes {
+                sym.add(route.path.as_ref().map_or(0, String::capacity));
+                sym.add(route.handler.as_ref().map_or(0, String::capacity));
+                sym.add(
+                    route.placeholders.capacity()
+                        * size_of::<crate::symbol_map::RoutePlaceholder>(),
+                );
+                for placeholder in &route.placeholders {
+                    sym.add(placeholder.name.capacity());
+                }
+            }
         }
     }
     eprintln!(

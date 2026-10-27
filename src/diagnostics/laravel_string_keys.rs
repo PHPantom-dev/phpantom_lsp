@@ -5,7 +5,8 @@
 //! against what the project actually registers (routes, config keys,
 //! views, translation keys, console commands, morph aliases, gate
 //! abilities, Symfony service IDs, container parameters, routes and Twig
-//! templates, Yii views), and report the ones nothing declares.
+//! templates, Yii views, routes, and the route arguments a handler reads),
+//! and report the ones nothing declares.
 
 use std::sync::Arc;
 
@@ -40,6 +41,8 @@ enum CheckedStringKind {
     TwigTemplate,
     MessengerBus,
     YiiView,
+    YiiRoute,
+    YiiRouteArgument,
 }
 
 impl CheckedStringKind {
@@ -63,6 +66,8 @@ impl CheckedStringKind {
             StringKeyKind::TwigTemplate => Self::TwigTemplate,
             StringKeyKind::MessengerBus => Self::MessengerBus,
             StringKeyKind::YiiView => Self::YiiView,
+            StringKeyKind::YiiRoute => Self::YiiRoute,
+            StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -130,6 +135,8 @@ struct DeclaredKeys<'a> {
     twig_templates: Vec<String>,
     /// The Messenger buses the project's configuration declares, sorted.
     messenger_buses: Vec<String>,
+    /// The Yii route names the project declares, sorted.
+    yii_routes: Vec<String>,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -155,6 +162,7 @@ impl<'a> DeclaredKeys<'a> {
         let has_symfony_route = names(|kind| kind == CheckedStringKind::SymfonyRoute);
         let has_twig_template = names(|kind| kind == CheckedStringKind::TwigTemplate);
         let has_messenger_bus = names(|kind| kind == CheckedStringKind::MessengerBus);
+        let has_yii_route = names(|kind| kind == CheckedStringKind::YiiRoute);
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -286,6 +294,12 @@ impl<'a> DeclaredKeys<'a> {
             Vec::new()
         };
 
+        let yii_routes = if has_yii_route {
+            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::YiiRoute)
+        } else {
+            Vec::new()
+        };
+
         Self {
             backend,
             routes,
@@ -303,6 +317,7 @@ impl<'a> DeclaredKeys<'a> {
             symfony_routes,
             twig_templates,
             messenger_buses,
+            yii_routes,
         }
     }
 
@@ -368,7 +383,36 @@ impl<'a> DeclaredKeys<'a> {
                 .backend
                 .yii_view_exists(key)
                 .map(|exists| (exists, "view", "invalid_yii_view")),
+            CheckedStringKind::YiiRoute => self.judge_yii_route(key),
+            CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
         }
+    }
+
+    /// No package Yii installs declares routes of its own, so the
+    /// project's routes are all of them.  A project that declares none was
+    /// not read at all.
+    fn judge_yii_route(&self, key: &str) -> Verdict {
+        if self.yii_routes.is_empty() {
+            return None;
+        }
+        let valid = self
+            .yii_routes
+            .binary_search_by(|name| name.as_str().cmp(key))
+            .is_ok();
+        Some((valid, "route", "invalid_yii_route"))
+    }
+
+    /// A route argument is judged against the paths of the routes that
+    /// dispatch to its handler, when the project declares one that does and
+    /// its path is written out.
+    fn judge_yii_route_argument(&self, key: &str) -> Verdict {
+        let (handler, name) = crate::yii::routes::split_route_argument_key(key);
+        let declared = self.backend.yii_handler_arguments(handler)?;
+        Some((
+            declared.iter().any(|declared| declared == name),
+            "route argument",
+            "invalid_yii_route_argument",
+        ))
     }
 
     /// A bus is only ever declared by the application's own Messenger
@@ -693,11 +737,16 @@ impl Backend {
                 && let Some(range) = range(start, end)
             {
                 // A Yii view is keyed by the whole path it names, which
-                // reads best from the workspace root.
-                let shown = if kind == CheckedStringKind::YiiView {
-                    std::borrow::Cow::Owned(self.yii_view_display(key))
-                } else {
-                    std::borrow::Cow::Borrowed(key)
+                // reads best from the workspace root, and a route
+                // argument's key names its handler too.
+                let shown = match kind {
+                    CheckedStringKind::YiiView => {
+                        std::borrow::Cow::Owned(self.yii_view_display(key))
+                    }
+                    CheckedStringKind::YiiRouteArgument => std::borrow::Cow::Borrowed(
+                        crate::yii::routes::split_route_argument_key(key).1,
+                    ),
+                    _ => std::borrow::Cow::Borrowed(key),
                 };
                 out.push(helpers::make_diagnostic(
                     range,

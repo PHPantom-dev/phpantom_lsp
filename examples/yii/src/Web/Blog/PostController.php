@@ -33,6 +33,9 @@ final readonly class PostController
         return $this->viewRenderer->render('index', ['posts' => $this->posts->latest()]);
     }
 
+    // Try: go-to-definition on 'slug', which lands on the {slug} of the
+    // route config/common/routes.php points here. Complete it, or rename it
+    // to one the path does not declare and see it reported.
     public function view(#[RouteArgument('slug')] string $slug): ResponseInterface
     {
         // Try: hover $post, or complete after $post->. The container hands

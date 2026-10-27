@@ -522,9 +522,10 @@ pub struct BackendState {
     pub(crate) is_twig: Arc<std::sync::atomic::AtomicBool>,
     /// The project's Twig template files and the roots they live under.
     pub(crate) twig: twig::TwigState,
-    /// Whether the project renders Yii views, which view names are read
-    /// in.  See [`crate::composer::is_yii_project`].  Starts `true` so a
-    /// workspace with no `composer.json` to classify behaves as before.
+    /// Whether the project is a Yii application, which view names, route
+    /// names, and route arguments are read in.  See
+    /// [`crate::composer::is_yii_project`].  Starts `true` so a workspace with
+    /// no `composer.json` to classify behaves as before.
     pub(crate) is_yii: Arc<std::sync::atomic::AtomicBool>,
     /// The Yii path aliases the project's configuration declares.
     pub(crate) yii: yii::YiiState,

@@ -26,6 +26,8 @@ return [
             Route::get('')
                 ->action([PostController::class, 'index'])
                 ->name('index'),
+            // Try: find references on 'post'. The name is blog/post, and
+            // the views generate its URL.
             Route::get('/{slug}')
                 ->action([PostController::class, 'view'])
                 ->name('post'),

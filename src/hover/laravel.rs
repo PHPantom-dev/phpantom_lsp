@@ -271,6 +271,37 @@ impl Backend {
                     );
                 ("Messenger bus", detail)
             }
+            StringKeyKind::YiiRoute => {
+                let declared = self.symfony_declaration_locations(*kind, key);
+                let mut detail = declared
+                    .first()
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                    .map_or_else(
+                        || "Not declared in the project's routes".to_string(),
+                        |path| format!("Declared in `{}`", path),
+                    );
+                for path in self.yii_route_paths(key) {
+                    detail.push_str(&format!("\n\nPath `{}`", path));
+                }
+                ("Route", detail)
+            }
+            // An argument is shown by its name, under the paths that
+            // declare it.
+            StringKeyKind::YiiRouteArgument => {
+                let (handler, name) = crate::yii::routes::split_route_argument_key(key);
+                shown = name;
+                let paths = self.yii_handler_paths(handler);
+                let detail = if paths.is_empty() {
+                    "No route the project declares dispatches here".to_string()
+                } else {
+                    paths
+                        .iter()
+                        .map(|path| format!("Path `{}`", path))
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                };
+                ("Route argument", detail)
+            }
             // An installed bundle's schema is not read, so a key no schema
             // of the project's declares is only not one of its own.
             StringKeyKind::SymfonyConfigKey => {

@@ -137,7 +137,7 @@ struct ExtractionCtx<'a> {
     /// `render()` calls recorded for the type engine to confirm as naming
     /// a template.
     twig: bool,
-    /// The directory of the file, when the project renders Yii views.
+    /// The directory of the file, when the project is a Yii application.
     /// Gates the render calls recorded as naming a view, and is what a
     /// path built from `__DIR__` evaluates against.
     yii_dir: Option<&'a std::path::Path>,
@@ -151,6 +151,19 @@ struct ExtractionCtx<'a> {
     uses_symfony_configurators: Option<bool>,
     /// Likewise for Symfony's routing configurator namespace.
     uses_symfony_routing_configurators: Option<bool>,
+    /// Whether the project is a Yii application, which [`Self::yii_dir`]
+    /// says.  Gates the route definitions, the route arguments, and the URL
+    /// generator calls recorded for the type engine to confirm.
+    yii: bool,
+    /// Whether the file names anything from Yii's router, checked once
+    /// lazily.
+    names_yii_router: Option<bool>,
+    /// The byte ranges of the `Route` and `Group` chains read, whose inner
+    /// calls the walk reaches afterwards (some more than once) and must not
+    /// read again.
+    yii_read_chains: Vec<(u32, u32)>,
+    /// The routes the file declares.
+    routes: Vec<crate::symbol_map::RouteSite>,
 }
 
 /// A variable token's name without its `$`.
@@ -259,6 +272,7 @@ mod statements;
 mod subject_text;
 mod symfony;
 mod yii;
+mod yii_routes;
 
 use class_like::*;
 use expressions::*;
@@ -269,6 +283,7 @@ use statements::*;
 use subject_text::*;
 use symfony::*;
 use yii::*;
+use yii_routes::*;
 
 pub(crate) use symfony::{
     configurator_function_kind, is_autowire_attribute, is_bus_name_stamp,
@@ -323,7 +338,7 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
 ///
 /// `symfony` says whether the project builds a Symfony service container,
 /// `twig` whether it uses Twig, and `yii_dir` is the file's directory when
-/// the project renders Yii views.
+/// the project is a Yii application.
 pub(crate) fn extract_symbol_map_for_index(
     program: &Program<'_>,
     content: &str,
@@ -391,6 +406,10 @@ fn extract_symbol_map_inner(
         yii_dir,
         yii_view_scope: YiiViewScope::Template,
         yii_class_name_offset: None,
+        yii: yii_dir.is_some(),
+        names_yii_router: None,
+        yii_read_chains: Vec::new(),
+        routes: Vec::new(),
     };
 
     for stmt in program.statements.iter() {
@@ -507,6 +526,7 @@ fn extract_symbol_map_inner(
     ctx.typed_receiver_sites.sort_by_key(|s| s.start);
     ctx.morph_column_sites.sort_by_key(|s| s.start);
     ctx.container_values.sort_by_key(|s| s.start);
+    ctx.routes.shrink_to_fit();
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
         crate::atom::AtomMap::default();
@@ -544,6 +564,7 @@ fn extract_symbol_map_inner(
         gate_subjects: ctx.gate_subjects,
         messenger_handlers: ctx.messenger_handlers,
         container_values: ctx.container_values,
+        routes: ctx.routes,
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
         source_hash: None,
     }

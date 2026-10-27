@@ -31,50 +31,6 @@ within the same impact tier.
 
 ---
 
-## Y2. Route names and their handlers
-
-**Impact: High · Complexity: Medium**
-
-```php
-// config/common/routes.php
-Route::get('/blog/{slug}')
-    ->action([PostController::class, 'view'])
-    ->name('blog/post'),
-
-// anywhere
-$urlGenerator->generate('blog/post', ['slug' => $post->getSlug()]);
-```
-
-Navigate from a route name in `UrlGeneratorInterface::generate()` (and
-the other URL-building calls) to the route that declares it, and from
-the route to its handler: the `[Controller::class, 'method']` array or
-the class an `action()` names. Find references on a route name lists
-every place that generates it, and on a handler method lists the routes
-that point at it. Complete route names and the parameter keys their
-path declares, and report a name nothing declares. Account for the name
-prefixes and path prefixes a `Group` adds.
-
-The parameter keys are the same problem as Symfony's
-[F27](lsp-features.md#f27-symfony-route-parameters); share the design.
-
-Two shapes from `yiisoft/demo-blog` to cover:
-
-- **Route arguments in handlers.** `#[RouteArgument('id')]` on an action
-  parameter (`yiisoft/input-http`) names a placeholder in the route's
-  path. Navigate to the `{id}`, complete it from the path of the route
-  whose handler this is, and report a name the path does not declare.
-  Optional segments (`/blog[/{page}]`) declare placeholders too.
-- **A wrapper around the URL generator.** The demo extends Yii's URL
-  generator with one method per route that calls
-  `$this->generate('blog/post/view', …)`. Recognise the call by the
-  method it resolves to (any subclass or implementation of
-  `UrlGeneratorInterface::generate()`), not by the receiver's spelling.
-
-**Where to look:** the route-name support for Laravel and Symfony
-(`src/symbol_map/extraction/symfony.rs`, `src/symfony/routes.rs`).
-
----
-
 ## Y4. DI container configuration
 
 **Impact: Medium-High · Complexity: Medium-High**

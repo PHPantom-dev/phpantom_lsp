@@ -20,6 +20,7 @@ use App\Web\Blog\PostController;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
 use Yiisoft\Aliases\Aliases;
+use Yiisoft\Router\HydratorAttribute\RouteArgument;
 use Yiisoft\Router\RouteCollectionInterface;
 use Yiisoft\Router\UrlGeneratorInterface;
 use Yiisoft\Yii\Runner\Http\HttpApplicationRunner;
@@ -68,6 +69,8 @@ check("The group's prefix makes blog/post's pattern /blog/{slug}", $post->getDat
 check('blog/index is handled by PostController::index()', $index->getData('enabledMiddlewares') === [[PostController::class, 'index']]);
 check('blog/post is handled by PostController::view()', $post->getData('enabledMiddlewares') === [[PostController::class, 'view']]);
 check('PostController declares index()', method_exists(PostController::class, 'index'));
+$slugArgument = (new ReflectionMethod(PostController::class, 'view'))->getParameters()[0]->getAttributes(RouteArgument::class);
+check("view()'s #[RouteArgument('slug')] reads a placeholder blog/post's path declares", count($slugArgument) === 1 && $slugArgument[0]->newInstance()->getName() === 'slug' && str_contains($post->getData('pattern'), '{slug}'));
 check('PostController declares view()', method_exists(PostController::class, 'view'));
 check('The home route is still declared', $routes->getRoute('home')->getData('pattern') === '/');
 

@@ -1,5 +1,6 @@
-//! Yii 3: the views an application renders, and the path aliases it names
-//! them through.
+//! Yii 3: the views an application renders and the path aliases it names
+//! them through, and the route names it declares and the arguments a
+//! handler takes from its route's path.
 //!
 //! A view is named by a path (`__DIR__ . '/template'`) or by a name the
 //! renderer's view path prefixes (`render('index')` after
@@ -8,8 +9,17 @@
 //! alias and all, as a [`YiiView`](crate::symbol_map::StringKeyKind::YiiView)
 //! key, and [`views`] resolves that key to a template file through the
 //! aliases the project's configuration declares (see [`aliases`]).
+//!
+//! A route is declared in PHP, by a `Route` definition in the arrays the
+//! router's configuration returns, and read in PHP, so both sides are spans
+//! in the symbol maps of PHP files (see `symbol_map/extraction/yii_routes.rs`).
+//! The files that declare one are tracked with Symfony's (see
+//! [`crate::symfony`]), and what a route's name alone does not say, its path
+//! and its handler, is kept beside its span (see
+//! [`crate::symbol_map::RouteSite`] and [`routes`]).
 
 pub(crate) mod aliases;
+pub(crate) mod routes;
 pub(crate) mod views;
 
 #[cfg(test)]
@@ -30,13 +40,13 @@ pub(crate) struct YiiState {
 }
 
 impl Backend {
-    /// Whether the project renders Yii views; see
+    /// Whether the project is a Yii application; see
     /// [`Backend::is_yii`](crate::Backend::is_yii).
     pub(crate) fn is_yii_project(&self) -> bool {
         self.is_yii.load(Ordering::Relaxed)
     }
 
-    /// Record whether the project renders Yii views, once the workspace's
+    /// Record whether the project is a Yii application, once the workspace's
     /// `composer.json` files have been read.
     pub(crate) fn set_is_yii(&self, is_yii: bool) {
         self.is_yii.store(is_yii, Ordering::Relaxed);

@@ -393,7 +393,9 @@ navigates to it. Laravel completes the keys of `route('name', [...])` from
 the URI it keeps with each route name (`completion/laravel_route_params.rs`).
 A parameter only means something under its route, so it does not fit a
 `StringKey` span on its own: a key spelled as one global name would merge
-every route's `id`. It needs the path kept beside each route declaration
+every route's `id`. Yii's routes already keep their path beside their name
+in the symbol map's `RouteSite` side table, and complete the keys of
+`generate()` from it. Symfony's declarations need to fill the same table
 (the attribute's path, the YAML `path:`, the XML `path` attribute, the
 configurator's second argument, and the class-level prefix in front of a
 method's path), and the parameter array of each `generateUrl()`,
@@ -401,8 +403,9 @@ method's path), and the parameter array of each `generateUrl()`,
 it.
 
 **Where to look:** `src/symbol_map/extraction/symfony.rs`
-(`emit_symfony_route_spans`), `src/symfony/routes.rs`,
-`src/completion/laravel_route_params.rs`.
+(`emit_symfony_route_spans`), `src/symfony/routes.rs`, and the Yii side
+of the same design: `src/symbol_map/extraction/yii_routes.rs`, `src/yii/routes.rs`,
+`src/completion/yii_route_params.rs`.
 
 ---
 

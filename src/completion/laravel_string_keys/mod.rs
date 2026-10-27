@@ -44,8 +44,10 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
         StringKeyKind::SymfonyEvent => CompletionItemKind::Event,
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
+        StringKeyKind::YiiRouteArgument => CompletionItemKind::Field,
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
+        | StringKeyKind::YiiRoute
         | StringKeyKind::Command
         | StringKeyKind::Section
         | StringKeyKind::Stack
@@ -173,12 +175,15 @@ impl Backend {
             | StringKeyKind::TranslationDomain
             | StringKeyKind::TwigTemplate
             | StringKeyKind::SymfonyEvent
-            | StringKeyKind::MessengerBus => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::MessengerBus
+            | StringKeyKind::YiiRoute => self.symfony_declared_names(*kind).into(),
             // A translation key is completed in the domain it is looked up
-            // in, and a configuration key under the key it is nested in,
-            // which only the Symfony completion knows.
+            // in, a configuration key under the key it is nested in, which
+            // only the Symfony completion knows, and a route argument from
+            // the routes of the handler it is written in.
             StringKeyKind::SymfonyTranslation
             | StringKeyKind::SymfonyConfigKey
+            | StringKeyKind::YiiRouteArgument
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::ContainerBinding

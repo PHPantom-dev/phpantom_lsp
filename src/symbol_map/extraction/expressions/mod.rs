@@ -116,6 +116,8 @@ pub(super) fn extract_from_expression<'a>(
         expr,
         Expression::Call(Call::Method(_) | Call::NullSafeMethod(_))
     ) {
+        // A route chain is read whole, from its outermost call.
+        record_yii_route_chain(expr, ctx);
         let mut links: Vec<&'a Call<'a>> = Vec::new();
         let mut receiver = expr;
         while let Expression::Call(call) = receiver {

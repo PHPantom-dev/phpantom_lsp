@@ -75,7 +75,8 @@ pub(crate) fn symfony_receiver_method(
         0 if is("generateUrl") || is("redirectToRoute") => {
             Some((ReceiverClass::ControllerRouting, false))
         }
-        0 if is("generate") => Some((ReceiverClass::UrlGenerator, false)),
+        0 if is("generate") || is("generateAbsolute") => Some((ReceiverClass::UrlGenerator, false)),
+        3 if is("generateFromCurrent") => Some((ReceiverClass::UrlGenerator, false)),
         0 if is("add") => Some((ReceiverClass::RoutingConfigurator, true)),
         0 if is("getParameter") || is("hasParameter") => {
             Some((ReceiverClass::ParameterHolder, false))
@@ -123,7 +124,7 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     argument_list: &ArgumentList<'_>,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    if !ctx.symfony && !ctx.twig {
+    if !ctx.symfony && !ctx.twig && !ctx.yii {
         return;
     }
     if ctx.symfony && member_name.eq_ignore_ascii_case("trans") {
@@ -134,15 +135,26 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         record_configured_class(object, argument_list, ctx);
         return;
     }
-    for (index, argument) in argument_list.arguments.iter().take(2).enumerate() {
+    // A Yii `generateFromCurrent()` takes its fallback route fourth.
+    for (index, argument) in argument_list.arguments.iter().take(4).enumerate() {
         let Argument::Positional(argument) = argument else {
             break;
         };
         let Some((receiver, is_write)) = symfony_receiver_method(member_name, index) else {
             continue;
         };
-        // Outside Symfony, Twig's own `render()` is the only call left.
-        if !ctx.symfony && receiver != ReceiverClass::TemplateRenderer {
+        // Outside Symfony, only the calls of the framework the project uses
+        // are left: Twig's own `render()`, or Yii's URL generator.
+        let records = |kind: StringKeyKind| {
+            if kind == StringKeyKind::TwigTemplate {
+                ctx.twig
+            } else if kind.is_yii() {
+                ctx.yii
+            } else {
+                ctx.symfony
+            }
+        };
+        if !receiver.names_any(records) {
             continue;
         }
         if let Some(namespace) = receiver.configurator_namespace()

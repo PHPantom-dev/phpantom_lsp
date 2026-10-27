@@ -133,7 +133,6 @@ ships, remove every row that names it.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | Y5  | [Alias definitions](todo/yii.md#y5-alias-definitions) | Medium      | Low-Medium  |
-| Y2  | [Route names and their handlers](todo/yii.md#y2-route-names-and-their-handlers) | High        | Medium      |
 | Y6  | [`$params` keys in configuration](todo/yii.md#y6-params-keys-in-configuration) | Medium      | Medium      |
 | Y4  | [DI container configuration](todo/yii.md#y4-di-container-configuration) | Medium-High | Medium-High |
 | Y9  | [Views a template renders by name](todo/yii.md#y9-views-a-template-renders-by-name) | Medium      | Medium      |
