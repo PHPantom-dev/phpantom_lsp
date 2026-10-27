@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| T58 | [A backed enum is not narrowed by comparing its `->value`](todo/type-inference.md#t58-a-backed-enum-is-not-narrowed-by-comparing-its--value) | Medium      | Medium      |
 | D39 | [Writes to a `@readonly` property are not checked](todo/diagnostics.md#d39-writes-to-a-readonly-property-are-not-checked) | Low         | Medium      |
 | F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration) | Low-Medium  | Low         |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |

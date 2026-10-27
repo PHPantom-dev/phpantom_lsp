@@ -592,6 +592,18 @@ class UnhandledMatchDemo
             Scaffolding\Status::Inactive => 'off',
         };
     }
+
+    public function code(Scaffolding\Status $status): string
+    {
+        // No diagnostic — 'pending' is the value only Status::Pending is backed by:
+        if ($status->value === 'pending') {
+            return 'P';
+        }
+        return match ($status) {
+            Scaffolding\Status::Active => 'A',
+            Scaffolding\Status::Inactive => 'I',
+        };
+    }
 }
 
 

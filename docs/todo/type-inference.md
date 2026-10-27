@@ -97,56 +97,6 @@ and use it from both walks so diagnostics and completion agree.
 
 ---
 
-## T58. A backed enum is not narrowed by comparing its `->value`
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-enum Suit: string {
-    case Hearts = 'H';
-    case Spades = 'S';
-}
-
-function describe(Suit $s): string {
-    if ($s->value === 'H') {
-        return 'hearts';        // $s should be Suit::Hearts
-    }
-
-    return match ($s) {         // PHPantom: unhandled_match, Suit::Hearts
-        Suit::Spades => 'spades',
-    };
-}
-```
-
-A backed enum's cases and backing values map one to one, so comparing
-`$s->value` identical to a literal proves which case `$s` holds, and
-comparing it not identical rules that case out. PHPantom only narrows on
-case identity (`$s === Suit::Hearts`), so the subject keeps the whole enum
-and the `match` after the guard is reported as missing `Suit::Hearts`.
-Of the other analyzers only mir narrows here. PHPStan, Psalm and Mago
-report the same `match`, and the PHP typing conformance suite's
-`regressions_backed_enum_value_narrowing` test, where this was found,
-records that as a per-tool divergence rather than correct behaviour.
-
-**Plan.** Next to the case-identity narrowing, recognise a condition
-whose one side is `$var->value` on a subject that holds a backed enum (or
-some of its cases) and whose other side is a literal of the backing type,
-in either operand order and both polarities. Map the literal to the cases
-whose backing value equals it, then narrow to them or subtract them with
-the existing helpers. A literal no case carries proves the branch cannot
-run, which is not this narrowing's call to make, so leave the subject
-alone. Cover `match (true)` arms and `in_array($s->value, [...], true)`
-through the same mapping.
-
-**Where to look:** `apply_enum_case_identity_narrowing`,
-`narrow_to_enum_cases` and `subtract_enum_cases` in
-`src/type_engine/variable/forward_walk/cond_narrowing/enum_cases.rs`;
-`enum_case_property_literal` in
-`src/type_engine/call_resolution/return_types/class_constants.rs` reads a
-case's backing value.
-
----
-
 ## T34. `static::CONST` over-narrows to the declaring class's value
 **Impact: Medium · Complexity: Medium-High**
 

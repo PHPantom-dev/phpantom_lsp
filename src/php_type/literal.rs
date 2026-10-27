@@ -93,6 +93,24 @@ impl LiteralValue {
         Some(LiteralValue::float(format!("{value:?}")))
     }
 
+    /// Whether `===` holds between the two values, whatever their spelling
+    /// (`'a'` and `"a"`, `16` and `0x10`), or `None` when a literal's value
+    /// cannot be read.
+    pub fn identical_to(&self, other: &LiteralValue) -> Option<bool> {
+        match (self, other) {
+            (LiteralValue::Int(_), LiteralValue::Int(_)) => {
+                Some(self.parse_i64()? == other.parse_i64()?)
+            }
+            (LiteralValue::Float(_), LiteralValue::Float(_)) => {
+                Some(self.parse_f64()? == other.parse_f64()?)
+            }
+            (LiteralValue::String(_), LiteralValue::String(_)) => {
+                Some(self.string_content()? == other.string_content()?)
+            }
+            _ => Some(false),
+        }
+    }
+
     /// Whether PHP 8's `==` holds between the two values, or `None` when a
     /// literal's value cannot be read.
     ///
