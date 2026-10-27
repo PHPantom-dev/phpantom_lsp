@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793121447306,
+  "lastUpdate": 1793125571086,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7203,6 +7203,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 77.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "971c384551a2e0a42e45f2a7ad7d21b8dc63d05b",
+          "message": "ci: build benchmarks once and measure across four runners (#508)",
+          "timestamp": "2026-10-27T19:08:57+01:00",
+          "tree_id": "7aa5bc4b82685db03784b1dc55d7ecd4349c6ed9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/971c384551a2e0a42e45f2a7ad7d21b8dc63d05b"
+        },
+        "date": 1793125550280,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 88,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 75.4,
             "unit": "MiB"
           }
         ]
