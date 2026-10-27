@@ -1090,17 +1090,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d39-writes-to-a-readonly-property-are-not-checked" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D39. Writes to a <code>@readonly</code> property are not checked
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1731,17 +1720,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d39-writes-to-a-readonly-property-are-not-checked" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D39. Writes to a <code>@readonly</code> property are not checked
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2202,25 +2180,6 @@ and <code>gedmo_property_assign*.fixture</code> in <code>tests/fixtures/phpstan_
 for the read/write bookkeeping, the Doctrine mapping index in
 <code>src/framework.rs</code>, and PHPStan's <code>UnusedPrivatePropertyRule</code> with the
 Doctrine extension's <code>PropertiesExtension</code>s.</p>
-<hr />
-<h2 id="d39-writes-to-a-readonly-property-are-not-checked">D39. Writes to a <code>@readonly</code> property are not checked<a class="headerlink" href="#d39-writes-to-a-readonly-property-are-not-checked" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">final class Invoice</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">{</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    /** @readonly */</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    public int $total;</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">$invoice-&gt;total = 0; // nothing reported</span>
-</code></pre></div>
-<p><code>@readonly</code> (and <code>@psalm-readonly</code>, <code>@phpstan-readonly</code>) marks a property
-that may only be initialized once, from inside its class, the way native
-<code>readonly</code> does, for code that predates PHP 8.1. <code>invalid_readonly_write</code>
-only knows the native keyword, so a write from outside the class or a
-second assignment in the constructor goes unreported. The check applies
-unchanged once the property counts as readonly. PHPStan's Doctrine
-extension fixture <code>missing_readonly_property_assign_phpdoc.fixture</code> in
-<code>tests/fixtures/phpstan_doctrine/</code> has the constructor case.</p>
 <hr />
 <h2 id="d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties">D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties<a class="headerlink" href="#d40-a-doctrine-entity-mapped-in-xml-or-yaml-is-not-checked-for-uninitialized-properties" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
