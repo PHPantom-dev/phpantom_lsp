@@ -928,23 +928,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Templates">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b682-a-templated-override-keeps-the-parents-wider-return-beside-its-own-native-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B682. A templated override keeps the parent's wider <code>@return</code> beside its own native type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1563,23 +1546,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Templates">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b682-a-templated-override-keeps-the-parents-wider-return-beside-its-own-native-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B682. A templated override keeps the parent's wider <code>@return</code> beside its own native type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1691,49 +1657,18 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
-<h3 id="b682-a-templated-override-keeps-the-parents-wider-return-beside-its-own-native-type">B682. A templated override keeps the parent's wider <code>@return</code> beside its own native type<a class="headerlink" href="#b682-a-templated-override-keeps-the-parents-wider-return-beside-its-own-native-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">interface View { public function name(): string; }</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">interface Htmlable {}</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">abstract class Component {</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    /** @return View|Htmlable|\Closure|string */</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    abstract public function render();</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">}</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">/** @template TModel */</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">final class PerPage extends Component {</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    public function render(): View { throw new Exception(); }</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">}</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">function f(PerPage $p): void {</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">    $p-&gt;render()-&gt;name();   // resolves on View|Htmlable|Closure</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>render()</code> declares <code>: View</code> and has no docblock, so its return type is
-<code>View</code>. It resolves to <code>View|Htmlable|Closure</code> instead: the inheritance
-merge takes the parent's <code>@return</code> and
-<code>without_alternatives_the_native_type_forbids</code> (in
-<code>src/php_type/normalize.rs</code>) only drops alternatives whose value domain
-the native type rules out, so <code>string</code> goes and every class stays. The
-same override without <code>@template TModel</code> on its class resolves to <code>View</code>,
-so a second path, taken only for a templated class, is the one that
-lets the wider type through. PHPStan discards an inherited <code>@return</code> that
-is not a subtype of the native type.</p>
-<p>Found running the opt-in <code>partial-union-members</code> diagnostic over a
-Laravel project: a Blade component's <code>render(): View</code> reported <code>name()</code>
-as missing on <code>Htmlable</code> and <code>Closure</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b684-a-class-one-composer-project-installs-resolves-in-every-other-project-of-the-workspace">B684. A class one Composer project installs resolves in every other project of the workspace<a class="headerlink" href="#b684-a-class-one-composer-project-installs-resolves-in-every-other-project-of-the-workspace" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>repo/
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── composer.json
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├── platform/            ← requires guzzlehttp/guzzle
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│   ├── composer.json
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│   └── vendor/
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>└── mobile/              ← does not
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    ├── composer.json
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    └── vendor/
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>repo/
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── composer.json
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── platform/            ← requires guzzlehttp/guzzle
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│   ├── composer.json
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   └── vendor/
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└── mobile/              ← does not
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    ├── composer.json
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    └── vendor/
 </code></pre></div>
 <p>A file under <code>mobile/</code> that names <code>GuzzleHttp\Client</code> gets completion,
 hover and no <code>unknown_class</code>, although running it would fail: the
