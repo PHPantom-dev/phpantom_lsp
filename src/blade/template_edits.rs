@@ -47,6 +47,26 @@ impl Backend {
         }
         Some(TemplateText::new(uri, template, virtual_php, map))
     }
+
+    /// [`template_text`](Self::template_text) for a template whose text
+    /// the caller holds, which the `fix` command's rewrites leave ahead of
+    /// both the disk and the open-file table.
+    pub(crate) fn template_text_of(&self, uri: &str, template: &str) -> Option<TemplateText> {
+        if !self.is_blade_file(uri) {
+            return None;
+        }
+        let virtual_php = self.blade_virtual_php_arc(uri)?;
+        let map = self.blade_source_map(uri)?;
+        if !map.lowered_from(template) {
+            return None;
+        }
+        Some(TemplateText::new(
+            uri,
+            Arc::new(template.to_string()),
+            virtual_php,
+            map,
+        ))
+    }
 }
 
 impl TemplateText {

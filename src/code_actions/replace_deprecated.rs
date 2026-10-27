@@ -33,6 +33,22 @@ struct FileCtx<'a> {
     local_classes: &'a [Arc<ClassInfo>],
 }
 
+/// A deprecated call rewritten to the replacement its
+/// `#[Deprecated(replacement: "...")]` template suggests.
+pub(crate) struct DeprecatedCallReplacement {
+    /// The source the replacement takes the place of.
+    pub(crate) range: Range,
+    /// The expanded template.
+    pub(crate) replacement: String,
+}
+
+impl DeprecatedCallReplacement {
+    /// The quickfix's title, which the `fix` command reports too.
+    pub(crate) fn title(&self) -> String {
+        format!("Replace with {}", summarize_replacement(&self.replacement))
+    }
+}
+
 impl Backend {
     /// Collect "Replace deprecated call" code actions for the cursor position.
     ///
@@ -50,18 +66,39 @@ impl Backend {
             crate::text_position::position_to_byte_offset(content, params.range.start);
         let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
+        for found in self.deprecated_call_replacements(uri, content, request_start, request_end) {
+            emit_action(uri, found.title(), found.range, &found.replacement, out);
+        }
+    }
+
+    /// Every call between the byte offsets `start` and `end` to a
+    /// deprecated function or method whose deprecation names a
+    /// replacement, rewritten to that replacement.
+    ///
+    /// Shared by the quickfix, which asks about the request range, and the
+    /// `fix` command's `deprecated` rule, which asks about the whole file.
+    pub(crate) fn deprecated_call_replacements(
+        &self,
+        uri: &str,
+        content: &str,
+        start: usize,
+        end: usize,
+    ) -> Vec<DeprecatedCallReplacement> {
+        let mut found = Vec::new();
+
         let Some(symbol_map) = self.symbol_map_for(uri) else {
-            return;
+            return found;
         };
 
         let Some(source) = symbol_map.source(content) else {
-            return;
+            return found;
         };
 
-        // Every span considered below overlaps the request range, so the
-        // namespace block covering its start is the right one for all of
-        // them, including in a file that declares several blocks.
-        let block = self.import_block_at(uri, request_start);
+        // A file that declares several `namespace` blocks resolves each
+        // call against the block it sits in, so the block is reloaded
+        // whenever a call falls outside the one at hand.
+        let mut block = self.import_block_at(uri, start);
+        let mut block_range = self.import_block_range_at(uri, start);
         let local_classes: Vec<Arc<ClassInfo>> = self
             .symbols
             .uri_classes_index
@@ -73,18 +110,29 @@ impl Backend {
         let class_loader = self.resolved_class_loader_with(&local_classes);
         let cache = &self.resolved_class_cache;
 
-        let file_ctx = FileCtx {
-            use_map: &block.use_map,
-            function_imports: &block.symbol_imports.functions,
-            namespace: &block.namespace,
-            local_classes: &local_classes,
-        };
-
         for span in &symbol_map.spans {
-            // Only consider spans that overlap with the request range.
-            if (span.end as usize) < request_start || (span.start as usize) > request_end {
+            if (span.end as usize) < start || (span.start as usize) > end {
                 continue;
             }
+            if !matches!(
+                span.kind,
+                SymbolKind::FunctionCall { .. } | SymbolKind::MemberAccess { .. }
+            ) {
+                continue;
+            }
+            if block_range.is_some_and(|(block_start, block_end)| {
+                !(block_start..block_end).contains(&(span.start as usize))
+            }) {
+                block = self.import_block_at(uri, span.start as usize);
+                block_range = self.import_block_range_at(uri, span.start as usize);
+            }
+
+            let file_ctx = FileCtx {
+                use_map: &block.use_map,
+                function_imports: &block.symbol_imports.functions,
+                namespace: &block.namespace,
+                local_classes: &local_classes,
+            };
 
             match &span.kind {
                 SymbolKind::FunctionCall { name, .. } => {
@@ -116,9 +164,7 @@ impl Backend {
                     };
 
                     let replacement = expand_template(&replacement_template, &args_text, None);
-
-                    let title = format!("Replace with {}", summarize_replacement(&replacement));
-                    emit_action(uri, title, range, &replacement, out);
+                    found.push(DeprecatedCallReplacement { range, replacement });
                 }
 
                 SymbolKind::MemberAccess {
@@ -180,14 +226,14 @@ impl Backend {
                     let subject = Some(subject_text.as_str(source).trim().to_string());
                     let replacement =
                         expand_template(replacement_template, &args_text, subject.as_deref());
-
-                    let title = format!("Replace with {}", summarize_replacement(&replacement));
-                    emit_action(uri, title, range, &replacement, out);
+                    found.push(DeprecatedCallReplacement { range, replacement });
                 }
 
                 _ => {}
             }
         }
+
+        found
     }
 }
 
@@ -201,7 +247,7 @@ impl Backend {
 /// whole `$subject->method(...)` when the template names `%class%` and so
 /// writes the subject itself. `None` when no call site covers the span,
 /// which leaves the argument list's boundaries unknown and nothing safe
-/// to replace.
+/// to replace, or when the argument list was never closed.
 fn replacement_target(
     symbol_map: &crate::symbol_map::SymbolMap,
     content: &str,
@@ -213,7 +259,12 @@ fn replacement_target(
         .call_sites
         .iter()
         .find(|cs| cs.args_start > span_start && cs.args_start <= span_end + 2)?;
-    let range = checked_byte_range_to_lsp_range(content, range_start, call_site.args_end as usize)?;
+    let close = call_site.args_end as usize;
+    if content.as_bytes().get(close) != Some(&b')') {
+        return None;
+    }
+    // The template writes its own closing `)`, so the call's goes too.
+    let range = checked_byte_range_to_lsp_range(content, range_start, close + 1)?;
     Some((
         range,
         extract_arguments(content, call_site.args_start, call_site.args_end),
