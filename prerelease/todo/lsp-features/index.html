@@ -2158,15 +2158,18 @@ navigates to it. Laravel completes the keys of <code>route('name', [...])</code>
 the URI it keeps with each route name (<code>completion/laravel_route_params.rs</code>).
 A parameter only means something under its route, so it does not fit a
 <code>StringKey</code> span on its own: a key spelled as one global name would merge
-every route's <code>id</code>. It needs the path kept beside each route declaration
+every route's <code>id</code>. Yii's routes already keep their path beside their name
+in the symbol map's <code>RouteSite</code> side table, and complete the keys of
+<code>generate()</code> from it. Symfony's declarations need to fill the same table
 (the attribute's path, the YAML <code>path:</code>, the XML <code>path</code> attribute, the
 configurator's second argument, and the class-level prefix in front of a
 method's path), and the parameter array of each <code>generateUrl()</code>,
 <code>redirectToRoute()</code>, <code>generate()</code>, <code>path()</code>, and <code>url()</code> call read against
 it.</p>
 <p><strong>Where to look:</strong> <code>src/symbol_map/extraction/symfony.rs</code>
-(<code>emit_symfony_route_spans</code>), <code>src/symfony/routes.rs</code>,
-<code>src/completion/laravel_route_params.rs</code>.</p>
+(<code>emit_symfony_route_spans</code>), <code>src/symfony/routes.rs</code>, and the Yii side
+of the same design: <code>src/symbol_map/extraction/yii_routes.rs</code>, <code>src/yii/routes.rs</code>,
+<code>src/completion/yii_route_params.rs</code>.</p>
 <hr />
 <h2 id="f28-symfony-route-names-a-loader-composes">F28. Symfony route names a loader composes<a class="headerlink" href="#f28-symfony-route-names-a-loader-composes" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>

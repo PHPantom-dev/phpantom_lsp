@@ -3443,7 +3443,7 @@ sit next to.</p>
 <a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
 <a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
 <a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner
-<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>├── yii/                    # Yii views and the path aliases they are named through: the alias table read from the params files, view keys resolved to templates
+<a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>├── yii/                    # Yii views and the path aliases they are named through (the alias table read from the params files, view keys resolved to templates), and route names and route arguments (route paths and handlers, looked up in the declaring files' route side tables)
 <a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>├── references/, rename/, highlight/
 <a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 <a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
@@ -3638,6 +3638,7 @@ equivalent:</p>
 <li><strong>Candidate typed-receiver sites</strong> (<code>typed_receiver_sites</code>): the string keys a method call spells when only the receiver's <em>type</em> decides what it names — a constructor-injected <code>Factory $views</code> behind <code>$this-&gt;views-&gt;make('page')</code>, a mailable held in a local, a Symfony <code>ContainerInterface $container</code> behind <code>$container-&gt;get('app.mailer')</code>, a configurator's <code>$services-&gt;set('app.mailer')</code>, a URL generator's <code>$urls-&gt;generate('blog_index')</code>, a translator's <code>$translator-&gt;trans('demo.title')</code>, a controller's or Twig's <code>render('page.html.twig')</code>, an event dispatcher's <code>$events-&gt;dispatch($event, 'app.order.placed')</code>. Each site records the classes its receiver may be and the kind of key each makes it (<code>ReceiverClass::targets</code>). Extraction runs before the file's classes are resolved and cannot type the receiver, so it records the candidates and <code>blade/typed_receiver.rs</code> confirms them lazily through the shared type engine, once per file. Consumers of those keys (the call-site diagnostics, call-site inference, <code>lookup_symbol_map</code>, find-references, the Symfony declaration lookup) read the confirmed spans alongside the map's own <code>StringKey</code> spans. The reference candidate index takes the <em>unconfirmed</em> candidates, under every kind each could turn out to be, since a file has to be findable before it can be asked.</li>
 <li><strong>Config-backed Laravel resource names</strong>: one declarative table maps direct helpers, facades, contextual attributes, and middleware parameters to their config subtrees. A <code>SymbolSpan</code> whose string-key kind is <code>ConfigResource(...)</code> stores the short source name, while completion, navigation, diagnostics, and references derive the full dot key only at the config boundary. This keeps source ranges and reference identity exact without duplicating one trigger table across LSP features.</li>
 <li><strong>Candidate morph-column aliases</strong> (<code>morph_column_sites</code>): literals compared with properties or query columns are confirmed lazily by <code>virtual_members/laravel/typed_morph_columns.rs</code>. The shared type engine identifies the receiver model, and its parsed <code>morphTo()</code> metadata identifies the column. Array values in one query share a single model and column check. Confirmed literals become ordinary <code>MorphAlias</code> spans for completion, navigation, references, and diagnostics. Model metadata changes invalidate dependent confirmations, including when a relation's column changes without changing its PHP signature.</li>
+<li><strong>Routes</strong> (<code>routes</code>): each route a file declares, with what its name alone does not say: its path, group prefixes included, the placeholders the file spells out, and the handler it dispatches to. A path's placeholders only mean something under their route, so they are a side table keyed back to the name's span rather than spans of their own. Yii's route definitions fill it (<code>symbol_map/extraction/yii_routes.rs</code>), and a <code>#[RouteArgument]</code> is resolved through it by its handler.</li>
 <li><strong>Messenger handlers</strong> (<code>messenger_handlers</code>): each method a Symfony <code>#[AsMessageHandler]</code> registers, with the message class it receives, read from the attribute's <code>handles:</code> or the method's first parameter type. A handler is a fact about a class rather than a string at a cursor, so it is a side table rather than a span. The files holding one are among the Symfony declaring files (<code>symfony/mod.rs</code>), which is how the CodeLens on a message class finds the handlers that receive it.</li>
 </ul>
 <h3 id="tier-2-stored-byte-offsets-cross-file-jumps">Tier 2: Stored Byte Offsets (cross-file jumps)<a class="headerlink" href="#tier-2-stored-byte-offsets-cross-file-jumps" title="Permanent link">&para;</a></h3>
@@ -3667,12 +3668,15 @@ emits it.</p>
 <ul>
 <li><strong>PHP</strong> is read from the AST during symbol-map extraction
   (<code>symbol_map/extraction/laravel/</code>, <code>symbol_map/extraction/symfony.rs</code>,
-  and <code>symbol_map/extraction/yii.rs</code>).
+  <code>symbol_map/extraction/yii.rs</code>, and <code>symbol_map/extraction/yii_routes.rs</code>).
   A function, an attribute, or a <code>new</code> is recognised by its resolved name.
   A method call whose name is too common to claim on sight (<code>get()</code>,
   <code>set()</code>, <code>render()</code>, <code>dispatch()</code>) is recorded as a candidate
   typed-receiver site (see above) and settled by the shared type engine,
-  never by guessing from the receiver's spelling.</li>
+  never by guessing from the receiver's spelling. A URL generator may
+  stand behind a class of the project's own whose method passes the name
+  on; that method is read to see which of its parameters it passes to a
+  URL generator (<code>Backend::typed_receiver_key_kind</code>).</li>
 <li><strong>YAML, XML, XLIFF, and Twig</strong> are read as text by the scanners in
   <code>symfony/</code> and <code>twig/</code>, which build each resource file's symbol map
   (<code>resource_navigation.rs</code>). These files have no AST we share, and their
@@ -3694,7 +3698,10 @@ files' symbol maps on demand. The maps are kept current by the ordinary
 document and watched-file lifecycle, and the reference index files every
 span by its key, so references need no second walk. All of it is gated on
 the project: Symfony names are only read when the project builds a Symfony
-container, and Laravel's only when it is a Laravel application.</p>
+container, Laravel's only when it is a Laravel application, and Yii's only
+when it routes with Yii's router. Yii's route names are declared in the
+same way, by spans in the PHP files that define its routes, so those files
+are among the declaring files too.</p>
 <p>A Yii view is keyed by the path it names rather than by a name a file
 declares, with its alias left in (<code>@views/blog/index</code>), so two spellings
 of one template share no key. Its references are found by resolving each
