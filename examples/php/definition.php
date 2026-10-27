@@ -3,8 +3,8 @@
 /**
  * PHP Showcase — Navigation
  *
- * Go-to-definition, go-to-type-definition, go-to-implementation, and the
- * type hierarchy. Ctrl+Click a name, or use "Go to Type Definition" to
+ * Go-to-definition, go-to-type-definition, go-to-implementation,
+ * go-to-declaration, and the type hierarchy. Ctrl+Click a name, or use "Go to Type Definition" to
  * jump to the class declaration of a variable's resolved type.
  *
  * One of the demo files listed in README.md. Supporting fixtures live in
@@ -252,6 +252,23 @@ class ReverseImplementationDemo implements GtdPrintable
     public function format(): string
     {
         return 'reverse';
+    }
+}
+
+
+// ── Go-to-Declaration ───────────────────────────────────────────────────────
+// "Go to Declaration" jumps to the contract a method fulfils, where
+// Go-to-Definition jumps to the code that runs. A method with no interface or
+// abstract prototype lands where Go-to-Definition does.
+
+class GoToDeclarationDemo
+{
+    public function demo(GtdPlainPrinter $printer, GtdTarget $target): string
+    {
+        // Try: Go-to-Declaration on "format" → GtdPrintable::format()
+        // (Go-to-Definition goes to GtdPlainPrinter::format() instead)
+        return $printer->format()
+            . $target->label();                   // Go-to-Declaration → GtdTarget::label() (no prototype)
     }
 }
 

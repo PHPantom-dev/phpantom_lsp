@@ -437,6 +437,45 @@ impl LanguageServer for Backend {
         .await
     }
 
+    async fn goto_declaration(
+        &self,
+        params: DeclarationParams,
+    ) -> Result<Option<DeclarationResponse>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+
+        self.run_position_request(
+            "goto_declaration",
+            uri,
+            position,
+            |backend, uri, position| {
+                backend.handle_with_position("goto_declaration", uri, position, |content, pos| {
+                    let locs = backend
+                        .resolve_declaration(uri, content, pos)
+                        .into_iter()
+                        .map(|l| backend.translate_location(l))
+                        .collect();
+                    wrap_locations(locs).map(|definition| {
+                        DeclarationResponse::Declaration(match definition {
+                            Definition::Location(location) => Declaration::Location(location),
+                            Definition::LocationList(locations) => {
+                                Declaration::LocationList(locations)
+                            }
+                        })
+                    })
+                })
+            },
+        )
+        .await
+    }
+
     async fn goto_implementation(
         &self,
         params: ImplementationParams,

@@ -97,7 +97,7 @@ src/
 │
 │   # LSP features (one module each)
 ├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
-├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
+├── definition/             # Go-to-definition (resolve, member, variable/, implementation, declaration, type_definition)
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
 ├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
 ├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner

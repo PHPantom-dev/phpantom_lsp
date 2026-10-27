@@ -33,7 +33,6 @@ contributor even though it's short.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | D39 | [Writes to a `@readonly` property are not checked](todo/diagnostics.md#d39-writes-to-a-readonly-property-are-not-checked) | Low         | Medium      |
-| F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration) | Low-Medium  | Low         |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets

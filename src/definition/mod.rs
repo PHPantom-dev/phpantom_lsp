@@ -26,6 +26,10 @@
 //!   - **Method calls on interfaces/abstract classes**: jumps to the concrete
 //!     method implementations in all implementing/extending classes
 //!
+//! Supported symbols (declaration):
+//!   - **Member calls and member declarations**: jumps to the interface or
+//!     abstract method the member implements, else to the definition
+//!
 //! Supported symbols (type definition):
 //!   - **Variables**: `$var` jumps to the class declaration of the resolved type
 //!   - **Member access**: `$var->method()` jumps to the return type's class
@@ -51,6 +55,8 @@
 //! - [`implementation`]: Go-to-implementation — finding concrete classes that
 //!   implement an interface or extend an abstract class, and locating the
 //!   concrete method definitions within those classes.
+//! - [`declaration`]: Go-to-declaration — the interface or abstract
+//!   prototype of a member, falling back to go-to-definition.
 //! - [`type_definition`]: Go-to-type-definition — resolving the type of a
 //!   variable, expression, or member access, then jumping to the class
 //!   declaration of that type.
@@ -60,6 +66,7 @@ use tower_lsp_server::gen_lsp_types::{Location, Position, Range, Uri};
 use crate::types::ClassInfo;
 
 mod blade_component;
+mod declaration;
 mod global_symbols;
 pub(crate) mod implementation;
 pub(crate) mod member;
