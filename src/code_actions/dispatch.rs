@@ -64,6 +64,9 @@ enum TemplatePolicy {
 
 struct Collector {
     collect: CollectFn,
+    /// The kinds of the actions it can offer, so a request whose
+    /// `context.only` asks for none of them skips it unrun.
+    kinds: &'static [&'static str],
     template: TemplatePolicy,
     /// Whether the actions are offered in a resource document (a Twig
     /// template, a YAML or XML file).  Only the ones about a string key
@@ -71,33 +74,45 @@ struct Collector {
     in_resource: bool,
 }
 
-const fn offer(collect: CollectFn) -> Collector {
+const QUICKFIX: &[&str] = &["quickfix"];
+const REFACTOR: &[&str] = &["refactor"];
+const EXTRACT: &[&str] = &["refactor.extract"];
+const INLINE: &[&str] = &["refactor.inline"];
+const REWRITE: &[&str] = &["refactor.rewrite"];
+const ORGANIZE_IMPORTS: &[&str] = &["source.organizeImports"];
+const ADD_MISSING_IMPORTS: &[&str] = &["source.addMissingImports"];
+
+const fn offer(kinds: &'static [&'static str], collect: CollectFn) -> Collector {
     Collector {
         collect,
+        kinds,
         template: TemplatePolicy::Offer,
         in_resource: false,
     }
 }
 
-const fn template_range(collect: CollectFn) -> Collector {
+const fn template_range(kinds: &'static [&'static str], collect: CollectFn) -> Collector {
     Collector {
         collect,
+        kinds,
         template: TemplatePolicy::TemplateRange,
         in_resource: false,
     }
 }
 
-const fn skip_in_template(collect: CollectFn) -> Collector {
+const fn skip_in_template(kinds: &'static [&'static str], collect: CollectFn) -> Collector {
     Collector {
         collect,
+        kinds,
         template: TemplatePolicy::Skip,
         in_resource: false,
     }
 }
 
-const fn offer_in_resource(collect: CollectFn) -> Collector {
+const fn offer_in_resource(kinds: &'static [&'static str], collect: CollectFn) -> Collector {
     Collector {
         collect,
+        kinds,
         template: TemplatePolicy::Offer,
         in_resource: true,
     }
@@ -105,38 +120,76 @@ const fn offer_in_resource(collect: CollectFn) -> Collector {
 
 /// Every code-action collector, in the order their actions are listed.
 static COLLECTORS: &[Collector] = &[
-    offer(Backend::collect_import_class_actions),
-    offer(Backend::collect_replace_fqcn_actions),
-    offer(Backend::collect_import_all_classes_action),
-    template_range(Backend::collect_remove_unused_import_actions),
-    offer(Backend::collect_sort_use_statements_action),
-    offer(Backend::collect_implement_methods_actions),
-    offer(Backend::collect_replace_deprecated_actions),
-    skip_in_template(Backend::collect_phpstan_actions),
-    skip_in_template(Backend::collect_mago_fix_actions),
-    offer(Backend::collect_change_visibility_actions),
-    offer(Backend::collect_update_docblock_actions),
-    offer(Backend::collect_promote_constructor_param_actions),
-    offer(Backend::collect_generate_constructor_actions),
-    offer(Backend::collect_generate_getter_setter_actions),
-    offer(Backend::collect_generate_property_hook_actions),
-    offer(Backend::collect_extract_constant_actions),
-    offer(Backend::collect_extract_variable_actions),
-    skip_in_template(Backend::collect_extract_function_actions),
-    offer(Backend::collect_inline_variable_actions),
-    offer(Backend::collect_convert_to_instance_variable_actions),
-    offer(Backend::collect_simplify_null_actions),
-    offer(Backend::collect_convert_to_arrow_function_actions),
-    offer(Backend::collect_convert_to_closure_actions),
-    offer(Backend::collect_convert_switch_to_match_actions),
-    offer(Backend::collect_convert_to_interpolation_actions),
-    skip_in_template(Backend::collect_fix_namespace_actions),
-    skip_in_template(Backend::collect_fix_class_name_actions),
-    offer(Backend::collect_fix_class_case_actions),
-    offer(Backend::collect_extract_interface_actions),
-    offer_in_resource(Backend::collect_create_missing_view_actions),
-    offer_in_resource(Backend::collect_insert_translation_key_actions),
+    offer(QUICKFIX, Backend::collect_import_class_actions),
+    offer(REWRITE, Backend::collect_replace_fqcn_actions),
+    offer(
+        ADD_MISSING_IMPORTS,
+        Backend::collect_import_all_classes_action,
+    ),
+    template_range(
+        &["quickfix", "source.organizeImports"],
+        Backend::collect_remove_unused_import_actions,
+    ),
+    offer(
+        ORGANIZE_IMPORTS,
+        Backend::collect_sort_use_statements_action,
+    ),
+    offer(QUICKFIX, Backend::collect_implement_methods_actions),
+    offer(QUICKFIX, Backend::collect_replace_deprecated_actions),
+    skip_in_template(QUICKFIX, Backend::collect_phpstan_actions),
+    skip_in_template(QUICKFIX, Backend::collect_mago_fix_actions),
+    offer(
+        &["quickfix", "refactor.rewrite"],
+        Backend::collect_change_visibility_actions,
+    ),
+    offer(QUICKFIX, Backend::collect_update_docblock_actions),
+    offer(REWRITE, Backend::collect_promote_constructor_param_actions),
+    offer(REWRITE, Backend::collect_generate_constructor_actions),
+    offer(REFACTOR, Backend::collect_generate_getter_setter_actions),
+    offer(REFACTOR, Backend::collect_generate_property_hook_actions),
+    offer(EXTRACT, Backend::collect_extract_constant_actions),
+    offer(EXTRACT, Backend::collect_extract_variable_actions),
+    skip_in_template(EXTRACT, Backend::collect_extract_function_actions),
+    offer(INLINE, Backend::collect_inline_variable_actions),
+    offer(
+        EXTRACT,
+        Backend::collect_convert_to_instance_variable_actions,
+    ),
+    offer(REWRITE, Backend::collect_simplify_null_actions),
+    offer(REWRITE, Backend::collect_convert_to_arrow_function_actions),
+    offer(REWRITE, Backend::collect_convert_to_closure_actions),
+    offer(REWRITE, Backend::collect_convert_switch_to_match_actions),
+    offer(REWRITE, Backend::collect_convert_to_interpolation_actions),
+    skip_in_template(QUICKFIX, Backend::collect_fix_namespace_actions),
+    skip_in_template(QUICKFIX, Backend::collect_fix_class_name_actions),
+    offer(QUICKFIX, Backend::collect_fix_class_case_actions),
+    offer(EXTRACT, Backend::collect_extract_interface_actions),
+    offer_in_resource(QUICKFIX, Backend::collect_create_missing_view_actions),
+    offer_in_resource(QUICKFIX, Backend::collect_insert_translation_key_actions),
 ];
+
+/// Whether `only`, a request's `context.only`, asks for actions of kind
+/// `kind`.  Kinds are hierarchical: asking for `refactor` asks for
+/// `refactor.extract` too.  No filter, or an empty one, asks for all.
+fn kind_requested(only: &[CodeActionKind], kind: &str) -> bool {
+    only.is_empty()
+        || only.iter().any(|requested| {
+            let requested = requested.as_str();
+            requested.is_empty()
+                || kind
+                    .strip_prefix(requested)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+        })
+}
+
+fn action_kind(action: &CodeActionResponse) -> &str {
+    match action {
+        CodeActionResponse::CodeAction(CodeAction {
+            kind: Some(kind), ..
+        }) => kind.as_str(),
+        _ => "",
+    }
+}
 
 impl Backend {
     /// Handle a `textDocument/codeAction` request.
@@ -187,8 +240,18 @@ impl Backend {
         // collector below instead of once each.
         let _scope = self.enter_request_scope_borrowed(uri, content);
 
+        let only = params.context.only.as_deref().unwrap_or_default();
         let is_resource = self.is_resource_uri(uri);
         for collector in COLLECTORS {
+            // The kind filter is its own gate, ahead of the document one,
+            // and the collector's own range checks are left to it.
+            if !collector
+                .kinds
+                .iter()
+                .any(|kind| kind_requested(only, kind))
+            {
+                continue;
+            }
             if is_template && collector.template == TemplatePolicy::Skip
                 || is_resource && !collector.in_resource
             {
@@ -198,8 +261,18 @@ impl Backend {
                 TemplatePolicy::TemplateRange if is_template => template_params,
                 _ => params,
             };
+            let first = actions.len();
             (collector.collect)(self, uri, content, params, &mut actions);
+            debug_assert!(
+                actions[first..]
+                    .iter()
+                    .all(|action| collector.kinds.contains(&action_kind(action))),
+                "a code action collector offered a kind its table entry does not list",
+            );
         }
+        // A collector that offers several kinds may have offered one the
+        // request did not ask for.
+        actions.retain(|action| kind_requested(only, action_kind(action)));
 
         // Every collector plans its edits against the PHP a template lowers
         // to; the editor applies them to the template itself, and an action

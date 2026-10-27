@@ -130,8 +130,10 @@ impl Backend {
                     CodeActionOptions {
                         code_action_kinds: Some(vec![
                             CodeActionKind::QuickFix,
+                            CodeActionKind::Refactor,
                             CodeActionKind::RefactorExtract,
                             CodeActionKind::RefactorInline,
+                            CodeActionKind::RefactorRewrite,
                             CodeActionKind::SourceOrganizeImports,
                             CodeActionKind::new("source.addMissingImports"),
                         ]),

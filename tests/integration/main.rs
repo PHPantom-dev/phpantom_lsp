@@ -44,6 +44,7 @@ mod code_action_implement_methods;
 mod code_action_import_class;
 mod code_action_inline_variable;
 mod code_action_insert_translation_key;
+mod code_action_kind_filter;
 mod code_action_promote_constructor_param;
 mod code_action_remove_override;
 mod code_action_remove_unreachable;
