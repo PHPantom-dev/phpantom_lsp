@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793071388952,
+  "lastUpdate": 1793110744607,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -6969,6 +6969,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 76.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "bff3dd9b43dc5114e02440f1352a025aeb86919b",
+          "message": "Each Composer project of a workspace sees only its own dependencies",
+          "timestamp": "2026-10-27T15:01:50+01:00",
+          "tree_id": "59a9d4e4cbd0337a87387e71d41fbd8d992e523a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/bff3dd9b43dc5114e02440f1352a025aeb86919b"
+        },
+        "date": 1793110732818,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 43.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.7,
             "unit": "MiB"
           }
         ]
