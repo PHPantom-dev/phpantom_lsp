@@ -750,12 +750,16 @@ impl ClassDeclarations<'_> {
         // A parse is better information than a classmap entry, which only
         // claims the name lives in a file: it names a file we have just
         // seen declare the name.  So only a second *parsed* declaration
-        // starts a duplicate record.
-        let reowned = self.uris.get(fqn).is_some_and(|owner| owner != uri);
+        // starts a duplicate record, and only displacing one counts as
+        // taking the name over: nothing was indexed or resolved from an
+        // unparsed classmap entry, so there is nothing stale to evict.
         let displaced = match self.classes.get(fqn) {
-            Some(class) if reowned => Some(Arc::clone(class)),
+            Some(class) if self.uris.get(fqn).is_some_and(|owner| owner != uri) => {
+                Some(Arc::clone(class))
+            }
             _ => None,
         };
+        let reowned = displaced.is_some();
         match displaced {
             Some(displaced) => {
                 let owner = self.uris.get(fqn).expect("reowned means an owner").clone();

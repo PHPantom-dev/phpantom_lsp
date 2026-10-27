@@ -430,7 +430,7 @@ impl Backend {
             all_old_fqns.clone()
         } else {
             let mut fqns = all_old_fqns.clone();
-            fqns.append(&mut reowned_fqns);
+            fqns.extend(reowned_fqns.iter().cloned());
             fqns.sort();
             fqns.dedup();
             fqns
@@ -459,7 +459,7 @@ impl Backend {
         self.symbols.index_inheritance(&winning_classes);
 
         let (any_signature_changed, evicted_fqns) =
-            self.evict_batch_resolved_classes(&prepared, &mut changed_names);
+            self.evict_batch_resolved_classes(&prepared, &reowned_fqns, &mut changed_names);
 
         {
             let mut uri_classes = self.symbols.uri_classes_index.write();
@@ -810,12 +810,20 @@ impl Backend {
     fn evict_batch_resolved_classes(
         &self,
         prepared: &[PreparedAstIndexUpdate],
+        reowned_fqns: &[String],
         changed_names: &mut Vec<Atom>,
     ) -> (bool, Vec<String>) {
         let mut any_signature_changed = false;
         let mut evicted_fqns = Vec::new();
         {
             let mut cache = self.resolved_class_cache.write();
+            // A name this batch took over was resolved from the other file's
+            // declaration, even when this is the taking file's first parse.
+            for fqn in reowned_fqns {
+                changed_names.push(crate::resolution_deps::dep_key(fqn));
+                evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
+                any_signature_changed = true;
+            }
             for update in prepared {
                 // An anonymous class keeps its FQN across an edit that leaves
                 // its opening brace where it was, so a cache entry from the

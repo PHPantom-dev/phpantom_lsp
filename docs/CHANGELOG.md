@@ -362,6 +362,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Typing in a `namespace { }` block.** While a call in a braced `namespace` block is still missing its `)`, or the block its closing `}`, signature help and completion use the block's own namespace and imports instead of an earlier block's, and the classes and functions it declares stay available to other files.
 - **"Import all missing classes" with the cursor at the start of a name.** The bulk import is now offered there too, wherever "Import class" is.
 - **Completion shows member types next to the name.** Method and property suggestions show their return or property type right after the name (e.g. `findOneByEmail($email): ?User`) in editors such as PhpStorm and VS Code, where previously only the class name was visible. Contributed by @EranNL.
+- **A class declared in more than one file keeps what it inherits.** When a second declaration of a class (such as a stand-in defined behind `class_exists()`) was read first, members the real class inherits are no longer reported as unknown once its own file is indexed. Contributed by @Deadsquirrel93.
 
 ### Internal
 
