@@ -57,25 +57,7 @@ No outstanding items.
 
 ## Name resolution
 
-### B686. Another Composer project's own sources resolve in every project of the workspace
-
-**Impact: Low · Complexity: Medium**
-
-A file under `mobile/` can name a class from `platform/src/` and gets
-completion, hover and no `unknown_class`, although `mobile/`'s
-autoloader cannot load it. A file now only sees its own project's
-`vendor/` (see `ProjectScope` in `src/resolution/project_scope.rs`), but
-the PSR-4 sources of every project stay visible to all of them, since
-`psr4_mappings` is one workspace-wide list.
-
-Hiding them needs care: a path repository symlinked into a project's
-`vendor/` is that project's dependency even though its files live
-under another project's tree, and the workspace's loose files must stay
-visible to everyone.
-
-**Where to look:** `ProjectScope::sees`, and Phase 2 of
-`find_or_load_class_inner` in `src/resolution/classes.rs`, which
-resolves through the shared `psr4_mappings`.
+No outstanding items.
 
 ## Code actions
 

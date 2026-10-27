@@ -238,6 +238,35 @@ fn is_stub_package(package: &serde_json::Value) -> bool {
         )
 }
 
+/// The roots of the installed packages that live outside the vendor
+/// directory: path repositories symlinked into it, and packages a custom
+/// installer placed elsewhere.  Each is given canonically and, when that
+/// differs, as `install-path` spells it from the vendor directory.
+pub(crate) fn linked_package_roots(installed: &InstalledPackages) -> Vec<PathBuf> {
+    let canonical_vendor = installed
+        .vendor_path
+        .canonicalize()
+        .unwrap_or_else(|_| installed.vendor_path.clone());
+    let mut roots = Vec::new();
+    for package in &installed.packages {
+        let Some(root) = installed.package_root(package) else {
+            continue;
+        };
+        if root.starts_with(&canonical_vendor) {
+            continue;
+        }
+        if let Some(install_path) = package.get("install-path").and_then(|p| p.as_str()) {
+            let spelled =
+                crate::document_links::normalize_path(&installed.composer_dir.join(install_path));
+            if spelled != root {
+                roots.push(spelled);
+            }
+        }
+        roots.push(root);
+    }
+    roots
+}
+
 /// The install roots of the stub packages Composer installed, in
 /// `installed.json` order.
 pub(crate) fn stub_package_roots(installed: &InstalledPackages) -> Vec<PathBuf> {

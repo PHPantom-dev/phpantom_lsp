@@ -175,3 +175,169 @@ async fn a_single_project_workspace_has_no_scopes() {
     let uri = crate::util::path_to_uri(&dir.path().join("platform/src/a.php"));
     assert!(backend.project_scope_for(&uri).is_none());
 }
+
+const USES_PLATFORM_ONLY: &str =
+    "<?php\nnamespace App;\nfunction go(): void {\n    (new \\App\\Platform\\Only())->run();\n}\n";
+
+const PLATFORM_ONLY: &str =
+    "<?php\nnamespace App\\Platform;\nclass Only {\n    public function run(): void {}\n}\n";
+
+#[tokio::test]
+async fn another_projects_own_sources_are_unknown() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(&dir.path().join("platform"), "oldMethod", true);
+    write_project(&dir.path().join("mobile"), "newMethod", false);
+    write(
+        &dir.path().join("platform/src/Platform/Only.php"),
+        PLATFORM_ONLY,
+    );
+    let backend = Backend::new_test();
+    *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+    backend
+        .discover_workspace_symbols(dir.path(), Default::default(), None, None)
+        .await;
+
+    let mobile = diagnostic_codes(
+        &backend,
+        &dir.path().join("mobile/src/a.php"),
+        USES_PLATFORM_ONLY,
+    );
+    assert!(
+        mobile.iter().any(|code| code == "unknown_class"),
+        "mobile/'s autoloader cannot load platform/src/, got {mobile:?}"
+    );
+
+    let platform = diagnostic_codes(
+        &backend,
+        &dir.path().join("platform/src/a.php"),
+        USES_PLATFORM_ONLY,
+    );
+    assert!(
+        !platform.iter().any(|code| code == "unknown_class"),
+        "got {platform:?}"
+    );
+}
+
+/// A class only reachable through another project's PSR-4 mapping, never
+/// indexed, is not remembered as missing for that project.
+#[tokio::test]
+async fn a_class_hidden_from_one_project_still_loads_for_its_own() {
+    let (dir, backend) = monorepo().await;
+    write(
+        &dir.path().join("platform/src/Platform/Only.php"),
+        PLATFORM_ONLY,
+    );
+
+    for (project, known) in [("mobile", false), ("platform", true)] {
+        let uri = crate::util::path_to_uri(&dir.path().join(project).join("src/a.php"));
+        let _scope = backend.enter_project_scope(&uri);
+        assert_eq!(
+            backend.find_or_load_class("App\\Platform\\Only").is_some(),
+            known,
+            "{project}/"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_package_installed_from_another_projects_tree_is_visible() {
+    let (dir, backend) = {
+        let dir = tempfile::tempdir().unwrap();
+        write_project(&dir.path().join("platform"), "oldMethod", true);
+        write_project(&dir.path().join("mobile"), "newMethod", false);
+        write(
+            &dir.path().join("platform/packages/shared/src/Thing.php"),
+            "<?php\nnamespace Acme\\Shared;\nclass Thing {\n    public function run(): void {}\n}\n",
+        );
+        write(
+            &dir.path().join("mobile/vendor/composer/installed.json"),
+            r#"{ "packages": [
+                { "name": "acme/lib", "install-path": "../acme/lib",
+                  "autoload": { "psr-4": { "Acme\\Lib\\": "src/" } } },
+                { "name": "acme/shared", "install-path": "../../../platform/packages/shared",
+                  "dist": { "type": "path" }, "transport-options": { "symlink": true },
+                  "autoload": { "psr-4": { "Acme\\Shared\\": "src/" } } }
+            ] }"#,
+        );
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+        backend
+            .discover_workspace_symbols(dir.path(), Default::default(), None, None)
+            .await;
+        (dir, backend)
+    };
+
+    let codes = diagnostic_codes(
+        &backend,
+        &dir.path().join("mobile/src/a.php"),
+        "<?php\nnamespace App;\nfunction go(): void {\n    (new \\Acme\\Shared\\Thing())->run();\n}\n",
+    );
+    assert!(
+        !codes.iter().any(|code| code == "unknown_class"),
+        "mobile/ installed acme/shared from platform/packages/, got {codes:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_file_outside_every_project_is_visible_to_all_of_them() {
+    let (dir, backend) = monorepo().await;
+    write(
+        &dir.path().join("tools/Helper.php"),
+        "<?php\nnamespace Tools;\nclass Helper {\n    public function run(): void {}\n}\n",
+    );
+    let uri = crate::util::path_to_uri(&dir.path().join("tools/Helper.php"));
+    backend.update_ast(
+        &uri,
+        &std::fs::read_to_string(dir.path().join("tools/Helper.php")).unwrap(),
+    );
+
+    for project in ["platform", "mobile"] {
+        let codes = diagnostic_codes(
+            &backend,
+            &dir.path().join(project).join("src/a.php"),
+            "<?php\nnamespace App;\nfunction go(): void {\n    (new \\Tools\\Helper())->run();\n}\n",
+        );
+        assert!(
+            !codes.iter().any(|code| code == "unknown_class"),
+            "{project}/: got {codes:?}"
+        );
+    }
+}
+
+/// A project nested below the workspace's root project and the root
+/// project each only see their own sources.
+#[tokio::test]
+async fn a_nested_project_and_the_project_around_it_keep_their_sources_apart() {
+    let dir = tempfile::tempdir().unwrap();
+    write_project(dir.path(), "newMethod", false);
+    write_project(&dir.path().join("platform"), "oldMethod", true);
+    write(
+        &dir.path().join("platform/src/Platform/Only.php"),
+        PLATFORM_ONLY,
+    );
+    write(
+        &dir.path().join("src/Root/Only.php"),
+        "<?php\nnamespace App\\Root;\nclass Only {\n    public function run(): void {}\n}\n",
+    );
+    let backend = Backend::new_test();
+    *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+    let package = crate::composer::read_composer_package(dir.path());
+    backend
+        .discover_workspace_symbols(dir.path(), Default::default(), package, None)
+        .await;
+
+    for (file, class, known) in [
+        ("src/a.php", "App\\Root\\Only", true),
+        ("src/a.php", "App\\Platform\\Only", false),
+        ("platform/src/a.php", "App\\Platform\\Only", true),
+        ("platform/src/a.php", "App\\Root\\Only", false),
+    ] {
+        let uri = crate::util::path_to_uri(&dir.path().join(file));
+        let _scope = backend.enter_project_scope(&uri);
+        assert_eq!(
+            backend.find_or_load_class(class).is_some(),
+            known,
+            "{class} from {file}"
+        );
+    }
+}

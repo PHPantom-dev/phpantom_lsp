@@ -265,12 +265,13 @@ impl Backend {
         // project other than the one asking, the asking project only has
         // the class if it installed a copy of its own.  Not a miss worth
         // remembering: the other project does have the class.
-        if let Some(scope) = project_scope::active() {
+        let scope = project_scope::active();
+        if let Some(scope) = &scope {
             let indexed = self.symbols.fqn_uri_index.read().get(class_name).cloned();
             if let Some(uri) = indexed
                 && !scope.sees(&uri)
             {
-                return self.find_project_copy(class_name, last_segment, &scope);
+                return self.find_project_copy(class_name, last_segment, scope);
             }
         }
 
@@ -327,11 +328,21 @@ impl Backend {
         // vendor class is missing from the class index, it fails visibly
         // rather than being silently resolved, making stale classmaps
         // obvious (fix: run `composer dump-autoload`).
+        // The mappings are every project's, so a file another project's
+        // mapping places the class in is skipped, and the miss is not
+        // remembered for the projects that do have it.
+        let mut hidden = false;
         let workspace_root = self.workspace.workspace_root.read().clone();
         if let Some(workspace_root) = workspace_root {
             let file_path = {
                 let mappings = self.workspace.psr4_mappings.read();
-                composer::resolve_class_path(&mappings, &workspace_root, class_name)
+                composer::psr4_class_files(&mappings, &workspace_root, class_name).find(|path| {
+                    let seen = scope
+                        .as_ref()
+                        .is_none_or(|scope| scope.sees(&crate::util::path_to_uri(path)));
+                    hidden |= !seen;
+                    seen
+                })
             };
             if let Some(file_path) = file_path
                 && let Some(classes) = self.parse_and_cache_file(&file_path)
@@ -352,6 +363,9 @@ impl Backend {
         // extension class (Ds, BcMath, Random, …) is found.
         if let Some(cls) = self.load_stub_class(class_name) {
             return Some(cls);
+        }
+        if hidden {
+            return None;
         }
 
         // Cache the negative result so subsequent lookups for the same

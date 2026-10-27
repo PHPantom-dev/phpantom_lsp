@@ -71,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Each Composer project of a workspace sees only its own dependencies.** In a monorepo, or a workspace with Composer projects nested below its root, a class that only another project installed is now reported as unknown and no longer completes, and when two projects install different versions of a package, each file resolves the version its own project installed.
+- **Each Composer project of a workspace sees only its own dependencies.** In a monorepo, or a workspace with Composer projects nested below its root, a class that only another project installed or declares is now reported as unknown and no longer completes, and when two projects install different versions of a package, each file resolves the version its own project installed.
 - **`$pivot` right after startup.** A model reached through a many-to-many relationship no longer misses its `$pivot` property in completion or diagnostics when the editor asks for both at once while the relationship index is still being built.
 - **An override's own return type wins over its parent's docblock.** A method declaring `: View` without a docblock of its own no longer picks up the other classes and scalars a parent's `@return` lists, so members of `View` are no longer reported as missing on them.
 - **No highlighting flicker while typing.** Semantic highlighting, CodeLens, and document highlights no longer blank out or land a few characters away from their symbol when a request arrives before an edit has been parsed. The editor keeps what it shows until the update is ready.

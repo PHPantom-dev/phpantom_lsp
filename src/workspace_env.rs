@@ -148,6 +148,10 @@ pub(crate) struct ComposerProjectPaths {
     /// Every spelling of the project's vendor directory, or empty when it
     /// has none on disk.
     pub(crate) vendor_paths: Vec<PathBuf>,
+    /// The packages it installed from outside its vendor directory (see
+    /// [`composer::linked_package_roots`]), which can lie in another
+    /// project's tree.
+    pub(crate) linked_packages: Vec<PathBuf>,
     pub(crate) package_roots: Vec<(PathBuf, ClassCompletionOrigin, String)>,
     /// The roots of the stub packages it installed, which are stub paths.
     pub(crate) stub_packages: Vec<PathBuf>,
