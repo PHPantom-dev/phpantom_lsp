@@ -702,3 +702,198 @@ final class Box {
 "#;
     assert!(collect(php).is_empty());
 }
+
+// ─── Properties readonly by docblock ────────────────────────────────────────
+
+#[test]
+fn a_docblock_readonly_property_written_from_outside_is_flagged() {
+    let php = r#"<?php
+final class Invoice {
+    /** @readonly */
+    public int $total;
+
+    public function __construct(int $total)
+    {
+        $this->total = $total;
+    }
+}
+
+$invoice = new Invoice(1);
+$invoice->total = 0;
+"#;
+    let msgs = messages(php);
+    assert_eq!(
+        msgs,
+        vec!["Cannot modify @readonly property Invoice::$total from outside its declaring class"]
+    );
+}
+
+#[test]
+fn every_vendor_spelling_of_the_readonly_tag_counts() {
+    let php = r#"<?php
+final class Invoice {
+    /** @psalm-readonly */
+    public int $a = 0;
+    /** @phpstan-readonly */
+    public int $b = 0;
+}
+
+function change(Invoice $invoice): void {
+    $invoice->a = 1;
+    $invoice->b = 1;
+}
+"#;
+    assert_eq!(messages(php).len(), 2, "{:?}", messages(php));
+}
+
+#[test]
+fn a_second_constructor_assignment_of_a_docblock_readonly_property_is_flagged() {
+    let php = r#"<?php
+final class Invoice {
+    /** @readonly */
+    private int $total;
+
+    public function __construct(int $total)
+    {
+        $this->total = $total;
+        $this->total = 17;
+    }
+}
+"#;
+    assert_eq!(
+        messages(php),
+        vec![
+            "Cannot modify @readonly property Invoice::$total after the constructor has already initialized it"
+        ]
+    );
+}
+
+#[test]
+fn a_docblock_readonly_property_written_after_the_constructor_is_flagged() {
+    let php = r#"<?php
+final class Invoice {
+    /** @readonly */
+    private int $total;
+
+    public function __construct(int $total)
+    {
+        $this->total = $total;
+    }
+
+    public function reset(): void
+    {
+        $this->total = 0;
+    }
+}
+"#;
+    let msgs = messages(php);
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(
+        msgs[0].contains("after the constructor has initialized it"),
+        "{}",
+        msgs[0]
+    );
+}
+
+#[test]
+fn a_subclass_writing_a_docblock_readonly_property_is_flagged_on_php_8_4() {
+    let php = r#"<?php
+class Base {
+    /** @readonly */
+    protected int $value;
+}
+
+final class Child extends Base {
+    public function __construct()
+    {
+        $this->value = 1;
+    }
+}
+"#;
+    let msgs = messages_on_php(php, PhpVersion::new(8, 4));
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].contains("Base::$value"), "{}", msgs[0]);
+}
+
+#[test]
+fn filling_a_docblock_readonly_array_in_the_constructor_is_not_flagged() {
+    let php = r#"<?php
+final class Bag {
+    /**
+     * @readonly
+     * @var list<int>
+     */
+    private array $items;
+
+    public function __construct()
+    {
+        $this->items = [];
+        $this->items[] = 1;
+        $ref = &$this->items;
+    }
+}
+"#;
+    assert!(messages(php).is_empty(), "{:?}", messages(php));
+}
+
+#[test]
+fn an_offset_write_to_a_docblock_readonly_array_outside_is_flagged() {
+    let php = r#"<?php
+final class Bag {
+    /**
+     * @readonly
+     * @var list<int>
+     */
+    public array $items = [];
+}
+
+function fill(Bag $bag): void {
+    $bag->items[] = 1;
+}
+"#;
+    let msgs = messages(php);
+    assert_eq!(
+        msgs,
+        vec!["Cannot modify @readonly property Bag::$items from outside its declaring class"]
+    );
+}
+
+#[test]
+fn private_mutation_leaves_writes_inside_the_class_alone() {
+    let php = r#"<?php
+final class Counter {
+    /**
+     * @readonly
+     * @psalm-allow-private-mutation
+     */
+    public int $count = 0;
+
+    /** @psalm-readonly-allow-private-mutation */
+    public int $total = 0;
+
+    public function __construct()
+    {
+        $this->count = 0;
+        $this->total = 0;
+    }
+
+    public function bump(): void
+    {
+        $this->count++;
+        $this->total += 1;
+    }
+}
+
+function change(Counter $counter): void {
+    $counter->count = 5;
+    $counter->total = 5;
+}
+"#;
+    let msgs = messages(php);
+    assert_eq!(msgs.len(), 2, "{msgs:?}");
+    assert!(
+        msgs.iter()
+            .all(|m| m.contains("outside its declaring class")),
+        "{msgs:?}"
+    );
+}

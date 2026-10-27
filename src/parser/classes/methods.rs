@@ -278,6 +278,7 @@ fn push_promoted_properties<'a>(
             description: None,
             is_static: false,
             is_readonly: prop_readonly,
+            doc_readonly: DocReadonly::No,
             visibility: prop_visibility,
             deprecation_message: None,
             deprecated_replacement: None,

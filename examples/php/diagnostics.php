@@ -437,6 +437,10 @@ class ReadonlyWriteDemo
         $point = new Scaffolding\ScaffoldingReadonlyPoint(1, 2);
         $point->x = 10;
 
+        // Error — a `@readonly` docblock tag makes the property readonly by
+        // contract, for code written before PHP had the keyword:
+        $coordinate->unit = 'em';
+
         // No diagnostic — reading is always fine:
         echo $coordinate->x + $coordinate->y;
 
