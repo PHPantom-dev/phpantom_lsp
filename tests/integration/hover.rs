@@ -17018,6 +17018,37 @@ function f(PerPage $p): void {{
     }
 }
 
+/// An override narrowing to a concrete class drops the parent's contract
+/// from the inherited `@return`, and the scalar left beside it is one the
+/// native type forbids, so nothing of the docblock survives.
+#[test]
+fn hover_override_native_class_drops_a_lone_inherited_scalar() {
+    let backend = create_test_backend_with_closure_stub();
+    let content = r#"<?php
+interface ViewContract { public function name(): string; }
+class View implements ViewContract { public function name(): string { return ''; } }
+
+abstract class Component {
+    /** @return ViewContract|string */
+    abstract public function render();
+}
+
+final class Portlet extends Component {
+    public function render(): View { return new View(); }
+}
+
+function f(Portlet $p): void {
+    $v = $p->render();
+    $v;
+}
+"#;
+    let hover =
+        hover_at(&backend, "file:///test.php", content, 15, 5).expect("expected hover on $v");
+    let text = hover_text(&hover);
+    assert!(text.contains("$v = View"), "{text}");
+    assert!(!text.contains("string"), "{text}");
+}
+
 /// A parent's method-level template in `@return` survives an override's
 /// native class hint even when a global class shares the template's name.
 #[test]

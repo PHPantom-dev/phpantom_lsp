@@ -187,6 +187,11 @@ fn walk_stmt_exprs(
                 walk_expr_depth(v, f)?;
             }
         }
+        Statement::EchoTag(e) => {
+            for v in e.values.iter() {
+                walk_expr_depth(v, f)?;
+            }
+        }
         Statement::Namespace(ns) => {
             for s in ns.statements().iter() {
                 walk_stmt_exprs(s, f)?;

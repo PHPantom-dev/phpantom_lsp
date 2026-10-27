@@ -824,7 +824,10 @@ fn statement_may_continue(stmt: &Statement<'_>) -> bool {
         Statement::Block(_) | Statement::If(_) => {
             crate::parser::any_nested_statement(stmt, statement_may_continue)
         }
-        Statement::Expression(_) | Statement::Echo(_) | Statement::Return(_) => false,
+        Statement::Expression(_)
+        | Statement::Echo(_)
+        | Statement::EchoTag(_)
+        | Statement::Return(_) => false,
         // Anything else (a nested loop, `switch`, `try`) is taken to possibly
         // hold one, rather than walking every shape it comes in.
         _ => true,

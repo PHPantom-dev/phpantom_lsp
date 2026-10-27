@@ -5548,6 +5548,7 @@ fn a_native_declaration_rules_out_the_alternatives_it_forbids() {
     assert_eq!(
         inherited
             .without_alternatives_the_native_type_forbids(&PhpType::array())
+            .unwrap()
             .to_string(),
         "array<string, mixed>|list<mixed>"
     );
@@ -5555,6 +5556,7 @@ fn a_native_declaration_rules_out_the_alternatives_it_forbids() {
     assert_eq!(
         inherited
             .without_alternatives_the_native_type_forbids(&PhpType::parse("?string"))
+            .unwrap()
             .to_string(),
         "string"
     );
@@ -5564,6 +5566,7 @@ fn a_native_declaration_rules_out_the_alternatives_it_forbids() {
     assert_eq!(
         PhpType::parse("Traversable|string")
             .without_alternatives_the_native_type_forbids(&PhpType::array())
+            .unwrap()
             .to_string(),
         "Traversable"
     );
@@ -5572,6 +5575,7 @@ fn a_native_declaration_rules_out_the_alternatives_it_forbids() {
     assert_eq!(
         inherited
             .without_alternatives_the_native_type_forbids(&PhpType::parse("iterable"))
+            .unwrap()
             .to_string(),
         inherited.to_string()
     );
@@ -5579,8 +5583,13 @@ fn a_native_declaration_rules_out_the_alternatives_it_forbids() {
     assert_eq!(
         PhpType::parse("int|float|string")
             .without_alternatives_the_native_type_forbids(&PhpType::float())
+            .unwrap()
             .to_string(),
         "int|float"
+    ); // A lone alternative the native type forbids leaves nothing.
+    assert_eq!(
+        PhpType::string().without_alternatives_the_native_type_forbids(&PhpType::array()),
+        None
     );
 }
 

@@ -117,10 +117,13 @@ find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l
 php -d zend.assertions=1 examples/php/scaffolding/assertions.php
 php -l examples/laravel/app/Demo.php
 find examples/symfony/src examples/symfony/config -name '*.php' -print0 | xargs -0 -n1 php -l
+find examples/yii/src examples/yii/config examples/yii/resources -name '*.php' -print0 | xargs -0 -n1 php -l
 php examples/laravel/assertions.php
 php examples/symfony/assertions.php
+php examples/yii/assertions.php
 phpantom_lsp analyze --project-root examples/laravel --no-colour
 phpantom_lsp analyze --project-root examples/symfony --no-colour
+phpantom_lsp analyze --project-root examples/yii --no-colour
 ```
 
 CI additionally builds the WebAssembly target and runs
@@ -129,11 +132,12 @@ if your change touches dependencies, `Cargo.toml`, or anything in the
 per-file request path. See [wasm.md](wasm.md).
 
 The framework `assertions.php` and `analyze` runs need `composer
-install` in `examples/laravel/` and `examples/symfony/` first. Each
+install` in `examples/laravel/`, `examples/symfony/`, and `examples/yii/`
+first. Each
 `assertions.php` checks its playground's demo against the real framework.
 
-All fourteen must pass with zero warnings and zero failures, and the
-Symfony `analyze` run must report `[OK] No errors`. The Laravel
+All seventeen must pass with zero warnings and zero failures, and the
+Symfony and Yii `analyze` runs must report `[OK] No errors`. The Laravel
 `analyze` run is the exception: `app/Demo.php` carries three
 deliberate mistakes, each demonstrating a diagnostic.
 `Artisan::call('does:not-exist')`

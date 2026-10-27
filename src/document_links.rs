@@ -187,6 +187,11 @@ fn collect_include_links_from_statement(
                 collect_include_links_from_expression(val, file_dir, links);
             }
         }
+        Statement::EchoTag(echo) => {
+            for val in echo.values.iter() {
+                collect_include_links_from_expression(val, file_dir, links);
+            }
+        }
         _ => {}
     }
 }

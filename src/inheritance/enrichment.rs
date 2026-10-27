@@ -83,7 +83,7 @@ fn inherited_return_type(
         return Some(inherited);
     };
     let inherited = within_native_class(inherited, existing, ancestor, class_loader)?;
-    Some(inherited.without_alternatives_the_native_type_forbids(native))
+    inherited.without_alternatives_the_native_type_forbids(native)
 }
 
 /// `inherited` without the classes the override's own native return hint

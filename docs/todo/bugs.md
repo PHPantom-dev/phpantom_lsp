@@ -75,7 +75,33 @@ No outstanding items.
 
 ## Templates
 
-No outstanding items.
+### B693. A template is not bound from a closure argument's parameter type
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @template TData as array|object */
+final class DataColumn {
+    /** @param (callable(TData, DataContext): string)|null $content */
+    public function __construct(string $property, ?callable $content = null) {}
+}
+
+new DataColumn('status', content: static fn(User $user) => $user->name);
+// expects (callable(array|object, DataContext): string)|null, got Closure(User)
+```
+
+When the only place a template appears is a callable parameter's own
+parameter, the closure passed there decides it: `TData` is `User`, and the
+closure fits. PHPantom leaves `TData` unbound, falls back to its bound
+`array|object`, and then reports the closure for accepting only a `User`.
+The same happens for a function's `@template` (`column(fn(User $u) => …)`
+against `callable(T, Ctx): string`), so it is the binding, not the
+constructor, that is missing. Psalm and PHPStan both bind a template from
+the parameter types of the closure passed in.
+
+Found in Yii's demo blog, where every `GridView` column that renders a
+cell with a typed closure (`yiisoft/yii-dataview`'s `DataColumn`) is
+reported (7 diagnostics, all that remain on the project).
 
 ## Name resolution
 
@@ -87,4 +113,22 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B694. A closure's inferred return type drops a method call on its own parameter
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$a = fn(User $u) => $u;            // Closure(User): User
+$b = fn(User $u) => $u->label();   // Closure(User), expected Closure(User): string
+$b($user);                         // unknown, expected string
+```
+
+`infer_closure_literal_type` (`rhs_resolution/calls.rs`) seeds the
+closure's typed parameters through `scope_var_resolver` before resolving the
+body, which is enough for a bare `$u`. A member call on `$u` loses it
+(`$u?->label()` too), so the receiver's resolution apparently does not go
+through the seeded resolver; the body comes back empty and the closure gets
+no return type. A body that does not depend on the call's type, such as
+`strlen($u->label())`, is unaffected. Anything that
+reads the closure's return afterwards, such as calling it or checking it
+against a declared `callable(...): string`, sees nothing.

@@ -100,6 +100,11 @@ pub(crate) fn walk_closures_in_statement<'b>(
                 walk_closures_in_expr(val, outer_scope, ctx, None);
             }
         }
+        Statement::EchoTag(echo) => {
+            for val in echo.values.iter() {
+                walk_closures_in_expr(val, outer_scope, ctx, None);
+            }
+        }
         // For compound statements (if, while, foreach, etc.) only scan
         // the condition/iteration expression — not the block bodies.
         // Block bodies are walked by walk_body_forward which calls us

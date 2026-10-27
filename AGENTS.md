@@ -184,10 +184,11 @@ edit and must be fixed before moving on.
 
 **Framework-specific demos.** Laravel demos live in `examples/laravel/`
 (a standalone project with `composer.json`, models, config, routes,
-views, and translations), and Symfony demos in `examples/symfony/` (a
+views, and translations), Symfony demos in `examples/symfony/` (a
 standalone project with `composer.json`, controllers, YAML/XML/PHP
-configuration, Twig templates, and translation catalogues). `vendor/`
-is git-ignored in both, so run `composer install` there before
+configuration, Twig templates, and translation catalogues), and Yii 3
+demos in `examples/yii/` (an application generated from `yiisoft/app`).
+`vendor/` is git-ignored in all three, so run `composer install` there before
 verifying framework demos on a fresh clone. Put new
 framework-specific features in the matching `examples/<framework>/`
 project, not in `examples/php/`. If a feature affects Laravel-specific
@@ -215,6 +216,19 @@ runtime. Add a matching check there for each new name or claim, and run
 `php examples/symfony/assertions.php`. Then run
 `phpantom_lsp analyze --project-root examples/symfony --no-colour`,
 which must report `[OK] No errors`.
+
+Yii support (routes, views, DI definitions, aliases) follows the same
+pattern in `examples/yii/`: a "Try:" comment at the site and a line in
+its `README.md`. Lint with
+`find examples/yii/src examples/yii/config examples/yii/resources -name '*.php' -print0 | xargs -0 -n1 php -l`.
+`examples/yii/assertions.php` builds the configuration with
+`yiisoft/config` and the DI container the way the web runner does, then
+checks every name the demo declares and every claim its "Try:" comments
+make. Add a check there for each new one, run
+`php examples/yii/assertions.php`, then
+`phpantom_lsp analyze --project-root examples/yii --no-colour`, which must
+report `[OK] No errors`. A "Try:" comment only claims what PHPantom does
+today.
 
 ## Updating docs/todo.md
 

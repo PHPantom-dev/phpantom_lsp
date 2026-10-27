@@ -1,0 +1,85 @@
+html, body {
+    margin: 0;
+    padding: 0;
+}
+html {
+    height: 100%;
+}
+body {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    font: 16px/24px "Trebuchet MS", Helvetica, sans-serif;
+    background: #f8f8f8;
+    color: #4b4b4b;
+}
+
+.header {
+    margin: 24px;
+    padding: 12px;
+    border-radius: 12px;
+    background: #fff;
+    color: #888;
+    box-shadow: 0 0 24px #f4f4f4;
+    text-align: center;
+}
+.header svg {
+    height: 48px;
+}
+
+.content {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+}
+.content_i {
+    flex-grow: 1;
+    padding: 24px 5%;
+}
+.content a {
+    color: #00617b;
+}
+.content a:hover {
+    color: #1191b3;
+}
+
+.footer {
+    border-top: 1px solid #e6e8ec;
+    margin: 24px 24px 0;
+    padding: 24px;
+    text-align: center;
+}
+
+.footer_copyright a {
+    color: #838b99;
+    text-decoration: none;
+}
+
+.footer_copyright a:hover {
+    color: #0b7794;
+    text-decoration: underline;
+}
+
+.footer_icons {
+    padding-top: 16px;
+    display: flex;
+    justify-content: center;
+}
+
+.footer_icons a {
+    margin: 0 12px;
+    text-decoration: none;
+}
+
+.footer_icons svg {
+    height: 32px;
+    fill: #838b99;
+}
+
+.footer_icons a:hover svg {
+    fill: #0b7794;
+}
+
+.text-center {
+    text-align: center;
+}
