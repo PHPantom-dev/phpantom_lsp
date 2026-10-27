@@ -1198,45 +1198,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f15-go-to-declaration" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        F15. Go-to-declaration
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="F15. Go-to-declaration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#behaviour" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Behaviour
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#implementation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Implementation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#f16-on-type-brace-de-indent" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1249,7 +1210,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#behaviour_1" class="md-nav__link">
+  <a href="#behaviour" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Behaviour
@@ -1723,45 +1684,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f15-go-to-declaration" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        F15. Go-to-declaration
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="F15. Go-to-declaration">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#behaviour" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Behaviour
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#implementation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Implementation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#f16-on-type-brace-de-indent" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1774,7 +1696,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#behaviour_1" class="md-nav__link">
+  <a href="#behaviour" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Behaviour
@@ -2049,38 +1971,12 @@ language entry (alongside <code>intelephense</code>):</p>
   server and its feature set.</li>
 </ul>
 <hr />
-<h2 id="f15-go-to-declaration">F15. Go-to-declaration<a class="headerlink" href="#f15-go-to-declaration" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p>Implement <code>textDocument/declaration</code> to jump from a concrete method to
-its abstract or interface prototype, complementing the existing
-go-to-definition (which jumps to the concrete implementation) and
-go-to-implementation (which jumps from an interface to concrete classes).</p>
-<h3 id="behaviour">Behaviour<a class="headerlink" href="#behaviour" title="Permanent link">&para;</a></h3>
-<p>When the cursor is on a method call or method name:</p>
-<ol>
-<li>Search for an <strong>interface or abstract class</strong> that declares a method
-   with the same name and is in the inheritance chain of the resolved
-   class.</li>
-<li>If found, jump to the interface/abstract method declaration.</li>
-<li>If no abstract prototype exists, fall back to the same result as
-   go-to-definition.</li>
-</ol>
-<h3 id="implementation">Implementation<a class="headerlink" href="#implementation" title="Permanent link">&para;</a></h3>
-<p>The existing <code>resolve_implementation</code> already does reverse lookups
-(concrete → prototype) via <code>resolve_reverse_implementation</code>. The
-declaration handler can reuse this: for <code>MemberAccess</code> and
-<code>MemberDeclaration</code> symbols, call the reverse-implementation resolver
-first. For class-level symbols, declaration and definition are the
-same.</p>
-<p>Register <code>declaration_provider</code> in <code>src/backend/startup.rs</code> and wire it
-to a thin handler that delegates to the existing infrastructure.</p>
-<hr />
 <h2 id="f16-on-type-brace-de-indent">F16. On-type <code>}</code> brace de-indent<a class="headerlink" href="#f16-on-type-brace-de-indent" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <p>Extend the existing on-type formatting handler (currently triggered on
 <code>\n</code> for docblock generation) to also trigger on <code>}</code>, automatically
 de-indenting the closing brace to match its opening <code>{</code>.</p>
-<h3 id="behaviour_1">Behaviour<a class="headerlink" href="#behaviour_1" title="Permanent link">&para;</a></h3>
+<h3 id="behaviour">Behaviour<a class="headerlink" href="#behaviour" title="Permanent link">&para;</a></h3>
 <p>When the user types <code>}</code>:</p>
 <ol>
 <li>From the <code>}</code> position, scan backward through the document text to
