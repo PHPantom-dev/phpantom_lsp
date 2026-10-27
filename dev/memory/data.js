@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793138089560,
+  "lastUpdate": 1793140527799,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7413,6 +7413,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 107.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1d1ffafda68d9ce60459b2e21b798e11a1a76cfb",
+          "message": "Closures that return a method call on their own parameter",
+          "timestamp": "2026-10-27T23:02:37+01:00",
+          "tree_id": "4a5683cb507064732100cbd2e077e0ef2b9830cb",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1d1ffafda68d9ce60459b2e21b798e11a1a76cfb"
+        },
+        "date": 1793140516412,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 76.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 102.5,
             "unit": "MiB"
           }
         ]
