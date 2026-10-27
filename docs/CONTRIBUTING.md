@@ -45,6 +45,31 @@ reports are uploaded together to Codecov. To reproduce one shard locally
 cargo llvm-cov nextest --partition hash:1/6 --lcov --output-path lcov.info
 ```
 
+PR latency benchmarks build once, then distribute the discovered benchmark
+cases across four runners. Each runner measures its cases sequentially with
+Criterion's usual sampling settings. The `Benchmark (PR comparison)` check
+compares the combined results only after every shard passes and every case
+is accounted for. To reproduce a shard locally from the repository root:
+
+```bash
+cargo bench --bench completion --bench references --bench laravel_completion \
+  --bench custom_builder --bench symfony_completion \
+  --no-run --message-format=json > /tmp/benchmark-build.jsonl
+python3 benches/ci_benchmarks.py prepare --build-dir /tmp/phpantom-benchmarks \
+  --shards 4 < /tmp/benchmark-build.jsonl
+python3 benches/ci_benchmarks.py run --build-dir /tmp/phpantom-benchmarks \
+  --shard 1 --output /tmp/shard-1.json
+```
+
+CI uses static musl binaries; these commands use your local Cargo target.
+Run the sharding helper's tests with
+`python3 -m unittest discover -s benches -p 'test_ci_benchmarks.py'`.
+
+Latency and memory benchmark comparisons appear in the job summaries.
+A regression over 30% fails the comparison check. Alerts also leave a PR
+comment for same-repository PRs, except Dependabot runs; fork and Dependabot
+PRs use the summaries so they do not need permission to post a review.
+
 - Integration tests go in `tests/integration/`, one file per feature area (`completion_*.rs`, `definition_*.rs`, `code_action_*.rs`, ...)
 - Use `create_test_backend()` from `tests/integration/common/mod.rs` for same-file tests
 - Use `create_psr4_workspace()` for cross-file / PSR-4 tests
@@ -57,7 +82,7 @@ See [BUILDING.md](BUILDING.md) for more on running tests and manual LSP testing.
 
 ## Changelog
 
-Update [CHANGELOG.md](CHANGELOG.md) when your PR adds, changes, or fixes something a user would notice. Add entries under `## [Unreleased]` in the appropriate subsection (`### Added`, `### Fixed`, `### Changed`, or `### Removed`). Write for end users, not developers: describe what changed in the editor, not which internal modules were touched.
+Update [CHANGELOG.md](CHANGELOG.md) when your PR adds, changes, or fixes something a user would notice. Add entries under `## [Unreleased]` in the appropriate subsection (`### Added`, `### Fixed`, `### Changed`, or `### Removed`). Write for end users, not developers: describe what changed in the editor, not which internal modules were touched. Contributions users never see, such as CI or tooling work, go under `### Internal` so they are still credited.
 
 Keep entries short and easy to scan:
 

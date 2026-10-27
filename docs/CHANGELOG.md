@@ -363,6 +363,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **"Import all missing classes" with the cursor at the start of a name.** The bulk import is now offered there too, wherever "Import class" is.
 - **Completion shows member types next to the name.** Method and property suggestions show their return or property type right after the name (e.g. `findOneByEmail($email): ?User`) in editors such as PhpStorm and VS Code, where previously only the class name was visible. Contributed by @EranNL.
 
+### Internal
+
+- **Faster benchmark checks on pull requests.** Latency benchmarks now run split across four runners, and benchmark alerts on fork pull requests show up in the job summary instead of failing on a permission error. Contributed by @shuvroroy.
+
 ## [0.11.1] - 2026-10-07
 
 ### Added
