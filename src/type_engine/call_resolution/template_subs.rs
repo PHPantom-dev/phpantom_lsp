@@ -7,11 +7,14 @@ use std::collections::HashMap;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap};
-use crate::class_lookup::Fqn;
+use crate::class_lookup::{Fqn, ResolvedClassLoader, is_type_compatible};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::*;
 
 use crate::type_engine::resolver::ResolutionCtx;
+use crate::type_engine::variable::rhs_resolution::{
+    TemplateBindingMode, classify_template_binding,
+};
 
 use super::constant_operands::constant_operand_subs;
 
@@ -202,19 +205,44 @@ pub(crate) fn build_call_template_subs(
 /// template the declaration binds becomes `mixed`: another argument
 /// decides it, and that argument's own check is where the two can
 /// disagree.
+///
+/// The bound only stands in for the binding where the template is the
+/// value handed over. A template bound from a callable's parameter list
+/// (`@param callable(T): string`) is what the callback accepts, and a
+/// callback accepting less than the whole bound is the point: `fn(User $u)`
+/// binds `T` to `User`. There the binding, from `call_subs`, is checked in
+/// place of the bound once it is known to satisfy it.
 pub(crate) fn self_bound_template_params(
     bindings: &[(Atom, Atom)],
     parameters: &[ParameterInfo],
     arg_texts: &[&str],
     bound_of: &dyn Fn(&Atom) -> Option<PhpType>,
+    call_subs: &HashMap<String, PhpType>,
+    class_loader: &ResolvedClassLoader<'_>,
 ) -> AtomMap<Option<PhpType>> {
     let self_bound = exclusively_bound_templates(bindings, parameters, arg_texts);
     let mut result = AtomMap::default();
     for (tpl_name, param_name) in &self_bound {
         let bounds = result.entry(*param_name).or_insert_with(HashMap::new);
-        if let Some(bound) = bound_of(tpl_name) {
-            bounds.insert(tpl_name.to_string(), bound);
-        }
+        let Some(bound) = bound_of(tpl_name) else {
+            continue;
+        };
+        let hint = parameters
+            .iter()
+            .find(|p| p.name == param_name.as_str())
+            .and_then(|p| p.type_hint.as_ref());
+        let accepted_by_callback = matches!(
+            classify_template_binding(tpl_name, hint),
+            TemplateBindingMode::CallableParamType(_)
+        );
+        let checked = call_subs
+            .get(tpl_name.as_str())
+            .filter(|binding| {
+                accepted_by_callback && is_type_compatible(binding, &bound, class_loader, false)
+            })
+            .cloned()
+            .unwrap_or(bound);
+        bounds.insert(tpl_name.to_string(), checked);
     }
     result
         .into_iter()

@@ -75,33 +75,7 @@ No outstanding items.
 
 ## Templates
 
-### B693. A template is not bound from a closure argument's parameter type
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @template TData as array|object */
-final class DataColumn {
-    /** @param (callable(TData, DataContext): string)|null $content */
-    public function __construct(string $property, ?callable $content = null) {}
-}
-
-new DataColumn('status', content: static fn(User $user) => $user->name);
-// expects (callable(array|object, DataContext): string)|null, got Closure(User)
-```
-
-When the only place a template appears is a callable parameter's own
-parameter, the closure passed there decides it: `TData` is `User`, and the
-closure fits. PHPantom leaves `TData` unbound, falls back to its bound
-`array|object`, and then reports the closure for accepting only a `User`.
-The same happens for a function's `@template` (`column(fn(User $u) => …)`
-against `callable(T, Ctx): string`), so it is the binding, not the
-constructor, that is missing. Psalm and PHPStan both bind a template from
-the parameter types of the closure passed in.
-
-Found in Yii's demo blog, where every `GridView` column that renders a
-cell with a typed closure (`yiisoft/yii-dataview`'s `DataColumn`) is
-reported (7 diagnostics, all that remain on the project).
+No outstanding items.
 
 ## Name resolution
 

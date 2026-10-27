@@ -6093,6 +6093,65 @@ takesNamedBox(new NamedBox(new AnonymousUser()));
 }
 
 #[test]
+fn no_diagnostic_for_template_bound_from_closure_parameter_type() {
+    // A template named only in a callable's parameter list is bound by the
+    // closure's own parameter type, so a closure accepting less than the
+    // template's bound fits.
+    let php = r#"<?php
+final class DataContext {}
+final class User { public string $name = ''; }
+
+/** @template TData as array|object */
+final class DataColumn {
+    /** @param (callable(TData, DataContext): string)|null $content */
+    public function __construct(string $property, ?callable $content = null) {}
+}
+
+/**
+ * @template T of object
+ * @param callable(T, DataContext): string $content
+ */
+function column(callable $content): void {}
+
+new DataColumn('status', content: static fn(User $user) => $user->name);
+new DataColumn('status', static fn(User $user) => $user->name);
+column(fn(User $user) => $user->name);
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A closure parameter binds the template, got: {diags:?}"
+    );
+}
+
+#[test]
+fn diagnostic_for_closure_parameter_type_outside_template_bound() {
+    // The closure still binds the template, but the binding has to satisfy
+    // the bound.
+    let php = r#"<?php
+final class DataContext {}
+
+/** @template TData as array|object */
+final class DataColumn {
+    /** @param (callable(TData, DataContext): string)|null $content */
+    public function __construct(string $property, ?callable $content = null) {}
+}
+
+/**
+ * @template T of object
+ * @param callable(T, DataContext): string $content
+ */
+function column(callable $content): void {}
+
+new DataColumn('status', static fn(int $id): string => 'x');
+column(fn(int $id): string => 'x');
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(msgs.len(), 2, "got: {msgs:?}");
+}
+
+#[test]
 fn no_diagnostic_for_covariant_generic_type_argument() {
     // A narrower type argument still satisfies the wider one.
     let php = r#"<?php
