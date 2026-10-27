@@ -884,6 +884,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b692-int-of-a-ctype_digit-checked-string-is-not-non-negative" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B692. <code>(int)</code> of a <code>ctype_digit()</code>-checked string is not non-negative
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -928,6 +945,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Templates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b690-a-member-access-through-an-override-with-a-native-return-type-loses-the-calls-method-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B690. A member access through an override with a native return type loses the call's method template
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -960,6 +994,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b691-an-import-named-only-by-a-see-line-comment-is-reported-unused" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B691. An import named only by a <code>// @see</code> line comment is reported unused
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1485,6 +1536,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b692-int-of-a-ctype_digit-checked-string-is-not-non-negative" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B692. <code>(int)</code> of a <code>ctype_digit()</code>-checked string is not non-negative
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1529,6 +1597,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Templates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b690-a-member-access-through-an-override-with-a-native-return-type-loses-the-calls-method-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B690. A member access through an override with a native return type loses the call's method template
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1561,6 +1646,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b691-an-import-named-only-by-a-see-line-comment-is-reported-unused" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B691. An import named only by a <code>// @see</code> line comment is reported unused
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1615,7 +1717,24 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b692-int-of-a-ctype_digit-checked-string-is-not-non-negative">B692. <code>(int)</code> of a <code>ctype_digit()</code>-checked string is not non-negative<a class="headerlink" href="#b692-int-of-a-ctype_digit-checked-string-is-not-non-negative" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function wait(string $delay): void {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    if (!ctype_digit($delay)) {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        return;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    }</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    sleep((int) $delay);   // expects int&lt;0, max&gt;, got int</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>A string that passes <code>ctype_digit()</code> holds only the digits 0-9, so casting
+it to <code>int</code> cannot give a negative number, and <code>sleep()</code>'s
+<code>int&lt;0, max&gt;</code> parameter accepts it. The narrowing leaves <code>$delay</code> a plain
+<code>string</code> and the cast gives <code>int</code>. PHPStan reports nothing here only
+because its function map declares <code>sleep()</code> and <code>usleep()</code> as taking a
+plain <code>int</code>. phpstorm-stubs and Mago both declare <code>int&lt;0, max&gt;</code>, which
+matches PHP 8 throwing a <code>ValueError</code> on a negative.</p>
+<p>Found in a Laravel project's API client, which sleeps for the number of
+seconds a rate-limit message names.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
@@ -1623,13 +1742,67 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b690-a-member-access-through-an-override-with-a-native-return-type-loses-the-calls-method-template">B690. A member access through an override with a native return type loses the call's method template<a class="headerlink" href="#b690-a-member-access-through-an-override-with-a-native-return-type-loses-the-calls-method-template" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">interface Node {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    /**</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">     * @template T of Node</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">     * @param class-string&lt;T&gt; $type</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">     * @return T|null</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">     */</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    public function first($type): ?self;</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">}</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">abstract class Base implements Node {</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">    public function first($type): ?Node { return null; }</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">}</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">final class Leaf extends Base { public function leafOnly(): int { return 1; } }</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">function f(Base $b): void {</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">    $v = $b-&gt;first(Leaf::class);   // hover and argument checks: Leaf|null</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="x">    $v-&gt;leafOnly();                // Method 'leafOnly' not found on class 'Node'</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="x">    $b-&gt;first(Leaf::class)-&gt;leafOnly();   // same</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="x">}</span>
+</code></pre></div>
+<p>The two consumers disagree about the same value. The forward walker
+types <code>$v</code> as <code>Leaf|null</code>, so hover and argument checks are right, but
+the member-access subject resolver (<code>resolve_subject_outcome</code> →
+<code>resolve_target_classes</code>, used by <code>unknown_member</code>) resolves <code>$v</code> to the
+override's native <code>Node</code>. The same call through a <code>Node</code> or a <code>Leaf</code>
+receiver resolves to <code>Leaf</code>, as does <code>Base::first()</code> without a native
+return type. So the subject path looks the method up on the receiver's
+own class, where the override has no <code>@template</code> until the inheritance
+merge adds it, and does not prefer the merged method the way
+<code>resolve_owner_method_call</code> (<code>rhs_resolution/owner_method_call.rs</code>)
+does. Fix the subject path to read the merged method so the two cannot
+diverge, rather than adding a second preference rule.</p>
+<p>Predates the 2026-10-12 sweep. Found while reducing a PDepend regression
+with a scratch project. PDepend's own calls go through subclasses, so
+they do not hit it.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b691-an-import-named-only-by-a-see-line-comment-is-reported-unused">B691. An import named only by a <code>// @see</code> line comment is reported unused<a class="headerlink" href="#b691-an-import-named-only-by-a-see-line-comment-is-reported-unused" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">use App\Http\Controllers\UsersController;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">final class SanctumSession {</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    public function handle(): void {</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        // @see UsersController::impersonate()</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">        $this-&gt;restore();</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    }</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>unused_import</code> counts docblock names as uses, but not names in a <code>//</code>
+comment, so this import is reported and "Remove unused imports" would
+delete it. The <code>@see</code> then no longer resolves in any tool that follows
+it. php-cs-fixer's <code>no_unused_imports</code> treats a name in any comment as a
+use. Decide whether a <code>@see</code> tag (or any class name) in a line comment is
+a reference. If it is, emit it as a <code>ClassReference</code> in the symbol map,
+the way docblock <code>@see</code> targets are, so that go-to-definition and rename
+follow it too, not only this diagnostic.</p>
+<p>Found twice in a Laravel project, both inside method bodies.</p>
 
 
 
