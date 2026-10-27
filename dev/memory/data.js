@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793125571086,
+  "lastUpdate": 1793127637890,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7242,6 +7242,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 75.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "deadsquirrel93@gmail.com",
+            "name": "deadsquirrel93",
+            "username": "Deadsquirrel93"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "47fd0751314c05720b698e5cc4ade2be547d0581",
+          "message": "A class declared twice keeps what it inherits\n\nWhen a file's first parse takes a class name over from another file\nthat declared it earlier (a test double such as `class StoreTable {}`\nbehind `class_exists()`, sorting after the real class), the\nresolved-class cache kept the entry built from the other declaration:\neviction is skipped on a first parse, on the assumption that a name\nnever parsed cannot be cached.  The real class then resolved without its\nparent chain, and the members it inherits were reported as unknown.\n\nEvict the names a parse takes over from the resolved-class cache, on the\nbatch publish path and on the on-demand load path alike.",
+          "timestamp": "2026-10-27T19:43:31+01:00",
+          "tree_id": "9b21a08894556d39cf292de38b88e5c97b920db0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/47fd0751314c05720b698e5cc4ade2be547d0581"
+        },
+        "date": 1793127626040,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.3,
             "unit": "MiB"
           }
         ]
