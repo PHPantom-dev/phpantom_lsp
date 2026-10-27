@@ -76,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`[indexing] exclude` covers Composer's class lists.** A class Composer's classmap or PSR-0 map names no longer resolves from a path you excluded, so excluding a path mid-session and restarting give the same result.
 - **Filtered code action menus.** When the editor asks for one kind of code action, such as only quick fixes or only the organize-imports action run on save, only actions of that kind are returned instead of every action mixed together. Every kind of action PHPantom offers is now listed among the kinds it advertises.
 - **Closures that return a method call on their own parameter.** `fn (User $u) => $u->label()` now gets the method's return type, so calling the closure, or passing it where a `callable(User): string` is expected, sees what it returns.
 - **A typed closure decides a callback's template.** A closure such as `fn(User $user) => …` passed where a `callable(T): string` is expected now binds `T` to `User`, so it is no longer reported for accepting less than the template's bound. A closure whose parameter falls outside the bound is still reported.

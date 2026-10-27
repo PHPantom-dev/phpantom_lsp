@@ -280,28 +280,6 @@ exclude` skips"). The PSR-4 mapping makes the probe a single stat
 plus an already-compiled glob match on the failure path only;
 classmap-only projects get no probe rather than a disk walk.
 
-## X16. Composer's own class lists bypass `[indexing] exclude`
-
-**Impact: Low-Medium · Complexity: Low**
-
-Every workspace walker honours `exclude`, but three sources write
-straight into `fqn_uri_index` without consulting it: the Composer
-classmap (`parse_autoload_classmap`, used under `strategy = "composer"`
-and `"none"`), the PSR-0 map (`parse_autoload_namespaces`), and the
-bootstrap classes `vendor/composer` requires before any autoloader
-exists. A class any of those name stays resolvable from a path the user
-excluded, so `exclude` means one thing for a file a walk found and
-another for a file a list named.
-
-It also costs the mid-session reconciliation some precision. The
-eviction pass applies only the *change* (a file both the old and the new
-filters exclude is left alone) exactly so an unrelated settings edit
-cannot drop these entries, which leaves one asymmetry: excluding such a
-path mid-session evicts it, while a restart would index it again.
-Filtering the three where they merge into the index makes one rule out
-of two and removes the asymmetry; the cost is one already-compiled glob
-match per entry, skipped outright when no exclude is configured.
-
 ## X14. Forward Zed's `file_scan_exclusions` and `file_types`
 
 **Impact: Low · Complexity: Low**

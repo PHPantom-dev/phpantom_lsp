@@ -231,10 +231,19 @@ impl Backend {
             .map(crate::composer::explicit_dependency_names)
             .unwrap_or_default();
 
+        // Composer's class lists name files without any walk reaching
+        // them, so `exclude` is applied to them here, where they merge.
+        let filters = self.index_filters();
+        let composer_classmap = || {
+            let mut classmap = composer::parse_autoload_classmap(root, &vendor_dir);
+            filters.retain_unexcluded(&mut classmap);
+            classmap
+        };
+
         let (mut scan, source_label) = match strategy {
             IndexingStrategy::None => {
                 let scan = WorkspaceScanResult {
-                    classmap: composer::parse_autoload_classmap(root, &vendor_dir),
+                    classmap: composer_classmap(),
                     package_roots: classmap_scanner::vendor_package_roots(
                         root,
                         &vendor_dir,
@@ -260,7 +269,6 @@ impl Backend {
                 if let Some(p) = progress {
                     p.begin_phase(0.0, 0.3, "Scanning workspace files");
                 }
-                let filters = self.index_filters();
                 let mut scan = classmap_scanner::scan_roots_full(
                     &[root.to_path_buf()],
                     library_roots,
@@ -293,7 +301,7 @@ impl Backend {
                 // The Composer classmap wins every name it lists, so a
                 // self-scan entry for one of them keeps neither its path
                 // nor its origin.
-                let composer_cm = composer::parse_autoload_classmap(root, &vendor_dir);
+                let composer_cm = composer_classmap();
                 let skip_paths: HashSet<PathBuf> = composer_cm.values().cloned().collect();
                 let mut self_scan = self.build_self_scan_composer(
                     root,
@@ -333,11 +341,8 @@ impl Backend {
             if let Some(p) = progress {
                 p.set_scope(at(55), at(59), "Scanning Drupal directories");
             }
-            let drupal_result = classmap_scanner::scan_drupal_directories(
-                &drupal_web_root,
-                &self.index_filters(),
-                progress,
-            );
+            let drupal_result =
+                classmap_scanner::scan_drupal_directories(&drupal_web_root, &filters, progress);
             let drupal_count = drupal_result.classmap.len()
                 + drupal_result.function_index.len()
                 + drupal_result.constant_index.len();
@@ -354,7 +359,8 @@ impl Backend {
         // (e.g. HTMLPurifier) are listed in `autoload_namespaces.php`.
         // Scan the listed directories and merge discovered classes into
         // the classmap so they are resolvable via `find_or_load_class`.
-        let psr0_cm = composer::parse_autoload_namespaces(root, &vendor_dir);
+        let mut psr0_cm = composer::parse_autoload_namespaces(root, &vendor_dir);
+        filters.retain_unexcluded(&mut psr0_cm);
         if !psr0_cm.is_empty() {
             let count = psr0_cm.len();
             self.symbols
@@ -368,7 +374,8 @@ impl Backend {
         // autoloader exists, so no autoload map lists them and no package
         // scan reaches them.  Code that introspects its own autoloader
         // names them directly.
-        let bootstrap_cm = composer::scan_composer_bootstrap_classes(root, &vendor_dir);
+        let mut bootstrap_cm = composer::scan_composer_bootstrap_classes(root, &vendor_dir);
+        filters.retain_unexcluded(&mut bootstrap_cm);
         if !bootstrap_cm.is_empty() {
             let count = bootstrap_cm.len();
             self.symbols
