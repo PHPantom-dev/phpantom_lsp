@@ -995,23 +995,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b682-test_pivot_attached_when_relation_file_was_never_opened-fails-intermittently" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B682. <code>test_pivot_attached_when_relation_file_was_never_opened</code> fails intermittently
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1647,23 +1630,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b682-test_pivot_attached_when_relation_file_was_never_opened-fails-intermittently" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B682. <code>test_pivot_attached_when_relation_file_was_never_opened</code> fails intermittently
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1786,18 +1752,7 @@ the class lookup in <code>src/resolution/</code>.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b682-test_pivot_attached_when_relation_file_was_never_opened-fails-intermittently">B682. <code>test_pivot_attached_when_relation_file_was_never_opened</code> fails intermittently<a class="headerlink" href="#b682-test_pivot_attached_when_relation_file_was_never_opened-fails-intermittently" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<p>The Laravel completion test in <code>tests/integration/completion_laravel.rs</code>
-failed once in a full <code>cargo nextest run</code> and passed on every run on its
-own and in the suite runs before and after. The test calls
-<code>initialized()</code> and then completes on a model whose relationship lives in
-a file nothing opened, so its answer depends on the workspace index that
-<code>initialized()</code> builds. A result that changes with machine load points at
-the completion reading that index before the work it waits for has
-finished, or at state leaking in from another test on the same thread.
-Find which, and make the test (or the code under it) wait for what it
-needs.</p>
+<p>No outstanding items.</p>
 
 
 
