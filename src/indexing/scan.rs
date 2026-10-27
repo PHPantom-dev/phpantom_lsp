@@ -285,8 +285,18 @@ impl Backend {
             .as_ref()
             .map(composer::stub_package_roots)
             .unwrap_or_default();
-        composer_project_entry(&mut self.workspace.composer_projects.write(), project_root)
-            .stub_packages = stub_packages;
+        let vendor_paths = if vendor_path.is_dir() {
+            path_aliases(&vendor_path)
+        } else {
+            Vec::new()
+        };
+        {
+            let mut projects = self.workspace.composer_projects.write();
+            let project = composer_project_entry(&mut projects, project_root);
+            project.stub_packages = stub_packages;
+            project.vendor_paths = vendor_paths;
+        }
+        self.workspace.forget_project_scopes();
 
         (vendor_dir, vendor_path)
     }

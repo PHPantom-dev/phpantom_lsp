@@ -1086,6 +1086,7 @@ impl Backend {
         let effective: &str = &content_view;
 
         crate::util::catch_panic_unwind_safe("workspace_diagnostics", uri, None, || {
+            let _project_guard = self.enter_project_scope(uri);
             let _parse_guard = crate::parser::with_parse_cache(effective);
             let _cache_guard = crate::virtual_members::with_active_resolved_class_cache(
                 &self.resolved_class_cache,

@@ -57,37 +57,25 @@ No outstanding items.
 
 ## Name resolution
 
-### B684. A class one Composer project installs resolves in every other project of the workspace
+### B686. Another Composer project's own sources resolve in every project of the workspace
 
-**Impact: Medium · Complexity: High**
+**Impact: Low · Complexity: Medium**
 
-```text
-repo/
-├── composer.json
-├── platform/            ← requires guzzlehttp/guzzle
-│   ├── composer.json
-│   └── vendor/
-└── mobile/              ← does not
-    ├── composer.json
-    └── vendor/
-```
+A file under `mobile/` can name a class from `platform/src/` and gets
+completion, hover and no `unknown_class`, although `mobile/`'s
+autoloader cannot load it. A file now only sees its own project's
+`vendor/` (see `ProjectScope` in `src/resolution/project_scope.rs`), but
+the PSR-4 sources of every project stay visible to all of them, since
+`psr4_mappings` is one workspace-wide list.
 
-A file under `mobile/` that names `GuzzleHttp\Client` gets completion,
-hover and no `unknown_class`, although running it would fail: the
-class only exists in `platform/vendor/`. Every Composer project of a
-workspace (a monorepo's subprojects, or projects nested below a root
-`composer.json`) feeds one shared class index, so a lookup does not
-know which project the file asking belongs to. Two projects installing
-different versions of one package also share whichever copy was
-indexed first.
+Hiding them needs care: a path repository symlinked into a project's
+`vendor/` is that project's dependency even though its files live
+under another project's tree, and the workspace's loose files must stay
+visible to everyone.
 
-Lookups from a file need to go through the index of the project that
-holds it, falling back to the shared one only for the project's own
-sources and the workspace's loose files.
-
-**Where to look:** `ComposerProjectPaths` in `src/workspace_env.rs`
-(each project's vendor and PSR-4 mappings are already recorded), and
-the class lookup in `src/resolution/`.
+**Where to look:** `ProjectScope::sees`, and Phase 2 of
+`find_or_load_class_inner` in `src/resolution/classes.rs`, which
+resolves through the shared `psr4_mappings`.
 
 ## Code actions
 

@@ -280,6 +280,7 @@ pub async fn run(options: FixOptions) -> i32 {
 
             let (uri, content) = file_data[i].as_ref()?;
 
+            let _project_guard = backend.enter_project_scope(uri);
             let _parse_guard = with_parse_cache(content);
             let _cache_guard = with_active_resolved_class_cache(&backend.resolved_class_cache);
 

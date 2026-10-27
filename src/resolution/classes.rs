@@ -8,6 +8,7 @@ use crate::class_loader_memo;
 use crate::class_lookup::Fqn;
 use crate::composer;
 use crate::php_type::{PhpType, is_builtin_non_class_type};
+use crate::resolution::{ProjectScope, project_scope};
 use crate::types::ClassInfo;
 use crate::util::short_name;
 
@@ -120,14 +121,17 @@ impl Backend {
         // times, and every miss costs two case-insensitive hash lookups
         // behind locks the whole worker pool shares.  Read the generation
         // first so that a change landing mid-search retires the answer.
+        // The same name can find a different class in another Composer
+        // project, so the answer is memoised for the active project.
         let generation = self.symbols.class_lookup_generation();
-        match class_loader_memo::probe(self.symbols.id(), generation, ty) {
+        let owner = self.symbols.id() ^ (u64::from(project_scope::active_id()) << 48);
+        match class_loader_memo::probe(owner, generation, ty) {
             Some(memoised) => memoised,
             None => {
                 let found = ty
                     .base_name()
                     .and_then(|base| self.find_or_load_class_inner(base));
-                class_loader_memo::store(self.symbols.id(), generation, ty, &found);
+                class_loader_memo::store(owner, generation, ty, &found);
                 found
             }
         }
@@ -255,6 +259,21 @@ impl Backend {
             return Some(cls);
         }
 
+        // ── Another Composer project's dependency ───────────────────
+        // The index holds one declaration per name for the whole
+        // workspace.  When that one lives in the vendor directory of a
+        // project other than the one asking, the asking project only has
+        // the class if it installed a copy of its own.  Not a miss worth
+        // remembering: the other project does have the class.
+        if let Some(scope) = project_scope::active() {
+            let indexed = self.symbols.fqn_uri_index.read().get(class_name).cloned();
+            if let Some(uri) = indexed
+                && !scope.sees(&uri)
+            {
+                return self.find_project_copy(class_name, last_segment, &scope);
+            }
+        }
+
         // ── Phase 0: Search all already-parsed files ────────────
         // O(1) lookup via `fqn_index` (populated by `update_ast` and
         // `parse_and_cache_content`), with a linear `uri_classes_index` fallback
@@ -341,6 +360,36 @@ impl Backend {
             .class_not_found_cache
             .write()
             .insert(class_name);
+        None
+    }
+
+    /// The declaration of `class_name` that `scope` sees, other than the
+    /// one the index holds: one in the project's own vendor directory
+    /// first, else one outside every vendor directory.
+    fn find_project_copy(
+        &self,
+        class_name: &str,
+        last_segment: &str,
+        scope: &ProjectScope,
+    ) -> Option<Arc<ClassInfo>> {
+        for uri in scope.visible_alternates(self.symbols.alternate_class_uris(class_name)) {
+            let parsed = self
+                .symbols
+                .duplicate_classes
+                .read()
+                .get(class_name)
+                .and_then(|decls| decls.get(&uri).cloned());
+            if parsed.is_some() {
+                return parsed;
+            }
+            if let Some(classes) = self.parse_and_cache_uri(&uri)
+                && let Some(cls) = classes
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(last_segment))
+            {
+                return Some(Arc::clone(cls));
+            }
+        }
         None
     }
 

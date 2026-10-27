@@ -294,6 +294,12 @@ impl Backend {
         candidates.sort();
         candidates.dedup();
 
+        // In a workspace of several Composer projects, a class only another
+        // project installed is not one this file can import.
+        if crate::resolution::project_scope::active().is_some() {
+            candidates.retain(|fqn| self.find_or_load_class(fqn).is_some());
+        }
+
         // Sort by affinity score descending, with alphabetical tiebreak.
         candidates.sort_by(|a, b| {
             let score_a = crate::completion::class_completion::affinity_score(a, affinity_table);

@@ -43,25 +43,39 @@ pub(crate) struct RequestScope<'a> {
     // Shared chain prefixes (e.g. `$model->where(...)` in
     // `$model->where(...)->orderBy(...)`) are resolved once and reused.
     _chain: crate::type_engine::resolver::ChainCacheGuard,
+    // Classes are looked up as the Composer project holding the file
+    // sees them.  Entered first, so it outlives every cache filled
+    // under it.
+    _project: crate::resolution::project_scope::ProjectScopeGuard,
 }
 
 impl Backend {
-    /// Enter a [`RequestScope`] for `content`, which the parse cache
-    /// shares instead of copying.
-    pub(crate) fn enter_request_scope(&self, content: Arc<String>) -> RequestScope<'static> {
-        self.request_scope_with(|| crate::parser::with_parse_cache_arc(content))
+    /// Enter a [`RequestScope`] for `content`, the text of `uri`, which
+    /// the parse cache shares instead of copying.
+    pub(crate) fn enter_request_scope(
+        &self,
+        uri: &str,
+        content: Arc<String>,
+    ) -> RequestScope<'static> {
+        self.request_scope_with(uri, || crate::parser::with_parse_cache_arc(content))
     }
 
     /// [`enter_request_scope`](Self::enter_request_scope) for a caller
     /// that only borrows the content.
-    pub(crate) fn enter_request_scope_borrowed<'a>(&self, content: &'a str) -> RequestScope<'a> {
-        self.request_scope_with(|| crate::parser::with_parse_cache(content))
+    pub(crate) fn enter_request_scope_borrowed<'a>(
+        &self,
+        uri: &str,
+        content: &'a str,
+    ) -> RequestScope<'a> {
+        self.request_scope_with(uri, || crate::parser::with_parse_cache(content))
     }
 
     fn request_scope_with<'a>(
         &self,
+        uri: &str,
         parse: impl FnOnce() -> crate::parser::ParseCacheGuard<'a>,
     ) -> RequestScope<'a> {
+        let _project = self.enter_project_scope(uri);
         let _chain = crate::type_engine::resolver::with_chain_resolution_cache();
         let _type_engine = crate::type_engine::call_resolution::activate_type_engine_caches();
         let _resolved_classes =
@@ -71,6 +85,7 @@ impl Backend {
             _resolved_classes,
             _type_engine,
             _chain,
+            _project,
         }
     }
 
@@ -114,7 +129,7 @@ impl Backend {
             None => (self.analysable_content(uri)?, None),
         };
 
-        let _scope = self.enter_request_scope(Arc::clone(&content));
+        let _scope = self.enter_request_scope(uri, Arc::clone(&content));
         crate::util::catch_panic_unwind_safe(handler_name, uri, pos, || f(&content, pos))
     }
 

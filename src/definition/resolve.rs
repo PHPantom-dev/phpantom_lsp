@@ -494,7 +494,7 @@ impl Backend {
         // previously navigated-to vendor files) live in
         // fqn_uri_index (FQN → URI) and uri_classes_index (URI → [ClassInfo]).
         for fqn in &candidates {
-            let target_uri = self.symbols.fqn_uri_index.read().get(fqn.as_str()).cloned();
+            let target_uri = self.class_declaration_uri(fqn);
             if let Some(ref target_uri) = target_uri
                 && let Some(location) =
                     self.find_definition_in_uri_classes_index_cross_file(fqn, target_uri)
@@ -587,13 +587,11 @@ impl Backend {
     /// opened) still resolves.  Used by go-to-definition on symbols that name a
     /// class indirectly, such as an Eloquent morph alias.
     pub(crate) fn class_declaration_location(&self, fqn: &str) -> Option<Location> {
-        let indexed = self.symbols.fqn_uri_index.read().get(fqn).cloned();
-        let target_uri = match indexed {
+        let target_uri = match self.class_declaration_uri(fqn) {
             Some(uri) => uri,
             None => {
                 self.find_or_load_class(fqn);
-                let loaded = self.symbols.fqn_uri_index.read().get(fqn).cloned();
-                loaded?
+                self.class_declaration_uri(fqn)?
             }
         };
         self.find_definition_in_uri_classes_index_cross_file(fqn, &target_uri)
@@ -622,7 +620,15 @@ impl Backend {
             .read()
             .get(target_uri)
             .cloned();
-        let indexed = || self.symbols.fqn_class_index.read().get(fqn).cloned();
+        // The parsed class the index holds is only this file's when the
+        // index names this file, not another copy of the class.
+        let indexed = || {
+            let owner = self.symbols.fqn_uri_index.read().get(fqn).cloned();
+            if owner.as_deref() != Some(target_uri) {
+                return None;
+            }
+            self.symbols.fqn_class_index.read().get(fqn).cloned()
+        };
         let classes = match cached {
             Some(cached) => cached,
             None => match indexed() {
