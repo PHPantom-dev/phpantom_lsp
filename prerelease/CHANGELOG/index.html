@@ -5196,6 +5196,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Closures that return a method call on their own parameter.</strong> <code>fn (User $u) =&gt; $u-&gt;label()</code> now gets the method's return type, so calling the closure, or passing it where a <code>callable(User): string</code> is expected, sees what it returns.</li>
 <li><strong>Closures and variables inside <code>&lt;?= ?&gt;</code> echo tags.</strong> In a plain PHP template, a closure written inside an echo tag now knows the types of its parameters, so their members resolve instead of being reported as unverifiable. A variable assigned or read inside an echo tag counts as defined or used.</li>
 <li><strong><code>@see</code> in a plain comment.</strong> A <code>// @see Foo::bar()</code> inside a method body now counts as a use of the <code>Foo</code> import, so it is no longer reported unused or deleted by "Remove unused imports", and go-to-definition, find-references and rename follow it like a docblock <code>@see</code>.</li>
 <li><strong>Each Composer project of a workspace sees only its own dependencies.</strong> In a monorepo, or a workspace with Composer projects nested below its root, a class that only another project installed or declares is now reported as unknown and no longer completes, and when two projects install different versions of a package, each file resolves the version its own project installed.</li>

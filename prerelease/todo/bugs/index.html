@@ -995,23 +995,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b694-a-closures-inferred-return-type-drops-a-method-call-on-its-own-parameter" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B694. A closure's inferred return type drops a method call on its own parameter
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1647,23 +1630,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b694-a-closures-inferred-return-type-drops-a-method-call-on-its-own-parameter" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B694. A closure's inferred return type drops a method call on its own parameter
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1769,21 +1735,7 @@ reported (7 diagnostics, all that remain on the project).</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b694-a-closures-inferred-return-type-drops-a-method-call-on-its-own-parameter">B694. A closure's inferred return type drops a method call on its own parameter<a class="headerlink" href="#b694-a-closures-inferred-return-type-drops-a-method-call-on-its-own-parameter" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$a = fn(User $u) =&gt; $u;            // Closure(User): User</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$b = fn(User $u) =&gt; $u-&gt;label();   // Closure(User), expected Closure(User): string</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$b($user);                         // unknown, expected string</span>
-</code></pre></div>
-<p><code>infer_closure_literal_type</code> (<code>rhs_resolution/calls.rs</code>) seeds the
-closure's typed parameters through <code>scope_var_resolver</code> before resolving the
-body, which is enough for a bare <code>$u</code>. A member call on <code>$u</code> loses it
-(<code>$u?-&gt;label()</code> too), so the receiver's resolution apparently does not go
-through the seeded resolver; the body comes back empty and the closure gets
-no return type. A body that does not depend on the call's type, such as
-<code>strlen($u-&gt;label())</code>, is unaffected. Anything that
-reads the closure's return afterwards, such as calling it or checking it
-against a declared <code>callable(...): string</code>, sees nothing.</p>
+<p>No outstanding items.</p>
 
 
 
