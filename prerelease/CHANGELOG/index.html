@@ -5483,6 +5483,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Typing in a <code>namespace { }</code> block.</strong> While a call in a braced <code>namespace</code> block is still missing its <code>)</code>, or the block its closing <code>}</code>, signature help and completion use the block's own namespace and imports instead of an earlier block's, and the classes and functions it declares stay available to other files.</li>
 <li><strong>"Import all missing classes" with the cursor at the start of a name.</strong> The bulk import is now offered there too, wherever "Import class" is.</li>
 <li><strong>Completion shows member types next to the name.</strong> Method and property suggestions show their return or property type right after the name (e.g. <code>findOneByEmail($email): ?User</code>) in editors such as PhpStorm and VS Code, where previously only the class name was visible. Contributed by @EranNL.</li>
+<li><strong>A class declared in more than one file keeps what it inherits.</strong> When a second declaration of a class (such as a stand-in defined behind <code>class_exists()</code>) was read first, members the real class inherits are no longer reported as unknown once its own file is indexed. Contributed by @Deadsquirrel93.</li>
 </ul>
 <h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
 <ul>
