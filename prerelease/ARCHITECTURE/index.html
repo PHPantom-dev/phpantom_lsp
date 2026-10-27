@@ -3943,37 +3943,43 @@ file that declares it.</p>
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│   (see "Stub Paths" below).
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│   ↓ miss
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>├── Phase 0: fqn_class_index (O(1) hash hit)
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│   Direct lookup by FQN. This is where cached results from
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>│   previous phases are found on subsequent lookups.
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>│   ↓ miss
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>│
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>├── Phase 0.5: built-in global names → embedded stubs
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>│   A global name the embedded stubs know is a PHP built-in, so a
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>│   conditional polyfill in vendor cannot shadow it.
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>│   ↓ miss
-<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>│
-<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>├── Phase 1: fqn_uri_index (FQN → file URI)
-<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>│   Direct hash lookup in the unified FQN-to-URI index, populated
-<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>│   at init time from Composer's classmap, the self-scanner, and
-<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>│   phar archives. Covers all classes (including vendor) that don't
-<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>│   need PSR-4 path computation.
-<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>│   ↓ miss
-<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>│
-<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>├── Phase 2: PSR-4 resolution
-<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>│   Uses PSR-4 mappings from composer.json to locate the file on disk.
-<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>│   These mappings only cover user code (vendor PSR-4 is not loaded).
-<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>│   Example: "App\Models\User" → workspace/src/Models/User.php
-<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>│   Reads, parses, resolves names, caches in uri_classes_index.
-<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>│   ↓ miss
-<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>│
-<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>├── Phase 3: Embedded PHP stubs
-<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>│   Looks up the class name in the compiled-in stub index
-<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>│   (from phpstorm-stubs). Parses the stub PHP source, caches
-<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>│   in uri_classes_index under a phpantom-stub:// URI.
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>├── Project scope: another Composer project's dependency
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│   In a workspace of several Composer projects, a name the index
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>│   holds in another project's vendor/ resolves to the asking
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>│   project's own copy, or to nothing (see "Monorepo Support").
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>│   ↓ not another project's
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>│
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>├── Phase 0: fqn_class_index (O(1) hash hit)
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>│   Direct lookup by FQN. This is where cached results from
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>│   previous phases are found on subsequent lookups.
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>│   ↓ miss
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>│
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>├── Phase 0.5: built-in global names → embedded stubs
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>│   A global name the embedded stubs know is a PHP built-in, so a
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>│   conditional polyfill in vendor cannot shadow it.
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>│   ↓ miss
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>│
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>├── Phase 1: fqn_uri_index (FQN → file URI)
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>│   Direct hash lookup in the unified FQN-to-URI index, populated
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>│   at init time from Composer's classmap, the self-scanner, and
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>│   phar archives. Covers all classes (including vendor) that don't
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>│   need PSR-4 path computation.
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>│   ↓ miss
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>│
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>├── Phase 2: PSR-4 resolution
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>│   Uses PSR-4 mappings from composer.json to locate the file on disk.
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>│   These mappings only cover user code (vendor PSR-4 is not loaded).
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>│   Example: "App\Models\User" → workspace/src/Models/User.php
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>│   Reads, parses, resolves names, caches in uri_classes_index.
 <a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>│   ↓ miss
 <a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>│
-<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>└── None
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>├── Phase 3: Embedded PHP stubs
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a>│   Looks up the class name in the compiled-in stub index
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a>│   (from phpstorm-stubs). Parses the stub PHP source, caches
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a>│   in uri_classes_index under a phpantom-stub:// URI.
+<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a>│   ↓ miss
+<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a>│
+<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a>└── None
 </code></pre></div>
 <h3 id="caching">Caching<a class="headerlink" href="#caching" title="Permanent link">&para;</a></h3>
 <p>Every phase that successfully parses a file caches the result in <code>uri_classes_index</code>, <code>fqn_class_index</code>, and <code>fqn_uri_index</code>. This means:</p>
@@ -4008,6 +4014,12 @@ appears there once a second file declares it, so the overwhelming
 majority of symbols cost nothing, and keeping the runners-up is what lets
 the name pass to the next declarant when the winning file stops declaring
 it (rename, deletion, or an edit that removes it) instead of vanishing.</p>
+<p><code>duplicate_classes</code> only knows parsed declarations. Discovery also finds
+names in more than one file before anything parses them (two Composer
+projects of a workspace installing the same package), and a merge that
+keeps one location records the others in <code>class_alternates</code>, again only
+for names found more than once. A name whose indexed file goes away
+passes to one of them.</p>
 <p>Both class indexing paths (<code>apply_ast_index_updates_batch</code> for editor
 files, <code>parse_and_cache_content_versioned</code> for lazily loaded ones) and the
 watched-file purge record declarations through
@@ -4301,7 +4313,8 @@ classes the current parse produced.</p>
 <p><strong>Per-subproject processing.</strong> For each discovered <code>(subproject_root, vendor_dir)</code>, the same Composer pipeline runs: PSR-4 mappings (with base paths resolved to absolute paths so <code>resolve_class_path</code> works regardless of workspace root), classmap parsing, vendor package scanning from <code>installed.json</code>, and autoload file indexing. Results are merged into the shared backend state with first-subproject-wins semantics for duplicate FQNs.</p>
 <p><strong>Loose file discovery.</strong> After all subprojects are processed, the gitignore-aware full-scan walker (<code>scan_workspace_fallback_full</code>) runs on the workspace root with a skip set containing all subproject root paths. This picks up PHP files outside any subproject tree (e.g. top-level scripts, shared utilities) without double-scanning subproject content.</p>
 <p><strong>Vendor tracking.</strong> Each subproject's vendor directory is registered in both <code>vendor_uri_prefixes</code> (for URI-level vendor detection in diagnostics, find references, and rename) and <code>vendor_dir_paths</code> (for filesystem-level skip logic in go-to-implementation and workspace indexing).</p>
-<p><strong>Trade-offs.</strong> Conflicting class versions across subprojects result in first-wins resolution. A single PHP version is used for the entire workspace. Per-subproject <code>.phpantom.toml</code> is not supported. Multi-root LSP workspaces (separate <code>workspaceFolders</code>) are a separate feature.</p>
+<p><strong>Per-project class lookups.</strong> The class index is shared, but a file only sees the dependencies of the Composer project holding it. When the workspace has two or more projects with a vendor directory, each gets a <code>ProjectScope</code> (<code>resolution/project_scope.rs</code>): its own vendor directory and every other project's. The work done for one file (an LSP request through <code>RequestScope</code>, the file's diagnostic pass, <code>analyze</code> and <code>fix</code>) runs with the scope of the innermost project holding it, and <code>find_or_load_class</code> answers a name the index holds in another project's vendor with the project's own copy from <code>class_alternates</code> or <code>duplicate_classes</code>, or with nothing. Work that is not about one file, and files outside every project, see the shared index. The class memo and the resolved-class cache key their entries by scope, since a class resolves differently when its ancestors come from a different copy. A workspace with a single installed project has no scopes and pays nothing.</p>
+<p><strong>Trade-offs.</strong> A single PHP version is used for the entire workspace. Per-subproject <code>.phpantom.toml</code> is not supported. Multi-root LSP workspaces (separate <code>workspaceFolders</code>) are a separate feature.</p>
 <h3 id="function-resolution-priority">Function Resolution Priority<a class="headerlink" href="#function-resolution-priority" title="Permanent link">&para;</a></h3>
 <p>When resolving a standalone function call (e.g. <code>app()</code>, <code>date_create()</code>), the lookup order is:</p>
 <ol>

@@ -5170,6 +5170,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Each Composer project of a workspace sees only its own dependencies.</strong> In a monorepo, or a workspace with Composer projects nested below its root, a class that only another project installed is now reported as unknown and no longer completes, and when two projects install different versions of a package, each file resolves the version its own project installed.</li>
 <li><strong><code>$pivot</code> right after startup.</strong> A model reached through a many-to-many relationship no longer misses its <code>$pivot</code> property in completion or diagnostics when the editor asks for both at once while the relationship index is still being built.</li>
 <li><strong>An override's own return type wins over its parent's docblock.</strong> A method declaring <code>: View</code> without a docblock of its own no longer picks up the other classes and scalars a parent's <code>@return</code> lists, so members of <code>View</code> are no longer reported as missing on them.</li>
 <li><strong>No highlighting flicker while typing.</strong> Semantic highlighting, CodeLens, and document highlights no longer blank out or land a few characters away from their symbol when a request arrives before an edit has been parsed. The editor keeps what it shows until the update is ready.</li>
