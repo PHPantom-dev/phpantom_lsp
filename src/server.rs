@@ -437,6 +437,45 @@ impl LanguageServer for Backend {
         .await
     }
 
+    async fn goto_declaration(
+        &self,
+        params: DeclarationParams,
+    ) -> Result<Option<DeclarationResponse>> {
+        if self.is_foreign_document(&params.text_document_position_params.text_document.uri) {
+            return Ok(None);
+        }
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+
+        self.run_position_request(
+            "goto_declaration",
+            uri,
+            position,
+            |backend, uri, position| {
+                backend.handle_with_position("goto_declaration", uri, position, |content, pos| {
+                    let locs = backend
+                        .resolve_declaration(uri, content, pos)
+                        .into_iter()
+                        .map(|l| backend.translate_location(l))
+                        .collect();
+                    wrap_locations(locs).map(|definition| {
+                        DeclarationResponse::Declaration(match definition {
+                            Definition::Location(location) => Declaration::Location(location),
+                            Definition::LocationList(locations) => {
+                                Declaration::LocationList(locations)
+                            }
+                        })
+                    })
+                })
+            },
+        )
+        .await
+    }
+
     async fn goto_implementation(
         &self,
         params: ImplementationParams,
@@ -711,19 +750,25 @@ impl LanguageServer for Backend {
             uri,
             position,
             |backend, uri, position| {
-                backend.handle_with_position("document_highlight", uri, position, |content, pos| {
-                    backend
-                        .handle_document_highlight(uri, content, pos)
-                        .map(|highlights| {
-                            highlights
-                                .into_iter()
-                                .filter_map(|mut h| {
-                                    h.range = backend.try_translate_blade_range(uri, h.range)?;
-                                    Some(h)
-                                })
-                                .collect()
-                        })
-                })
+                backend.with_current_symbol_map(
+                    "document_highlight",
+                    uri,
+                    Some(position),
+                    |content, pos| {
+                        backend
+                            .handle_document_highlight(uri, content, pos?)
+                            .map(|highlights| {
+                                highlights
+                                    .into_iter()
+                                    .filter_map(|mut h| {
+                                        h.range =
+                                            backend.try_translate_blade_range(uri, h.range)?;
+                                        Some(h)
+                                    })
+                                    .collect()
+                            })
+                    },
+                )
             },
         )
         .await
@@ -737,28 +782,37 @@ impl LanguageServer for Backend {
         let position = params.position;
 
         self.run_position_request("prepare_rename", uri, position, |backend, uri, position| {
-            backend.handle_with_position("prepare_rename", uri, position, |content, pos| {
-                backend
-                    .handle_prepare_rename(uri, content, pos)
-                    .and_then(|res| match res {
-                        PrepareRenameResult::Range(r) => backend
-                            .try_translate_blade_range(uri, r)
-                            .map(PrepareRenameResult::Range),
-                        PrepareRenameResult::PrepareRenamePlaceholder(p) => backend
-                            .try_translate_blade_range(uri, p.range)
-                            .map(|range| {
-                                PrepareRenameResult::PrepareRenamePlaceholder(
-                                    PrepareRenamePlaceholder {
-                                        range,
-                                        placeholder: p.placeholder,
-                                    },
-                                )
-                            }),
-                        default @ PrepareRenameResult::PrepareRenameDefaultBehavior(_) => {
-                            Some(default)
-                        }
-                    })
-            })
+            let outcome =
+                backend.handle_with_position("prepare_rename", uri, position, |content, pos| {
+                    Some(backend.handle_prepare_rename(uri, content, pos))
+                })?;
+            // A refusal is answered as an error so the editor shows why
+            // instead of asking for a name it would then reject.
+            let response = match outcome {
+                Some(Ok(response)) => response,
+                Some(Err(message)) => {
+                    return Err(tower_lsp_server::jsonrpc::Error {
+                        code: tower_lsp_server::jsonrpc::ErrorCode::InvalidRequest,
+                        message: message.into(),
+                        data: None,
+                    });
+                }
+                None => None,
+            };
+            Ok(response.and_then(|res| match res {
+                PrepareRenameResult::Range(r) => backend
+                    .try_translate_blade_range(uri, r)
+                    .map(PrepareRenameResult::Range),
+                PrepareRenameResult::PrepareRenamePlaceholder(p) => backend
+                    .try_translate_blade_range(uri, p.range)
+                    .map(|range| {
+                        PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+                            range,
+                            placeholder: p.placeholder,
+                        })
+                    }),
+                default @ PrepareRenameResult::PrepareRenameDefaultBehavior(_) => Some(default),
+            }))
         })
         .await
     }
@@ -874,7 +928,7 @@ impl LanguageServer for Backend {
         let u = uri.clone();
         let lenses = self
             .coalesced_whole_file("code_lens", &uri, move || {
-                backend.handle_with_uri("code_lens", &u, |content| {
+                backend.with_current_symbol_map("code_lens", &u, None, |content, _| {
                     backend.handle_code_lens(&u, content)
                 })
             })
@@ -982,7 +1036,7 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let u = uri.clone();
         self.coalesced_whole_file("semantic_tokens_full", &uri, move || {
-            backend.handle_with_uri("semantic_tokens_full", &u, |content| {
+            backend.with_current_symbol_map("semantic_tokens_full", &u, None, |content, _| {
                 backend.handle_semantic_tokens_full(&u, content)
             })
         })

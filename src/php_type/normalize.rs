@@ -363,6 +363,8 @@ fn native_value_domains(ty: &PhpType) -> Option<Vec<ValueDomain>> {
             }
             Some(domains)
         }
+        // A class admits only objects, which belong to none of the domains.
+        _ if ty.class_name().is_some() && !ty.is_mixed() => Some(Vec::new()),
         _ => {
             let mut domains = vec![value_domain(ty)?];
             // A native `float` accepts an `int` return and coerces it, so a

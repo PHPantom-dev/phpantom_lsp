@@ -35,7 +35,7 @@ use tower_lsp_server::gen_lsp_types::{CompletionResponse, Position};
 use crate::Backend;
 use crate::completion::eloquent_string::detect_string_call_context;
 use crate::completion::laravel_string_keys::{
-    ArgumentSlot, attribute_class_start, callable_before_scalar_argument, string_key_item_kind,
+    ArgumentSlot, attribute_class_start, scalar_argument_at, string_key_item_kind,
     string_key_response,
 };
 use crate::completion::source::code_context::CodeContext;
@@ -75,7 +75,7 @@ impl Backend {
         let (kind, prefix_start) = self
             .symfony_call_key(content, cursor, code, ctx)
             .map(|kind| (kind, literal_start))
-            .or_else(|| attribute_key(content, quote, literal, literal_start, ctx))
+            .or_else(|| attribute_key(content, code, literal, literal_start, ctx))
             .filter(|(kind, _)| self.string_key_kind_enabled(*kind))?;
         if kind == StringKeyKind::SymfonyTranslation {
             let domain = self.translation_domain_at(uri, content, literal_start);
@@ -357,13 +357,12 @@ impl Backend {
 /// `#[AsMessageHandler]`'s `bus:` a bus.
 fn attribute_key(
     content: &str,
-    quote: usize,
+    code: &CodeContext<'_>,
     literal: &str,
     literal_start: usize,
     ctx: &FileContext,
 ) -> Option<(StringKeyKind, usize)> {
-    let before_quote = content[..quote].trim_end();
-    let (callable, slot) = callable_before_scalar_argument(before_quote)?;
+    let (callable, slot) = scalar_argument_at(content, code)?;
     let name_start = callable.len() - trailing_name(callable).len();
     let class_start = attribute_class_start(callable, name_start)?;
     let written = &callable[class_start..];

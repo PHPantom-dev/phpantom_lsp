@@ -56,7 +56,13 @@ impl Backend {
                     Some(VarDefKind::Property)
                 ) || self.is_promoted_property_param(uri, span.start);
                 if is_property {
-                    self.highlight_member_name(uri, symbol_map, content, name, MemberRefKind::Value)
+                    self.highlight_member_name(
+                        uri,
+                        symbol_map,
+                        content,
+                        name,
+                        MemberRefKind::Property,
+                    )
                 } else {
                     self.highlight_variable(symbol_map, content, name, span.start)
                 }
@@ -66,21 +72,23 @@ impl Backend {
                 let fqn = class_span_fqn(kind, span.start, &ctx)?;
                 self.highlight_class(symbol_map, content, &fqn, &ctx)
             }
-            kind @ SymbolKind::MemberAccess { member_name, .. } => self.highlight_member_name(
+            SymbolKind::MemberAccess { member_name, .. } => self.highlight_member_name(
                 uri,
                 symbol_map,
                 content,
                 member_name,
-                MemberRefKind::of_access(kind).unwrap_or(MemberRefKind::Either),
+                MemberRefKind::of_access(&span).unwrap_or(MemberRefKind::Either),
             ),
             SymbolKind::MemberDeclaration {
-                name, is_method, ..
+                name,
+                is_static,
+                is_method,
             } => self.highlight_member_name(
                 uri,
                 symbol_map,
                 content,
                 name,
-                MemberRefKind::of_method(*is_method),
+                MemberRefKind::of_declaration(*is_static, *is_method),
             ),
             SymbolKind::FunctionCall { name, .. } => {
                 self.highlight_function(symbol_map, content, name)
@@ -190,7 +198,7 @@ impl Backend {
         // A constructor-promoted property is declared by a parameter, so its
         // Variable span is tagged as a parameter rather than a property; the
         // class's property offsets are what pick it out.
-        let property_offsets: Vec<u32> = if target_kind.admits(MemberRefKind::Value) {
+        let property_offsets: Vec<u32> = if target_kind.admits(MemberRefKind::Property) {
             self.shared_classes_for_uri(uri)
                 .iter()
                 .flat_map(|classes| classes.iter())
@@ -202,22 +210,24 @@ impl Backend {
             Vec::new()
         };
         collect_highlights(symbol_map, content, |span| match &span.kind {
-            kind @ SymbolKind::MemberAccess { member_name, .. }
-                if member_name == target_name && target_kind.admits_access(kind) =>
+            SymbolKind::MemberAccess { member_name, .. }
+                if member_name == target_name && target_kind.admits_access(span) =>
             {
                 Some(DocumentHighlightKind::Read)
             }
             SymbolKind::MemberDeclaration {
-                name, is_method, ..
+                name,
+                is_static,
+                is_method,
             } if name == target_name
-                && target_kind.admits(MemberRefKind::of_method(*is_method)) =>
+                && target_kind.admits(MemberRefKind::of_declaration(*is_static, *is_method)) =>
             {
                 Some(DocumentHighlightKind::Write)
             }
             // Also match property declarations that appear as Variable spans.
             SymbolKind::Variable { name }
                 if name == target_name
-                    && target_kind.admits(MemberRefKind::Value)
+                    && target_kind.admits(MemberRefKind::Property)
                     && (property_offsets.contains(&span.start)
                         || symbol_map
                             .var_def_kind_at(name, span.start)

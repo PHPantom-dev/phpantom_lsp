@@ -500,31 +500,6 @@ Doctrine extension's `PropertiesExtension`s.
 
 ---
 
-## D39. Writes to a `@readonly` property are not checked
-
-**Impact: Low · Complexity: Medium**
-
-```php
-final class Invoice
-{
-    /** @readonly */
-    public int $total;
-}
-
-$invoice->total = 0; // nothing reported
-```
-
-`@readonly` (and `@psalm-readonly`, `@phpstan-readonly`) marks a property
-that may only be initialized once, from inside its class, the way native
-`readonly` does, for code that predates PHP 8.1. `invalid_readonly_write`
-only knows the native keyword, so a write from outside the class or a
-second assignment in the constructor goes unreported. The check applies
-unchanged once the property counts as readonly. PHPStan's Doctrine
-extension fixture `missing_readonly_property_assign_phpdoc.fixture` in
-`tests/fixtures/phpstan_doctrine/` has the constructor case.
-
----
-
 ## D40. A Doctrine entity mapped in XML or YAML is not checked for uninitialized properties
 
 **Impact: Low · Complexity: Medium**

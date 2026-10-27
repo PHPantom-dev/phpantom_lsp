@@ -317,6 +317,7 @@ fn property_eq(a: &PropertyInfo, b: &PropertyInfo) -> bool {
         description,
         is_static,
         is_readonly,
+        doc_readonly,
         visibility,
         deprecation_message,
         deprecated_replacement,
@@ -330,6 +331,7 @@ fn property_eq(a: &PropertyInfo, b: &PropertyInfo) -> bool {
         && *native_type_hint == b.native_type_hint
         && *is_static == b.is_static
         && *is_readonly == b.is_readonly
+        && *doc_readonly == b.doc_readonly
         && *visibility == b.visibility
         && *is_virtual == b.is_virtual
         && *description == b.description

@@ -16,6 +16,7 @@ use crate::definition::member::MemberKind;
 use crate::inheritance::find_declaring_ancestor;
 use crate::reference_counts::MemberSlot;
 use crate::reference_index::ReferenceIndexKey;
+use crate::references::MemberRefKind;
 use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::text_position::{LineIndex, offset_to_position};
 use crate::types::{ClassInfo, ClassLikeKind, Visibility};
@@ -158,7 +159,7 @@ impl Backend {
                         method.name,
                         MemberSlot {
                             is_static: method.is_static,
-                            is_method: true,
+                            kind: MemberRefKind::Method,
                         },
                     )
                 {
@@ -219,7 +220,7 @@ impl Backend {
                     crate::atom::atom(member_name),
                     MemberSlot {
                         is_static: property.is_static,
-                        is_method: false,
+                        kind: MemberRefKind::Property,
                     },
                 ) {
                     lenses.push(lens);
@@ -238,7 +239,7 @@ impl Backend {
                     constant.name,
                     MemberSlot {
                         is_static: true,
-                        is_method: false,
+                        kind: MemberRefKind::Constant,
                     },
                 ) {
                     lenses.push(lens);
@@ -411,7 +412,8 @@ impl Backend {
                 "classFqn": class_fqn.as_str(),
                 "member": member.as_str(),
                 "isStatic": slot.is_static,
-                "isMethod": slot.is_method,
+                "isMethod": slot.kind == MemberRefKind::Method,
+                "isConstant": slot.kind == MemberRefKind::Constant,
             })),
         })
     }
@@ -601,9 +603,16 @@ impl Backend {
                         .and_then(|offset| u32::try_from(offset).ok())?;
                     let class_fqn = data.get("classFqn").and_then(serde_json::Value::as_str)?;
                     let member = data.get("member").and_then(serde_json::Value::as_str)?;
+                    let flag = |key: &str| data.get(key).and_then(serde_json::Value::as_bool);
                     let slot = MemberSlot {
-                        is_static: data.get("isStatic").and_then(serde_json::Value::as_bool)?,
-                        is_method: data.get("isMethod").and_then(serde_json::Value::as_bool)?,
+                        is_static: flag("isStatic")?,
+                        kind: if flag("isConstant")? {
+                            MemberRefKind::Constant
+                        } else if flag("isMethod")? {
+                            MemberRefKind::Method
+                        } else {
+                            MemberRefKind::Property
+                        },
                     };
                     Some(self.resolve_member_ref_locations(
                         uri,

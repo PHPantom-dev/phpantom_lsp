@@ -17603,3 +17603,39 @@ final class Host
          subclass, which refines the native `\\ReflectionProperty`: {unknown:?}"
     );
 }
+
+/// An override whose native return type merely restates the interface's
+/// bound still answers with the interface's method template, so a member
+/// access on the call's result reaches the class the argument names.
+#[test]
+fn override_with_native_return_keeps_the_interface_method_template() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+interface Node {
+    /**
+     * @template T of Node
+     * @param class-string<T> $type
+     * @return T|null
+     */
+    public function first($type): ?self;
+}
+abstract class Base implements Node {
+    public function first($type): ?Node { return null; }
+}
+final class Leaf extends Base { public function leafOnly(): int { return 1; } }
+
+function f(Base $b): void {
+    $v = $b->first(Leaf::class);
+    $v->leafOnly();
+    $b->first(Leaf::class)->leafOnly();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .all(|d| !message_text(&d.message).contains("leafOnly")),
+        "`first(Leaf::class)` returns `Leaf|null` through the override, got: {diags:?}"
+    );
+}

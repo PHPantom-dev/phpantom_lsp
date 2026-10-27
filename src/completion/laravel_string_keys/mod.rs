@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::completion::source::code_context::CodeContext;
 use crate::symbol_map::{LaravelConfigResource, StringKeyKind};
 use crate::types::FileContext;
 
@@ -23,7 +24,7 @@ mod enumerate;
 mod tests;
 
 use context::*;
-pub(crate) use context::{ArgumentSlot, attribute_class_start, callable_before_scalar_argument};
+pub(crate) use context::{ArgumentSlot, attribute_class_start, scalar_argument_at};
 
 /// The icon an editor shows beside a completed string key: whatever the key
 /// names is what it should look like.
@@ -191,7 +192,9 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<CompletionResponse> {
-        self.try_laravel_string_key_completion_inner(content, position, None, None, None)
+        let cursor = crate::text_position::position_to_offset(content, position) as usize;
+        let code = crate::completion::source::code_context::code_context_at(content, cursor)?;
+        self.try_laravel_string_key_completion_inner(content, position, &code, None, None, None)
     }
 
     /// Live-request form of Laravel string-key completion. Resolved names
@@ -200,6 +203,7 @@ impl Backend {
         &self,
         content: &str,
         position: Position,
+        code: &CodeContext<'_>,
         file_ctx: &FileContext,
     ) -> Option<CompletionResponse> {
         let indexed_function_exists = |name: &str| self.has_indexed_function(name);
@@ -207,6 +211,7 @@ impl Backend {
         self.try_laravel_string_key_completion_inner(
             content,
             position,
+            code,
             file_ctx.resolved_names.as_deref(),
             Some(&indexed_function_exists),
             Some(&indexed_class_exists),
@@ -217,6 +222,7 @@ impl Backend {
         &self,
         content: &str,
         position: Position,
+        code: &CodeContext<'_>,
         resolved_names: Option<&crate::names::OwnedResolvedNames>,
         indexed_function_exists: Option<&dyn Fn(&str) -> bool>,
         indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
@@ -224,6 +230,7 @@ impl Backend {
         let ctx = detect_laravel_string_key_context_inner(
             content,
             position,
+            code,
             resolved_names,
             indexed_function_exists,
             indexed_class_exists,

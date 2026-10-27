@@ -35,29 +35,13 @@ impl Backend {
         // and the editor re-requests them on each scroll and each refresh a
         // keystroke triggers, so the work runs off the request task.
         let backend = self.clone_for_blocking();
-        let outcome = crate::server::run_blocking_cancel_safe("inlay_hint", move || {
-            backend.with_file_content("textDocument/inlayHint", &uri, None, |content, _| {
+        crate::server::run_blocking_cancel_safe("inlay_hint", move || {
+            backend.with_current_symbol_map("textDocument/inlayHint", &uri, None, |content, _| {
                 backend.handle_inlay_hints(&uri, content, range)
             })
         })
         .await
-        .flatten();
-
-        match outcome {
-            Some(Some(hints)) => Ok(Some(hints)),
-            // The symbol map lags the buffer.  A null result would read as
-            // "no hints here" and blank the labels the editor is showing;
-            // `ContentModified` lets it keep them until the
-            // `inlayHint/refresh` that `did_change` sends once the new map
-            // commits.
-            Some(None) => Err(jsonrpc::Error {
-                code: jsonrpc::ErrorCode::ContentModified,
-                message: "inlay hints are not current for this document version".into(),
-                data: None,
-            }),
-            // No content to work from, or the blocking task died.
-            None => Ok(None),
-        }
+        .unwrap_or(Ok(None))
     }
 
     /// Handle a `textDocument/inlayHint` request.

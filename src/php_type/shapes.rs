@@ -330,6 +330,13 @@ impl PhpType {
                 return None;
             }
         }
+        Self::merge_shape_entries(a, b)
+    }
+
+    /// Pair the entries of two shapes by runtime key, unconditionally: a key
+    /// both hold joins their values, and one only one side holds becomes
+    /// optional. `None` when either side's keys are not decidable.
+    fn merge_shape_entries(a: &[ShapeEntry], b: &[ShapeEntry]) -> Option<Vec<ShapeEntry>> {
         let keys_a = runtime_shape_keys(a)?;
         let keys_b = runtime_shape_keys(b)?;
         // An entry that may be absent no longer sits at the index a
@@ -417,6 +424,75 @@ impl PhpType {
         } else {
             PhpType::union(members)
         }
+    }
+
+    /// Fold the alternatives an array holds after an append into as few
+    /// shapes as describe them, the way PHPStan's `TypeCombinator` reduces
+    /// constant arrays.
+    ///
+    /// Appending to each alternative of `array{}|array{A}` keeps every path
+    /// apart (`array{B}|array{A, B}`), so a run of conditional appends would
+    /// double the alternatives at each one. A shape whose keys are all keys
+    /// of another folds into it, with the keys it lacks becoming optional:
+    /// `array{B}|array{A, B}` is `array{0: A|B, 1?: B}`. The empty array
+    /// stays apart, since folding it in would leave no entry required.
+    pub(crate) fn fold_key_subset_shapes(members: Vec<PhpType>) -> PhpType {
+        let mut members = members;
+        let mut i = 0;
+        while i < members.len() {
+            let mut grew = false;
+            let mut j = i + 1;
+            while j < members.len() {
+                match Self::fold_key_subset_pair(&members[i], &members[j]) {
+                    Some(folded) => {
+                        members[i] = folded;
+                        members.remove(j);
+                        grew = true;
+                        j = i + 1;
+                    }
+                    None => j += 1,
+                }
+            }
+            // A shape that took another in may now hold every key of one
+            // it was compared with before.
+            i = if grew { 0 } else { i + 1 };
+        }
+        if members.len() == 1 {
+            members.into_iter().next().unwrap()
+        } else {
+            PhpType::union(members)
+        }
+    }
+
+    /// `a` and `b` as one shape when the keys of one are all keys of the
+    /// other (see [`fold_key_subset_shapes`](Self::fold_key_subset_shapes)).
+    fn fold_key_subset_pair(a: &PhpType, b: &PhpType) -> Option<PhpType> {
+        fn sealed_entries(ty: &PhpType) -> Option<&[ShapeEntry]> {
+            if ty.as_unsealed_shape().is_some() {
+                return None;
+            }
+            match ty.kind() {
+                TypeKind::ArrayShape(entries) if !entries.is_empty() => Some(entries),
+                _ => None,
+            }
+        }
+        let entries_a = sealed_entries(a)?;
+        let entries_b = sealed_entries(b)?;
+        let keys_a = runtime_shape_keys(entries_a)?;
+        let keys_b = runtime_shape_keys(entries_b)?;
+        let merged = if keys_b.iter().all(|key| keys_a.contains(key)) {
+            Self::merge_shape_entries(entries_a, entries_b)?
+        } else if keys_a.iter().all(|key| keys_b.contains(key)) {
+            Self::merge_shape_entries(entries_b, entries_a)?
+        } else {
+            return None;
+        };
+        let shape = PhpType::array_shape(merged);
+        Some(if a.is_list_shape() && b.is_list_shape() {
+            PhpType::as_list_shape(shape)
+        } else {
+            shape
+        })
     }
 
     /// Look up the value type for a specific property in an object shape.

@@ -81,8 +81,7 @@ to settle a proof once instead of re-proving it at every later join
 (remember which proofs were already shown to survive against a holder
 value that has not changed since). Making the shape comparison
 allocation-free is worth doing on its own, but leaves the curve where
-it is. B683's generalisation of shape unions would shrink the shapes
-being compared too.
+it is.
 
 **Where to look:** `join_implied_narrowings` in
 `src/type_engine/variable/forward_walk/scope_state/proofs.rs`,

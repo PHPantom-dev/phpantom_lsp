@@ -9,7 +9,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::docblock::{
-    class_ref_span, class_ref_span_ctx, extract_docblock_symbols,
+    class_ref_span, class_ref_span_ctx, extract_comment_see_symbols, extract_docblock_symbols,
     extract_docblock_symbols_covering, get_docblock_text_with_offset, is_navigable_type,
 };
 use super::morph_columns::{record_morph_column_call, record_morph_column_comparison};
@@ -378,13 +378,27 @@ fn extract_symbol_map_inner(
     // inside array literals or after expressions) are never visited.
     // Scan every docblock trivia entry and extract symbols; the dedup
     // step below removes any duplicates from already-processed docblocks.
+    // Plain comments are never attached to a node, so their `@see` tags
+    // are only found here.
     for t in program.trivia.iter() {
-        if t.kind == TriviaKind::DocBlockComment {
-            let _found = extract_docblock_symbols(
-                bytes_to_str(t.value),
-                t.span.start.offset,
-                &mut ctx.spans,
-            );
+        match t.kind {
+            TriviaKind::DocBlockComment => {
+                let _found = extract_docblock_symbols(
+                    bytes_to_str(t.value),
+                    t.span.start.offset,
+                    &mut ctx.spans,
+                );
+            }
+            TriviaKind::SingleLineComment
+            | TriviaKind::HashComment
+            | TriviaKind::MultiLineComment => {
+                extract_comment_see_symbols(
+                    bytes_to_str(t.value),
+                    t.span.start.offset,
+                    &mut ctx.spans,
+                );
+            }
+            TriviaKind::WhiteSpace => {}
         }
     }
 

@@ -368,12 +368,23 @@ impl Backend {
         // calling classify/is_likely_namespace_not_class (which
         // re-acquire the same lock — parking_lot RwLock is not
         // reentrant).
+        // Another Composer project's dependencies are not offered, unless
+        // this file's project installed its own copy.
+        let scope = crate::resolution::project_scope::active();
         let fqn_keys: Vec<String> = self
             .symbols
             .fqn_uri_index
             .read()
-            .keys()
-            .map(str::to_owned)
+            .iter()
+            .filter(|(fqn, uri)| {
+                scope.as_ref().is_none_or(|scope| {
+                    scope.sees(uri)
+                        || !scope
+                            .visible_alternates(self.symbols.alternate_class_uris(fqn))
+                            .is_empty()
+                })
+            })
+            .map(|(fqn, _)| fqn.to_owned())
             .collect();
         for fqn in &fqn_keys {
             let sn = short_name(fqn);

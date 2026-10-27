@@ -853,3 +853,32 @@ function f(array $entry, array $counts, string $k): string {
         "the offset read resolves to Carbon: {unresolved:?}"
     );
 }
+
+/// A conditional append lands on every array the variable may hold by then,
+/// so the path that skipped an earlier append and took a later one is kept,
+/// and the alternatives fold into one shape with optional trailing entries
+/// rather than doubling at each append.
+#[test]
+fn conditional_appends_keep_every_path() {
+    let content = r#"<?php
+function f(bool $a, bool $b, bool $d): void {
+    $c = [];
+    if ($a) { $c[] = 1; }
+    if ($b) { $c[] = 2; }
+    echo /*TWO*/$c;
+    if (count($c) === 1) {
+        echo /*ONE*/$c;
+    }
+    if ($d) { $c[] = 3; }
+    echo /*THREE*/$c;
+}
+"#;
+    assert_marked_types(
+        content,
+        &[
+            ("TWO", "array{}|array{1|2, 1?: 2}"),
+            ("ONE", "array{1|2}"),
+            ("THREE", "array{}|array{1|2|3, 1?: 2|3, 2?: 3}"),
+        ],
+    );
+}

@@ -15,7 +15,7 @@ use crate::code_actions::multi_file_edit;
 use crate::framework::{
     FrameworkReferenceKind, namespace_segment_range_at_offset, short_segment_range,
 };
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{SymbolKind, SymbolSpan};
 use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::util::build_fqn;
 
@@ -78,15 +78,16 @@ impl Backend {
     /// Handle `textDocument/prepareRename`.
     ///
     /// Validates that the symbol under the cursor is renameable and
-    /// returns its range and current name.  Returns `None` (which the
-    /// LSP layer translates to an error) when the symbol cannot be
-    /// renamed.
+    /// returns its range and current name.  `Ok(None)` when the symbol
+    /// cannot be renamed, and `Err(message)` when it could but the rename
+    /// would break the code, so the editor says why before asking for a
+    /// new name.
     pub(crate) fn handle_prepare_rename(
         &self,
         uri: &str,
         content: &str,
         position: Position,
-    ) -> Option<PrepareRenameResult> {
+    ) -> Result<Option<PrepareRenameResult>, String> {
         // A YAML/XML occurrence is a rename site only through the Symfony
         // and Doctrine resource index, which edits a single segment of the
         // name.  Anything else there may be the escaped `App\\Handler` form
@@ -94,9 +95,25 @@ impl Backend {
         // nothing here can plan the edit that replaces it, and the PHP
         // occurrences are reached from the declaration instead.
         if self.is_resource_uri(uri) {
-            return self.handle_framework_prepare_rename(uri, content, position);
+            return Ok(self.handle_framework_prepare_rename(uri, content, position));
         }
+        let Some((span, response)) = self.prepare_rename_response(uri, content, position) else {
+            return Ok(None);
+        };
+        if let Some(refusal) = self.contract_rename_refusal(uri, content, &span) {
+            return Err(refusal);
+        }
+        Ok(Some(response))
+    }
 
+    /// The symbol under the cursor and the range and placeholder
+    /// `prepareRename` answers with, `None` when it cannot be renamed.
+    fn prepare_rename_response(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Option<(SymbolSpan, PrepareRenameResult)> {
         let span = self.lookup_symbol_at_position(uri, content, position)?;
 
         // The range below is built from this span's byte offsets, and the
@@ -118,11 +135,13 @@ impl Backend {
                 start: offset_to_position(content, span.start as usize),
                 end: offset_to_position(content, span.end as usize),
             };
-            return Some(PrepareRenameResult::PrepareRenamePlaceholder(
-                PrepareRenamePlaceholder {
+            let placeholder = name.to_string();
+            return Some((
+                span,
+                PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
                     range,
-                    placeholder: name.to_string(),
-                },
+                    placeholder,
+                }),
             ));
         }
 
@@ -145,9 +164,39 @@ impl Backend {
             name
         };
 
-        Some(PrepareRenameResult::PrepareRenamePlaceholder(
-            PrepareRenamePlaceholder { range, placeholder },
+        Some((
+            span,
+            PrepareRenameResult::PrepareRenamePlaceholder(PrepareRenamePlaceholder {
+                range,
+                placeholder,
+            }),
         ))
+    }
+
+    /// Why renaming the method `span` names would break the code, when it
+    /// would: a class the rename reaches would no longer implement a method
+    /// an interface or abstract declaration outside the rename requires.
+    fn contract_rename_refusal(
+        &self,
+        uri: &str,
+        content: &str,
+        span: &SymbolSpan,
+    ) -> Option<String> {
+        let conflict =
+            self.method_rename_contract_conflict(uri, content, &span.kind, span.start)?;
+        let (class, contract) = (&conflict.class, &conflict.contract);
+        Some(if conflict.contract_renameable {
+            format!(
+                "Renaming this method would leave `{class}` without `{contract}`, \
+                 which it has to implement. Rename `{contract}` instead."
+            )
+        } else {
+            format!(
+                "Renaming this method would leave `{class}` without `{contract}`, \
+                 which it has to implement. `{contract}` is declared outside the project, \
+                 so it cannot be renamed."
+            )
+        })
     }
 
     /// Whether this rename can reach a file that is not open.
@@ -254,6 +303,10 @@ impl Backend {
         // would corrupt one representation.
         if is_config_resource_identity(&span.kind) {
             return Ok(None);
+        }
+
+        if let Some(refusal) = self.contract_rename_refusal(uri, content, &span) {
+            return Err(refusal);
         }
 
         // Find all references (including the declaration).

@@ -41,6 +41,44 @@ async fn test_goto_definition_class_constant_same_file() {
     }
 }
 
+/// `Foo::path` can only read a constant, so a static property of the
+/// same name is not what it names, while `Foo::$path` is.
+#[tokio::test]
+async fn test_goto_definition_class_constant_beside_same_named_property() {
+    let backend = create_test_backend();
+
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    public static string $path = '/tmp';\n",
+        "    const path = '/etc';\n",
+        "    public function own(): void {\n",
+        "        echo self::path;\n",
+        "        echo self::$path;\n",
+        "    }\n",
+        "}\n",
+        "echo Config::path;\n",
+        "echo Config::$path;\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    for (line, character, expected, what) in [
+        (5, 21, 3, "self::path"),
+        (6, 22, 2, "self::$path"),
+        (9, 14, 3, "Config::path"),
+        (10, 15, 2, "Config::$path"),
+    ] {
+        match goto_definition_at(&backend, &uri, line, character).await {
+            Some(DefinitionResponse::Definition(Definition::Location(location))) => {
+                assert_eq!(location.range.start.line, expected, "{what}");
+            }
+            other => panic!("{what}: expected a location, got {other:?}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_goto_definition_self_const_in_class_level_attribute() {
     let backend = create_test_backend();
@@ -3021,6 +3059,42 @@ async fn test_goto_definition_see_tag_inline_in_expression() {
     match result.unwrap() {
         DefinitionResponse::Definition(Definition::Location(location)) => {
             assert_eq!(location.range.start.line, 1, "Config is defined on line 1");
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_see_tag_in_line_comment() {
+    let backend = create_test_backend();
+
+    let uri = Uri::parse("file:///test_see_line_comment.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    public function load(): void {}\n",
+        "}\n",
+        "function f(): void {\n",
+        "    // @see Config::load()\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    // On "Config" in the comment.
+    let result = goto_definition_at(&backend, &uri, 5, 13).await;
+    match result {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
+            assert_eq!(location.range.start.line, 1, "Config is defined on line 1");
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+
+    // On "load" in the comment.
+    let result = goto_definition_at(&backend, &uri, 5, 21).await;
+    match result {
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => {
+            assert_eq!(location.range.start.line, 2, "load is defined on line 2");
         }
         other => panic!("Expected Scalar location, got: {:?}", other),
     }

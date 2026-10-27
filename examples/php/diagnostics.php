@@ -437,6 +437,10 @@ class ReadonlyWriteDemo
         $point = new Scaffolding\ScaffoldingReadonlyPoint(1, 2);
         $point->x = 10;
 
+        // Error — a `@readonly` docblock tag makes the property readonly by
+        // contract, for code written before PHP had the keyword:
+        $coordinate->unit = 'em';
+
         // No diagnostic — reading is always fine:
         echo $coordinate->x + $coordinate->y;
 
@@ -590,6 +594,18 @@ class UnhandledMatchDemo
         return match ($status) {
             Scaffolding\Status::Active => 'on',
             Scaffolding\Status::Inactive => 'off',
+        };
+    }
+
+    public function code(Scaffolding\Status $status): string
+    {
+        // No diagnostic — 'pending' is the value only Status::Pending is backed by:
+        if ($status->value === 'pending') {
+            return 'P';
+        }
+        return match ($status) {
+            Scaffolding\Status::Active => 'A',
+            Scaffolding\Status::Inactive => 'I',
         };
     }
 }

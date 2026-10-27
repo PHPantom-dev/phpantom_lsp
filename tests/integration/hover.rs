@@ -106,6 +106,38 @@ function configure(?callable $callback): void {
     );
 }
 
+/// `Foo::path` can only read a constant, so hover shows the constant and
+/// not a static property of the same name, while `Foo::$path` shows the
+/// property.
+#[test]
+fn hover_class_constant_beside_same_named_property() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Config {
+    public static string $path = '/tmp';
+    const path = '/etc';
+    public function own(): void {
+        echo self::path;
+    }
+}
+echo Config::path;
+echo Config::$path;
+"#;
+
+    for (line, character, what) in [(5, 21, "self::path"), (8, 14, "Config::path")] {
+        let hover = hover_at(&backend, "file:///test.php", content, line, character)
+            .unwrap_or_else(|| panic!("expected hover on {what}"));
+        let text = hover_text(&hover);
+        assert!(text.contains("const path"), "{what}: {text}");
+        assert!(!text.contains("$path"), "{what}: {text}");
+    }
+
+    let hover =
+        hover_at(&backend, "file:///test.php", content, 9, 15).expect("hover on Config::$path");
+    let text = hover_text(&hover);
+    assert!(text.contains("$path"), "{text}");
+}
+
 #[test]
 fn hover_this_variable() {
     let backend = create_test_backend();
@@ -16947,4 +16979,72 @@ function run(): void {
 
     let text = markup_hover_at(&backend, &uri, 4, 13).await;
     assert!(text.contains("`Pen` *(inferred)*"), "{text}");
+}
+
+/// An override with a native return type and no docblock of its own
+/// returns its native type, not the parent's wider `@return`, whether or
+/// not its class declares a template.
+#[test]
+fn hover_override_native_return_drops_wider_inherited_classes() {
+    for template in ["", "/** @template TModel */"] {
+        let backend = create_test_backend_with_closure_stub();
+        let content = format!(
+            r#"<?php
+interface View {{ public function name(): string; }}
+interface Htmlable {{}}
+
+abstract class Component {{
+    /** @return View|Htmlable|\Closure|string */
+    abstract public function render();
+}}
+
+{template}
+final class PerPage extends Component {{
+    public function render(): View {{ throw new Exception(); }}
+}}
+
+function f(PerPage $p): void {{
+    $v = $p->render();
+    $v;
+}}
+"#
+        );
+        let hover = hover_at(&backend, "file:///test.php", &content, 16, 5)
+            .unwrap_or_else(|| panic!("expected hover on $v ({template:?})"));
+        let text = hover_text(&hover);
+        assert!(text.contains("$v = View"), "{template:?}: {text}");
+        assert!(!text.contains("Htmlable"), "{template:?}: {text}");
+        assert!(!text.contains("Closure"), "{template:?}: {text}");
+    }
+}
+
+/// A parent's method-level template in `@return` survives an override's
+/// native class hint even when a global class shares the template's name.
+#[test]
+fn hover_override_native_return_keeps_method_template_shadowing_a_class() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class T {}
+interface Node {
+    /**
+     * @template T of Node
+     * @param class-string<T> $type
+     * @return T|null
+     */
+    public function first($type): ?self;
+}
+abstract class Base implements Node {
+    public function first($type): ?Node { return null; }
+}
+final class Leaf extends Base {}
+
+function f(Base $b): void {
+    $v = $b->first(Leaf::class);
+    $v;
+}
+"#;
+    let hover =
+        hover_at(&backend, "file:///test.php", content, 17, 5).expect("expected hover on $v");
+    let text = hover_text(&hover);
+    assert!(text.contains("Leaf"), "{text}");
 }

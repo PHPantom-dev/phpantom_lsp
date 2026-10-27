@@ -154,40 +154,6 @@ command = "phpantom_lsp"
 
 ---
 
-## F15. Go-to-declaration
-
-**Impact: Low-Medium · Complexity: Low**
-
-Implement `textDocument/declaration` to jump from a concrete method to
-its abstract or interface prototype, complementing the existing
-go-to-definition (which jumps to the concrete implementation) and
-go-to-implementation (which jumps from an interface to concrete classes).
-
-### Behaviour
-
-When the cursor is on a method call or method name:
-
-1. Search for an **interface or abstract class** that declares a method
-   with the same name and is in the inheritance chain of the resolved
-   class.
-2. If found, jump to the interface/abstract method declaration.
-3. If no abstract prototype exists, fall back to the same result as
-   go-to-definition.
-
-### Implementation
-
-The existing `resolve_implementation` already does reverse lookups
-(concrete → prototype) via `resolve_reverse_implementation`. The
-declaration handler can reuse this: for `MemberAccess` and
-`MemberDeclaration` symbols, call the reverse-implementation resolver
-first. For class-level symbols, declaration and definition are the
-same.
-
-Register `declaration_provider` in `src/backend/startup.rs` and wire it
-to a thin handler that delegates to the existing infrastructure.
-
----
-
 ## F16. On-type `}` brace de-indent
 
 **Impact: Low · Complexity: Low**

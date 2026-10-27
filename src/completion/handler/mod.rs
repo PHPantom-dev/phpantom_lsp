@@ -239,7 +239,7 @@ impl Backend {
         let (content, position) = self.analysable_content_at(uri, position)?;
 
         let response = {
-            let _scope = self.enter_request_scope(std::sync::Arc::clone(&content));
+            let _scope = self.enter_request_scope(uri, std::sync::Arc::clone(&content));
 
             let cursor_offset = crate::text_position::position_to_offset(&content, position);
             let site = CompletionSite {

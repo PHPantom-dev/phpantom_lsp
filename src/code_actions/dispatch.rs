@@ -185,7 +185,7 @@ impl Backend {
         // Inside a request this re-enters the scope `with_file_content`
         // opened; called on its own it still parses the file once for every
         // collector below instead of once each.
-        let _scope = self.enter_request_scope_borrowed(content);
+        let _scope = self.enter_request_scope_borrowed(uri, content);
 
         let is_resource = self.is_resource_uri(uri);
         for collector in COLLECTORS {
@@ -367,7 +367,7 @@ impl Backend {
         // several times.  This handler fetches its own file content, so it
         // enters the request scope itself rather than through
         // `with_file_content`.
-        let _scope = self.enter_request_scope_borrowed(content);
+        let _scope = self.enter_request_scope_borrowed(&data.uri, content);
 
         let result = match data.action_kind.as_str() {
             // ── PHPStan quickfixes ──────────────────────────────────

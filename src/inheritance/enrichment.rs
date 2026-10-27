@@ -79,55 +79,80 @@ fn inherited_return_type(
     }
 
     let inherited = in_override_param_names(ancestor.return_type.as_ref()?, existing, ancestor);
-    if existing.native_return_type.is_some()
-        && inherited_return_widens_native(&inherited, existing, class_loader)
-    {
-        return None;
-    }
-    Some(match existing.native_return_type {
-        Some(ref native) => inherited.without_alternatives_the_native_type_forbids(native),
-        None => inherited,
-    })
+    let Some(ref native) = existing.native_return_type else {
+        return Some(inherited);
+    };
+    let inherited = within_native_class(inherited, existing, ancestor, class_loader)?;
+    Some(inherited.without_alternatives_the_native_type_forbids(native))
 }
 
-/// Whether `inherited` only describes classes the override's own native
-/// return hint narrows below.
+/// `inherited` without the classes the override's own native return hint
+/// rules out, or `None` when nothing but `null` is left.
 ///
-/// An interface declaring `@return Factory<Meta>` over a native `: Factory`
-/// tells an override narrowing to `: OrmFactory` (a `Factory` subclass)
-/// nothing it can use: `Factory<Meta>` is wider than the override's own
-/// declaration, so inheriting it would make every `return` of an
-/// `OrmFactory` look like a mismatch. The native hint wins, as it does in
-/// PHPStan, whenever every alternative the docblock names is a strict
-/// ancestor of the override's class. Anything else (the same class, a
-/// subclass, a template, `static`) still refines the override.
-fn inherited_return_widens_native(
-    inherited: &PhpType,
+/// An override declaring `: View` can only return a `View`, so a parent's
+/// `@return View|Htmlable|\Closure` keeps just `View`, and an interface's
+/// `@return Factory<Meta>` over an override narrowing to `: OrmFactory` (a
+/// `Factory` subclass) offers nothing the override can use, so the native
+/// hint wins outright, as it does in PHPStan. An alternative naming the
+/// override's class or one of its subclasses still refines it, and one
+/// that cannot be classified (a template, `static`, a class that does not
+/// load) is kept, since dropping it could not be proved right.
+///
+/// The ancestor's class-level templates are already substituted (or
+/// bound-filled) by the caller, but its method-level ones reach here as
+/// bare names, so those are checked against `ancestor` before the loader
+/// gets a chance to mistake `T` for an unrelated global class `T`.
+fn within_native_class(
+    inherited: PhpType,
     existing: &MethodInfo,
+    ancestor: &MethodInfo,
     class_loader: ClassLoader<'_>,
-) -> bool {
+) -> Option<PhpType> {
     // With no docblock of its own, the effective return type is the native
     // hint with its class name already resolved to a FQN.
     let Some(own) = existing.return_type.as_ref() else {
-        return false;
+        return Some(inherited);
     };
     let own = own.non_null_type().unwrap_or_else(|| own.clone());
-    let Some(own_class) = own.class_name() else {
-        return false;
+    // `mixed` is not in the scalar keyword list, so `class_name` lets it by.
+    let Some(own_class) = own.class_name().filter(|_| !own.is_mixed()) else {
+        return Some(inherited);
     };
-    let mut alternatives = inherited
-        .union_members()
+    let admits = |member: &PhpType| {
+        if !matches!(member.kind(), TypeKind::Named(_) | TypeKind::Generic(_))
+            || member.is_self_like()
+        {
+            return true;
+        }
+        let Some(class) = member.base_name() else {
+            return true;
+        };
+        if ancestor
+            .template_params()
+            .iter()
+            .any(|t| t.as_str() == class)
+        {
+            return true;
+        }
+        match class_loader(crate::class_lookup::Fqn::new(class)) {
+            Some(info) => crate::class_lookup::is_subtype_of(&info, own_class, class_loader),
+            None => true,
+        }
+    };
+
+    let members = inherited.union_members();
+    if members.iter().all(|member| admits(member)) {
+        return Some(inherited);
+    }
+    let kept: Vec<PhpType> = members
         .into_iter()
-        .filter(|member| !member.is_null())
-        .peekable();
-    alternatives.peek().is_some()
-        && alternatives.all(|member| {
-            matches!(member.kind(), TypeKind::Named(_) | TypeKind::Generic(_))
-                && !member.is_self_like()
-                && member.base_name().is_some_and(|ancestor_class| {
-                    crate::class_lookup::is_subclass_of(own_class, ancestor_class, class_loader)
-                })
-        })
+        .filter(|member| admits(member))
+        .cloned()
+        .collect();
+    if kept.iter().all(PhpType::is_null) {
+        return None;
+    }
+    Some(PhpType::union(kept))
 }
 
 /// `ty`, written in `ancestor`'s docblock, with each conditional that names

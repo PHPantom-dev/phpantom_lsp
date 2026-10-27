@@ -275,6 +275,23 @@ impl Backend {
             );
         }
 
+        let locations =
+            self.member_prototype_locations(uri, content, current_class, member_name, class_loader);
+        (!locations.is_empty()).then_some(locations)
+    }
+
+    /// The declarations `member_name` of `current_class` implements: the
+    /// same-named member of every interface it implements and the method
+    /// of every abstract ancestor that declares it.  `current_class`'s own
+    /// declaration is not included.
+    pub(super) fn member_prototype_locations(
+        &self,
+        uri: &str,
+        content: &str,
+        current_class: &ClassInfo,
+        member_name: &str,
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Vec<Location> {
         let mut locations = Vec::new();
 
         // Check implemented interfaces for a method with the same name.
@@ -330,11 +347,7 @@ impl Backend {
             }
         }
 
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        locations
     }
 
     /// Resolve implementations of a method on an interface/abstract class

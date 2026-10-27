@@ -2212,3 +2212,73 @@ async fn a_repository_by_name_alone_gets_no_doctrine_lenses() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn a_constant_lens_does_not_count_a_same_named_method_or_property() {
+    let tag = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Tag {\n",
+        "    const name = 'tag';\n",
+        "    public string $name = 'tag';\n",
+        "    public function name(): string {\n",
+        "        return self::name . $this->name . $this->name();\n",
+        "    }\n",
+        "}\n",
+        "echo Tag::name;\n",
+    );
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/Tag.php", tag)],
+    );
+    let uri = Uri::from_file_path(dir.path().join("src/Tag.php")).unwrap();
+    open_php(&backend, &uri, tag).await;
+    warm_workspace_index(&backend, &uri, Position::new(3, 11)).await;
+
+    assert_eq!(
+        resolved_reference_title(&backend, &uri, 3).await.as_deref(),
+        Some("2 references"),
+        "`self::name` and `Tag::name` read the constant; the rest are the method and property"
+    );
+}
+
+#[tokio::test]
+async fn a_constant_and_a_same_named_static_member_keep_their_own_counts() {
+    let config = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "enum Config {\n",
+        "    const path = '/etc';\n",
+        "    case Hearts;\n",
+        "    public static string $path = '/tmp';\n",
+        "    public static function Hearts(): self { return self::Hearts; }\n",
+        "}\n",
+        "echo Config::path;\n",
+        "echo Config::$path . Config::$path;\n",
+        "Config::Hearts(); Config::Hearts(); Config::Hearts();\n",
+    );
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/Config.php", config)],
+    );
+    let uri = Uri::from_file_path(dir.path().join("src/Config.php")).unwrap();
+    open_php(&backend, &uri, config).await;
+    warm_workspace_index(&backend, &uri, Position::new(3, 11)).await;
+
+    // Each pair is static, so a count cached for the first must not be
+    // served for the second.
+    for (line, expected) in [
+        (3, "1 reference"),
+        (5, "2 references"),
+        (4, "1 reference"),
+        (6, "3 references"),
+    ] {
+        assert_eq!(
+            resolved_reference_title(&backend, &uri, line)
+                .await
+                .as_deref(),
+            Some(expected),
+            "lens on line {line}"
+        );
+    }
+}

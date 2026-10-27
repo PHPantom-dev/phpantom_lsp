@@ -69,6 +69,14 @@ pub(super) fn extract_property(
                 prop.see_refs = see_refs.clone();
             }
         }
+        let doc_readonly = info
+            .as_ref()
+            .map_or(DocReadonly::No, docblock::extract_doc_readonly_from_info);
+        if doc_readonly != DocReadonly::No {
+            for prop in &mut prop_infos {
+                prop.doc_readonly = doc_readonly;
+            }
+        }
         // Use merge_deprecation_info for version-aware suppression and
         // replacement extraction.
         apply_deprecation(
@@ -163,6 +171,7 @@ fn extract_property_info(property: &Property, content: Option<&str>) -> Vec<Prop
             description: None,
             is_static,
             is_readonly,
+            doc_readonly: DocReadonly::No,
             visibility,
             deprecation_message: None,
             deprecated_replacement: None,

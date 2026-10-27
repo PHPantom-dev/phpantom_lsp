@@ -5606,6 +5606,14 @@ fn truthy_type_strips_null_from_every_nullable_union_member() {
     );
     // A union that is entirely falsy has no truthy half at all.
     assert_eq!(PhpType::parse("null|false").truthy_type(), None);
+    // A `void` result is `null` at runtime, so it is dropped the same way.
+    assert_eq!(
+        PhpType::parse("void|string")
+            .truthy_type()
+            .unwrap()
+            .to_string(),
+        "non-falsy-string"
+    );
 }
 
 #[test]

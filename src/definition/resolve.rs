@@ -23,7 +23,8 @@ use super::member::{MemberAccessHint, MemberDefinitionCtx, MemberKind};
 use super::{class_keyword_location, point_location};
 use crate::Backend;
 use crate::composer;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
+use crate::references::MemberRefKind;
+use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan};
 use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, ClassInfo};
 use crate::util::short_name;
@@ -45,8 +46,7 @@ impl Backend {
         // end-of-token edge cases).
         let symbol = self.lookup_symbol_at_position(uri, content, position);
         if let Some(ref s) = symbol
-            && let Some(resolved) =
-                self.resolve_from_symbol(&s.kind, uri, content, position, s.start)
+            && let Some(resolved) = self.resolve_from_symbol(s, uri, content, position)
         {
             return resolved;
         }
@@ -213,13 +213,13 @@ impl Backend {
     /// with an O(log n) binary search.
     fn resolve_from_symbol(
         &self,
-        kind: &SymbolKind,
+        symbol: &SymbolSpan,
         uri: &str,
         content: &str,
         position: Position,
-        cursor_offset: u32,
     ) -> Option<Vec<Location>> {
-        match kind {
+        let cursor_offset = symbol.start;
+        match &symbol.kind {
             SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
                 // Try the precomputed var_defs map first.
                 // This avoids re-parsing the file at request time.
@@ -240,7 +240,7 @@ impl Backend {
                         // site.  Return the symbol's own location so
                         // editors can fall back to Find References.
                         let parsed_uri = crate::util::parse_url(uri)?;
-                        let end_offset = match kind {
+                        let end_offset = match &symbol.kind {
                             SymbolKind::Variable { .. } => cursor_offset as usize + 1 + name.len(),
                             SymbolKind::CompactVariable { .. } => {
                                 cursor_offset as usize + name.len()
@@ -279,14 +279,15 @@ impl Backend {
                 subject_text,
                 member_name,
                 is_static,
-                is_method_call,
                 ..
             } => {
                 let access_kind = AccessKind::of_member_access(*is_static);
-                let access_hint = if *is_method_call {
-                    MemberAccessHint::MethodCall
-                } else {
-                    MemberAccessHint::PropertyAccess
+                let access_hint = match MemberRefKind::of_access(symbol)? {
+                    MemberRefKind::Method => MemberAccessHint::MethodCall,
+                    MemberRefKind::Constant => MemberAccessHint::ConstantAccess,
+                    MemberRefKind::Property | MemberRefKind::Either => {
+                        MemberAccessHint::PropertyAccess
+                    }
                 };
                 let mctx = MemberDefinitionCtx {
                     member_name,
@@ -493,7 +494,7 @@ impl Backend {
         // previously navigated-to vendor files) live in
         // fqn_uri_index (FQN → URI) and uri_classes_index (URI → [ClassInfo]).
         for fqn in &candidates {
-            let target_uri = self.symbols.fqn_uri_index.read().get(fqn.as_str()).cloned();
+            let target_uri = self.class_declaration_uri(fqn);
             if let Some(ref target_uri) = target_uri
                 && let Some(location) =
                     self.find_definition_in_uri_classes_index_cross_file(fqn, target_uri)
@@ -586,13 +587,11 @@ impl Backend {
     /// opened) still resolves.  Used by go-to-definition on symbols that name a
     /// class indirectly, such as an Eloquent morph alias.
     pub(crate) fn class_declaration_location(&self, fqn: &str) -> Option<Location> {
-        let indexed = self.symbols.fqn_uri_index.read().get(fqn).cloned();
-        let target_uri = match indexed {
+        let target_uri = match self.class_declaration_uri(fqn) {
             Some(uri) => uri,
             None => {
                 self.find_or_load_class(fqn);
-                let loaded = self.symbols.fqn_uri_index.read().get(fqn).cloned();
-                loaded?
+                self.class_declaration_uri(fqn)?
             }
         };
         self.find_definition_in_uri_classes_index_cross_file(fqn, &target_uri)
@@ -621,7 +620,15 @@ impl Backend {
             .read()
             .get(target_uri)
             .cloned();
-        let indexed = || self.symbols.fqn_class_index.read().get(fqn).cloned();
+        // The parsed class the index holds is only this file's when the
+        // index names this file, not another copy of the class.
+        let indexed = || {
+            let owner = self.symbols.fqn_uri_index.read().get(fqn).cloned();
+            if owner.as_deref() != Some(target_uri) {
+                return None;
+            }
+            self.symbols.fqn_class_index.read().get(fqn).cloned()
+        };
         let classes = match cached {
             Some(cached) => cached,
             None => match indexed() {

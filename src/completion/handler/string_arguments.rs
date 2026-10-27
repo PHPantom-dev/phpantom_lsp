@@ -79,8 +79,9 @@ impl Backend {
                 string_ctx,
                 StringContext::InStringLiteral | StringContext::NotInString
             )
+            && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
-                self.try_laravel_string_key_completion_in_file(content, position, ctx)
+                self.try_laravel_string_key_completion_in_file(content, position, code, ctx)
         {
             return Some(response);
         }

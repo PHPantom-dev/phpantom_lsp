@@ -521,11 +521,12 @@ fn apply_array_write<'b>(
             return;
         }
     }
-    let base_type = scope
-        .get(base_name)
-        .last()
-        .map(|rt| rt.type_string.clone())
-        .unwrap_or_else(PhpType::array);
+    // The write lands on whichever value the variable holds, so every
+    // alternative a branch join left behind takes it.
+    let base_type = match scope.get(base_name) {
+        [] => PhpType::array(),
+        base_types => ResolvedType::types_joined(base_types),
+    };
 
     // If the base variable is an object (e.g. SplObjectStorage, ArrayAccess),
     // array-access syntax invokes offsetSet, not actual array mutation.

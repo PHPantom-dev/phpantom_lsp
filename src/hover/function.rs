@@ -4,7 +4,6 @@
 use tower_lsp_server::gen_lsp_types::Hover;
 
 use crate::Backend;
-use crate::definition::member::MemberKind;
 use crate::types::FunctionInfo;
 
 use super::HoverSite;
@@ -33,7 +32,7 @@ impl Backend {
         // class's own member first, as phpDocumentor reads it.
         if is_docblock_reference
             && let Some((class, kind)) = self.docblock_scope_member(ctx, symbol_start, name)
-            && let Some(hit) = Self::find_member_for_hover(&class, name, kind == MemberKind::Method)
+            && let Some(hit) = Self::find_member_for_hover(&class, name, kind.into())
         {
             return Some(match hit {
                 HoverMemberHit::Method(m) => {

@@ -125,6 +125,7 @@ mod completion_variables;
 mod composer_autoload_edge_cases;
 mod crash_sandbox;
 mod crlf_edits;
+mod declaration;
 mod definition_blade;
 mod definition_builtin_stubs;
 mod definition_classes;

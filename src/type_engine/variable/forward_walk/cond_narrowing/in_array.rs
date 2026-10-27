@@ -79,6 +79,7 @@ fn narrow_key_existence(
         }
         return;
     };
+    drop_shapes_contradicting_key(base_key, &key_name, present, scope);
     if !present {
         mark_array_shape_key_absent(base_key, &key_name, scope);
         return;

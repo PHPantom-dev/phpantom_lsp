@@ -214,7 +214,7 @@ fn populate_one(
 ) {
     // Skip classes already in the cache (e.g. from a previous
     // incremental population run).
-    let cache_key: ResolvedClassCacheKey = (atom(fqn), Vec::new());
+    let cache_key = resolved_key(atom(fqn), Vec::new());
     if cache.read().contains_key(&cache_key) {
         return;
     }
@@ -338,6 +338,19 @@ pub fn property_write_is_magic(
     merged.has_method("__set") && !merged.has_property(prop_name)
 }
 
+/// The cache key for `fqn` instantiated with `args`.
+///
+/// Marked with the Composer project the lookups run for, when the
+/// workspace has several: what a class resolves to depends on which copy
+/// of each ancestor those lookups find, and another project may have
+/// installed different ones.
+fn resolved_key(fqn: crate::atom::Atom, mut args: Vec<String>) -> ResolvedClassCacheKey {
+    if let Some(scope) = crate::resolution::project_scope::active() {
+        args.push(scope.cache_tag.clone());
+    }
+    (fqn, args)
+}
+
 /// Reserved generic-args marker for [`resolve_class_base_cached`]'s cache
 /// key. Contains a NUL byte, which `PhpType::to_string()` never produces,
 /// so it can never collide with a real `(FQN, generic_args)` key.
@@ -374,7 +387,7 @@ pub(crate) fn resolve_class_base_cached(
         return Arc::new(resolve_class_with_inheritance(class, class_loader));
     };
 
-    let key: ResolvedClassCacheKey = (class.fqn(), vec![BASE_RESOLUTION_MARKER.to_string()]);
+    let key = resolved_key(class.fqn(), vec![BASE_RESOLUTION_MARKER.to_string()]);
 
     {
         let map = cache.read();
@@ -421,7 +434,7 @@ pub fn resolve_class_fully_with_generics(
 
     // Check the cache for (FQN, generic_args).
     let fqn = class.fqn();
-    let cache_key: ResolvedClassCacheKey = (fqn, generic_arg_strings.to_vec());
+    let cache_key = resolved_key(fqn, generic_arg_strings.to_vec());
 
     if let Some(c) = cache {
         let map = c.read();
@@ -567,7 +580,7 @@ pub fn resolve_class_for_type_hint(
 ) -> Arc<ClassInfo> {
     let cache = super::cache::active_resolved_class_cache();
     let fqn = class.fqn();
-    let key: ResolvedClassCacheKey = (
+    let key = resolved_key(
         fqn,
         generic_arg_strings
             .iter()
@@ -588,8 +601,10 @@ pub fn resolve_class_for_type_hint(
     );
     // A specialisation that was left uncached is a partial result handed
     // to a re-entrant caller, and so is anything built on it.
-    let cacheable =
-        cache.is_some_and(|c| c.read().contains_key(&(fqn, generic_arg_strings.to_vec())));
+    let cacheable = cache.is_some_and(|c| {
+        c.read()
+            .contains_key(&resolved_key(fqn, generic_arg_strings.to_vec()))
+    });
 
     let mut result = Arc::unwrap_or_clone(specialised);
     if class
@@ -666,7 +681,7 @@ fn resolve_class_fully_inner(
     let _active_guard = super::cache::with_active_resolved_class_cache(cache);
 
     let fqn = class.fqn();
-    let cache_key: ResolvedClassCacheKey = (fqn, Vec::new());
+    let cache_key = resolved_key(fqn, Vec::new());
 
     // ── Reload raw class from class_loader ──────────────────────────
     // Callers sometimes pass a ClassInfo that has already been through

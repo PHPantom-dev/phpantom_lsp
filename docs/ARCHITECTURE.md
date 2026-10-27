@@ -97,7 +97,7 @@ src/
 │
 │   # LSP features (one module each)
 ├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
-├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
+├── definition/             # Go-to-definition (resolve, member, variable/, implementation, declaration, type_definition)
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
 ├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
 ├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner
@@ -534,6 +534,12 @@ find_or_load_class("Iterator")
 │   (see "Stub Paths" below).
 │   ↓ miss
 │
+├── Project scope: another Composer project's dependency
+│   In a workspace of several Composer projects, a name the index
+│   holds in another project's vendor/ resolves to the asking
+│   project's own copy, or to nothing (see "Monorepo Support").
+│   ↓ not another project's
+│
 ├── Phase 0: fqn_class_index (O(1) hash hit)
 │   Direct lookup by FQN. This is where cached results from
 │   previous phases are found on subsequent lookups.
@@ -607,6 +613,13 @@ appears there once a second file declares it, so the overwhelming
 majority of symbols cost nothing, and keeping the runners-up is what lets
 the name pass to the next declarant when the winning file stops declaring
 it (rename, deletion, or an edit that removes it) instead of vanishing.
+
+`duplicate_classes` only knows parsed declarations. Discovery also finds
+names in more than one file before anything parses them (two Composer
+projects of a workspace installing the same package), and a merge that
+keeps one location records the others in `class_alternates`, again only
+for names found more than once. A name whose indexed file goes away
+passes to one of them.
 
 Both class indexing paths (`apply_ast_index_updates_batch` for editor
 files, `parse_and_cache_content_versioned` for lazily loaded ones) and the
@@ -971,7 +984,9 @@ When the workspace root has no `composer.json` but contains subdirectories that 
 
 **Vendor tracking.** Each subproject's vendor directory is registered in both `vendor_uri_prefixes` (for URI-level vendor detection in diagnostics, find references, and rename) and `vendor_dir_paths` (for filesystem-level skip logic in go-to-implementation and workspace indexing).
 
-**Trade-offs.** Conflicting class versions across subprojects result in first-wins resolution. A single PHP version is used for the entire workspace. Per-subproject `.phpantom.toml` is not supported. Multi-root LSP workspaces (separate `workspaceFolders`) are a separate feature.
+**Per-project class lookups.** The class index is shared, but a file only sees its own Composer project's classes and dependencies. When the workspace has two or more projects with a vendor directory, each gets a `ProjectScope` (`resolution/project_scope.rs`): its own root and vendor directory, the packages it installed from outside its vendor directory (path repositories, which can live in another project's tree), and every other project's root and vendor directory. A file belongs to the innermost project whose root holds it, and files outside every project are visible to all of them. The work done for one file (an LSP request through `RequestScope`, the file's diagnostic pass, `analyze` and `fix`) runs with the scope of the innermost project holding it, and `find_or_load_class` answers a name the index holds in another project with the project's own copy from `class_alternates` or `duplicate_classes`, or with nothing. Work that is not about one file, and files outside every project, see the shared index. The class memo and the resolved-class cache key their entries by scope, since a class resolves differently when its ancestors come from a different copy. A workspace with a single installed project has no scopes and pays nothing.
+
+**Trade-offs.** A single PHP version is used for the entire workspace. Per-subproject `.phpantom.toml` is not supported. Multi-root LSP workspaces (separate `workspaceFolders`) are a separate feature.
 
 ### Function Resolution Priority
 
