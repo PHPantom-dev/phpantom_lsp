@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793118277587,
+  "lastUpdate": 1793119230199,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7086,6 +7086,45 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_symfony_controller",
             "value": 75.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "478e51ba157ec89e629c1c570fa68524c5af3893",
+          "message": "Method templates through an override",
+          "timestamp": "2026-10-27T17:21:32+01:00",
+          "tree_id": "a62f5b1b76642f898827fd25f1322d4ea2e15fda",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/478e51ba157ec89e629c1c570fa68524c5af3893"
+        },
+        "date": 1793119217984,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.1,
             "unit": "MiB"
           }
         ]
