@@ -2561,7 +2561,6 @@ cleaned up in seconds rather than file by file.</p>
 </tbody>
 </table>
 <h3 id="available-rules">Available rules<a class="headerlink" href="#available-rules" title="Permanent link">&para;</a></h3>
-<p>Rules correspond to diagnostic identifiers.</p>
 <table>
 <thead>
 <tr>
@@ -2571,11 +2570,17 @@ cleaned up in seconds rather than file by file.</p>
 </thead>
 <tbody>
 <tr>
+<td><code>deprecated</code></td>
+<td>Rewrite calls to deprecated functions and methods whose <code>#[Deprecated(replacement: "...")]</code> names a replacement</td>
+</tr>
+<tr>
 <td><code>unused_import</code></td>
 <td>Remove unused <code>use</code> statements</td>
 </tr>
 </tbody>
 </table>
+<p>Rules run in that order, so an import that a rewritten call leaves
+unused is removed in the same run.</p>
 <h3 id="example-output_1">Example output<a class="headerlink" href="#example-output_1" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a> ------ -------------------------------------------
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>   Line   src/Service/UserService.php

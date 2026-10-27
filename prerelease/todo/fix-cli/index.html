@@ -962,6 +962,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#deprecated-replace-deprecated-symbol-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>deprecated</code> — Replace deprecated symbol usage
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -978,17 +989,6 @@
   
     <nav class="md-nav" aria-label="Planned Native Rules">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fx1-deprecated-replace-deprecated-symbol-usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        FX1. <code>deprecated</code> — Replace deprecated symbol usage
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#fx2-unused_variable-remove-unused-variables" class="md-nav__link">
@@ -1501,6 +1501,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#deprecated-replace-deprecated-symbol-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>deprecated</code> — Replace deprecated symbol usage
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1517,17 +1528,6 @@
   
     <nav class="md-nav" aria-label="Planned Native Rules">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fx1-deprecated-replace-deprecated-symbol-usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        FX1. <code>deprecated</code> — Replace deprecated symbol usage
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#fx2-unused_variable-remove-unused-variables" class="md-nav__link">
@@ -1690,21 +1690,16 @@ and its associated code action.</p>
 <p>Detects unused <code>use</code> statements and removes them. Handles simple imports,
 group imports (removing individual members), and blank-line collapsing to
 keep formatting clean.</p>
+<h3 id="deprecated-replace-deprecated-symbol-usage"><code>deprecated</code> — Replace deprecated symbol usage<a class="headerlink" href="#deprecated-replace-deprecated-symbol-usage" title="Permanent link">&para;</a></h3>
+<p>Rewrites calls to functions and methods whose
+<code>#[Deprecated(replacement: "...")]</code> attribute names a replacement, using
+the same expansion as the "Replace with" quickfix
+(<code>src/code_actions/replace_deprecated.rs</code>). Runs before <code>unused_import</code>
+so an import a rewritten call leaves unused goes in the same run.</p>
 <hr />
 <h2 id="planned-native-rules">Planned Native Rules<a class="headerlink" href="#planned-native-rules" title="Permanent link">&para;</a></h2>
 <p>These rules use PHPantom's own diagnostics and do not require external
 tools.</p>
-<h3 id="fx1-deprecated-replace-deprecated-symbol-usage">FX1. <code>deprecated</code> — Replace deprecated symbol usage<a class="headerlink" href="#fx1-deprecated-replace-deprecated-symbol-usage" title="Permanent link">&para;</a></h3>
-<p><strong>Prerequisite:</strong> The existing <code>replace_deprecated</code> code action
-(<code>src/code_actions/replace_deprecated.rs</code>), already implemented and
-shipped as an LSP quickfix.</p>
-<p>When a symbol carries a <code>#[Deprecated(replacement: "...")]</code> attribute
-(the phpstorm-stubs convention, using <code>%parametersList%</code>,
-<code>%parameter0%</code>, <code>%class%</code> template placeholders), automatically apply
-the replacement. The action already does this mechanically from the
-structured attribute, not from free-text message parsing; the
-remaining work is wiring it into <code>fix.rs</code>'s <code>NATIVE_RULES</code> the same
-way <code>unused_import</code> is wired.</p>
 <h3 id="fx2-unused_variable-remove-unused-variables">FX2. <code>unused_variable</code> — Remove unused variables<a class="headerlink" href="#fx2-unused_variable-remove-unused-variables" title="Permanent link">&para;</a></h3>
 <p>The unused-variable diagnostic already ships
 (<code>src/diagnostics/unused_variables.rs</code>), so this rule's diagnostic
