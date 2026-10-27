@@ -1291,6 +1291,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Internal
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3224,6 +3235,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Fixed
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Internal
       </span>
     </span>
   </a>
@@ -5461,6 +5483,10 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Typing in a <code>namespace { }</code> block.</strong> While a call in a braced <code>namespace</code> block is still missing its <code>)</code>, or the block its closing <code>}</code>, signature help and completion use the block's own namespace and imports instead of an earlier block's, and the classes and functions it declares stay available to other files.</li>
 <li><strong>"Import all missing classes" with the cursor at the start of a name.</strong> The bulk import is now offered there too, wherever "Import class" is.</li>
 <li><strong>Completion shows member types next to the name.</strong> Method and property suggestions show their return or property type right after the name (e.g. <code>findOneByEmail($email): ?User</code>) in editors such as PhpStorm and VS Code, where previously only the class name was visible. Contributed by @EranNL.</li>
+</ul>
+<h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Faster benchmark checks on pull requests.</strong> Latency benchmarks now run split across four runners, and benchmark alerts on fork pull requests show up in the job summary instead of failing on a permission error. Contributed by @shuvroroy.</li>
 </ul>
 <h2 id="0111-2026-10-07"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.0...0.11.1">0.11.1</a> - 2026-10-07<a class="headerlink" href="#0111-2026-10-07" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>

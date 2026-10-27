@@ -1513,6 +1513,26 @@ reports are uploaded together to Codecov. To reproduce one shard locally
 (replace <code>1</code> with the shard number):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>llvm-cov<span class="w"> </span>nextest<span class="w"> </span>--partition<span class="w"> </span>hash:1/6<span class="w"> </span>--lcov<span class="w"> </span>--output-path<span class="w"> </span>lcov.info
 </code></pre></div>
+<p>PR latency benchmarks build once, then distribute the discovered benchmark
+cases across four runners. Each runner measures its cases sequentially with
+Criterion's usual sampling settings. The <code>Benchmark (PR comparison)</code> check
+compares the combined results only after every shard passes and every case
+is accounted for. To reproduce a shard locally from the repository root:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cargo<span class="w"> </span>bench<span class="w"> </span>--bench<span class="w"> </span>completion<span class="w"> </span>--bench<span class="w"> </span>references<span class="w"> </span>--bench<span class="w"> </span>laravel_completion<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--bench<span class="w"> </span>custom_builder<span class="w"> </span>--bench<span class="w"> </span>symfony_completion<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--no-run<span class="w"> </span>--message-format<span class="o">=</span>json<span class="w"> </span>&gt;<span class="w"> </span>/tmp/benchmark-build.jsonl
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>python3<span class="w"> </span>benches/ci_benchmarks.py<span class="w"> </span>prepare<span class="w"> </span>--build-dir<span class="w"> </span>/tmp/phpantom-benchmarks<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--shards<span class="w"> </span><span class="m">4</span><span class="w"> </span>&lt;<span class="w"> </span>/tmp/benchmark-build.jsonl
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>python3<span class="w"> </span>benches/ci_benchmarks.py<span class="w"> </span>run<span class="w"> </span>--build-dir<span class="w"> </span>/tmp/phpantom-benchmarks<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>--shard<span class="w"> </span><span class="m">1</span><span class="w"> </span>--output<span class="w"> </span>/tmp/shard-1.json
+</code></pre></div>
+<p>CI uses static musl binaries; these commands use your local Cargo target.
+Run the sharding helper's tests with
+<code>python3 -m unittest discover -s benches -p 'test_ci_benchmarks.py'</code>.</p>
+<p>Latency and memory benchmark comparisons appear in the job summaries.
+A regression over 30% fails the comparison check. Alerts also leave a PR
+comment for same-repository PRs, except Dependabot runs; fork and Dependabot
+PRs use the summaries so they do not need permission to post a review.</p>
 <ul>
 <li>Integration tests go in <code>tests/integration/</code>, one file per feature area (<code>completion_*.rs</code>, <code>definition_*.rs</code>, <code>code_action_*.rs</code>, ...)</li>
 <li>Use <code>create_test_backend()</code> from <code>tests/integration/common/mod.rs</code> for same-file tests</li>
@@ -1524,7 +1544,7 @@ reports are uploaded together to Codecov. To reproduce one shard locally
 </ul>
 <p>See <a href="../BUILDING/">BUILDING.md</a> for more on running tests and manual LSP testing.</p>
 <h2 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h2>
-<p>Update <a href="../CHANGELOG/">CHANGELOG.md</a> when your PR adds, changes, or fixes something a user would notice. Add entries under <code>## [Unreleased]</code> in the appropriate subsection (<code>### Added</code>, <code>### Fixed</code>, <code>### Changed</code>, or <code>### Removed</code>). Write for end users, not developers: describe what changed in the editor, not which internal modules were touched.</p>
+<p>Update <a href="../CHANGELOG/">CHANGELOG.md</a> when your PR adds, changes, or fixes something a user would notice. Add entries under <code>## [Unreleased]</code> in the appropriate subsection (<code>### Added</code>, <code>### Fixed</code>, <code>### Changed</code>, or <code>### Removed</code>). Write for end users, not developers: describe what changed in the editor, not which internal modules were touched. Contributions users never see, such as CI or tooling work, go under <code>### Internal</code> so they are still credited.</p>
 <p>Keep entries short and easy to scan:</p>
 <ul>
 <li>Start with a bolded one-line summary, then one or two plain sentences (three at most for a large feature). For a feature, say what the user gets and how to use it. For a fix, say what went wrong from the user's point of view and what happens now.</li>
@@ -1534,21 +1554,21 @@ reports are uploaded together to Codecov. To reproduce one shard locally
 <li>End with <code>Contributed by @username</code> if you are not the maintainer. Don't reference the issue a change fixes.</li>
 </ul>
 <p>Example:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">-</span><span class="w"> </span><span class="gs">**`analyze` takes more than one path.**</span> <span class="sb">`phpantom_lsp analyze app/ lib/Helper.php tests/`</span> checks everything named, so a pre-commit hook or CI step can pass only the changed files.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">-</span><span class="w"> </span><span class="gs">**`analyze` takes more than one path.**</span> <span class="sb">`phpantom_lsp analyze app/ lib/Helper.php tests/`</span> checks everything named, so a pre-commit hook or CI step can pass only the changed files.
 </code></pre></div>
 <h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
 <p>The documentation site is built with <a href="https://zensical.org/">Zensical</a>.
 The only dependency you need is <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a>.</p>
 <p>Preview the docs locally with live reload:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve
 </code></pre></div>
 <p>Then open <code>http://127.0.0.1:8000</code> in your browser. Changes to files in
 <code>docs/</code> and <code>zensical.toml</code> are reflected immediately. If port 8000 is
 already in use, pick a different one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve<span class="w"> </span>-a<span class="w"> </span><span class="m">127</span>.0.0.1:8200
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve<span class="w"> </span>-a<span class="w"> </span><span class="m">127</span>.0.0.1:8200
 </code></pre></div>
 <p>Build the docs for offline use:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>build
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>build
 </code></pre></div>
 <p>The output is written to <code>site/</code> (gitignored). <code>uv</code> handles creating
 a virtual environment and installing all Python dependencies
