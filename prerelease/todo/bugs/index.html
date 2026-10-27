@@ -995,23 +995,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b691-an-import-named-only-by-a-see-line-comment-is-reported-unused" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B691. An import named only by a <code>// @see</code> line comment is reported unused
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1647,23 +1630,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b691-an-import-named-only-by-a-see-line-comment-is-reported-unused" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B691. An import named only by a <code>// @see</code> line comment is reported unused
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1783,26 +1749,7 @@ they do not hit it.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b691-an-import-named-only-by-a-see-line-comment-is-reported-unused">B691. An import named only by a <code>// @see</code> line comment is reported unused<a class="headerlink" href="#b691-an-import-named-only-by-a-see-line-comment-is-reported-unused" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">use App\Http\Controllers\UsersController;</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">final class SanctumSession {</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    public function handle(): void {</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        // @see UsersController::impersonate()</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">        $this-&gt;restore();</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    }</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>unused_import</code> counts docblock names as uses, but not names in a <code>//</code>
-comment, so this import is reported and "Remove unused imports" would
-delete it. The <code>@see</code> then no longer resolves in any tool that follows
-it. php-cs-fixer's <code>no_unused_imports</code> treats a name in any comment as a
-use. Decide whether a <code>@see</code> tag (or any class name) in a line comment is
-a reference. If it is, emit it as a <code>ClassReference</code> in the symbol map,
-the way docblock <code>@see</code> targets are, so that go-to-definition and rename
-follow it too, not only this diagnostic.</p>
-<p>Found twice in a Laravel project, both inside method bodies.</p>
+<p>No outstanding items.</p>
 
 
 
