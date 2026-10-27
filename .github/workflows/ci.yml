@@ -326,8 +326,11 @@ jobs:
   benchmark-pr:
     name: Benchmark (PR comparison)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     needs: [benchmark-build-pr, benchmark-shard-pr]
-    if: always() && github.event_name == 'pull_request'
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     steps:
       - name: Check benchmark jobs passed
         env:
@@ -370,7 +373,9 @@ jobs:
           benchmark-data-dir-path: dev/bench
           auto-push: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          comment-on-alert: true
+          # Fork and Dependabot runs report alerts in the job summary.
+          comment-on-alert: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+          summary-always: true
           alert-threshold: "130%"
           fail-on-alert: true
           alert-comment-cc-users: "@AJenbo"
@@ -451,6 +456,9 @@ jobs:
   memory-benchmark-pr:
     name: Memory Benchmark (PR comparison)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
@@ -498,7 +506,9 @@ jobs:
           benchmark-data-dir-path: dev/memory
           auto-push: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          comment-on-alert: true
+          # Fork and Dependabot runs report alerts in the job summary.
+          comment-on-alert: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+          summary-always: true
           alert-threshold: "130%"
           fail-on-alert: true
           alert-comment-cc-users: "@AJenbo"
