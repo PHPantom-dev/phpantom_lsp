@@ -817,56 +817,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#a46-honor-contextonly-in-code-action-responses" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        A46. Honor <code>context.only</code> in code action responses
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="A46. Honor context.only in code action responses">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#the-kindposition-interaction-to-get-right" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        The kind/position interaction to get right
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#a-second-gap-this-surfaces" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        A second gap this surfaces
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#scope-boundary-codeactionresolve-is-unaffected" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Scope boundary: <code>codeAction/resolve</code> is unaffected
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#a16-snippet-placeholder-for-extracted-method-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1662,56 +1612,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#a46-honor-contextonly-in-code-action-responses" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        A46. Honor <code>context.only</code> in code action responses
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="A46. Honor context.only in code action responses">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#the-kindposition-interaction-to-get-right" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        The kind/position interaction to get right
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#a-second-gap-this-surfaces" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        A second gap this surfaces
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#scope-boundary-codeactionresolve-is-unaffected" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Scope boundary: <code>codeAction/resolve</code> is unaffected
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#a16-snippet-placeholder-for-extracted-method-name" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2030,80 +1930,6 @@ quick-fixes and refactoring actions use different code paths.</p>
 <p>Do this when the next batch of code actions is added (A25, A28, etc.).
 The refactoring pays for itself by making each subsequent action
 cheaper to add: write one function, append it to an array.</p>
-<hr />
-<h2 id="a46-honor-contextonly-in-code-action-responses">A46. Honor <code>context.only</code> in code action responses<a class="headerlink" href="#a46-honor-contextonly-in-code-action-responses" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>We advertise <code>codeActionKinds</code> (<code>quickfix</code>, <code>refactor.extract</code>,
-<code>refactor.inline</code>, <code>source.organizeImports</code>, <code>source.addMissingImports</code>)
-in <code>code_action_provider</code> (<code>src/backend/startup.rs</code>), and every collector already tags its <code>CodeAction</code>
-with a <code>kind</code>, but <code>handle_code_action</code> in <code>src/code_actions/mod.rs</code>
-never reads <code>params.context.only</code> and never filters its result against
-it. A client that asks for only quick-fixes (its Ctrl+.-style menu) or
-only <code>source.organizeImports</code> (an on-save automation like
-<code>editor.codeActionsOnSave</code>) gets every action mixed together instead,
-which breaks the menus that are supposed to be filtered and can make
-an auto-run-on-save hook unable to identify the one action it should
-apply.</p>
-<h3 id="the-kindposition-interaction-to-get-right">The kind/position interaction to get right<a class="headerlink" href="#the-kindposition-interaction-to-get-right" title="Permanent link">&para;</a></h3>
-<p><code>context.only</code> is a pure <strong>kind</strong> filter and must stay orthogonal to
-the <strong>position/selection</strong> validity checks each collector already does
-(a diagnostic overlapping <code>params.range</code> for quickfixes, a real
-non-collapsed selection over a literal for <code>extract_constant</code>, a
-cursor on an inlineable variable for <code>inline_variable</code>, etc.). Two
-failure modes to design against explicitly:</p>
-<ol>
-<li><strong>Don't let a kind mismatch masquerade as a position mismatch, or
-   vice versa.</strong> Implement the kind check as a separate, earlier gate
-   than the position check, never folded into the same conditional —
-   e.g. <code>if kind_requested(&amp;only, KIND) { collect_x(...) }</code>, where
-   <code>collect_x</code> still runs its own unmodified position logic once
-   called. If the two checks get combined, a future edit to one is
-   liable to silently change the other's behavior.</li>
-<li><strong>Filter before running a collector, not just after, where cheap to
-   do so.</strong> Every collector's kind is fixed and known statically (see
-   the table below), so <code>context.only</code> can skip whole collector calls
-   before they touch the AST, rather than computing every action and
-   discarding some after the fact. This isn't just an optimization —
-   <code>handle_code_action</code> runs on effectively every cursor move, so a
-   client that always sends a narrow <code>only</code> (several editors default
-   the automatic lightbulb request to <code>quickfix</code> only) currently pays
-   for every refactor/extract collector on every keystroke for
-   nothing.</li>
-</ol>
-<p><code>only</code> matching must be <strong>hierarchical</strong>, not exact-string: a client
-requesting the bare <code>"refactor"</code> kind must match any of our
-<code>refactor.extract</code>/<code>refactor.inline</code>/<code>refactor.rewrite</code> actions
-(<code>requested == actual || actual.starts_with(&amp;format!("{requested}."))</code>),
-per the LSP spec's kind-hierarchy semantics — an exact-equality check
-would silently return nothing for that request.</p>
-<h3 id="a-second-gap-this-surfaces">A second gap this surfaces<a class="headerlink" href="#a-second-gap-this-surfaces" title="Permanent link">&para;</a></h3>
-<p>Several collectors already emit kinds we don't declare in
-<code>code_action_provider</code>'s <code>code_action_kinds</code> list: <code>refactor.rewrite</code>
-(<code>convert_switch_to_match</code>, <code>convert_to_arrow_function</code>,
-<code>convert_to_closure</code>, <code>convert_to_interpolation</code>,
-<code>promote_constructor_param</code>, <code>simplify_null</code>), <code>refactor.rewrite</code> via
-<code>CodeActionKind::REFACTOR_REWRITE</code> (<code>generate_constructor</code>,
-<code>change_visibility</code>, <code>replace_fqcn</code>), and the bare
-<code>CodeActionKind::REFACTOR</code> (<code>generate_getter_setter</code>,
-<code>generate_property_hooks</code>). Reconcile these as part of
-the same task: either add the missing kinds to the advertised list, or
-fold each action under an already-declared parent kind — a client
-that trusts our advertised capability list and asks for exactly what
-we declared should not miss actions we're actually capable of
-returning.</p>
-<h3 id="scope-boundary-codeactionresolve-is-unaffected">Scope boundary: <code>codeAction/resolve</code> is unaffected<a class="headerlink" href="#scope-boundary-codeactionresolve-is-unaffected" title="Permanent link">&para;</a></h3>
-<p><code>context.only</code> belongs to the <code>textDocument/codeAction</code> request only.
-<code>codeAction/resolve</code> (<code>resolve_code_action</code>) receives the exact
-<code>CodeAction</code> the client already picked (via its <code>data</code> field) with no
-<code>context</code> to filter against — do not add any kind-filtering logic
-there.</p>
-<p><strong>Where to look:</strong> <code>handle_code_action</code> in <code>src/code_actions/mod.rs</code>
-(the ~30 <code>collect_*_actions</code> call list — each call site is where the
-early kind-gate belongs); <code>code_action_provider</code> in
-<code>src/backend/startup.rs</code> for the advertised kind list; A34 above is the
-natural long-term home for a per-handler kind table if that refactor
-lands first, but this doesn't need to wait for it — the gate works fine
-bolted onto the current call list.</p>
 <hr />
 <h2 id="a16-snippet-placeholder-for-extracted-method-name">A16. Snippet Placeholder for Extracted Method Name<a class="headerlink" href="#a16-snippet-placeholder-for-extracted-method-name" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
