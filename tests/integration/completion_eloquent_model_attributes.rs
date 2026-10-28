@@ -253,6 +253,43 @@ namespace App\Models {
 }
 
 #[tokio::test]
+async fn eloquent_model_attributes_require_the_declared_attribute_namespace() {
+    let source = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+#[Fillable(['na'])]
+class User extends \Illuminate\Database\Eloquent\Model {
+    protected $fillable = ['name'];
+}
+"#;
+    let position = position_after(source, "#[Fillable(['na");
+    for (namespace, expected) in [
+        ("Illuminate\\Database\\Eloquent\\Attributes", true),
+        ("App", false),
+    ] {
+        let attribute = format!(
+            "<?php namespace {namespace}; #[\\Attribute(\\Attribute::TARGET_CLASS)] \
+             class Fillable {{ public function __construct(array|string ...$columns) {{}} }}"
+        );
+        let (backend, dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                (
+                    "framework/Model.php",
+                    "<?php namespace Illuminate\\Database\\Eloquent; class Model {}",
+                ),
+                ("framework/Attributes/Fillable.php", &attribute),
+                ("app/Models/User.php", source),
+            ],
+        );
+        backend.initialized(InitializedParams {}).await;
+        let uri = Uri::from_file_path(dir.path().join("app/Models/User.php")).unwrap();
+        let items = complete_at(&backend, &uri, source, position.line, position.character).await;
+        assert_eq!(labels(&items).contains(&"name"), expected, "{namespace}");
+    }
+}
+
+#[tokio::test]
 async fn eloquent_model_attributes_require_a_model_class_target() {
     for declaration in [
         "#[Fillable(['na|'])] class User { protected $fillable = ['name']; }",
