@@ -25,6 +25,7 @@ mod member;
 mod see_refs;
 mod templates;
 mod twig;
+mod validation_strings;
 mod variable;
 
 use tower_lsp_server::gen_lsp_types::*;
@@ -142,6 +143,10 @@ impl Backend {
                 })
         {
             hover.range = Some(symbol_span_to_range(content, &symbol));
+            return Some(hover);
+        }
+
+        if let Some(hover) = self.validation_string_hover(uri, content, position) {
             return Some(hover);
         }
 

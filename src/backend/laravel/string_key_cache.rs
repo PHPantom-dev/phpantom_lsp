@@ -8,6 +8,9 @@ use std::sync::Arc;
 /// and dropped again when an edit could change it.
 #[derive(Default)]
 pub(crate) struct LaravelStringKeyCache {
+    /// Installed validation rules and the project's custom registrations.
+    pub validation_rules:
+        Option<Arc<crate::virtual_members::laravel::validation_strings::catalog::RuleCatalog>>,
     /// Named routes with the URI each was registered with, plus any group
     /// prefixes whose full set of children is unknowable.  Shared behind an
     /// `Arc` because both the name list and the parameter names of one route
@@ -73,6 +76,8 @@ pub(crate) struct LaravelStringKeyCache {
 /// view names wait out an unrelated route-name build.
 #[derive(Default)]
 pub(crate) struct LaravelStringKeyBuildLocks {
+    /// Serializes discovery of installed and application validation rules.
+    pub validation_rules: parking_lot::Mutex<()>,
     pub routes: parking_lot::Mutex<()>,
     pub config_keys: parking_lot::Mutex<()>,
     pub view_names: parking_lot::Mutex<()>,
@@ -87,6 +92,18 @@ pub(crate) struct LaravelStringKeyBuildLocks {
 
 impl LaravelStringKeyCache {
     pub(crate) fn invalidate_for_uri(&mut self, uri: &str, content: &str) {
+        if self
+            .validation_rules
+            .as_ref()
+            .is_some_and(|catalog| catalog.reads(uri))
+            || uri.ends_with("/bootstrap/providers.php")
+            || uri.ends_with("/config/app.php")
+            || uri.ends_with("/composer.json")
+            || uri.ends_with("/composer.lock")
+            || has_validation_registration(content)
+        {
+            self.validation_rules = None;
+        }
         // Abilities come from `Gate::define()` calls and from the methods of
         // every policy class, so an edit to either invalidates the set.  The
         // token is `Gate::` rather than `Gate` so an unrelated `Gateway` does
@@ -149,6 +166,86 @@ impl LaravelStringKeyCache {
                 .is_some_and(|catalog| catalog.contains_uri(uri))
         {
             self.translations = None;
+        }
+    }
+}
+
+/// Check only registration call tokens: `extends` occurs in nearly
+/// every form request, where body edits must retain the workspace catalog.
+fn has_validation_registration(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    memchr::memmem::find_iter(bytes, b"::")
+        .chain(memchr::memmem::find_iter(bytes, b"->"))
+        .any(|offset| {
+            let start = crate::text_scan::skip_php_trivia(bytes, offset + 2);
+            let mut end = start;
+            while bytes
+                .get(end)
+                .is_some_and(|byte| crate::text_scan::is_ident_byte(*byte))
+            {
+                end += 1;
+            }
+            [
+                b"extend".as_slice(),
+                b"extendImplicit",
+                b"extendDependent",
+                b"resolver",
+            ]
+            .iter()
+            .any(|name| bytes[start..end].eq_ignore_ascii_case(name))
+                && bytes.get(crate::text_scan::skip_php_trivia(bytes, end)) == Some(&b'(')
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::virtual_members::laravel::validation_strings::catalog::RuleCatalog;
+
+    #[test]
+    fn validation_catalog_survives_unrelated_class_body_edits() {
+        let catalog = Arc::new(RuleCatalog::default());
+        let mut cache = LaravelStringKeyCache {
+            validation_rules: Some(Arc::clone(&catalog)),
+            ..LaravelStringKeyCache::default()
+        };
+        for content in [
+            "<?php class Request extends FormRequest { public function rules() { return ['name' => 'required']; } }",
+            "<?php class Request extends FormRequest { public function rules() { return ['name' => 'required|string']; } }",
+            "<?php SomeClass::extended(); SomeClass::extendImplicitly(); SomeClass::extend;",
+            "<?php SomeClass:: /* unfinished comment",
+        ] {
+            cache.invalidate_for_uri("file:///app/Request.php", content);
+            assert!(Arc::ptr_eq(
+                cache.validation_rules.as_ref().unwrap(),
+                &catalog
+            ));
+        }
+    }
+
+    #[test]
+    fn validation_catalog_detects_new_registration_calls() {
+        for content in [
+            "<?php Validator::extend('custom', fn () => true);",
+            "<?php Rules::extendImplicit ('custom', fn () => true);",
+            "<?php Rules :: \n extendDependent \t ('custom', fn () => true);",
+            "<?php Rules::EXTEND('custom', fn () => true);",
+            "<?php Rules::EXTENDIMPLICIT('custom', fn () => true);",
+            "<?php Rules::EXTENDDEPENDENT('custom', fn () => true);",
+            "<?php Rules:: /* method */ extend /* arguments */ ('custom', fn () => true);",
+            "<?php Rules:: // method\n extend # arguments\n ('custom', fn () => true);",
+            "<?php $factory->extend('custom', fn () => true);",
+            "<?php $factory -> EXTENDIMPLICIT ('custom', fn () => true);",
+            "<?php $factory?-> /* comment */ extendDependent ('custom', fn () => true);",
+            "<?php Validator::resolver(fn () => new CustomValidator);",
+            "<?php $factory->RESOLVER (fn () => new CustomValidator);",
+        ] {
+            let mut cache = LaravelStringKeyCache {
+                validation_rules: Some(Arc::new(RuleCatalog::default())),
+                ..LaravelStringKeyCache::default()
+            };
+            cache.invalidate_for_uri("file:///app/NewRules.php", content);
+            assert!(cache.validation_rules.is_none(), "{content}");
         }
     }
 }

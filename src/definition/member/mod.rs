@@ -32,6 +32,9 @@ mod file_lookup;
 mod laravel;
 mod shape_keys;
 
+#[cfg(test)]
+mod column_tests;
+
 use tower_lsp_server::gen_lsp_types::*;
 
 use super::point_location;
@@ -110,6 +113,58 @@ struct MemberLookup<'a> {
 
 impl Backend {
     // ─── Member Definition Resolution ───────────────────────────────────────
+
+    /// Resolve a column named in framework metadata through the normal
+    /// property lookup, including accessors and inherited model array entries.
+    pub(crate) fn model_column_declaration_location(
+        &self,
+        model: &ClassInfo,
+        column: &str,
+    ) -> Option<Location> {
+        let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
+        let lookup = MemberLookup {
+            uri: "",
+            content: "",
+            cursor_offset: 0,
+            member_name: column,
+            access_hint: MemberAccessHint::PropertyAccess,
+            class_loader: &class_loader,
+        };
+        let raw = Self::reload_raw_class(model, &[], &class_loader);
+        let raw = raw.as_ref().unwrap_or(model);
+        if let Some(location) = self
+            .member_definition_on_candidate(&lookup, model, raw)
+            .or_else(|| self.member_definition_fallback(&lookup, model, raw))
+        {
+            return Some(location);
+        }
+        // Model metadata is inherited without turning a fillable key into
+        // a declared PHP property. Find the source array in the same order
+        // PHP resolves traits and parents, using each declaration's FQN.
+        let mut pending = Vec::new();
+        pending.extend(raw.parent_class);
+        pending.extend(raw.used_traits.iter().rev().copied());
+        let mut visited = std::collections::HashSet::new();
+        while let Some(name) = pending.pop() {
+            if !visited.insert(name) || visited.len() > crate::types::MAX_INHERITANCE_DEPTH as usize
+            {
+                continue;
+            }
+            let Some(class) = class_loader(Fqn::new(&name)) else {
+                continue;
+            };
+            let raw_class = Self::reload_raw_class(&class, &[], &class_loader);
+            let class = raw_class.as_ref().unwrap_or(&class);
+            if let Some(location) =
+                self.eloquent_array_entry_location(&lookup, &class.fqn(), column, class)
+            {
+                return Some(location);
+            }
+            pending.extend(class.parent_class);
+            pending.extend(class.used_traits.iter().rev().copied());
+        }
+        None
+    }
 
     /// Resolve a member named by external project metadata, where the class
     /// is already a fully-qualified name and there is no PHP source context

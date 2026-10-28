@@ -24,6 +24,7 @@ pub struct SchemaIndex {
     blueprint_macros: HashMap<String, String>,
     base_tables: HashMap<(String, String), SchemaTable>,
     cached_plan: MigrationPlan,
+    dump_paths: Vec<PathBuf>,
 }
 
 impl PartialEq for SchemaIndex {
@@ -75,6 +76,7 @@ impl SchemaIndex {
             blueprint_macros: HashMap::new(),
             base_tables: HashMap::new(),
             cached_plan: MigrationPlan::default(),
+            dump_paths: Vec::new(),
         };
         for table in tables {
             index.insert_table(table);
@@ -124,6 +126,32 @@ impl SchemaIndex {
     pub fn table(&self, connection: &str, table: &str) -> Option<&SchemaTable> {
         self.tables
             .get(&(connection.to_ascii_lowercase(), table.to_ascii_lowercase()))
+    }
+
+    /// The tables declared by committed schema dumps and migrations.
+    pub(crate) fn tables(&self) -> impl Iterator<Item = &SchemaTable> {
+        self.tables.values()
+    }
+
+    /// Already-discovered migration files, in migration order, with cached source.
+    pub(crate) fn migration_sources(&self) -> impl DoubleEndedIterator<Item = (&Path, &str)> {
+        self.cached_plan
+            .files
+            .iter()
+            .map(|file| (file.path.as_path(), file.content.as_str()))
+    }
+
+    /// Schema dump files already read for one connection.
+    pub(crate) fn dump_paths_for<'a>(
+        &'a self,
+        connection: &'a str,
+    ) -> impl Iterator<Item = &'a Path> {
+        self.dump_paths
+            .iter()
+            .filter(move |path| {
+                connection_name_from_schema_path(path).eq_ignore_ascii_case(connection)
+            })
+            .map(PathBuf::as_path)
     }
 
     #[cfg(test)]
@@ -310,6 +338,7 @@ pub fn load_schema_index(
         blueprint_macros: blueprint_macros.clone(),
         base_tables: HashMap::new(),
         cached_plan: MigrationPlan::default(),
+        dump_paths: Vec::new(),
     };
 
     if config.schema.enabled() {
@@ -323,6 +352,7 @@ pub fn load_schema_index(
                 table.connection = connection.to_string();
                 index.insert_table(table);
             }
+            index.dump_paths.push(path);
         }
     }
 
@@ -334,6 +364,11 @@ pub fn load_schema_index(
         index.cached_plan = plan;
     }
     Ok(index)
+}
+
+/// Whether a Blueprint method creates a column rather than an index or constraint.
+pub(crate) fn blueprint_declares_column(method: &str) -> bool {
+    migration_database_type(method).is_some()
 }
 
 pub fn database_type_to_php_type(database_type: &str, nullable: bool) -> PhpType {

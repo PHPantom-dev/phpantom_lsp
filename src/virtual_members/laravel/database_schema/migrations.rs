@@ -579,7 +579,7 @@ fn default_column_name(method: &str) -> Option<String> {
 /// `index('email')`, `foreign('author_id')`, and `comment('…')` name a column or
 /// the table without adding one, so only the methods that reach
 /// `Blueprint::addColumn()` are listed here.
-fn migration_database_type(method: &str) -> Option<&'static str> {
+pub(super) fn migration_database_type(method: &str) -> Option<&'static str> {
     match method.to_ascii_lowercase().as_str() {
         "bigincrements" | "biginteger" | "foreignid" | "foreignidfor" | "id"
         | "unsignedbiginteger" => Some("BIGINT"),
