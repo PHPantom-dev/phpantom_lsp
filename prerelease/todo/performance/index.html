@@ -1097,17 +1097,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p88-reading-a-by-reference-parameters-out-type-walks-the-callee-once-per-return" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P88. Reading a by-reference parameter's out type walks the callee once per <code>return</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1406,17 +1395,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#p88-reading-a-by-reference-parameters-out-type-walks-the-callee-once-per-return" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        P88. Reading a by-reference parameter's out type walks the callee once per <code>return</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1576,72 +1554,37 @@ it is.</p>
 <code>shape_is_subshape</code> in <code>src/php_type/subtype.rs</code>, <code>runtime_shape_keys</code>
 in <code>src/php_type/shape_keys.rs</code>.</p>
 <hr />
-<h2 id="p88-reading-a-by-reference-parameters-out-type-walks-the-callee-once-per-return">P88. Reading a by-reference parameter's out type walks the callee once per <code>return</code><a class="headerlink" href="#p88-reading-a-by-reference-parameters-out-type-walks-the-callee-once-per-return" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function privParseOptions(&amp;$p_options_list, $p_size, &amp;$v_result_list, $v_requested_options = false)</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">{</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    // ~340 lines, 25 `return` statements</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">$v_result = $this-&gt;privParseOptions($v_arg_list, $v_size, $v_options, [...]);</span>
-</code></pre></div>
-<p>When a call passes a variable to a by-reference parameter, the walker
-reads the callee's body for what it leaves there (<code>read_out_type</code> in
-<code>src/type_engine/call_resolution/out_param.rs</code>). It does so by running a
-separate <code>resolve_variable_types_in_program</code> query at every exit, each
-<code>return</code> plus the closing brace, with the diagnostic scope cache
-suspended, so each query walks the body from the top. A body with R
-returns costs R full walks per out-parameter, and the walks themselves
-reach other by-reference calls whose callees are read the same way (up
-to <code>MAX_OUT_TYPE_DEPTH</code>).</p>
-<p>WordPress core's bundled <code>class-pclzip.php</code> (5,700 lines, by-reference
-array parameters on nearly every private method) takes 10.1 s on its own
-in a debug <code>analyze</code>, the slowest file in core by a factor of two and
-about 8% of the whole project's CPU time. The same file with the <code>&amp;</code>
-removed from its parameters takes 3.0 s. Every method on its own takes
-0.1 to 0.4 s, so the cost is all in the cross-method readings. An editor
-opening the file pays it on each diagnostic pass.</p>
-<p>Read every exit in one walk: walk the body once and record the
-parameter's type as the walk passes each <code>return</code> (the walker already
-visits them in order), then join the recordings. That makes a reading
-O(body) instead of O(returns × body), and the existing memo keeps it to
-one reading per out-parameter per pass.</p>
-<p><strong>Where to look:</strong> <code>read_out_type</code> and <code>infer_out_type</code> in
-<code>src/type_engine/call_resolution/out_param.rs</code>;
-<code>resolve_variable_types_in_program</code> in
-<code>src/type_engine/variable/resolution/</code>.</p>
-<hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Flat profile of a whole-project run. The release build has symbols but</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># no debug info or frame pointers, so for call graphs build with</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># RUSTFLAGS="-C force-frame-pointers=yes" and record with `-g`.</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>perf<span class="w"> </span>record<span class="w"> </span>-F<span class="w"> </span><span class="m">999</span><span class="w"> </span>--<span class="w"> </span>./target/release/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Text report (top functions):</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>perf<span class="w"> </span>report<span class="w"> </span>--stdio<span class="w"> </span>--no-children<span class="w"> </span>--sort<span class="w"> </span>symbol<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-80
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># Flamegraph (requires the `flamegraph` crate or perf-tools):</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>perf<span class="w"> </span>script<span class="w"> </span><span class="p">|</span><span class="w"> </span>flamegraph<span class="w"> </span>&gt;<span class="w"> </span>/tmp/phpantom.svg
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="c1"># Instantaneous CPU utilisation over a run (% of one core, sampled</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c1"># every 0.5 s), for machines where perf is unavailable</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="c1"># (kernel.perf_event_paranoid &gt; 2):</span>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>./target/release/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">  </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">&amp;</span><span class="w"> </span><span class="nv">PID</span><span class="o">=</span><span class="nv">$!</span><span class="p">;</span><span class="w"> </span><span class="nv">prev</span><span class="o">=</span><span class="m">0</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="k">while</span><span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-0<span class="w"> </span><span class="nv">$PID</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">  </span><span class="nv">cur</span><span class="o">=</span><span class="k">$(</span>awk<span class="w"> </span><span class="s1">'{print $14+$15}'</span><span class="w"> </span>/proc/<span class="nv">$PID</span>/stat<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">break</span>
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">  </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"</span><span class="nv">$cur</span><span class="s2">"</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="k">$((</span><span class="w"> </span><span class="o">(</span><span class="nv">cur</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">prev</span><span class="o">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="nv">prev</span><span class="o">=</span><span class="nv">$cur</span><span class="p">;</span><span class="w"> </span>sleep<span class="w"> </span><span class="m">0</span>.5
-<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="k">done</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Flat profile of a whole-project run. The release build has symbols but</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># no debug info or frame pointers, so for call graphs build with</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># RUSTFLAGS="-C force-frame-pointers=yes" and record with `-g`.</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>perf<span class="w"> </span>record<span class="w"> </span>-F<span class="w"> </span><span class="m">999</span><span class="w"> </span>--<span class="w"> </span>./target/release/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Text report (top functions):</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>perf<span class="w"> </span>report<span class="w"> </span>--stdio<span class="w"> </span>--no-children<span class="w"> </span>--sort<span class="w"> </span>symbol<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-80
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Flamegraph (requires the `flamegraph` crate or perf-tools):</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>perf<span class="w"> </span>script<span class="w"> </span><span class="p">|</span><span class="w"> </span>flamegraph<span class="w"> </span>&gt;<span class="w"> </span>/tmp/phpantom.svg
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1"># Instantaneous CPU utilisation over a run (% of one core, sampled</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="c1"># every 0.5 s), for machines where perf is unavailable</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="c1"># (kernel.perf_event_paranoid &gt; 2):</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>./target/release/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">  </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">&amp;</span><span class="w"> </span><span class="nv">PID</span><span class="o">=</span><span class="nv">$!</span><span class="p">;</span><span class="w"> </span><span class="nv">prev</span><span class="o">=</span><span class="m">0</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="k">while</span><span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-0<span class="w"> </span><span class="nv">$PID</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">  </span><span class="nv">cur</span><span class="o">=</span><span class="k">$(</span>awk<span class="w"> </span><span class="s1">'{print $14+$15}'</span><span class="w"> </span>/proc/<span class="nv">$PID</span>/stat<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">break</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">  </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">"</span><span class="nv">$cur</span><span class="s2">"</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="k">$((</span><span class="w"> </span><span class="o">(</span><span class="nv">cur</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">prev</span><span class="o">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="nv">prev</span><span class="o">=</span><span class="nv">$cur</span><span class="p">;</span><span class="w"> </span>sleep<span class="w"> </span><span class="m">0</span>.5
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="k">done</span>
 </code></pre></div>
 <h3 id="memory">Memory<a class="headerlink" href="#memory" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Per-store deep-size audit printed at the end of `analyze`. The feature</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># installs a counting allocator, so build it into its own target dir to</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># keep the normal binary untouched.</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>cargo<span class="w"> </span>build<span class="w"> </span>--features<span class="w"> </span>mem-audit<span class="w"> </span>--target-dir<span class="w"> </span>target/memaudit
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="nv">PHPANTOM_MEM_AUDIT</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>target/memaudit/debug/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Per-store deep-size audit printed at the end of `analyze`. The feature</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># installs a counting allocator, so build it into its own target dir to</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># keep the normal binary untouched.</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>cargo<span class="w"> </span>build<span class="w"> </span>--features<span class="w"> </span>mem-audit<span class="w"> </span>--target-dir<span class="w"> </span>target/memaudit
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="nv">PHPANTOM_MEM_AUDIT</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>target/memaudit/debug/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour
 </code></pre></div>
 <p>The audit walks every long-lived store with shared <code>Arc</code>s counted once,
 then drops each store in turn and reports the exact bytes released. For
