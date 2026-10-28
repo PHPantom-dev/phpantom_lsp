@@ -156,6 +156,7 @@ pub(crate) mod typed_morph_columns;
 mod unique_ids;
 pub(crate) mod validated_shape;
 pub(crate) mod validation_rules;
+pub(crate) mod validation_strings;
 mod view_data;
 mod view_names;
 pub(crate) mod where_property;

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Laravel validation strings.** Validation rules and their referenced fields, database columns, and enum values now complete and navigate, with hover documentation and diagnostics for unknown rules and message keys. Suggestions follow the project's installed framework and custom rules. Contributed by @shuvroroy.
 - **Go to declaration.** On a method call or a method's own declaration, go-to-declaration jumps to the interface or abstract method it implements. Where there is none, it lands where go-to-definition does.
 - **Morph aliases and config keys complete as array keys.** Registered aliases are suggested for the keys of `Relation::morphMap([...])`, and config keys for the keys of `Config::set([...])` and `config([...])`. Contributed by @shuvroroy.
 - **Plural and singleton resource routes in Laravel.** Routes registered with `Route::resources()`, `Route::singleton()` and their API and plural variants now complete, navigate, and are no longer reported as unknown. Resource names with stray slashes or empty segments get the same route names Laravel gives them. Contributed by @shuvroroy.
@@ -78,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Escaped dollar signs stay literal during completion.** A `\$` inside a double-quoted string no longer offers variable names, so string-value suggestions remain available. Contributed by @shuvroroy.
 - **Scalar coercion outside `strict_types`.** In a file without `declare(strict_types=1)`, a `bool` passed to a `string`, `int` or `float` parameter, an integer range passed to `string`, and any scalar passed to `bool` are no longer reported, since PHP converts them. The same holds for return values and property assignments. A callback's return value is still checked strictly, because nothing converts it.
 - **`[indexing] exclude` covers Composer's class lists.** A class Composer's classmap or PSR-0 map names no longer resolves from a path you excluded, so excluding a path mid-session and restarting give the same result.
 - **"Replace with" no longer leaves a stray parenthesis.** Replacing a call to a deprecated function or method now replaces its closing parenthesis too, instead of leaving an extra `)` behind.

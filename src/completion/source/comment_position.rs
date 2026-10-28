@@ -338,14 +338,44 @@ fn is_simple_interpolation_site(bytes: &[u8], target: usize) -> bool {
         pos -= 1;
     }
     let ident_len = before_ident - pos;
+    let unescaped_dollar =
+        pos > 0 && bytes[pos - 1] == b'$' && !crate::text_scan::is_escaped(bytes, pos - 1);
 
     // If we consumed an arrow, the identifier must be non-empty and
     // preceded by `$`.
     if has_arrow {
-        return ident_len > 0 && pos > 0 && bytes[pos - 1] == b'$';
+        return ident_len > 0 && unescaped_dollar;
     }
 
     // ── Case 2: bare `$` or `$partialName` (variable interpolation) ─
     // The identifier may be empty (just `$`) or partially typed.
-    pos > 0 && bytes[pos - 1] == b'$'
+    unescaped_dollar
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_simple_interpolation_site;
+
+    #[test]
+    fn escaped_dollars_remain_literal_at_variable_and_member_positions() {
+        for prefix in [r"\$", r"\$cost", r"\$item->", r"\$item?->", r"\\\$cost"] {
+            assert!(
+                !is_simple_interpolation_site(prefix.as_bytes(), prefix.len()),
+                "{prefix}"
+            );
+        }
+        for prefix in [
+            "$",
+            "$cost",
+            "$item->",
+            "$item?->",
+            r"\\$cost",
+            r"\\$item->",
+        ] {
+            assert!(
+                is_simple_interpolation_site(prefix.as_bytes(), prefix.len()),
+                "{prefix}"
+            );
+        }
+    }
 }

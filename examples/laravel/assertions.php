@@ -956,6 +956,123 @@ check(
         && (string) (new ReflectionEnum(\App\Models\BatchSize::class))->getBackingType() === 'int'
 );
 
+// ─── Validation string references and custom rules ──────────────────────────
+
+$validationRequest = new \App\Http\Requests\ValidationDemoRequest();
+$validationRules = $validationRequest->rules();
+$validationFactory = new \Illuminate\Validation\Factory($translator);
+$validationFactory->setPresenceVerifier(
+    new \Illuminate\Validation\DatabasePresenceVerifier($capsule->getDatabaseManager())
+);
+
+// Run the provider's actual registration against a standalone validator.
+$previousValidator = \Illuminate\Support\Facades\Validator::getFacadeRoot();
+\Illuminate\Support\Facades\Validator::swap($validationFactory);
+$validationProvider = new \App\Providers\DemoServiceProvider(new \Illuminate\Container\Container());
+$validationProvider->registerValidationRules();
+
+$schema = $capsule->getConnection()->getSchemaBuilder();
+$schema->create('customers', static function (\Illuminate\Database\Schema\Blueprint $table): void {
+    $table->string('email');
+});
+$schema->create('bakeries', static function (\Illuminate\Database\Schema\Blueprint $table): void {
+    $table->string('jam_flavor');
+});
+$capsule->getConnection()->table('customers')->insert(['email' => 'existing@bakery.test']);
+foreach (\App\Models\JamFlavor::cases() as $flavor) {
+    $capsule->getConnection()->table('bakeries')->insert(['jam_flavor' => $flavor->value]);
+}
+
+$validationData = [
+    'email' => 'new@bakery.test',
+    'password' => 'Sourdough!',
+    'password_confirmation' => 'Sourdough!',
+    'jam_flavor' => 'blueberry',
+    'featured_flavor' => 'strawberry',
+    'code' => 'BREAD',
+    'booking_code' => 'BAK-2026',
+];
+$validateDemo = static function (array $data) use ($validationFactory, $validationRequest, $validationRules) {
+    return $validationFactory->make(
+        $data,
+        $validationRules,
+        $validationRequest->messages(),
+        $validationRequest->attributes()
+    );
+};
+check('ValidationDemoRequest accepts its demonstrated values', $validateDemo($validationData)->passes());
+check(
+    'exists and unique name the model tables and declared columns',
+    (new \App\Models\Customer())->getTable() === 'customers'
+        && in_array('email', (new \App\Models\Customer())->getFillable(), true)
+        && (new \App\Models\Bakery())->getTable() === 'bakeries'
+        && ((new \App\Models\Bakery())->getCasts()['jam_flavor'] ?? null) === \App\Models\JamFlavor::class
+);
+check(
+    'in values are the backing values of the column enum',
+    explode(',', substr(explode('|', $validationRules['jam_flavor'])[2], 3))
+        === array_map(static fn (\App\Models\JamFlavor $flavor): string => $flavor->value, \App\Models\JamFlavor::cases())
+);
+check(
+    'Rule::in accepts the same enum-backed column values',
+    $validateDemo(array_replace($validationData, ['featured_flavor' => 'raspberry']))->passes()
+        && $validateDemo(array_replace($validationData, ['featured_flavor' => 'blueberry']))->errors()->has('featured_flavor')
+);
+check(
+    'same refers to the sibling password field',
+    $validateDemo(array_replace($validationData, ['password_confirmation' => 'Different!']))->errors()->has('password_confirmation')
+);
+check(
+    'exists rejects a value absent from the named column',
+    $validateDemo(array_replace($validationData, ['jam_flavor' => 'apricot']))->errors()->has('jam_flavor')
+);
+check(
+    'messages() selects the named field and rule',
+    $validateDemo(array_replace($validationData, ['email' => 'existing@bakery.test']))->errors()->first('email')
+        === 'That email address is already registered.'
+        && $validateDemo(array_replace($validationData, ['email' => '']))->errors()->first('email')
+        === 'Please provide your email address.'
+);
+$translator->addLines(['validation.same' => 'The :attribute must match :other.'], 'en');
+check(
+    'attributes() labels a field declared in rules()',
+    $validateDemo(array_replace($validationData, ['password_confirmation' => 'Different!']))->errors()->first('password_confirmation')
+        === 'The repeated password must match password.'
+);
+check(
+    'the custom ValidationRule object rejects lowercase input',
+    $validationRules['code'][1] instanceof \Illuminate\Contracts\Validation\ValidationRule
+        && $validateDemo(array_replace($validationData, ['code' => 'bread']))->errors()->first('code')
+        === 'The code must be uppercase.'
+);
+check(
+    'the provider registers bakery_code as a usable string rule',
+    $validateDemo(array_replace($validationData, ['booking_code' => 'OTHER-2026']))->errors()->has('booking_code')
+);
+$conditionalValidator = $validationFactory->make(['email' => 'baker@bakery.test'], ['email' => ['required', 'email']]);
+$conditionalValidator->sometimes('email', 'max:255', static fn (): bool => true);
+check(
+    'sometimes() adds its rule to the named field',
+    in_array('max:255', $conditionalValidator->getRules()['email'], true)
+        && $conditionalValidator->passes()
+);
+$requiredRule = new ReflectionMethod(\Illuminate\Validation\Validator::class, 'validateRequired');
+$maximumRule = new ReflectionMethod(\Illuminate\Validation\Validator::class, 'validateMax');
+check(
+    'installed validator methods expose rule parameter requirements',
+    array_map(static fn (ReflectionParameter $parameter): string => $parameter->getName(), $requiredRule->getParameters())
+        === ['attribute', 'value']
+        && array_map(static fn (ReflectionParameter $parameter): string => $parameter->getName(), $maximumRule->getParameters())
+        === ['attribute', 'value', 'parameters']
+);
+$schema->drop('customers');
+$schema->drop('bakeries');
+if ($previousValidator !== null) {
+    \Illuminate\Support\Facades\Validator::swap($previousValidator);
+} else {
+    \Illuminate\Support\Facades\Validator::clearResolvedInstance('validator');
+}
+
 // ─── Composed rules and excluded fields ─────────────────────────────────────
 
 // Demo::inheritedRequestInputKeys() claims a child request that writes

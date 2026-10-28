@@ -388,41 +388,6 @@ The scanners already enumerate every valid key for go-to-definition. The
 items below mostly wire that existing enumeration into three more LSP
 endpoints rather than building new analysis.
 
-#### L62. Validation rule strings
-
-**Impact: High · Complexity: Medium**
-
-Completion, hover, and diagnostics for the rule strings in
-`'field' => 'required|email'`. Laravel Idea completes these and
-advertises it on its front page; rules arrays are written in nearly every
-controller and form request, so this is the most frequent string context
-we leave blank.
-
-Rather than hardcoding a rule list (the Laravel LSP ships ~90 rules as
-LSP snippets, e.g. `between:${min},${max}`), derive it from the installed
-framework: the `Validator` concern declares one `validate{Rule}` method
-per rule, so scanning that vendor class yields the exact rule set for the
-project's Laravel version, plus whether each rule takes parameters.
-Custom rule classes (implementing `ValidationRule`) and literal
-`Validator::extend('name', …)` registrations extend the set. Trigger
-contexts to match: `$request->validate()` arg 0, `Validator::make()`
-arg 1, `$validator->sometimes()` arg 1, and array *values* (never keys,
-which are field names) inside the `rules()` method of `FormRequest` /
-`Livewire\Form` subclasses.
-
-**Rule parameters are references too:** `exists:users,email` and
-`unique:users` name a table and column (resolve to the model/column via
-the schema/migration table map or the model's own column sources);
-`same:password`, `different:`, `required_with:`, `gt/gte/lt/lte:`,
-`after:`/`before:` name *other fields* in the same rules array (complete
-and navigate to the sibling key); `in:`/`Rule::in()` values on an
-enum-cast field can complete from the enum's cases.
-
-**Messages and attributes.** The keys of a form request's `messages()`
-(`'email.required'`) and `attributes()` arrays name a field from
-`rules()`, optionally followed by a rule. Complete them from the rules
-array and report a key that names neither.
-
 #### L63. Middleware alias names
 
 **Impact: Medium-High · Complexity: Medium**

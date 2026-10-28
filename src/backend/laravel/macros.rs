@@ -390,7 +390,8 @@ impl Backend {
         }
     }
 
-    fn is_macro_helper_uri_allowed(&self, provider_uri: &str, helper_uri: &str) -> bool {
+    /// Restrict provider helpers to the application or the provider's own package.
+    pub(crate) fn is_macro_helper_uri_allowed(&self, provider_uri: &str, helper_uri: &str) -> bool {
         let Some(provider_url) = crate::util::parse_url(provider_uri) else {
             return false;
         };

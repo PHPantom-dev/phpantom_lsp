@@ -84,6 +84,7 @@ pub(crate) mod laravel_route_controller;
 pub(crate) mod laravel_route_params;
 pub(crate) mod laravel_string_keys;
 pub(crate) mod laravel_translation_args;
+mod laravel_validation_strings;
 pub mod named_args;
 pub(crate) mod resolve;
 pub(crate) mod symfony_string_keys;

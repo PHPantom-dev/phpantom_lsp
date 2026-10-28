@@ -65,6 +65,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\View;
 use Illuminate\View\Factory as ViewFactory;
 
@@ -1262,6 +1263,30 @@ class Demo
         }
 
         strtoupper($search);              // → string
+    }
+
+
+    // ── Validation rule strings ─────────────────────────────────────────
+
+    public function validationRuleStrings(Request $request): void
+    {
+        // Try: complete or hover required and email. Misspell a rule to see
+        // an unknown-rule diagnostic; the field keys are input names.
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required|string|min:8',
+            // Try: complete after same:, or jump to password's key above.
+            'password_confirmation' => 'required|same:password',
+        ]);
+
+        // Try: complete rule values in make() and sometimes().
+        $validator = Validator::make($request->all(), [
+            'email' => ['required', 'email'],
+        ]);
+        $validator->sometimes('email', 'max:255', static fn (): bool => true);
+
+        // app/Http/Requests/ValidationDemoRequest.php also demonstrates
+        // database references, enum values, custom rules, and message keys.
     }
 
 
