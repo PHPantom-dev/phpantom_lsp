@@ -42,6 +42,54 @@ reads the service configuration now runs there too. Profile a single-file
 
 ---
 
+## P87. A run of conditional appends to one array is polynomial in its length
+
+**Impact: Medium · Complexity: High**
+
+```php
+$catalog = [];
+if ($user->hasPermission('access', 'catalog/category')) {
+    $catalog[] = ['name' => …, 'href' => …, 'children' => []];
+}
+if ($user->hasPermission('access', 'catalog/product')) {
+    $catalog[] = ['name' => …, 'href' => …, 'children' => []];
+}
+// … ninety of these in OpenCart's admin/controller/common/column_left.php
+```
+
+A synthetic file with N such blocks takes 0.01 s at N = 20, 0.57 s at
+80 and 9.4 s at 160 (release `analyze`). OpenCart's `column_left.php`
+alone takes 2.2 to 3.3 s, the whole tail of that project's analysis; the
+rest of its 1,872 files finish in under 0.6 s. An editor opening the
+file waits as long for its diagnostics.
+
+Nearly all of it is in `ScopeState::merge_branch`. Each condition that
+narrows something (a call key, `$s === 'x'`; a bare `bool` does not)
+records an implied narrowing whose trigger is the holder's whole shape
+at that point. Every later join re-asks each accumulated proof whether
+it survives (`join_implied_narrowings` → `disjoint` → `shape_is_subshape`),
+and those proofs never lapse, so a join costs O(N) proofs times an O(N)
+shape comparison. `ResolvedType::drop_subsumed_entries` in `merge_local`
+spends the rest comparing the same shapes. The shape comparison itself
+allocates: `runtime_shape_keys` formats every positional key with
+`to_string` and `KeyPositions::find` builds a `HashMap` per call.
+
+Fix the growth, not the constant. Each old proof stays live because
+the fall-through path still holds the shape its trigger names, so
+lapsing them on reassignment alone is not enough; the join needs a way
+to settle a proof once instead of re-proving it at every later join
+(remember which proofs were already shown to survive against a holder
+value that has not changed since). Making the shape comparison
+allocation-free is worth doing on its own, but leaves the curve where
+it is.
+
+**Where to look:** `join_implied_narrowings` in
+`src/type_engine/variable/forward_walk/scope_state/proofs.rs`,
+`shape_is_subshape` in `src/php_type/subtype.rs`, `runtime_shape_keys`
+in `src/php_type/shape_keys.rs`.
+
+---
+
 ## Appendix: Profiling
 
 ### Commands

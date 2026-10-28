@@ -737,6 +737,7 @@ class Demo
         // welcome.blade.php declares a @bladestan-signature, so this call
         // is checked against it the way a function call is checked against
         // its parameters.
+        // Try: change 'welcome' to 'welcom' and apply "Change to 'welcome'".
         $posts = BlogPost::where('published', true)->get();
         $user = BlogAuthor::first();
         view('welcome', compact('posts', 'user'));
@@ -819,6 +820,24 @@ class Demo
         // from the one Laravel derives from the resource name — each segment
         // of bakeries.ovens singularized into bakeries/{bakery}/ovens/{oven}.
         route('bakeries.ovens.show', ['bakery' => 1, 'oven' => 2]);
+
+        // Plural resource registrations in routes/web.php keep group prefixes.
+        // Try: complete the route names and their parameter keys.
+        route('catalog.collections.show', ['collection' => 1]);
+        route('catalog.menus.create');
+        route('catalog.deliveries.show', ['delivery' => 1]);
+        route('catalog.orders.destroy', ['order' => 1]);
+
+        // A nested singleton keeps {bakery}, with no {profile} parameter.
+        // creatable() adds create, store, and destroy to show/edit/update.
+        route('catalog.bakeries.profile.show', ['bakery' => 1]);
+        route('catalog.bakeries.profile.create', ['bakery' => 1]);
+        route('catalog.bakeries.profile.store', ['bakery' => 1]);
+        route('catalog.bakeries.profile.destroy', ['bakery' => 1]);
+
+        // An API singleton omits form routes; destroyable() adds deletion.
+        route('catalog.status.update');
+        route('catalog.status.destroy');
 
         // routes/web.php registers these from a nested foreach over a literal
         // array and names each one by interpolation.  The loop is unrolled
@@ -1114,6 +1133,8 @@ class Demo
         // `Relation::morphMap()` call.  Hover shows the model each alias maps
         // to, go-to-definition offers the registration and the model, and
         // find-references links every usage of the alias.
+        // Try: complete either string in the types array to see both aliases.
+        // They also complete as keys in DemoServiceProvider's morph map.
         Review::whereHasMorph('reviewable', ['blog_post', 'bakery'])->get();
 
         // The same alias resolves in Relation::getMorphedModel(), where
@@ -1140,6 +1161,9 @@ class Demo
         config('app.name');
         Config::get('database.default');
         Config::set('app.timezone', 'UTC');
+        // Try: complete the keys in these config writes.
+        Config::set(['app.timezone' => 'UTC']);
+        config(['app.name' => 'PHPantom Demo']);
     }
 
 

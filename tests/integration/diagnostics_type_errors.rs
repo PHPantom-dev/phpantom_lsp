@@ -62,6 +62,13 @@ fn has_type_error(diags: &[Diagnostic]) -> bool {
     })
 }
 
+fn type_error_count(diags: &[Diagnostic]) -> usize {
+    diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "type_mismatch_argument"))
+        .count()
+}
+
 // ─── Basic: string passed to int parameter ──────────────────────────────────
 
 #[test]
@@ -373,7 +380,7 @@ function test(): void {
 
 #[test]
 fn flags_bool_passed_to_string() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takes_string(string $x): void {}
 
 function test(): void {
@@ -2839,7 +2846,7 @@ function test(): void {
 
 #[test]
 fn still_flags_bool_to_int() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takes_int(int $x): void {}
 
 function test(): void {
@@ -5059,6 +5066,73 @@ function test(): void {
     );
 }
 
+/// The scalars PHP converts to a scalar parameter outside `strict_types`.
+const SCALAR_COERCIONS: &str = r#"
+function label(string $s): void {}
+function count_it(int $i): void {}
+function ratio(float $f): void {}
+function flag(bool $b): void {}
+
+/** @param int<0, 255> $byte */
+function test(string $haystack, bool $b, int $byte, float $f, string $s): void {
+    label(false);
+    label($b);
+    label(strpos($haystack, 'x'));
+    label($byte);
+    label(ord($haystack));
+    count_it(true);
+    count_it($b);
+    ratio(false);
+    ratio($b);
+    flag(0);
+    flag($f);
+    flag('yes');
+    flag($s);
+}
+"#;
+
+#[test]
+fn no_strict_types_allows_scalar_coercions() {
+    let php = format!("<?php\n{SCALAR_COERCIONS}");
+    let diags = collect_with_full_stubs(&php);
+    assert!(
+        !has_type_error(&diags),
+        "Without strict_types, PHP coerces these scalars, got: {diags:?}"
+    );
+}
+
+#[test]
+fn strict_types_flags_scalar_coercions() {
+    let php = format!("<?php\ndeclare(strict_types=1);\n{SCALAR_COERCIONS}");
+    let diags = collect_with_full_stubs(&php);
+    assert_eq!(
+        type_error_count(&diags),
+        13,
+        "Under strict_types=1 every coercion is a TypeError, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_strict_types_flags_non_numeric_string_passed_to_int() {
+    // A non-numeric string is the one scalar PHP refuses for `int` and
+    // `float` even outside strict_types.
+    let php = r#"<?php
+function count_it(int $i): void {}
+function ratio(float $f): void {}
+
+function test(string $s): void {
+    count_it('abc');
+    ratio($s);
+}
+"#;
+    let diags = collect(php);
+    assert_eq!(
+        type_error_count(&diags),
+        2,
+        "Non-numeric strings are still rejected by int and float, got: {diags:?}"
+    );
+}
+
 // ─── int / int reaching an int parameter ────────────────────────────────────
 
 /// `int / int` is `int|float`, but the float half only turns up when the
@@ -5235,7 +5309,7 @@ function test($v, int $exp): void {
 
 #[test]
 fn flags_string_passed_to_bool() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takes_bool(bool $x): void {}
 
 function test(): void {
@@ -6093,6 +6167,65 @@ takesNamedBox(new NamedBox(new AnonymousUser()));
 }
 
 #[test]
+fn no_diagnostic_for_template_bound_from_closure_parameter_type() {
+    // A template named only in a callable's parameter list is bound by the
+    // closure's own parameter type, so a closure accepting less than the
+    // template's bound fits.
+    let php = r#"<?php
+final class DataContext {}
+final class User { public string $name = ''; }
+
+/** @template TData as array|object */
+final class DataColumn {
+    /** @param (callable(TData, DataContext): string)|null $content */
+    public function __construct(string $property, ?callable $content = null) {}
+}
+
+/**
+ * @template T of object
+ * @param callable(T, DataContext): string $content
+ */
+function column(callable $content): void {}
+
+new DataColumn('status', content: static fn(User $user) => $user->name);
+new DataColumn('status', static fn(User $user) => $user->name);
+column(fn(User $user) => $user->name);
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A closure parameter binds the template, got: {diags:?}"
+    );
+}
+
+#[test]
+fn diagnostic_for_closure_parameter_type_outside_template_bound() {
+    // The closure still binds the template, but the binding has to satisfy
+    // the bound.
+    let php = r#"<?php
+final class DataContext {}
+
+/** @template TData as array|object */
+final class DataColumn {
+    /** @param (callable(TData, DataContext): string)|null $content */
+    public function __construct(string $property, ?callable $content = null) {}
+}
+
+/**
+ * @template T of object
+ * @param callable(T, DataContext): string $content
+ */
+function column(callable $content): void {}
+
+new DataColumn('status', static fn(int $id): string => 'x');
+column(fn(int $id): string => 'x');
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(msgs.len(), 2, "got: {msgs:?}");
+}
+
+#[test]
 fn no_diagnostic_for_covariant_generic_type_argument() {
     // A narrower type argument still satisfies the wider one.
     let php = r#"<?php
@@ -6941,6 +7074,202 @@ class MyException extends NativeException {}
     assert!(
         msgs.is_empty(),
         "Should not flag Exception subclass as incompatible with Throwable, got: {msgs:?}"
+    );
+}
+
+/// A global function typed with `\context`, which exists only via `class_alias()`.
+const ALIASED_GLOBAL_PARAM_PHP: &str = r#"<?php
+class_alias(Core\context::class, 'context');
+
+function is_enrolled(context $context): bool { return true; }
+"#;
+
+/// Argument diagnostics for `php`, with an unrelated `App\context` also indexed.
+fn collect_against_aliased_global_param(php: &str) -> Vec<String> {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///core/context.php",
+        "<?php\nnamespace Core;\n\nabstract class context {}\nfinal class course_context extends context {}\n",
+    );
+    backend.update_ast("file:///lib/accesslib.php", ALIASED_GLOBAL_PARAM_PHP);
+    backend.update_ast(
+        "file:///app/context.php",
+        "<?php\nnamespace App;\n\nfinal class context {}\n",
+    );
+    backend.update_ast("file:///test.php", php);
+
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    messages_with_code(&out, "type_mismatch_argument")
+}
+
+#[test]
+fn caller_import_does_not_rename_a_global_parameter_type() {
+    let msgs = collect_against_aliased_global_param(
+        r#"<?php
+namespace App\Service;
+
+use App\context;
+
+function check(): bool {
+    return is_enrolled(new \Core\course_context()) && new context() instanceof context;
+}
+"#,
+    );
+    assert!(
+        msgs.is_empty(),
+        "`context` in `is_enrolled()` was written in the global namespace, so \
+         the caller's `use App\\context;` has no say in what it names: {msgs:?}"
+    );
+}
+
+#[test]
+fn caller_namespace_does_not_rename_a_global_parameter_type() {
+    let msgs = collect_against_aliased_global_param(
+        r#"<?php
+namespace App;
+
+function check(): bool {
+    return is_enrolled(new \Core\course_context());
+}
+"#,
+    );
+    assert!(
+        msgs.is_empty(),
+        "`context` in `is_enrolled()` is the global name, not `App\\context` \
+         just because the call sits in namespace `App`: {msgs:?}"
+    );
+}
+
+#[test]
+fn flags_imported_class_passed_to_a_same_named_global_parameter_type() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///lib/accesslib.php",
+        r#"<?php
+abstract class context {}
+
+function is_enrolled(context $context): bool { return true; }
+"#,
+    );
+    backend.update_ast(
+        "file:///app/context.php",
+        "<?php\nnamespace App;\n\nfinal class context {}\n",
+    );
+    let php = r#"<?php
+namespace App\Service;
+
+use App\context;
+
+function check(): bool {
+    return is_enrolled(new context());
+}
+"#;
+    backend.update_ast("file:///test.php", php);
+
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("expects context") && m.contains("got App\\context")),
+        "`App\\context` does not extend the global `context`: {msgs:?}"
+    );
+}
+
+/// Argument diagnostics for `php` against a real global `context` and an `App\context`.
+fn collect_against_global_context(php: &str) -> Vec<String> {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///lib/accesslib.php",
+        r#"<?php
+class context {}
+
+function get_ctx(): context { return new context(); }
+
+function takes(context $c): bool { return true; }
+"#,
+    );
+    backend.update_ast(
+        "file:///app/context.php",
+        "<?php\nnamespace App;\n\nfinal class context {}\n",
+    );
+    backend.update_ast("file:///test.php", php);
+
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    messages_with_code(&out, "type_mismatch_argument")
+}
+
+#[test]
+fn caller_import_does_not_rename_a_global_return_type() {
+    let msgs = collect_against_global_context(
+        r#"<?php
+namespace App\Service;
+
+use App\context;
+
+function run(): bool {
+    return takes(get_ctx()) && new context() instanceof context;
+}
+"#,
+    );
+    assert!(
+        msgs.is_empty(),
+        "`get_ctx()` returns the global `context` whatever the caller \
+         imports: {msgs:?}"
+    );
+}
+
+#[test]
+fn native_parameter_hint_keeps_the_class_its_import_names() {
+    let msgs = collect_against_global_context(
+        r#"<?php
+namespace App\Service;
+
+use App\context;
+
+function wants_app(context $c): bool { return true; }
+
+class Svc {
+    public function run(context $native): bool {
+        return wants_app($native);
+    }
+}
+
+function run_fn(context $native): bool {
+    $closure = fn(context $inner): bool => wants_app($inner);
+    return wants_app($native) && $closure($native);
+}
+"#,
+    );
+    assert!(
+        msgs.is_empty(),
+        "`context $native` means `App\\context` in a file that imports it, \
+         even with a global `context` in the project: {msgs:?}"
+    );
+}
+
+#[test]
+fn flags_native_parameter_hint_passed_to_a_same_named_global_parameter_type() {
+    let msgs = collect_against_global_context(
+        r#"<?php
+namespace App\Service;
+
+use App\context;
+
+class Svc {
+    public function run(context $native): bool {
+        return takes($native);
+    }
+}
+"#,
+    );
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("expects context") && m.contains("got App\\context")),
+        "`$native` is an `App\\context`, which the global `context` \
+         parameter does not accept: {msgs:?}"
     );
 }
 
@@ -10884,13 +11213,34 @@ namespace App;
 /** @param callable(int): string $callback */
 function takesStringCallback(callable $callback): void {}
 
-takesStringCallback(static fn (int $value) => $value);
-takesStringCallback(static function (int $value) { return $value; });
+takesStringCallback(static fn (int $value) => undefined_helper($value));
+takesStringCallback(static function (int $value) { return undefined_helper($value); });
 takesStringCallback(strlen(...));
 takesStringCallback('strlen');
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Nothing converts a callback's return value on its way back to the
+/// caller, so the scalar coercions PHP applies to arguments outside
+/// `strict_types` do not make a `string` return satisfy `bool`.
+#[test]
+fn callable_spec_return_type_is_not_coerced_without_strict_types() {
+    let php = r#"<?php
+namespace App;
+
+/** @param callable(int): bool $callback */
+function takesPredicate(callable $callback): void {}
+
+takesPredicate(static fn (int $value): string => 'x');
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("does not satisfy bool"),
+        "got {messages:?}"
+    );
 }
 
 /// A `static` return type needs the class context the compatibility layer
@@ -12018,7 +12368,7 @@ useString(content() ?: '');
 /// then branch contributes every member of its own type.
 #[test]
 fn a_full_ternary_keeps_its_then_branch_whole() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function useString(string $value): void {}
 
 /** @return string|false */
@@ -12101,7 +12451,7 @@ useInt(parseImage([]));
 /// still ignored: the native hint is the more trustworthy of the two.
 #[test]
 fn a_docblock_unrelated_to_the_native_union_is_ignored() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function useString(string $value): void {}
 
 /**
@@ -12286,7 +12636,7 @@ function test(): void {
 /// function whose failure the caller has to deal with.
 #[test]
 fn an_ordinary_failure_branch_is_still_enforced() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takesString(string $path): void {}
 
 /** @return string|false */
@@ -12308,7 +12658,7 @@ function test(): void {
 /// found", which is an answer the caller is expected to read.
 #[test]
 fn a_failure_branch_that_carries_meaning_is_still_enforced() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takesInt(int $offset): void {}
 
 function test(): void {
@@ -12385,7 +12735,7 @@ function afterWhile(bool $flag): void {
 /// code spelled out itself is still enforced on the other side of an `if`.
 #[test]
 fn a_spelled_out_failure_branch_survives_a_branch_merge_too() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takesString(string $path): void {}
 
 /** @return string|false */
@@ -12485,7 +12835,7 @@ while ($line !== null) {
 /// the write.
 #[test]
 fn a_while_body_reassignment_widens_below_itself() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function useString(string $value): void {}
 
 /** @return string|false */
@@ -12976,7 +13326,7 @@ function test(): void {
 /// must terminate rather than chase the cycle.
 #[test]
 fn a_cyclic_constant_leaves_the_declared_union() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function useString(string $value): void {}
 
 class Encoder {
@@ -12999,7 +13349,7 @@ class Encoder {
 /// Without the flag the failure branch is real and still reported.
 #[test]
 fn json_encode_without_throw_on_error_may_be_false() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function useString(string $value): void {}
 
 function test(mixed $value): void {
@@ -15904,4 +16254,82 @@ namespace App\Models {
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("Comment"), "{messages:?}");
+}
+
+#[test]
+fn caller_import_still_names_its_own_annotated_types() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///global.php", "<?php\nclass Event {}\n");
+    backend.update_ast(
+        "file:///models.php",
+        "<?php\nnamespace App\\Models;\n\nclass Event {}\nfunction takes(Event $e): void {}\n",
+    );
+    let php = r#"<?php
+namespace App\Service;
+
+use App\Models\Event;
+use function App\Models\takes;
+
+class S {
+    /** @var Event */
+    private $e;
+    /** @return Event */
+    public function get() { return $this->e; }
+    /** @param Event $p */
+    public function run($p): void {
+        /** @var Event $v */
+        $v = make();
+        takes($v);
+        takes($p);
+        takes($this->e);
+        takes($this->get());
+        $c = fn(): Event => new Event();
+        takes($c());
+    }
+}
+"#;
+    backend.update_ast("file:///test.php", php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
+    assert!(
+        msgs.is_empty(),
+        "`Event` written in this file means the imported `App\\Models\\Event`, \
+         not the global `Event`: {msgs:?}"
+    );
+}
+
+#[test]
+fn this_bound_to_a_template_names_the_class_not_a_same_named_global_one() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///global.php", "<?php\nclass Request {}\n");
+    backend.update_ast(
+        "file:///box.php",
+        r#"<?php
+/** @template T of object */
+class Box {
+    /** @param T|class-string<T> $objectOrClass */
+    public function __construct(object|string $objectOrClass) {}
+}
+"#,
+    );
+    let php = r#"<?php
+namespace Acme\Requests;
+
+abstract class Request
+{
+    public function wrap(): \Box
+    {
+        return new \Box($this);
+    }
+}
+"#;
+    backend.update_ast("file:///test.php", php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
+    assert!(
+        msgs.is_empty(),
+        "`$this` binds `T` to `Acme\\Requests\\Request`, not the global `Request`: {msgs:?}"
+    );
 }

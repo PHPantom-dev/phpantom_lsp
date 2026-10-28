@@ -120,7 +120,7 @@ impl Backend {
         // but fetches the file content itself, so it enters the request
         // scope on its own to describe a member the same way hover would.
         let content = self.get_file_content_arc(&data.uri).unwrap_or_default();
-        let _scope = self.enter_request_scope(std::sync::Arc::clone(&content));
+        let _scope = self.enter_request_scope(&data.uri, std::sync::Arc::clone(&content));
 
         let ctx = self.file_context(&data.uri);
 

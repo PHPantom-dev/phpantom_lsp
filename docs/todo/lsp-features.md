@@ -154,40 +154,6 @@ command = "phpantom_lsp"
 
 ---
 
-## F15. Go-to-declaration
-
-**Impact: Low-Medium · Complexity: Low**
-
-Implement `textDocument/declaration` to jump from a concrete method to
-its abstract or interface prototype, complementing the existing
-go-to-definition (which jumps to the concrete implementation) and
-go-to-implementation (which jumps from an interface to concrete classes).
-
-### Behaviour
-
-When the cursor is on a method call or method name:
-
-1. Search for an **interface or abstract class** that declares a method
-   with the same name and is in the inheritance chain of the resolved
-   class.
-2. If found, jump to the interface/abstract method declaration.
-3. If no abstract prototype exists, fall back to the same result as
-   go-to-definition.
-
-### Implementation
-
-The existing `resolve_implementation` already does reverse lookups
-(concrete → prototype) via `resolve_reverse_implementation`. The
-declaration handler can reuse this: for `MemberAccess` and
-`MemberDeclaration` symbols, call the reverse-implementation resolver
-first. For class-level symbols, declaration and definition are the
-same.
-
-Register `declaration_provider` in `src/backend/startup.rs` and wire it
-to a thin handler that delegates to the existing infrastructure.
-
----
-
 ## F16. On-type `}` brace de-indent
 
 **Impact: Low · Complexity: Low**
@@ -427,7 +393,9 @@ navigates to it. Laravel completes the keys of `route('name', [...])` from
 the URI it keeps with each route name (`completion/laravel_route_params.rs`).
 A parameter only means something under its route, so it does not fit a
 `StringKey` span on its own: a key spelled as one global name would merge
-every route's `id`. It needs the path kept beside each route declaration
+every route's `id`. Yii's routes already keep their path beside their name
+in the symbol map's `RouteSite` side table, and complete the keys of
+`generate()` from it. Symfony's declarations need to fill the same table
 (the attribute's path, the YAML `path:`, the XML `path` attribute, the
 configurator's second argument, and the class-level prefix in front of a
 method's path), and the parameter array of each `generateUrl()`,
@@ -435,14 +403,32 @@ method's path), and the parameter array of each `generateUrl()`,
 it.
 
 **Where to look:** `src/symbol_map/extraction/symfony.rs`
-(`emit_symfony_route_spans`), `src/symfony/routes.rs`,
-`src/completion/laravel_route_params.rs`.
+(`emit_symfony_route_spans`), `src/symfony/routes.rs`, and the Yii side
+of the same design: `src/symbol_map/extraction/yii_routes.rs`, `src/yii/routes.rs`,
+`src/completion/yii_route_params.rs`.
 
 ---
 
 ## F28. Symfony route names a loader composes
 
-**Impact: Low-Medium · Complexity: Medium**
+**Impact: Medium-High · Complexity: Medium**
+
+Until this lands, the unknown-route diagnostic is inert in most real
+applications: it only judges names under `app_`, and applications that
+name their routes by area (`blog_post`, `admin_post_edit`, as the official
+Symfony demo does) never trigger it. A typo in `redirectToRoute()` or
+`path()` goes unreported there.
+
+Unlike service IDs, routes are a closed world the project spells out:
+every route enters through an import in `config/routes.yaml` /
+`config/routes/*` (or the kernel's `configureRoutes()`), and a bundle's
+routes come from the file that import names
+(`resource: '@WebProfilerBundle/Resources/config/routing/wdt.php'`).
+Following those imports into the bundle's routing files gives the full set,
+so the `app_` restriction can go. The exceptions are imports that run code,
+`type: service` loaders (the security logout loader) and custom loaders;
+an application with one of those keeps the world open only for the names
+that loader could produce, or entirely if that cannot be told.
 
 A route's name is read where it is declared: a `#[Route]` attribute, with
 its class's name prefix, a routing YAML or XML entry, or a routing
@@ -467,7 +453,7 @@ missed:
 
 ## F29. Report Symfony translation keys nothing declares
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Medium-High · Complexity: Medium**
 
 Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.
 
@@ -585,7 +571,7 @@ registered for.
 
 ## F32. Report unknown Symfony names in Twig templates
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Medium-High · Complexity: Medium**
 
 Blocks full Twig support: the README keeps Twig marked as partial until this lands.
 
@@ -664,25 +650,6 @@ recognises as rendering a template.
 
 ---
 
-## F35. Suggest a close name for an unknown template or view
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-return $this->render('blog/shw.html.twig');   // blog/show.html.twig exists
-return view('emails.welcom');                  // emails.welcome exists
-```
-
-An unknown Twig template or Laravel view offers only "Create missing
-template/view", which is the wrong fix for a typo. Offer the closest
-declared names first ("Change to 'blog/show.html.twig'"), ranked by edit
-distance and limited to a few, the way Symfony's language tools do. Both
-kinds already go through one collector, so one change serves both.
-
-**Where to look:** `src/code_actions/create_missing_view.rs`.
-
----
-
 ## F36. Twig block navigation
 
 **Impact: Medium · Complexity: Medium**
@@ -710,7 +677,7 @@ block, and complete the block names a child can override.
 
 ## F37. Twig template variables
 
-**Impact: Medium · Complexity: Medium-High**
+**Impact: Medium-High · Complexity: Medium-High**
 
 Blocks full Twig support: the README keeps Twig marked as partial until this lands.
 

@@ -45,6 +45,15 @@
 //! A property carries no `readonly` keyword of its own when its class is
 //! declared `readonly`; [`ClassInfo::is_readonly`] is what makes those
 //! properties count here.
+//!
+//! A property marked `@readonly` in its docblock is held to the same
+//! rules, with three differences that follow from it being a contract
+//! rather than something PHP enforces: only the declaring class may write
+//! it whatever the PHP version, an array offset write is judged like a
+//! direct one (filling an array in the constructor is part of initializing
+//! it) and taking a reference is not judged at all, and Psalm's
+//! allow-private-mutation tags leave every write from inside the declaring
+//! class alone.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -70,7 +79,7 @@ use crate::parser::{clone_with_writes, with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::symbol_map::SymbolKind;
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
-use crate::types::{AccessKind, ClassInfo, ClassLikeKind, PhpVersion, PropertyInfo};
+use crate::types::{AccessKind, ClassInfo, ClassLikeKind, DocReadonly, PhpVersion, PropertyInfo};
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::class_init_facts::{ClassInitFacts, class_init_facts};
@@ -361,11 +370,20 @@ fn holds_an_array(prop: &PropertyInfo) -> bool {
 }
 
 /// How the property is spelled in the diagnostic message.
-fn owner_display(declaring: &ClassInfo, property: &str) -> String {
+///
+/// A property readonly only by its docblock is called a `@readonly` one,
+/// so the message does not suggest PHP itself would reject the write.
+fn owner_display(declaring: &ClassInfo, property: &str, native: bool) -> String {
+    let marker = if native { "" } else { "@" };
     if declaring.name.starts_with("__anonymous@") {
-        format!("${}", property)
+        format!("{}readonly property ${}", marker, property)
     } else {
-        format!("{}::${}", declaring.fqn(), property)
+        format!(
+            "{}readonly property {}::${}",
+            marker,
+            declaring.fqn(),
+            property
+        )
     }
 }
 
@@ -491,22 +509,22 @@ impl Backend {
 
             let message = match verdict {
                 Some(Verdict::OutsideDeclaringClass(owner)) => format!(
-                    "Cannot {} readonly property {} from outside its declaring class",
+                    "Cannot {} {} from outside its declaring class",
                     form.verb(),
                     owner
                 ),
                 Some(Verdict::AlreadyInitialized(owner)) => format!(
-                    "Cannot {} readonly property {} after the constructor has initialized it",
+                    "Cannot {} {} after the constructor has initialized it",
                     form.verb(),
                     owner
                 ),
                 Some(Verdict::AssignedTwice(owner)) => format!(
-                    "Cannot {} readonly property {} after the constructor has already initialized it",
+                    "Cannot {} {} after the constructor has already initialized it",
                     form.verb(),
                     owner
                 ),
                 Some(Verdict::Indirect(owner)) => {
-                    format!("Cannot indirectly modify readonly property {}", owner)
+                    format!("Cannot indirectly modify {}", owner)
                 }
                 _ => continue,
             };
@@ -561,7 +579,8 @@ impl Backend {
         // readonly, which the check below the declaring-class lookup
         // settles.  This is the cheap half: unless something in the
         // hierarchy is readonly, there is nothing to look up.
-        if !prop.is_readonly && !merged.is_readonly {
+        let by_docblock = prop.doc_readonly != DocReadonly::No && !prop.is_static;
+        if !prop.is_readonly && !merged.is_readonly && !by_docblock {
             return Verdict::Ok;
         }
 
@@ -572,13 +591,14 @@ impl Backend {
         let declaring =
             find_declaring_class(&raw, property, &MemberKindForOrigin::Property, class_loader);
 
-        if !prop.is_readonly && !(declaring.is_readonly && !prop.is_static) {
+        let native = prop.is_readonly || (declaring.is_readonly && !prop.is_static);
+        if !native && !by_docblock {
             return Verdict::Ok;
         }
 
-        let owner = owner_display(&declaring, property);
+        let owner = owner_display(&declaring, property, native);
 
-        if site.form.is_indirect() {
+        if native && site.form.is_indirect() {
             // Writing through the property's value never counts as
             // initializing it, so PHP rejects it in every scope — but an
             // offset write only reaches the property when the property is
@@ -590,27 +610,46 @@ impl Backend {
             return Verdict::Indirect(owner);
         }
 
+        // Nothing happens to the property itself when an offset write goes
+        // through an `ArrayAccess` object it holds, and taking a reference
+        // only writes it if the reference is later written through.
+        if (site.form == WriteForm::Offset && !holds_an_array(prop))
+            || site.form == WriteForm::Reference
+        {
+            return Verdict::Ok;
+        }
+
         let Some(current) = site.current_class else {
             return Verdict::OutsideDeclaringClass(owner);
         };
 
-        // Since PHP 8.4 a readonly property is `protected(set)`, so a
-        // subclass may initialize it too.
+        // Since PHP 8.4 a native readonly property is `protected(set)`, so
+        // a subclass may initialize it too.  The docblock contract has no
+        // such rule: only the declaring class writes the property.
         let in_declaring_scope = current.fqn() == declaring.fqn()
             || (declaring.kind == ClassLikeKind::Trait
                 && declares_property(current, property, class_loader, &mut Vec::new()))
-            || (self.php_version() >= PhpVersion::new(8, 4)
+            || (native
+                && self.php_version() >= PhpVersion::new(8, 4)
                 && is_subtype_of(current, &declaring.fqn(), class_loader));
         if !in_declaring_scope {
             return Verdict::OutsideDeclaringClass(owner);
         }
 
-        if site.form == WriteForm::CloneWith {
+        if site.form == WriteForm::CloneWith
+            || (!native && prop.doc_readonly == DocReadonly::AllowPrivateMutation)
+        {
             return Verdict::Ok;
         }
         let Some(facts) = writes.classes.get(&current.start_offset) else {
             return Verdict::Ok;
         };
+        // Only native readonly turns an indirect write into an error of its
+        // own.  Under the docblock contract, filling an array the
+        // constructor just created is still part of initializing it.
+        if site.form.is_indirect() && facts.covers_initializer(site.offset) {
+            return Verdict::Ok;
+        }
         if facts.reassigns_in_constructor(property, site.offset) {
             return Verdict::AssignedTwice(owner);
         }

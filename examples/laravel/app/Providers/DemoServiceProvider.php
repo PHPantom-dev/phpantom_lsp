@@ -80,6 +80,7 @@ class DemoServiceProvider extends BaseDemoServiceProvider
         // polymorphic `*_type` column.  PHPantom reads the registration from
         // here, so the alias strings elsewhere in the project hover with the
         // model they stand for and go-to-definition jumps to it.
+        // Try: start a new key in this array to see the registered aliases.
         Relation::morphMap([
             'blog_post' => BlogPost::class,
             'bakery'    => Bakery::class,

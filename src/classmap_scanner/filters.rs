@@ -17,6 +17,7 @@
 //! whitelist-first semantics would invert the meaning of an exclude
 //! list containing a `!` pattern.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -438,6 +439,18 @@ impl IndexFilters {
                     .find(|m| !m.is_none())
                     .is_some_and(|m| m.is_ignore())
             })
+    }
+
+    /// Drop the entries of a class list whose file is excluded, so a class
+    /// a Composer map names is held to the same `exclude` a walk is.
+    ///
+    /// Only the exclude applies, not the extension: Composer lists a file
+    /// because the project autoloads it, whatever its extension.
+    pub fn retain_unexcluded(&self, classmap: &mut HashMap<String, PathBuf>) {
+        if self.excludes.is_none() && self.default_excludes.is_none() {
+            return;
+        }
+        classmap.retain(|_, path| !self.is_excluded_path(path, false));
     }
 
     /// Whether a file's extension marks it as PHP source: `.php` plus

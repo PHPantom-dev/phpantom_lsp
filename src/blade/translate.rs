@@ -7,6 +7,7 @@
 //! file's recorded [`super::source_map::BladeSourceMap`], and drop what
 //! lands in the injected prologue, which has no template text behind it.
 
+use super::template_edits::TemplateText;
 use crate::Backend;
 use crate::code_actions::{FileTextEdits, visit_file_text_edits};
 
@@ -15,6 +16,15 @@ impl Backend {
     /// Returns true if the URI ends with `.blade.php` OR was opened with `languageId == "blade"`.
     pub(crate) fn is_blade_file(&self, uri: &str) -> bool {
         crate::blade::is_blade_file(uri) || self.blade.uris.read().contains(uri)
+    }
+
+    /// A Blade template's own text, or `None` for a file that is not one.
+    pub(crate) fn blade_template_content(&self, uri: &str) -> Option<std::sync::Arc<String>> {
+        if self.is_blade_file(uri) {
+            self.get_file_content_arc(uri)
+        } else {
+            None
+        }
     }
 
     /// Translate a position from an original Blade file to the virtual PHP file.
@@ -246,26 +256,56 @@ impl Backend {
         !edits.is_empty()
     }
 
-    /// Move every template edit in a workspace edit from the virtual PHP it
-    /// was planned against back into the template's own coordinates, the
-    /// way [`Self::translate_template_edits`] does for one file's edits.
+    /// Move every template edit of a code action from the virtual PHP it
+    /// was planned against back into the template's own coordinates, all
+    /// or nothing.
     ///
-    /// Edits to files that are not templates are left alone, and an edit
-    /// that targets a template's injected prologue is dropped, whichever
-    /// shape (`changes` or `document_changes`) carries it.
+    /// Edits to files that are not templates are left alone, whichever
+    /// shape (`changes` or `document_changes`) carries them.  `request` is
+    /// the template the action was asked for, already read, and
+    /// `planned_in_template` says its edits were planned against its own
+    /// text rather than the virtual PHP, so they stay as they are.
     ///
-    /// Returns whether the workspace edit still applies anything: a text
-    /// edit in any file, or a resource operation (which no translation
-    /// touches).  `false` means every edit was dropped and the caller has
-    /// nothing left to offer.
-    pub(crate) fn translate_workspace_edit(
+    /// Returns `false` when any template edit touches text the template did
+    /// not write (see [`TemplateText::translate_edit`]), or targets a
+    /// template edited since it was lowered: applying the rest would leave
+    /// the action half done, so the caller drops it.
+    pub(crate) fn translate_action_edit(
         &self,
         edit: &mut tower_lsp_server::gen_lsp_types::WorkspaceEdit,
+        request: Option<&TemplateText>,
+        planned_in_template: bool,
     ) -> bool {
-        let mut applies = false;
-        let has_resource_op = visit_file_text_edits(edit, |uri, edits| {
-            applies |= self.retain_translated(uri.as_str(), edits);
+        let mut applies = true;
+        visit_file_text_edits(edit, |uri, mut edits| {
+            if !applies || !self.is_blade_file(uri.as_str()) {
+                return;
+            }
+            let read;
+            let template = match request.filter(|request| request.uri() == uri.as_str()) {
+                Some(_) if planned_in_template => return,
+                Some(request) => request,
+                None => match self.template_text(uri.as_str()) {
+                    Some(template) => {
+                        read = template;
+                        &read
+                    }
+                    None => {
+                        applies = false;
+                        return;
+                    }
+                },
+            };
+            applies = edits.try_for_each_mut(|edit| {
+                match template.translate_edit(edit.range, &edit.new_text) {
+                    Some(range) => {
+                        edit.range = range;
+                        true
+                    }
+                    None => false,
+                }
+            });
         });
-        applies || has_resource_op
+        applies
     }
 }

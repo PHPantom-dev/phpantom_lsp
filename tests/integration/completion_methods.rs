@@ -436,15 +436,15 @@ async fn test_completion_method_detail_shows_signature() {
                 Some("void"),
                 "Method detail should show the return type"
             );
-            // label_details.detail is None (detail field handles the
-            // return type display).
+            // label_details.detail repeats the return type inline, for
+            // clients that hide `detail` when a description is present.
             assert_eq!(
                 update
                     .label_details
                     .as_ref()
                     .and_then(|ld| ld.detail.as_deref()),
-                None,
-                "label_details.detail should be None"
+                Some(": void"),
+                "label_details.detail should show the return type inline"
             );
             // label_details.description shows the owning class name
             // (visible in VS Code, ignored by Zed).
@@ -467,6 +467,46 @@ async fn test_completion_method_detail_shows_signature() {
         }
         _ => panic!("Expected CompletionResponse::CompletionItemList"),
     }
+}
+
+#[tokio::test]
+async fn test_completion_member_label_details_show_type_inline() {
+    let backend = create_test_backend();
+
+    let uri = Uri::parse("file:///label_details_type.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Editor {\n",
+        "    public ?Editor $parent;\n",
+        "    public $untyped;\n",
+        "    function untypedMethod() {}\n",
+        "    function test() {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    )
+    .to_string();
+
+    open_php(&backend, &uri, &text).await;
+
+    let Some(CompletionResponse::CompletionItemList(items)) =
+        completion_response(&backend, &uri, 6, 15, None).await
+    else {
+        panic!("Expected CompletionResponse::CompletionItemList");
+    };
+    let inline_detail = |name: &str| {
+        items
+            .iter()
+            .find(|i| i.filter_text.as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("Should have {name}"))
+            .label_details
+            .as_ref()
+            .and_then(|ld| ld.detail.clone())
+    };
+
+    assert_eq!(inline_detail("parent").as_deref(), Some(": ?Editor"));
+    assert_eq!(inline_detail("untyped"), None);
+    assert_eq!(inline_detail("untypedMethod"), None);
 }
 
 #[tokio::test]

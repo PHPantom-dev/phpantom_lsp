@@ -322,7 +322,7 @@ function get_processor(): string {
 
 #[test]
 fn flags_bool_returned_from_int_function() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function get_count(): int {
     return true;
 }
@@ -472,7 +472,7 @@ class Service {
 
 #[test]
 fn flags_wrong_return_in_while() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function search(): string {
     while (true) {
         return false;
@@ -2068,7 +2068,7 @@ function get_count(): int {
 
 #[test]
 fn flags_bool_returned_from_string() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function get_label(): string {
     return false;
 }
@@ -2082,7 +2082,7 @@ function get_label(): string {
 
 #[test]
 fn flags_string_returned_from_bool() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function check(): bool {
     return "yes";
 }
@@ -5555,5 +5555,31 @@ function now(): \DateTimeImmutable
     assert!(
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "`App\\Support\\DateTimeImmutable` does not exist, so the native hint stands, got: {diags:?}"
+    );
+}
+
+/// A `void` result is `null` at runtime and therefore falsy, so a truthy
+/// check removes it the way it removes `null`.
+#[test]
+fn truthy_check_drops_void_from_a_union() {
+    let php = r#"<?php
+/** @return void|string */
+function maybe() { if (rand(0, 1)) { return 'x'; } }
+
+function a(): ?string { return maybe() ?: null; }
+function b(): ?string { $r = maybe(); return $r ? $r : null; }
+function c(): ?string { $r = maybe(); if (!$r) { return null; } return $r; }
+function control(): ?int { return maybe() ?: null; }
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Only the `?int` control should be flagged, got: {msgs:?}"
+    );
+    assert!(
+        !msgs[0].contains("void"),
+        "The control's truthy half should not carry `void`, got: {msgs:?}"
     );
 }

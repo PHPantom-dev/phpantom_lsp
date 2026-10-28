@@ -85,6 +85,8 @@ impl Backend {
                         .or_else(|| owner.template_param_bounds.get(tpl))
                         .cloned()
                 },
+                &method_subs,
+                rctx.file.class_loader,
             );
         }
 
@@ -426,6 +428,8 @@ impl Backend {
                         &func.parameters,
                         &split_args.iter().map(String::as_str).collect::<Vec<_>>(),
                         &|tpl| func.template_param_bounds.get(tpl).cloned(),
+                        &subs,
+                        rctx.file.class_loader,
                     ),
                     ..Default::default()
                 };
@@ -495,6 +499,8 @@ impl Backend {
                             .or_else(|| merged.template_param_bounds.get(tpl))
                             .cloned()
                     },
+                    &subs,
+                    rctx.file.class_loader,
                 );
                 let mut result_ctor = ctor;
                 crate::inheritance::apply_substitution_to_method(&mut result_ctor, &subs);

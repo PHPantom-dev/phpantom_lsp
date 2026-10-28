@@ -43,6 +43,40 @@ fn collection_key_normalization_preserves_non_numeric_string_domains() {
     );
 }
 
+/// An append lands on every alternative a union of shapes holds, and the
+/// results fold back into one shape whose keys the others are subsets of,
+/// so a run of conditional appends grows the type by one entry each rather
+/// than doubling it. An optional integer key leaves the next index open, so
+/// the append takes each index it can land on instead of widening.
+#[test]
+fn appends_to_a_union_of_shapes_fold_into_one_shape() {
+    let append = |base: &str, value: &str| {
+        merge_nested_array_write(
+            &PhpType::parse(base),
+            &[ArrayWriteKey::Append],
+            &PhpType::parse(value),
+            false,
+        )
+        .to_string()
+    };
+
+    assert_eq!(append("array{}|array{1}", "2"), "array{1|2, 1?: 2}");
+    // Index 1 holds either the entry that was there or the appended one.
+    assert_eq!(
+        append("array{0: 1|2, 1?: 2}", "3"),
+        "array{1|2, 2|3, 2?: 3}"
+    );
+    assert_eq!(
+        append("array{name: string, 0?: int}", "bool"),
+        "array{name: string, 0: int|bool, 1?: bool}"
+    );
+    // Shapes whose keys neither contain the other's stay apart.
+    assert_eq!(
+        append("array{a: int}|array{b: string}", "bool"),
+        "array{a: int, bool}|array{b: string, bool}"
+    );
+}
+
 /// An element write refines what the variable already tracks. It never
 /// leaves a tracked shape untouched, and never rebuilds a keyed array as a
 /// shape that claims the written key is the only one there.

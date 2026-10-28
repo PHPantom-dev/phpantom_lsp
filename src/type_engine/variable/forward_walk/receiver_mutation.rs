@@ -734,6 +734,11 @@ fn collect_call_invalidations_in_stmt<'b>(
                 collect_call_invalidations(value, scope, ctx, out);
             }
         }
+        Statement::EchoTag(echo) => {
+            for value in echo.values.iter() {
+                collect_call_invalidations(value, scope, ctx, out);
+            }
+        }
         Statement::Block(block) => {
             collect_call_invalidations_in_stmts(block.statements.as_slice(), scope, ctx, out);
         }

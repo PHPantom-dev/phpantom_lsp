@@ -5,6 +5,7 @@
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::blade::template_edits::TemplateText;
 
 use super::{CodeActionData, visit_file_text_edits};
 
@@ -49,6 +50,11 @@ type CollectFn = fn(&Backend, &str, &str, &CodeActionParams, &mut Vec<CodeAction
 enum TemplatePolicy {
     /// Offer the actions, translated back into the template.
     Offer,
+    /// Offer the actions, but hand the collector the request range in the
+    /// template's own coordinates: it matches the range against
+    /// diagnostics, which a template's are reported in, and its edits are
+    /// planned against the template's own text.
+    TemplateRange,
     /// Never offer the actions in a template: they are planned against the
     /// raw file (the external tools' fixes), are about class files (fix
     /// namespace, fix class name), or place code in the wrapper the
@@ -58,6 +64,9 @@ enum TemplatePolicy {
 
 struct Collector {
     collect: CollectFn,
+    /// The kinds of the actions it can offer, so a request whose
+    /// `context.only` asks for none of them skips it unrun.
+    kinds: &'static [&'static str],
     template: TemplatePolicy,
     /// Whether the actions are offered in a resource document (a Twig
     /// template, a YAML or XML file).  Only the ones about a string key
@@ -65,25 +74,45 @@ struct Collector {
     in_resource: bool,
 }
 
-const fn offer(collect: CollectFn) -> Collector {
+const QUICKFIX: &[&str] = &["quickfix"];
+const REFACTOR: &[&str] = &["refactor"];
+const EXTRACT: &[&str] = &["refactor.extract"];
+const INLINE: &[&str] = &["refactor.inline"];
+const REWRITE: &[&str] = &["refactor.rewrite"];
+const ORGANIZE_IMPORTS: &[&str] = &["source.organizeImports"];
+const ADD_MISSING_IMPORTS: &[&str] = &["source.addMissingImports"];
+
+const fn offer(kinds: &'static [&'static str], collect: CollectFn) -> Collector {
     Collector {
         collect,
+        kinds,
         template: TemplatePolicy::Offer,
         in_resource: false,
     }
 }
 
-const fn skip_in_template(collect: CollectFn) -> Collector {
+const fn template_range(kinds: &'static [&'static str], collect: CollectFn) -> Collector {
     Collector {
         collect,
+        kinds,
+        template: TemplatePolicy::TemplateRange,
+        in_resource: false,
+    }
+}
+
+const fn skip_in_template(kinds: &'static [&'static str], collect: CollectFn) -> Collector {
+    Collector {
+        collect,
+        kinds,
         template: TemplatePolicy::Skip,
         in_resource: false,
     }
 }
 
-const fn offer_in_resource(collect: CollectFn) -> Collector {
+const fn offer_in_resource(kinds: &'static [&'static str], collect: CollectFn) -> Collector {
     Collector {
         collect,
+        kinds,
         template: TemplatePolicy::Offer,
         in_resource: true,
     }
@@ -91,38 +120,76 @@ const fn offer_in_resource(collect: CollectFn) -> Collector {
 
 /// Every code-action collector, in the order their actions are listed.
 static COLLECTORS: &[Collector] = &[
-    offer(Backend::collect_import_class_actions),
-    offer(Backend::collect_replace_fqcn_actions),
-    offer(Backend::collect_import_all_classes_action),
-    offer(Backend::collect_remove_unused_import_actions),
-    offer(Backend::collect_sort_use_statements_action),
-    offer(Backend::collect_implement_methods_actions),
-    offer(Backend::collect_replace_deprecated_actions),
-    skip_in_template(Backend::collect_phpstan_actions),
-    skip_in_template(Backend::collect_mago_fix_actions),
-    offer(Backend::collect_change_visibility_actions),
-    offer(Backend::collect_update_docblock_actions),
-    offer(Backend::collect_promote_constructor_param_actions),
-    offer(Backend::collect_generate_constructor_actions),
-    offer(Backend::collect_generate_getter_setter_actions),
-    offer(Backend::collect_generate_property_hook_actions),
-    offer(Backend::collect_extract_constant_actions),
-    offer(Backend::collect_extract_variable_actions),
-    skip_in_template(Backend::collect_extract_function_actions),
-    offer(Backend::collect_inline_variable_actions),
-    offer(Backend::collect_convert_to_instance_variable_actions),
-    offer(Backend::collect_simplify_null_actions),
-    offer(Backend::collect_convert_to_arrow_function_actions),
-    offer(Backend::collect_convert_to_closure_actions),
-    offer(Backend::collect_convert_switch_to_match_actions),
-    offer(Backend::collect_convert_to_interpolation_actions),
-    skip_in_template(Backend::collect_fix_namespace_actions),
-    skip_in_template(Backend::collect_fix_class_name_actions),
-    offer(Backend::collect_fix_class_case_actions),
-    offer(Backend::collect_extract_interface_actions),
-    offer_in_resource(Backend::collect_create_missing_view_actions),
-    offer_in_resource(Backend::collect_insert_translation_key_actions),
+    offer(QUICKFIX, Backend::collect_import_class_actions),
+    offer(REWRITE, Backend::collect_replace_fqcn_actions),
+    offer(
+        ADD_MISSING_IMPORTS,
+        Backend::collect_import_all_classes_action,
+    ),
+    template_range(
+        &["quickfix", "source.organizeImports"],
+        Backend::collect_remove_unused_import_actions,
+    ),
+    offer(
+        ORGANIZE_IMPORTS,
+        Backend::collect_sort_use_statements_action,
+    ),
+    offer(QUICKFIX, Backend::collect_implement_methods_actions),
+    offer(QUICKFIX, Backend::collect_replace_deprecated_actions),
+    skip_in_template(QUICKFIX, Backend::collect_phpstan_actions),
+    skip_in_template(QUICKFIX, Backend::collect_mago_fix_actions),
+    offer(
+        &["quickfix", "refactor.rewrite"],
+        Backend::collect_change_visibility_actions,
+    ),
+    offer(QUICKFIX, Backend::collect_update_docblock_actions),
+    offer(REWRITE, Backend::collect_promote_constructor_param_actions),
+    offer(REWRITE, Backend::collect_generate_constructor_actions),
+    offer(REFACTOR, Backend::collect_generate_getter_setter_actions),
+    offer(REFACTOR, Backend::collect_generate_property_hook_actions),
+    offer(EXTRACT, Backend::collect_extract_constant_actions),
+    offer(EXTRACT, Backend::collect_extract_variable_actions),
+    skip_in_template(EXTRACT, Backend::collect_extract_function_actions),
+    offer(INLINE, Backend::collect_inline_variable_actions),
+    offer(
+        EXTRACT,
+        Backend::collect_convert_to_instance_variable_actions,
+    ),
+    offer(REWRITE, Backend::collect_simplify_null_actions),
+    offer(REWRITE, Backend::collect_convert_to_arrow_function_actions),
+    offer(REWRITE, Backend::collect_convert_to_closure_actions),
+    offer(REWRITE, Backend::collect_convert_switch_to_match_actions),
+    offer(REWRITE, Backend::collect_convert_to_interpolation_actions),
+    skip_in_template(QUICKFIX, Backend::collect_fix_namespace_actions),
+    skip_in_template(QUICKFIX, Backend::collect_fix_class_name_actions),
+    offer(QUICKFIX, Backend::collect_fix_class_case_actions),
+    offer(EXTRACT, Backend::collect_extract_interface_actions),
+    offer_in_resource(QUICKFIX, Backend::collect_create_missing_view_actions),
+    offer_in_resource(QUICKFIX, Backend::collect_insert_translation_key_actions),
 ];
+
+/// Whether `only`, a request's `context.only`, asks for actions of kind
+/// `kind`.  Kinds are hierarchical: asking for `refactor` asks for
+/// `refactor.extract` too.  No filter, or an empty one, asks for all.
+fn kind_requested(only: &[CodeActionKind], kind: &str) -> bool {
+    only.is_empty()
+        || only.iter().any(|requested| {
+            let requested = requested.as_str();
+            requested.is_empty()
+                || kind
+                    .strip_prefix(requested)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+        })
+}
+
+fn action_kind(action: &CodeActionResponse) -> &str {
+    match action {
+        CodeActionResponse::CodeAction(CodeAction {
+            kind: Some(kind), ..
+        }) => kind.as_str(),
+        _ => "",
+    }
+}
 
 impl Backend {
     /// Handle a `textDocument/codeAction` request.
@@ -139,42 +206,92 @@ impl Backend {
     ) -> Vec<CodeActionResponse> {
         let mut actions = Vec::new();
 
+        // A template is planned against the virtual PHP it lowers to, so
+        // the request range moves into it.  The diagnostics in the request
+        // context stay in the template's coordinates, which is where the
+        // collectors report a template's diagnostics, and what the editor
+        // matches an action's diagnostics against.
+        let is_template = self.is_blade_file(uri);
+        let template = if is_template {
+            // Nothing to offer for a template edited since it was lowered.
+            let Some(template) = self.template_text(uri) else {
+                return actions;
+            };
+            Some(template)
+        } else {
+            None
+        };
+        let template_params = params;
+        let translated;
+        let params = if is_template {
+            let mut moved = params.clone();
+            moved.range = self.translate_blade_range_to_php(uri, params.range);
+            translated = moved;
+            &translated
+        } else {
+            params
+        };
+
         let adjusted = skip_leading_whitespace(content, params);
         let params = adjusted.as_ref().unwrap_or(params);
 
         // Inside a request this re-enters the scope `with_file_content`
         // opened; called on its own it still parses the file once for every
         // collector below instead of once each.
-        let _scope = self.enter_request_scope_borrowed(content);
+        let _scope = self.enter_request_scope_borrowed(uri, content);
 
-        let is_template = self.is_blade_file(uri);
+        let only = params.context.only.as_deref().unwrap_or_default();
         let is_resource = self.is_resource_uri(uri);
         for collector in COLLECTORS {
+            // The kind filter is its own gate, ahead of the document one,
+            // and the collector's own range checks are left to it.
+            if !collector
+                .kinds
+                .iter()
+                .any(|kind| kind_requested(only, kind))
+            {
+                continue;
+            }
             if is_template && collector.template == TemplatePolicy::Skip
                 || is_resource && !collector.in_resource
             {
                 continue;
             }
+            let params = match collector.template {
+                TemplatePolicy::TemplateRange if is_template => template_params,
+                _ => params,
+            };
+            let first = actions.len();
             (collector.collect)(self, uri, content, params, &mut actions);
+            debug_assert!(
+                actions[first..]
+                    .iter()
+                    .all(|action| collector.kinds.contains(&action_kind(action))),
+                "a code action collector offered a kind its table entry does not list",
+            );
         }
+        // A collector that offers several kinds may have offered one the
+        // request did not ask for.
+        actions.retain(|action| kind_requested(only, action_kind(action)));
 
         // Every collector plans its edits against the PHP a template lowers
-        // to; the editor applies them to the template itself.
-        let eol = crate::text_position::line_ending(content);
-        for action in &mut actions {
-            if let CodeActionResponse::CodeAction(CodeAction {
+        // to; the editor applies them to the template itself, and an action
+        // that cannot be moved there whole is not offered.
+        let eol = Self::request_line_ending(template.as_ref(), content);
+        actions.retain_mut(|action| match action {
+            CodeActionResponse::CodeAction(CodeAction {
                 edit: Some(edit), ..
-            }) = action
-            {
-                self.translate_workspace_edit(edit);
-                self.match_workspace_edit_line_endings(edit, uri, eol);
-            }
-        }
+            }) => self.finish_action_edit(edit, uri, eol, template.as_ref(), false),
+            _ => true,
+        });
 
-        if !self.caps().code_action_resolve {
+        // A deferred action can resolve to nothing in a template (an
+        // extraction whose statement starts in the PHP an echo lowers to),
+        // so a template's are resolved before the list goes out.
+        if is_template || !self.caps().code_action_resolve {
             actions.retain_mut(|action| match action {
                 CodeActionResponse::CodeAction(action) => {
-                    self.inline_deferred_edit(action, content)
+                    self.inline_deferred_edit(action, content, template.as_ref())
                 }
                 CodeActionResponse::Command(_) => true,
             });
@@ -183,11 +300,41 @@ impl Backend {
         actions
     }
 
+    /// The line terminator of the file a request was made in: the
+    /// template's own for a template, whose virtual PHP is always `\n`.
+    fn request_line_ending(template: Option<&TemplateText>, content: &str) -> &'static str {
+        crate::text_position::line_ending(template.map_or(content, TemplateText::template))
+    }
+
+    /// Move an action's edit into the coordinates of the files it edits
+    /// and give its text their line terminators.  Returns `false` when the
+    /// edit cannot be moved into a template whole, and the action has
+    /// nothing to offer.
+    fn finish_action_edit(
+        &self,
+        edit: &mut WorkspaceEdit,
+        uri: &str,
+        eol: &'static str,
+        template: Option<&TemplateText>,
+        planned_in_template: bool,
+    ) -> bool {
+        if !self.translate_action_edit(edit, template, planned_in_template) {
+            return false;
+        }
+        self.match_workspace_edit_line_endings(edit, uri, eol);
+        true
+    }
+
     /// Fill in the edit of a deferred action for a client that cannot call
     /// `codeAction/resolve`, and drop the `data` it would never use.
     /// Returns `false` when the edit cannot be computed, since the action
     /// would do nothing.
-    fn inline_deferred_edit(&self, action: &mut CodeAction, content: &str) -> bool {
+    fn inline_deferred_edit(
+        &self,
+        action: &mut CodeAction,
+        content: &str,
+        template: Option<&TemplateText>,
+    ) -> bool {
         if action.edit.is_some() {
             return true;
         }
@@ -195,7 +342,7 @@ impl Backend {
             return true;
         };
         action.data = None;
-        let Some(edit) = self.compute_deferred_edit(action, &data, content) else {
+        let Some(edit) = self.compute_deferred_edit(action, &data, content, template) else {
             return false;
         };
         action.edit = Some(edit);
@@ -218,12 +365,19 @@ impl Backend {
         };
 
         // A template's action was planned against its virtual PHP, so the
-        // resolve reads the same text.
+        // resolve reads the same text, and has nothing to resolve to once
+        // the template no longer matches it.
+        let template = self.template_text(&data.uri);
+        if template.is_none() && self.is_blade_file(&data.uri) {
+            return (action, None);
+        }
         let Some(content) = self.analysable_content(&data.uri) else {
             return (action, None);
         };
 
-        let Some(edit) = self.compute_deferred_edit(&mut action, &data, &content) else {
+        let Some(edit) =
+            self.compute_deferred_edit(&mut action, &data, &content, template.as_ref())
+        else {
             return (action, None);
         };
         action.edit = Some(edit);
@@ -271,19 +425,22 @@ impl Backend {
 
     /// Compute the workspace edit of a deferred action, already translated
     /// for templates.  Returns `None` when the file changed since the
-    /// action was offered or the kind is unknown.
+    /// action was offered, the kind is unknown, or the edit cannot be moved
+    /// into the template whole.  `template` is the template the action was
+    /// offered on, when it was.
     fn compute_deferred_edit(
         &self,
         action: &mut CodeAction,
         data: &CodeActionData,
         content: &str,
+        template: Option<&TemplateText>,
     ) -> Option<WorkspaceEdit> {
         // Resolving an action can need types (an extracted function's
         // return type, a docblock's inferred `@return`) and walks the AST
         // several times.  This handler fetches its own file content, so it
         // enters the request scope itself rather than through
         // `with_file_content`.
-        let _scope = self.enter_request_scope_borrowed(content);
+        let _scope = self.enter_request_scope_borrowed(&data.uri, content);
 
         let result = match data.action_kind.as_str() {
             // ── PHPStan quickfixes ──────────────────────────────────
@@ -360,13 +517,15 @@ impl Backend {
         };
 
         let mut edit = result?;
-        self.translate_workspace_edit(&mut edit);
-        self.match_workspace_edit_line_endings(
-            &mut edit,
-            &data.uri,
-            crate::text_position::line_ending(content),
+        // A template's unused imports are removed as the directives it
+        // writes them as, planned against its own text.
+        let planned_in_template = matches!(
+            data.action_kind.as_str(),
+            "quickfix.removeUnusedImport" | "quickfix.removeAllUnusedImports"
         );
-        Some(edit)
+        let eol = Self::request_line_ending(template, content);
+        self.finish_action_edit(&mut edit, &data.uri, eol, template, planned_in_template)
+            .then_some(edit)
     }
 
     /// Give the text of every edit in `edit` the line terminator of the

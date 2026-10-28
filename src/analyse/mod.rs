@@ -66,7 +66,9 @@ pub(crate) use project::{
 };
 pub(crate) use run::discover_user_files;
 pub use run::run;
-pub(crate) use stages::{OpenedProject, note_plain_php_project, open_project};
+pub(crate) use stages::{
+    OpenedProject, note_plain_php_project, note_workspace_layout, open_project,
+};
 
 /// Severity filter for the analyse output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

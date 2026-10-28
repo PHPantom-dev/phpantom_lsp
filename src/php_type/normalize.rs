@@ -230,28 +230,34 @@ impl PhpType {
     /// several domains (a class can be `Traversable`, a string can be
     /// callable), so anything that cannot be classified on both sides is
     /// kept — the result is never narrower than what can be proved.
+    ///
+    /// `None` when the native declaration forbids every alternative, as it
+    /// does a lone `string` under `: View`: the type then describes nothing
+    /// the declaration can return.
     #[must_use]
-    pub(crate) fn without_alternatives_the_native_type_forbids(&self, native: &PhpType) -> PhpType {
-        let TypeKind::Union(members) = self.kind() else {
-            return self.clone();
-        };
+    pub(crate) fn without_alternatives_the_native_type_forbids(
+        &self,
+        native: &PhpType,
+    ) -> Option<PhpType> {
         let Some(allowed) = native_value_domains(native) else {
-            return self.clone();
+            return Some(self.clone());
         };
-
+        let members = self.union_members();
         let kept: Vec<PhpType> = members
             .iter()
             .filter(|member| match value_domain(member) {
                 Some(domain) => allowed.contains(&domain),
                 None => true,
             })
-            .cloned()
+            .map(|member| (*member).clone())
             .collect();
 
         if kept.is_empty() {
-            self.clone()
+            None
+        } else if kept.len() == members.len() {
+            Some(self.clone())
         } else {
-            PhpType::union(kept)
+            Some(PhpType::union(kept))
         }
     }
 
@@ -363,6 +369,8 @@ fn native_value_domains(ty: &PhpType) -> Option<Vec<ValueDomain>> {
             }
             Some(domains)
         }
+        // A class admits only objects, which belong to none of the domains.
+        _ if ty.class_name().is_some() && !ty.is_mixed() => Some(Vec::new()),
         _ => {
             let mut domains = vec![value_domain(ty)?];
             // A native `float` accepts an `int` return and coerces it, so a

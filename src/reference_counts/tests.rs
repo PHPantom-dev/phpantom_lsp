@@ -7,7 +7,7 @@ const URI: &str = "file:///test.php";
 
 const METHOD: MemberSlot = MemberSlot {
     is_static: false,
-    is_method: true,
+    kind: MemberRefKind::Method,
 };
 
 fn parse_extra(backend: &Backend, uri: &str, content: &str) {

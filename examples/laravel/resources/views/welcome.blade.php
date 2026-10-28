@@ -184,7 +184,11 @@
     {{-- <x-card> names a directory, not a class: Blade falls back to the
          class inside it that repeats its name, App\View\Components\Card\Card.
          Its view reads that class's members:
-         resources/views/components/card.blade.php --}}
+         resources/views/components/card.blade.php
+
+         Try: the code actions on \App\Models\Bakery on the next line.
+         Importing it shortens the name and adds a @use directive at the
+         top of this template. --}}
     @php($bakery = \App\Models\Bakery::firstOrFail())
     <x-card :bakery="$bakery" footer="Baked today" />
 

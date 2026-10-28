@@ -24,6 +24,10 @@
 //! `is_write` set).  The few files holding one, or a Messenger handler, are
 //! tracked here, so the declared names are read from those maps rather than
 //! from a second index.
+//!
+//! Yii's route names are declared the same way, by spans in the PHP files
+//! that define its routes (see [`crate::yii`]), so the files holding one, or
+//! a route of any kind, are tracked here too.
 
 pub(crate) mod config_tree;
 pub(crate) mod container;
@@ -100,7 +104,8 @@ pub(crate) fn slot_spans(content: &str, slots: Vec<NameSlot>) -> Vec<SymbolSpan>
 
 /// The files whose symbol maps declare a Symfony service ID, container
 /// parameter, route, translation key, Twig template, configuration key,
-/// event listener, or Messenger bus, or register a Messenger handler.
+/// event listener, or Messenger bus, or register a Messenger handler, or
+/// define a Yii route.
 #[derive(Default)]
 pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
@@ -112,10 +117,13 @@ pub(crate) struct SymfonyState {
 /// confirmed, or registers a Messenger handler.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that
-/// uses Twig declares its templates and nothing else.
+/// uses Twig declares its templates and nothing else.  A Yii route is
+/// counted whether it has a name or not, for the arguments its handler
+/// reads from its path.
 fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> bool) -> bool {
-    let counts = |kind: StringKeyKind| kind.is_symfony() && enabled(kind);
+    let counts = |kind: StringKeyKind| (kind.is_symfony() || kind.is_yii()) && enabled(kind);
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
+        || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
         || map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
@@ -129,7 +137,7 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         || map
             .typed_receiver_sites
             .iter()
-            .any(|site| site.is_write && counts(site.receiver.key_kind()))
+            .any(|site| site.is_write && site.receiver.names_any(counts))
 }
 
 impl Backend {
@@ -150,6 +158,8 @@ impl Backend {
     pub(crate) fn string_key_kind_enabled(&self, kind: StringKeyKind) -> bool {
         if kind == StringKeyKind::TwigTemplate {
             self.is_twig_project()
+        } else if kind.is_yii() {
+            self.is_yii_project()
         } else if kind.is_symfony() {
             self.is_symfony_project()
         } else {
@@ -162,7 +172,7 @@ impl Backend {
     /// Dependencies are never part of the project's own configuration, so a
     /// vendor file that happens to be parsed is left out.
     pub(crate) fn note_symfony_declarations(&self, uri: &str, map: &SymbolMap) {
-        if !self.is_symfony_project() && !self.is_twig_project() {
+        if !self.is_symfony_project() && !self.is_twig_project() && !self.is_yii_project() {
             return;
         }
         let declares = declares_symfony_keys(map, |kind| self.string_key_kind_enabled(kind))
@@ -188,6 +198,18 @@ impl Backend {
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
+        }
+    }
+
+    /// Visit the symbol map of every file that declares a name, in a
+    /// stable order.
+    pub(crate) fn visit_declaring_symbol_maps(&self, mut visit: impl FnMut(&str, &SymbolMap)) {
+        let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
+        uris.sort_unstable();
+        for uri in uris {
+            if let Some(map) = self.symbol_map_for(&uri) {
+                visit(&uri, &map);
+            }
         }
     }
 

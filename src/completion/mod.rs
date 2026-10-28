@@ -90,6 +90,8 @@ pub(crate) mod resolve;
 pub(crate) mod symfony_string_keys;
 pub(crate) mod target;
 pub(crate) mod use_edit;
+pub(crate) mod yii_route_params;
+pub(crate) mod yii_views;
 
 // ─── Sub-grouped modules ───────────────────────────────────────────────────
 

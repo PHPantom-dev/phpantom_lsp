@@ -1684,3 +1684,31 @@ function run(): void {
         "both parameters are ints, so both calls pass the wrong type, got: {messages:?}"
     );
 }
+
+/// A closure written in a `<?= … ?>` echo tag, as templates do, sees its
+/// typed parameters the way one in an `echo` statement does.
+#[test]
+fn closure_in_echo_tag_resolves_its_parameters() {
+    let backend = create_test_backend();
+    let php = r#"<?php
+class User {
+    public string $name = '';
+}
+
+function column(callable $content): string { return ''; }
+?>
+<?= column(static fn (User $user) => $user->nmae) ?>
+<?php echo column(static fn (User $user) => $user->nmae); ?>
+"#;
+    let messages = slow_diagnostic_messages(
+        &backend,
+        "file:///echo_tag_closure.php",
+        php,
+        "unknown_member",
+    );
+    assert_eq!(
+        messages.len(),
+        2,
+        "both closures read a property User does not declare, got: {messages:?}"
+    );
+}

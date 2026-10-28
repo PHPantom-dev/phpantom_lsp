@@ -18,7 +18,7 @@ use super::is_subtype_of_typed;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{
     CallableType, LiteralValue, PhpType, ShapeEntry, ShapeParts, TypeKind,
-    int_literal_is_within_range, is_array_like_name, shape_key_type,
+    int_literal_is_within_range, is_array_like_name, shape_key_type, with_keyword_lowercase,
 };
 use crate::types::{ClassInfo, Visibility};
 
@@ -775,7 +775,10 @@ impl Compat<'_> {
         // like any other value the caller receives back — is a real
         // constraint to check.  A closure arrives here with a return type
         // only when one was declared or resolved from its body, and with
-        // none at all when neither was possible.
+        // none at all when neither was possible.  Nothing converts the value
+        // on its way back, so the return type is compared without the
+        // `strict_types` coercions: a closure returning `string` hands the
+        // caller a string even where the specification promised `bool`.
         //
         // The parameters are contravariant: every value the specification
         // promises to pass has to be accepted by the closure's parameter in
@@ -791,7 +794,7 @@ impl Compat<'_> {
         {
             if let (Some(arg_return), Some(param_return)) =
                 (&arg_sig.return_type, &param_sig.return_type)
-                && !self.check(arg_return, param_return)
+                && !self.strictly().check(arg_return, param_return)
             {
                 return Some(false);
             }
@@ -983,29 +986,38 @@ impl Compat<'_> {
             // Not Stringable, or not loadable — fall through to other checks
         }
 
-        // ── PHP type juggling: int/float → string ───────────────────
-        // PHP coerces ints and floats to strings in many contexts
-        // (concatenation,
-        // function calls with declare(strict_types=0)).  Under
-        // strict_types=1 this is a TypeError, so we flag it.  Also
-        // covers numeric literals (e.g. `42` or `1.0` passed to `string`).
-        if !strict_types
-            && let TypeKind::Named(sup) = param_type.kind()
-            && sup.eq_ignore_ascii_case("string")
-        {
-            let is_numeric_like = match arg_type.kind() {
-                TypeKind::Named(sub) => {
-                    matches!(
-                        sub.to_ascii_lowercase().as_str(),
-                        "int" | "integer" | "float" | "double"
-                    )
-                }
-                TypeKind::Literal(l) => {
-                    matches!(**l, LiteralValue::Int(_) | LiteralValue::Float(_))
+        // ── PHP type juggling: the scalar coercion table ────────────
+        // Outside `declare(strict_types=1)` PHP converts a scalar argument
+        // to a scalar parameter's type instead of raising a TypeError:
+        //
+        // - `string` takes any int, float or bool (`false` becomes `""`).
+        // - `int` takes a float (truncated), a numeric string or a bool.
+        // - `float` takes a numeric string or a bool (an int fits anyway).
+        // - `bool` takes any int, float or string.
+        //
+        // A non-numeric string still fails `int` and `float`, so the
+        // numeric-string rules below carry that case.  Under
+        // strict_types=1 only int→float survives, which the subtype check
+        // already accepts.  `int / int` resolving to `int|float` is the
+        // usual way a float reaches an `int` position.
+        if !strict_types && let TypeKind::Named(sup) = param_type.kind() {
+            let is_bool = arg_type.is_bool() || arg_type.is_true() || arg_type.is_false();
+            let is_int = arg_type.is_int_subtype();
+            let is_float = arg_type.is_float_subtype();
+            let accepts = with_keyword_lowercase(sup, |lower| match lower {
+                "string" => is_bool || is_int || is_float || arg_type.is_named_ci("numeric"),
+                "int" | "integer" => is_bool || is_float,
+                "float" | "double" => is_bool,
+                "bool" | "boolean" => {
+                    is_int
+                        || is_float
+                        || arg_type.is_string_subtype()
+                        || arg_type.is_named_ci("numeric")
+                        || arg_type.is_named_ci("scalar")
                 }
                 _ => false,
-            };
-            if is_numeric_like {
+            });
+            if accepts {
                 return Some(true);
             }
         }
@@ -1064,32 +1076,6 @@ impl Compat<'_> {
             return Some(true);
         }
 
-        // ── PHP type juggling: float → int ──────────────────────────
-        // `int / int` in PHP resolves to `int|float` (division only
-        // stays an int when it divides evenly), so this hatch is what
-        // actually gets exercised: the `float` half of that union
-        // reaching an `int` position.  Outside `declare(strict_types=1)`
-        // PHP truncates the float on the way in rather than raising a
-        // TypeError, so there is nothing to report. Under strict_types=1
-        // this coercion is forbidden and stays a real mismatch.  Covers
-        // both a bare `float` type and a float literal (e.g. `1.5`),
-        // since a literal keeps its own `Literal` kind rather than
-        // widening to `Named("float")`.
-        if !strict_types {
-            let arg_is_float = match arg_type.kind() {
-                TypeKind::Named(sub) => {
-                    matches!(sub.to_ascii_lowercase().as_str(), "float" | "double")
-                }
-                TypeKind::Literal(l) => matches!(**l, LiteralValue::Float(_)),
-                _ => false,
-            };
-            if arg_is_float
-                && let TypeKind::Named(sup) = param_type.kind()
-                && matches!(sup.to_ascii_lowercase().as_str(), "int" | "integer")
-            {
-                return Some(true);
-            }
-        }
         None
     }
 

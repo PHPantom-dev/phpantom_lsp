@@ -119,6 +119,7 @@ impl Backend {
                 })),
                 hover_provider: Some(HoverProvider::Bool(true)),
                 definition_provider: Some(DefinitionProvider::Bool(true)),
+                declaration_provider: Some(DeclarationProvider::Bool(true)),
                 type_definition_provider: Some(TypeDefinitionProvider::Bool(true)),
                 implementation_provider: Some(ImplementationProvider::Bool(true)),
                 references_provider: Some(ReferencesProvider::Bool(true)),
@@ -129,8 +130,10 @@ impl Backend {
                     CodeActionOptions {
                         code_action_kinds: Some(vec![
                             CodeActionKind::QuickFix,
+                            CodeActionKind::Refactor,
                             CodeActionKind::RefactorExtract,
                             CodeActionKind::RefactorInline,
+                            CodeActionKind::RefactorRewrite,
                             CodeActionKind::SourceOrganizeImports,
                             CodeActionKind::new("source.addMissingImports"),
                         ]),

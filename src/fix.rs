@@ -40,7 +40,7 @@ use tower_lsp_server::gen_lsp_types::*;
 use crate::Backend;
 use crate::analyse::{
     Colour, OpenedProject, OutputFormat, TableRow, dispatch_report, github_annotation,
-    note_plain_php_project, open_project, print_box, print_success_box, print_table, progress_bar,
+    note_workspace_layout, open_project, print_box, print_success_box, print_table, progress_bar,
 };
 use crate::code_actions::{build_line_deletion_edit, build_use_directive_deletion_edit};
 use crate::parser::with_parse_cache;
@@ -101,7 +101,10 @@ struct FileFixResult {
 }
 
 /// All native rule identifiers that have automated fixers.
-const NATIVE_RULES: &[&str] = &["unused_import"];
+///
+/// They run in this order, each on the text the one before left: a
+/// replaced deprecated call can leave an import unused.
+const NATIVE_RULES: &[&str] = &["deprecated", "unused_import"];
 
 /// Check whether a rule identifier refers to a PHPStan-based fixer.
 fn is_phpstan_rule(rule: &str) -> bool {
@@ -215,6 +218,93 @@ pub fn fix_unused_imports(
     (new_content, fixes)
 }
 
+/// Rewrite every call to a deprecated function or method whose
+/// `#[Deprecated(replacement: "...")]` names a replacement, in a file
+/// `backend` has already parsed.
+///
+/// A replacement is spliced together from the call's own argument text,
+/// so when one deprecated call encloses another (`old(old($x))`) only the
+/// outer one is rewritten in a pass, carrying the inner call along as
+/// written.  The file is then parsed again and the next pass picks the
+/// inner one up.  Every pass rewrites at least one of the calls the first
+/// found, so there are never more passes than that.
+///
+/// Leaves `backend` holding a parse of an earlier text than the one
+/// returned when anything changed.
+pub fn fix_deprecated(backend: &Backend, uri: &str, content: &str) -> (String, Vec<AppliedFix>) {
+    let mut current = content.to_string();
+    let mut fixes: Vec<AppliedFix> = Vec::new();
+    let mut passes_left: Option<usize> = None;
+
+    loop {
+        // A template's calls are found in the virtual PHP it lowers to,
+        // and each rewrite is moved back into the template's own text.
+        let template = if backend.is_blade_file(uri) {
+            let Some(template) = backend.template_text_of(uri, &current) else {
+                break;
+            };
+            Some(template)
+        } else {
+            None
+        };
+        let analysable = backend.analysable_content_or(uri, &current);
+        let mut found = backend.deprecated_call_replacements(uri, &analysable, 0, analysable.len());
+        if found.is_empty() {
+            break;
+        }
+        let passes = passes_left.get_or_insert(found.len());
+
+        found.sort_by(|a, b| {
+            a.range
+                .start
+                .cmp(&b.range.start)
+                .then(b.range.end.cmp(&a.range.end))
+        });
+        found.dedup_by(|a, b| a.range == b.range);
+
+        let mut edits: Vec<TextEdit> = Vec::new();
+        let mut enclosed = false;
+        let mut taken_until: Option<Position> = None;
+        for call in &found {
+            if taken_until.is_some_and(|end| call.range.start < end) {
+                enclosed = true;
+                continue;
+            }
+            taken_until = Some(call.range.end);
+            let range = match &template {
+                Some(template) => match template.translate_edit(call.range, &call.replacement) {
+                    Some(range) => range,
+                    None => continue,
+                },
+                None => call.range,
+            };
+            fixes.push(AppliedFix {
+                rule: "deprecated".to_string(),
+                line: range.start.line + 1,
+                description: call.title(),
+            });
+            edits.push(TextEdit {
+                range,
+                new_text: call.replacement.clone(),
+            });
+        }
+        if edits.is_empty() {
+            break;
+        }
+
+        edits.sort_by_key(|edit| std::cmp::Reverse(edit.range.start));
+        current = apply_text_edits(&current, &edits);
+
+        *passes -= 1;
+        if !enclosed || *passes == 0 {
+            break;
+        }
+        backend.update_ast(uri, &current);
+    }
+
+    (current, fixes)
+}
+
 /// Run the fix command and return the process exit code.
 ///
 /// Returns `0` when fixes were applied (or nothing to fix), `1` on error,
@@ -222,7 +312,7 @@ pub fn fix_unused_imports(
 pub async fn run(options: FixOptions) -> i32 {
     let root = &options.workspace_root;
 
-    note_plain_php_project(root, "treating it as a plain PHP project.");
+    note_workspace_layout(root, "treating it as a plain PHP project.");
 
     // ── Validate rules ──────────────────────────────────────────────
     let rule_errors = validate_rules(&options.rules, options.with_phpstan);
@@ -280,24 +370,28 @@ pub async fn run(options: FixOptions) -> i32 {
 
             let (uri, content) = file_data[i].as_ref()?;
 
+            let _project_guard = backend.enter_project_scope(uri);
             let _parse_guard = with_parse_cache(content);
             let _cache_guard = with_active_resolved_class_cache(&backend.resolved_class_cache);
 
             let mut current_content = content.clone();
             let mut all_fixes: Vec<AppliedFix> = Vec::new();
 
+            let mut parsed = true;
             for rule in native_rules.iter() {
-                match *rule {
-                    "unused_import" => {
-                        let (new_content, fixes) =
-                            fix_unused_imports(&backend, uri, &current_content);
-                        current_content = new_content;
-                        all_fixes.extend(fixes);
-                    }
-                    _ => {
-                        // Future rules go here.
-                    }
+                // A rule reads the file through its parse, which has to be
+                // of the text the rule before it left.
+                if !parsed {
+                    backend.update_ast(uri, &current_content);
                 }
+                let (new_content, fixes) = match *rule {
+                    "deprecated" => fix_deprecated(&backend, uri, &current_content),
+                    "unused_import" => fix_unused_imports(&backend, uri, &current_content),
+                    _ => continue,
+                };
+                parsed = fixes.is_empty();
+                current_content = new_content;
+                all_fixes.extend(fixes);
             }
 
             let changed = current_content != *content;

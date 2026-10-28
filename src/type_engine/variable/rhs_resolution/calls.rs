@@ -570,8 +570,10 @@ pub(crate) fn infer_closure_literal_type(
         // $value): string => $value ?? '-'`), which nothing outside the
         // closure ever assigns, so the outer scope's variable resolution
         // cannot see them. Seed each hinted one so the body resolves
-        // against its own signature the way a call to it would.
-        let param_types: HashMap<String, PhpType> = parameter_list
+        // against its own signature the way a call to it would. Each seed
+        // carries the classes its hint names, so a member access on the
+        // parameter (`$u->label()`) has an owner to look the member up on.
+        let param_types: HashMap<String, Vec<ResolvedType>> = parameter_list
             .parameters
             .iter()
             .filter_map(|param| {
@@ -580,7 +582,7 @@ pub(crate) fn infer_closure_literal_type(
                 let ty = ctx
                     .written_names()
                     .resolve_hint(&crate::parser::extract_hint_type(hint));
-                Some((name, ty))
+                Some((name, resolve_return_type(ty, ctx)))
             })
             .collect();
 
@@ -589,7 +591,7 @@ pub(crate) fn infer_closure_literal_type(
         } else {
             let param_aware_resolver = |name: &str| -> Vec<ResolvedType> {
                 match param_types.get(name) {
-                    Some(ty) => vec![ResolvedType::from_type_string(ty.clone())],
+                    Some(seeded) => seeded.clone(),
                     None => resolve_var_types(name, ctx, ctx.cursor_offset),
                 }
             };

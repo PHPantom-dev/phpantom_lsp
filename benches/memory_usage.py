@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure PHPantom LSP resident memory (RSS) on three workloads.
+"""Measure PHPantom LSP resident memory (RSS) on four workloads.
 
 Scenarios
 ---------
@@ -7,6 +7,8 @@ Scenarios
 2. **laravel_model** – open the default ``User`` model inside a full
    laravel/laravel checkout (with Composer dependencies installed).
 3. **symfony_controller** – open a controller inside a full symfony/demo
+   checkout (with Composer dependencies installed).
+4. **yii_action** – open an action inside a full yiisoft/demo-blog
    checkout (with Composer dependencies installed).
 
 The script communicates with the LSP binary over JSON-RPC / stdio,
@@ -19,7 +21,8 @@ Output is printed as ``customSmallerIsBetter`` JSON so
     [
       {"name": "memory_hello_world",  "unit": "MiB", "value": 24.5},
       {"name": "memory_laravel_model", "unit": "MiB", "value": 31.7},
-      {"name": "memory_symfony_controller", "unit": "MiB", "value": 45.2}
+      {"name": "memory_symfony_controller", "unit": "MiB", "value": 45.2},
+      {"name": "memory_yii_action", "unit": "MiB", "value": 40.1}
     ]
 
 Usage (CI)::
@@ -72,6 +75,14 @@ SYMFONY_TARBALL = (
     f"{SYMFONY_TAG}.tar.gz"
 )
 
+# Pinned yiisoft/demo-blog commit. The demo has no tags, but it commits its
+# own composer.lock, so the commit alone pins every dependency version.
+YII_COMMIT = "0924761392b8f79a5896ba4e96f09e4d43b38feb"
+YII_TARBALL = (
+    "https://github.com/yiisoft/demo-blog/archive/"
+    f"{YII_COMMIT}.tar.gz"
+)
+
 HELLO_WORLD_PHP = """\
 <?php
 
@@ -110,6 +121,34 @@ final class TestController extends AbstractController
     public function helloWorld(Post $post): Response
     {
         return $this->render('blog/post_show.html.twig', ['title' => $post->getTitle()]);
+    }
+}
+"""
+
+YII_ACTION_PHP = r"""<?php
+
+declare(strict_types=1);
+
+namespace App\Presentation\Site\Blog\Test;
+
+use App\Domain\Post\PostId;
+use App\Domain\Post\PostRepositoryInterface;
+use App\Presentation\Site\Shared\ResponseFactory\ResponseFactory;
+use Psr\Http\Message\ResponseInterface;
+use Yiisoft\Router\HydratorAttribute\RouteArgument;
+
+final readonly class Action
+{
+    public function __construct(
+        private PostRepositoryInterface $postRepository,
+        private ResponseFactory $responseFactory,
+    ) {}
+
+    public function __invoke(#[RouteArgument('id')] PostId $postId): ResponseInterface
+    {
+        $post = $this->postRepository->getOrUserException($postId);
+
+        return $this->responseFactory->render(__DIR__ . '/template.php', ['title' => $post->title]);
     }
 }
 """
@@ -677,6 +716,76 @@ def run_symfony_controller(binary: str, work_dir: str) -> int:
         client.shutdown()
 
 
+def setup_yii(work_dir: str) -> str:
+    """Download yiisoft/demo-blog at the pinned commit and install Composer deps.
+
+    Composer scripts and plugins are skipped, as for Symfony:
+    ``yiisoft/config``'s plugin only assembles the runtime merge plan.
+    Platform requirements are ignored too, because the demo requires a
+    newer PHP and extensions the benchmark runner may not have, and the
+    language server never executes the code it reads.
+
+    Returns the path to the Yii project root.
+    """
+    yii_dir = download_project(YII_TARBALL, work_dir, "demo-blog-")
+
+    print("  Running composer install...", file=sys.stderr)
+    subprocess.run(
+        [
+            "composer", "install",
+            "--no-interaction",
+            "--no-progress",
+            "--prefer-dist",
+            "--no-scripts",
+            "--no-plugins",
+            "--ignore-platform-reqs",
+            "--quiet",
+        ],
+        check=True,
+        cwd=yii_dir,
+        timeout=300,
+    )
+
+    return yii_dir
+
+
+def run_yii_action(binary: str, work_dir: str) -> int:
+    """Measure RSS after indexing yiisoft/demo-blog and hovering a property.
+
+    Opens an action that loads a post through the repository interface
+    and renders a template with ``$post->title``, then hovers on
+    ``title``.  The hover resolves the domain entity through the
+    interface, and the action's response factory wraps the view renderer
+    from the vendor directory.
+
+    Returns RSS in KiB.
+    """
+    yii_dir = setup_yii(work_dir)
+
+    action_dir = os.path.join(yii_dir, "src", "Presentation", "Site", "Blog", "Test")
+    os.makedirs(action_dir, exist_ok=True)
+    action_path = os.path.join(action_dir, "Action.php")
+    with open(action_path, "w") as f:
+        f.write(YII_ACTION_PHP)
+
+    client = LspClient(binary, yii_dir)
+    try:
+        client.initialize()
+        client.wait_for_indexing(timeout=INDEX_TIMEOUT)
+
+        file_uri = Path(action_path).as_uri()
+        client.did_open(file_uri, YII_ACTION_PHP)
+
+        # Hover on ``$post->title`` (line 23, col 92).
+        client.hover(file_uri, line=23, character=92)
+        client.drain_notifications(SETTLE_TIME)
+
+        rss = sample_rss(client.pid)
+        return rss
+    finally:
+        client.shutdown()
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
@@ -709,7 +818,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--scenario",
-        choices=["hello_world", "laravel_model", "symfony_controller", "all"],
+        choices=["hello_world", "laravel_model", "symfony_controller", "yii_action", "all"],
         default="all",
         help="Which scenario to run (default: all).",
     )
@@ -777,6 +886,14 @@ def main() -> None:
             print("Running symfony_controller scenario...", file=sys.stderr)
             rss = run_symfony_controller(binary, work_dir)
             results["memory_symfony_controller"] = rss
+            print(
+                f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
+            )
+
+        if args.scenario in ("yii_action", "all"):
+            print("Running yii_action scenario...", file=sys.stderr)
+            rss = run_yii_action(binary, work_dir)
+            results["memory_yii_action"] = rss
             print(
                 f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
             )

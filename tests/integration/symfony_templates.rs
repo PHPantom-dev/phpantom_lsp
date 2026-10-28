@@ -391,6 +391,36 @@ async fn a_missing_template_can_be_created() {
     }
 }
 
+#[tokio::test]
+async fn a_close_template_name_is_offered() {
+    const TYPO_PHP: &str = "<?php\nnamespace App\\Controller;\n\nuse Symfony\\Bundle\\FrameworkBundle\\Controller\\AbstractController;\n\nfinal class TypoController extends AbstractController\n{\n    public function show(): object\n    {\n        return $this->render('blog/shw.html.twig');\n    }\n}\n";
+    let (backend, dir) = workspace(&[
+        ("templates/page.html.twig", PAGE_TWIG),
+        ("templates/blog/show.html.twig", CARD_TWIG),
+        ("src/Controller/TypoController.php", TYPO_PHP),
+    ])
+    .await;
+    let uri = uri_for(&dir, "src/Controller/TypoController.php");
+    let at = position_in(TYPO_PHP, "blog/shw", 0);
+
+    let actions = get_code_actions_in_range(
+        &backend,
+        uri.as_str(),
+        TYPO_PHP,
+        Range::new(Position::new(at.line, 0), Position::new(at.line, 200)),
+    );
+    let change = find_action(&actions, "Change to 'blog/show.html.twig'")
+        .expect("should offer the close name");
+    let edits = change
+        .edit
+        .as_ref()
+        .and_then(|edit| edit.changes.as_ref())
+        .and_then(|changes| changes.get(&uri))
+        .expect("an edit to the controller");
+    assert_eq!(edits[0].new_text, "blog/show.html.twig");
+    assert_eq!(edits[0].range.start, at);
+}
+
 /// A Twig template or a YAML file belongs to another extension: PHPantom
 /// answers there for the names it reads, and leaves formatting,
 /// highlighting, outline, folding, and the rest to that extension.

@@ -124,8 +124,14 @@ impl PestConfig {
     /// (`tests/` unless `--test-directory` names another), and test files
     /// live under it, so the nearest one above a test file is it.
     fn load(backend: &Backend, dir_uri: &str) -> Option<Self> {
-        let content = backend.get_file_content(&format!("{dir_uri}Pest.php"))?;
+        let uri = format!("{dir_uri}Pest.php");
         let tests_dir = crate::util::uri_to_path(dir_uri)?;
+        // Every directory above a file is probed and almost none has one,
+        // so a missing file is the normal answer, not a read failure.
+        if !backend.open_files.read().contains_key(&uri) && !tests_dir.join("Pest.php").is_file() {
+            return None;
+        }
+        let content = backend.get_file_content(&uri)?;
         Some(Self {
             bindings: parse_bindings(&content, &tests_dir),
         })

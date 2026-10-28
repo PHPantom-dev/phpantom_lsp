@@ -7,7 +7,10 @@
 
 use super::*;
 
-use crate::types::ClassInfo;
+use super::in_array::values_held_by;
+use crate::class_lookup::Fqn;
+use crate::type_engine::call_resolution::enum_case_property_literal;
+use crate::types::{ClassInfo, ClassLikeKind};
 
 /// Apply what an identity comparison against an enum case proves about the
 /// subject, in whichever direction the branch establishes.
@@ -34,6 +37,201 @@ pub(super) fn apply_enum_case_identity_narrowing(
             subtract_enum_cases(&var_name, &[case], scope, ctx);
         }
         return;
+    }
+}
+
+/// Apply what comparing a backed enum's `->value` against literals proves
+/// about the enum, in whichever direction the branch establishes.
+///
+/// A backed enum's cases and backing values map one to one, so
+/// `$s->value === 'H'` proves `$s` is the case backed by `'H'` and
+/// `$s->value !== 'H'` rules that case out. A strict
+/// `in_array($s->value, [...], true)` does the same for each value the
+/// haystack names.
+pub(super) fn apply_enum_value_identity_narrowing(
+    condition: &Expression<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    truthy: bool,
+) {
+    if let Some((var_name, literal, equal)) = extract_backing_value_identity(condition) {
+        narrow_by_backing_values(&var_name, &[literal], equal == truthy, scope, ctx);
+        return;
+    }
+    let (inner, negated) = condition_facts::unwrap_condition_negation(condition);
+    let Expression::Call(Call::Function(call)) = unwrap_parens(inner) else {
+        return;
+    };
+    let Some(needle) = call.argument_list.arguments.first().map(|arg| arg.value()) else {
+        return;
+    };
+    let Some(var_name) = backing_value_receiver(needle) else {
+        return;
+    };
+    let Some(needle_key) = condition_facts::expr_to_subject_key(needle) else {
+        return;
+    };
+    let Some(haystack_expr) = condition_facts::try_extract_in_array(inner, &needle_key) else {
+        return;
+    };
+    let Some(haystack) = resolve_in_array_haystack_type_fw(haystack_expr, scope, ctx) else {
+        return;
+    };
+    if truthy != negated {
+        // The needle is one of the haystack's elements, which names the
+        // cases only when every element is a value written out.
+        let Some(element) = haystack.iterable_element_type() else {
+            return;
+        };
+        let values: Vec<PhpType> = element.union_members().into_iter().cloned().collect();
+        if values.iter().all(|value| value.as_literal().is_some()) {
+            narrow_by_backing_values(&var_name, &values, true, scope, ctx);
+        }
+    } else {
+        narrow_by_backing_values(&var_name, &values_held_by(&haystack), false, scope, ctx);
+    }
+}
+
+/// The subject a strict comparison of `->value` against a literal reads
+/// the value of, the literal, and whether the branch being narrowed is the
+/// one where the two were identical.
+fn extract_backing_value_identity(expr: &Expression<'_>) -> Option<(String, PhpType, bool)> {
+    let (inner, negated) = condition_facts::unwrap_condition_negation(expr);
+    let Expression::Binary(bin) = unwrap_parens(inner) else {
+        return None;
+    };
+    let equal = match bin.operator {
+        BinaryOperator::Identical(_) => !negated,
+        BinaryOperator::NotIdentical(_) => negated,
+        _ => return None,
+    };
+    for (candidate, other) in [(bin.rhs, bin.lhs), (bin.lhs, bin.rhs)] {
+        if let Some(literal) = literal_comparand_type(candidate)
+            && literal.as_literal().is_some()
+            && let Some(var_name) = backing_value_receiver(other)
+        {
+            return Some((var_name, literal, equal));
+        }
+    }
+    None
+}
+
+/// The subject `expr` reads `->value` (or `?->value`) of.
+fn backing_value_receiver(expr: &Expression<'_>) -> Option<String> {
+    let (object, property) = match unwrap_parens(expr) {
+        Expression::Access(Access::Property(pa)) => (pa.object, &pa.property),
+        Expression::Access(Access::NullSafeProperty(pa)) => (pa.object, &pa.property),
+        _ => return None,
+    };
+    let ClassLikeMemberSelector::Identifier(ident) = property else {
+        return None;
+    };
+    if bytes_to_str(ident.value) != "value" {
+        return None;
+    }
+    expr_to_subject(object)
+}
+
+/// Narrow `var_name` by its `->value` being (`equal`) or not being one of
+/// `values`.
+///
+/// The equal branch narrows only a subject that holds nothing but backed
+/// enums (and `null`, whose `->value` is no value): any other object could
+/// carry a `value` of its own. A case whose backing value cannot be read
+/// stays in, since it may be the one compared against. A value no case is
+/// backed by describes a branch that cannot run, which is not this
+/// function's business to decide, so it leaves the subject alone.
+fn narrow_by_backing_values(
+    var_name: &str,
+    values: &[PhpType],
+    equal: bool,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let literals: Vec<&LiteralValue> = values.iter().filter_map(PhpType::as_literal).collect();
+    if literals.is_empty() {
+        return;
+    }
+    seed_synthetic_key_if_needed(var_name, scope, ctx);
+    let types = scope.get(var_name);
+    if types.is_empty() {
+        return;
+    }
+    let mut only_backed_enums = true;
+    let mut matched: Vec<ResolvedType> = Vec::new();
+    let mut possible: Vec<ResolvedType> = Vec::new();
+    for rt in types {
+        for member in rt.type_string.union_members() {
+            let member = match member.kind() {
+                TypeKind::Nullable(inner) => inner,
+                _ => member,
+            };
+            if member.is_null() {
+                continue;
+            }
+            let (enum_name, only_case) = match (member.as_enum_case(), member.kind()) {
+                (Some((enum_name, case)), _) => (enum_name, Some(case)),
+                (None, TypeKind::Named(name)) => (name.as_ref(), None),
+                _ => {
+                    only_backed_enums = false;
+                    continue;
+                }
+            };
+            let enum_class = match &rt.class_info {
+                Some(cls) if cls.fqn().eq_ignore_ascii_case(enum_name) => Arc::clone(cls),
+                _ => match (ctx.file.class_loader)(Fqn::new(enum_name)) {
+                    Some(cls) => cls,
+                    None => {
+                        only_backed_enums = false;
+                        continue;
+                    }
+                },
+            };
+            if enum_class.kind != ClassLikeKind::Enum || enum_class.backed_type.is_none() {
+                only_backed_enums = false;
+                continue;
+            }
+            let enum_fqn = enum_class.fqn();
+            for constant in enum_class
+                .constants
+                .iter()
+                .filter(|c| c.is_enum_case && only_case.is_none_or(|case| c.name == case))
+            {
+                let identical = enum_case_property_literal(&enum_class, &constant.name, "value")
+                    .and_then(|backing| {
+                        let backing = backing.as_literal()?.clone();
+                        let answers: Vec<Option<bool>> = literals
+                            .iter()
+                            .map(|lit| backing.identical_to(lit))
+                            .collect();
+                        if answers.contains(&Some(true)) {
+                            Some(true)
+                        } else if answers.contains(&None) {
+                            None
+                        } else {
+                            Some(false)
+                        }
+                    });
+                let case_type = PhpType::enum_case(enum_fqn, constant.name);
+                if identical == Some(false) || possible.iter().any(|rt| rt.type_string == case_type)
+                {
+                    continue;
+                }
+                let case = ResolvedType::from_both_arc(case_type, Arc::clone(&enum_class));
+                if identical == Some(true) {
+                    matched.push(case.clone());
+                }
+                possible.push(case);
+            }
+        }
+    }
+    if matched.is_empty() {
+        return;
+    }
+    if !equal {
+        subtract_enum_cases(var_name, &matched, scope, ctx);
+    } else if only_backed_enums {
+        narrow_to_enum_cases(var_name, possible, scope, ctx);
     }
 }
 

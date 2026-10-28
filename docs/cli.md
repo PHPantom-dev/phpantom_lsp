@@ -303,11 +303,13 @@ phpantom_lsp fix --project-root /path/to/app      # explicit project root
 
 ### Available rules
 
-Rules correspond to diagnostic identifiers.
+| Rule            | Description                                                                                                       |
+| --------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `deprecated`    | Rewrite calls to deprecated functions and methods whose `#[Deprecated(replacement: "...")]` names a replacement |
+| `unused_import` | Remove unused `use` statements                                                                                    |
 
-| Rule               | Description                    |
-| ------------------ | ------------------------------ |
-| `unused_import`    | Remove unused `use` statements |
+Rules run in that order, so an import that a rewritten call leaves
+unused is removed in the same run.
 
 ### Example output
 

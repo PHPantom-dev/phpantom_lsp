@@ -200,6 +200,31 @@ pub(crate) fn is_twig_project(package: &ComposerPackage) -> bool {
             })
 }
 
+/// The packages that make a project a Yii application: the view layer
+/// itself and the renderer an application's actions use, under its current
+/// and its former name, and the router.
+const YII_PACKAGES: [&str; 4] = [
+    "yiisoft/view",
+    "yiisoft/yii-view-renderer",
+    "yiisoft/yii-view",
+    "yiisoft/router",
+];
+
+/// Detect whether the project is a Yii application, which view names, route
+/// names, and route arguments are read in: it renders Yii views or routes
+/// requests with Yii's router.
+pub(crate) fn is_yii_project(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            YII_PACKAGES
+                .iter()
+                .any(|package| name.eq_ignore_ascii_case(package))
+        })
+}
+
 /// Detect whether the project is a Laravel *application* rather than a
 /// library that uses an Illuminate component.
 ///
@@ -411,6 +436,18 @@ mod tests {
         )));
         assert!(!is_twig_project(&pkg(
             r#"{"require": {"laravel/framework": "^11.0", "symfony/console": "^7.0"}}"#
+        )));
+    }
+
+    // ── is_yii_project ──────────────────────────────────────────────
+
+    #[test]
+    fn detects_yii_through_its_router() {
+        assert!(is_yii_project(&pkg(
+            r#"{"require": {"yiisoft/router": "^4.0"}}"#
+        )));
+        assert!(!is_yii_project(&pkg(
+            r#"{"require": {"yiisoft/arrays": "^3.0"}}"#
         )));
     }
 

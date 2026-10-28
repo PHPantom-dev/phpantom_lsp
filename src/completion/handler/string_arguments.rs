@@ -1,7 +1,7 @@
 //! Completion inside a string argument: array shape keys, the Laravel
 //! string keys (routes, config, views, translations, morph aliases, paths,
 //! route and command parameters, request input), Symfony service IDs and
-//! container parameters, Eloquent relation and
+//! container parameters, Yii views, Eloquent relation and
 //! column names, the strings a parameter's declared type asks for, and
 //! method names in route-controller groups and array callables.
 
@@ -79,21 +79,46 @@ impl Backend {
                 string_ctx,
                 StringContext::InStringLiteral | StringContext::NotInString
             )
+            && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
-                self.try_laravel_string_key_completion_in_file(content, position, ctx)
+                self.try_laravel_string_key_completion_in_file(content, position, code, ctx)
         {
             return Some(response);
         }
 
-        // ── Symfony names ───────────────────────────────────────
+        // ── Symfony and Yii names ───────────────────────────────
         // `$container->get('|')`, `service('|')`, `#[Autowire(param: '|')]`,
-        // `$translator->trans('|')`, and in any project that uses Twig,
-        // `$twig->render('|')`.
+        // `$translator->trans('|')`, in any project that uses Twig,
+        // `$twig->render('|')`, and in a Yii one `$urls->generate('|')` and
+        // `#[RouteArgument('|')]`.
         if matches!(string_ctx, StringContext::InStringLiteral)
-            && (self.is_symfony_project() || self.is_twig_project())
+            && (self.is_symfony_project() || self.is_twig_project() || self.is_yii_project())
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_symfony_string_key_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── Yii views ───────────────────────────────────────────
+        // `$this->viewRenderer->render('|')`, and a path built from
+        // `__DIR__` in any render call: `render(__DIR__ . '/|')`.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && self.is_yii_project()
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_yii_view_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── Yii route arguments ─────────────────────────────────
+        // The keys of `$urls->generate('blog/post', ['|' => …])` are the
+        // placeholders of the named route's path.
+        if self.is_yii_project()
+            && matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_yii_route_param_completion(content, position, code, ctx)
         {
             return Some(response);
         }

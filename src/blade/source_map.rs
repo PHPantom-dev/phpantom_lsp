@@ -15,6 +15,9 @@ pub struct BladeSourceMap {
     /// first template line.  At least [`super::PROLOGUE_LINES`]; larger
     /// when call-site-inferred `@var` declarations are injected.
     pub prologue_lines: u32,
+    /// The byte length of the template the map was built from.  See
+    /// [`Self::lowered_from`].
+    pub template_len: usize,
 }
 
 impl Default for BladeSourceMap {
@@ -22,6 +25,7 @@ impl Default for BladeSourceMap {
         Self {
             adjustments: Vec::new(),
             prologue_lines: super::PROLOGUE_LINES,
+            template_len: 0,
         }
     }
 }
@@ -56,6 +60,17 @@ fn anchor_at(line_adj: &[(u32, u32)], character: u32, side: AnchorSide) -> (usiz
 }
 
 impl BladeSourceMap {
+    /// Whether the map describes `template`, as far as its length can tell.
+    ///
+    /// A template is lowered on a background task after each keystroke, so
+    /// the recorded lowering can lag the buffer.  A position or edit moved
+    /// through a map built from older text lands on the wrong template
+    /// text, which matters wherever the result is an edit the editor
+    /// applies.
+    pub fn lowered_from(&self, template: &str) -> bool {
+        self.template_len == template.len()
+    }
+
     /// Map a Blade position into the virtual PHP.
     ///
     /// A column inside template text the preprocessor replaced (a tag name,
@@ -392,6 +407,16 @@ mod tests {
         let prologue = map.prologue_lines;
         assert_eq!(map.try_php_to_blade(at(prologue, 8)), Some(at(0, 3)));
         assert_eq!(map.try_php_to_blade(at(prologue, 20)), Some(at(0, 4)));
+    }
+
+    /// A lowering only describes the template it was built from: one typed
+    /// into since is a different text.
+    #[test]
+    fn a_map_knows_the_template_it_was_built_from() {
+        let template = "<h1>{{ $title }}</h1>\n";
+        let (_, map) = preprocess(template);
+        assert!(map.lowered_from(template));
+        assert!(!map.lowered_from("<h1>{{ $titles }}</h1>\n"));
     }
 
     /// The prologue holds declarations no template line stands behind, so

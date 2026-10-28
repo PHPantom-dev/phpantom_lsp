@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::completion::source::code_context::CodeContext;
 use crate::symbol_map::{LaravelConfigResource, StringKeyKind};
 use crate::types::FileContext;
 
@@ -23,14 +24,16 @@ mod enumerate;
 mod tests;
 
 use context::*;
-pub(crate) use context::{ArgumentSlot, attribute_class_start, callable_before_scalar_argument};
+pub(crate) use context::{ArgumentSlot, attribute_class_start, scalar_argument_at};
 
 /// The icon an editor shows beside a completed string key: whatever the key
 /// names is what it should look like.
 pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
     match kind {
         StringKeyKind::Config | StringKeyKind::ConfigResource(_) => CompletionItemKind::Property,
-        StringKeyKind::View | StringKeyKind::TwigTemplate => CompletionItemKind::File,
+        StringKeyKind::View | StringKeyKind::TwigTemplate | StringKeyKind::YiiView => {
+            CompletionItemKind::File
+        }
         StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
         StringKeyKind::TranslationDomain => CompletionItemKind::Module,
         StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
@@ -41,8 +44,10 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
         StringKeyKind::SymfonyEvent => CompletionItemKind::Event,
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
+        StringKeyKind::YiiRouteArgument => CompletionItemKind::Field,
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
+        | StringKeyKind::YiiRoute
         | StringKeyKind::Command
         | StringKeyKind::Section
         | StringKeyKind::Stack
@@ -97,7 +102,7 @@ impl Backend {
 
     /// Every name a string key of `kind` could be, unfiltered.
     ///
-    /// Three kinds have no list to offer. A Blade section or stack name is
+    /// Four kinds have no list to offer. A Blade section or stack name is
     /// completed from the raw template instead
     /// (`crate::completion::handler::blade_block_name`): what a name may be
     /// depends on the layouts above the file, and the edit has to land in
@@ -105,7 +110,8 @@ impl Backend {
     /// A container binding key is written where a class name is equally
     /// valid, which ordinary class completion already offers, and the set of
     /// keys is open besides — a list of them would read as the whole answer
-    /// when it is not.
+    /// when it is not.  A Yii view is completed a directory at a time from
+    /// the files under the view path (`crate::completion::yii_views`).
     fn string_key_candidates(&self, kind: &StringKeyKind, typed_prefix: &str) -> Arc<[String]> {
         match kind {
             StringKeyKind::Route => self.cached_route_names(),
@@ -169,15 +175,19 @@ impl Backend {
             | StringKeyKind::TranslationDomain
             | StringKeyKind::TwigTemplate
             | StringKeyKind::SymfonyEvent
-            | StringKeyKind::MessengerBus => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::MessengerBus
+            | StringKeyKind::YiiRoute => self.symfony_declared_names(*kind).into(),
             // A translation key is completed in the domain it is looked up
-            // in, and a configuration key under the key it is nested in,
-            // which only the Symfony completion knows.
+            // in, a configuration key under the key it is nested in, which
+            // only the Symfony completion knows, and a route argument from
+            // the routes of the handler it is written in.
             StringKeyKind::SymfonyTranslation
             | StringKeyKind::SymfonyConfigKey
+            | StringKeyKind::YiiRouteArgument
             | StringKeyKind::Section
             | StringKeyKind::Stack
-            | StringKeyKind::ContainerBinding => Arc::new([]),
+            | StringKeyKind::ContainerBinding
+            | StringKeyKind::YiiView => Arc::new([]),
         }
     }
 
@@ -191,7 +201,9 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<CompletionResponse> {
-        self.try_laravel_string_key_completion_inner(content, position, None, None, None)
+        let cursor = crate::text_position::position_to_offset(content, position) as usize;
+        let code = crate::completion::source::code_context::code_context_at(content, cursor)?;
+        self.try_laravel_string_key_completion_inner(content, position, &code, None, None, None)
     }
 
     /// Live-request form of Laravel string-key completion. Resolved names
@@ -200,6 +212,7 @@ impl Backend {
         &self,
         content: &str,
         position: Position,
+        code: &CodeContext<'_>,
         file_ctx: &FileContext,
     ) -> Option<CompletionResponse> {
         let indexed_function_exists = |name: &str| self.has_indexed_function(name);
@@ -207,6 +220,7 @@ impl Backend {
         self.try_laravel_string_key_completion_inner(
             content,
             position,
+            code,
             file_ctx.resolved_names.as_deref(),
             Some(&indexed_function_exists),
             Some(&indexed_class_exists),
@@ -217,6 +231,7 @@ impl Backend {
         &self,
         content: &str,
         position: Position,
+        code: &CodeContext<'_>,
         resolved_names: Option<&crate::names::OwnedResolvedNames>,
         indexed_function_exists: Option<&dyn Fn(&str) -> bool>,
         indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
@@ -224,6 +239,7 @@ impl Backend {
         let ctx = detect_laravel_string_key_context_inner(
             content,
             position,
+            code,
             resolved_names,
             indexed_function_exists,
             indexed_class_exists,

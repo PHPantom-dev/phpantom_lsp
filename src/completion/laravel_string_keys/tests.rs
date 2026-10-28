@@ -867,6 +867,8 @@ fn detects_every_forget_disk_array_value_and_spelling() {
         "Storage::forgetDisk(array('archive', 'backup'))",
         "Storage::forgetDisk(disk: ['archive', 'backup'])",
         "Storage::forgetDisk(disk: array('archive', 'backup'))",
+        "Storage::forgetDisk([$fn => 'archive', Keys::fn() => 'backup'])",
+        "Storage::forgetDisk([$caféfn => 'archive', fnclé => 'backup'])",
     ] {
         let content = storage_source(expression);
         for value in ["archive", "backup"] {
@@ -983,11 +985,21 @@ fn rejects_invalid_resource_argument_names_and_shapes() {
     }
 }
 
+/// The call a string literal opened at the end of `before_literal` is
+/// passed to, and where among its arguments it sits.
+fn scalar_argument_of(before_literal: &str) -> Option<(&str, ArgumentSlot<'_>)> {
+    let code = crate::completion::source::code_context::code_context_at(
+        before_literal,
+        before_literal.len(),
+    )?;
+    scalar_argument_at(before_literal, &code)
+}
+
 #[test]
 fn storage_argument_scanners_handle_nested_and_malformed_php() {
-    let before_named = r#"Storage::fake(config: ['message' => 'it\'s', 'factory' => wrap(fn () => new class {})], disk:"#;
+    let before_named = r#"Storage::fake(config: ['message' => 'it\'s', 'factory' => wrap(fn () => new class {})], disk: '"#;
     assert_eq!(
-        callable_before_scalar_argument(before_named),
+        scalar_argument_of(before_named),
         Some(("Storage::fake", ArgumentSlot::Named("disk")))
     );
 
@@ -1001,20 +1013,31 @@ Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive'
         StringKeyKind::ConfigResource(LaravelConfigResource::StorageDisk)
     ));
 
-    assert!(callable_before_scalar_argument("Storage::disk(:").is_none());
-    assert!(callable_before_scalar_argument("Storage::disk(name: value").is_none());
-    assert!(callable_before_scalar_argument("orphan name:").is_none());
+    assert!(scalar_argument_of("Storage::disk(: '").is_none());
+    assert!(scalar_argument_of("Storage::disk(name: value '").is_none());
+    assert!(scalar_argument_of("orphan name: '").is_none());
     assert_eq!(
-        callable_before_scalar_argument("foo(prénom:"),
+        scalar_argument_of("foo(prénom: '"),
         Some(("foo", ArgumentSlot::Named("prénom"))),
         "a non-ASCII argument name is read whole, not sliced mid-character"
     );
-    assert!(enclosing_call_open_paren("completed(); orphan").is_none());
-    assert!(enclosing_call_open_paren("orphan").is_none());
-    assert!(callable_before_array_argument("factory('archive").is_none());
-    assert!(callable_before_array_argument("{ 'archive").is_none());
-    assert!(callable_before_array_argument("broken; 'archive").is_none());
-    assert!(callable_before_array_argument("orphan").is_none());
+    assert!(scalar_argument_of("completed(); orphan, '").is_none());
+    assert_eq!(
+        scalar_argument_of("foo(/* ( */ 'a', // 'b', (\n '"),
+        Some(("foo", ArgumentSlot::Positional(1))),
+        "brackets, quotes and commas inside comments are not code"
+    );
+    for source in [
+        "factory('archive",
+        "{ 'archive",
+        "broken; 'archive",
+        "Storage::disk(fn () { 'archive",
+    ] {
+        assert!(
+            detect_at_end(source, "archive").is_none(),
+            "`{source}` has no call argument the literal belongs to"
+        );
+    }
 
     let escaped_key = r#"'key\'part' => 'archive'"#;
     assert!(string_literal_is_array_key(
@@ -1039,6 +1062,68 @@ Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive'
         "'value".len(),
         b'\'',
     ));
+}
+
+#[test]
+fn morph_and_config_arrays_complete_while_unfinished() {
+    for (source, expected) in [
+        ("Relation::morphMap(['po", StringKeyKind::MorphAlias),
+        (
+            "Relation::morphMap(array(/* key */ 'po",
+            StringKeyKind::MorphAlias,
+        ),
+        (
+            "$query->whereHasMorph(wrap('a,b', [1, 2]), ['po",
+            StringKeyKind::MorphAlias,
+        ),
+        (
+            "Config::set(['po' /* note */ => true])",
+            StringKeyKind::Config,
+        ),
+        ("config(['po", StringKeyKind::Config),
+        ("config(array('first' => true, 'po", StringKeyKind::Config),
+        (
+            "$query->whereHasMorph('commentable', ['video', /* '[( */ 'po",
+            StringKeyKind::MorphAlias,
+        ),
+        (
+            "$query->whereHasMorph(/* ; */ 'commentable', // it's ['\n ['po",
+            StringKeyKind::MorphAlias,
+        ),
+    ] {
+        let ctx = detect_at_end(source, "po").unwrap_or_else(|| panic!("{source}"));
+        assert_eq!(ctx.kind, expected, "{source}");
+        assert_eq!(ctx.prefix, "po");
+    }
+}
+
+#[test]
+fn array_context_does_not_leak_into_other_parameters_or_expressions() {
+    for source in [
+        "Relation::morphMap(['post' => 'po'])",
+        "Relation::morphMap(['prefix' . 'po' => Post::class])",
+        "Relation::morphMap([['po' => Post::class]])",
+        "Relation::morphMap(array(array('po' => Post::class)))",
+        "$query->whereHasMorph('commentable', ['po' => 'video'])",
+        "$query->whereHasMorph('commentable', ['post'], ['po'])",
+        "$query->whereHasMorph('commentable', [TYPES['po']])",
+        "Config::set(['app.name' => 'po'])",
+        "Config::set('app.name', ['po'])",
+        "Config::set(['outer' => ['po' => true]])",
+        "config(['app.name' => 'po'])",
+        "config('app.name', ['po'])",
+        "route('home', ['po' => true])",
+        "view('home', ['po' => true])",
+        "Storage::forgetDisk(['po' => 'local'])",
+        "Storage::forgetDisk('local', ['po'])",
+        "$query->whereHasMorph('commentable', [fn () => 'po'])",
+        "$query->whereHasMorph('commentable', ['x' => fn () => 'po'])",
+        "Storage::fake('local', 'po')",
+        "Route::middleware(['po' => 'auth:web'])",
+        "#[\\Illuminate\\Container\\Attributes\\Config('app.name', 'po')] class C {}",
+    ] {
+        assert!(detect_at_end(source, "po").is_none(), "{source}");
+    }
 }
 
 #[test]

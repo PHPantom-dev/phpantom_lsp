@@ -10,16 +10,15 @@ use tower_lsp_server::gen_lsp_types::Position;
 
 use std::cell::OnceCell;
 
+use crate::completion::source::code_context::{CodeContext, OpenBracket};
 use crate::symbol_map::StringKeyKind;
 use crate::symbol_map::extraction::laravel::{
-    MethodReceiver, argument_takes_name_list, facade_static_call_arg_kind,
+    MethodReceiver, argument_takes_name_keys, argument_takes_name_list,
+    facade_static_call_arg_kind, facade_static_call_array_key_kind,
     helper_function_accepts_name_list, helper_function_first_arg_kind, instance_method_arg_kind,
 };
 use crate::text_position::position_to_offset;
-use crate::text_scan::{
-    CodeOffsets, ScanStep, is_escaped, open_quote_before, scan_ident_backward,
-    scan_top_level_backward, skip_php_trivia, top_level_commas,
-};
+use crate::text_scan::{CodeOffsets, is_escaped, scan_ident_backward, skip_php_trivia};
 
 pub(super) struct LaravelStringKeyContext<'a> {
     pub(super) kind: StringKeyKind,
@@ -32,6 +31,9 @@ pub(super) struct LaravelStringKeyContext<'a> {
 pub(super) enum StringArgumentShape {
     Scalar,
     ArrayValue,
+    /// The key of an array entry, which starts the entry and is followed by
+    /// its `=>`.
+    ArrayKey,
 }
 
 /// Where a string literal sits among the arguments of the call it is
@@ -70,38 +72,23 @@ pub(super) enum PhpLexState {
     BlockComment,
 }
 
-/// Find the unmatched call parenthesis the end of `content` sits in.
-pub(super) fn enclosing_call_open_paren(content: &str) -> Option<usize> {
-    scan_top_level_backward(content.as_bytes(), |bytes, i| match bytes[i] {
-        b'(' => ScanStep::Stop,
-        b';' => ScanStep::Abort,
-        _ => ScanStep::Skip(1),
-    })
-}
-
-/// Return the callable a scalar argument is passed to, and where among its
-/// arguments the scalar sits.
-pub(crate) fn callable_before_scalar_argument(
-    before_value: &str,
-) -> Option<(&str, ArgumentSlot<'_>)> {
-    let before_value = before_value.trim_end();
-    if let Some(callable) = before_value.strip_suffix('(') {
-        return Some((callable.trim_end(), ArgumentSlot::Positional(0)));
+/// The callable whose argument list `paren` opens, and where among its
+/// arguments the value preceded by the code `before_value` sits.
+///
+/// `before_value` is code with comments and trailing whitespace cut off
+/// (see [`CodeContext::code_before`]), and everything nested inside
+/// `paren` before the value is closed, so a `(` or `,` it ends with is
+/// `paren`'s own.
+fn argument_slot<'a>(
+    content: &'a str,
+    paren: &OpenBracket,
+    before_value: &'a str,
+) -> Option<(&'a str, ArgumentSlot<'a>)> {
+    let callable = &content[..paren.code_before];
+    if before_value.ends_with(['(', ',']) {
+        return Some((callable, ArgumentSlot::Positional(paren.commas)));
     }
-    if let Some(before_comma) = before_value.strip_suffix(',') {
-        let open_paren = enclosing_call_open_paren(before_comma)?;
-        let index = top_level_commas(&before_comma[open_paren + 1..]).count() + 1;
-        return Some((
-            before_comma[..open_paren].trim_end(),
-            ArgumentSlot::Positional(index),
-        ));
-    }
-
-    let colon = before_value.rfind(':')?;
-    if !before_value[colon + 1..].trim().is_empty() {
-        return None;
-    }
-    let before_label = before_value[..colon].trim_end();
+    let before_label = before_value.strip_suffix(':')?.trim_end();
     // Scanned by byte, the way PHP's lexer reads a label: every byte from
     // 0x80 up is a label byte, so a non-ASCII name (`prénom:`) is read
     // whole and the start always lands on a character boundary.
@@ -112,37 +99,44 @@ pub(crate) fn callable_before_scalar_argument(
     if label_start == before_label.len() {
         return None;
     }
-    let argument = &before_label[label_start..];
-    let before_argument = before_label[..label_start].trim_end();
-    let open_paren = enclosing_call_open_paren(before_argument)?;
-    Some((
-        before_argument[..open_paren].trim_end(),
-        ArgumentSlot::Named(argument),
-    ))
+    Some((callable, ArgumentSlot::Named(&before_label[label_start..])))
 }
 
-/// Return the callable owning an array that directly contains this literal.
-pub(super) fn callable_before_array_argument(
-    before_quote: &str,
-) -> Option<(&str, ArgumentSlot<'_>)> {
-    let open = scan_top_level_backward(before_quote.as_bytes(), |bytes, i| match bytes[i] {
-        b'[' | b'(' => ScanStep::Stop,
-        b'{' | b';' => ScanStep::Abort,
-        _ => ScanStep::Skip(1),
-    })?;
-    let before_open = before_quote[..open].trim_end();
-    if before_quote.as_bytes()[open] == b'[' {
-        return callable_before_scalar_argument(before_open);
-    }
-    // A parenthesis only opens an array in the legacy `array(...)` spelling.
-    let token_start = scan_ident_backward(before_open.as_bytes(), before_open.len());
-    if before_open[token_start..].eq_ignore_ascii_case("array") {
-        return callable_before_scalar_argument(before_open[..token_start].trim_end());
-    }
-    None
+/// The callable a string literal the cursor is typing in is passed to as
+/// an argument of its own, and where among its arguments it sits.
+pub(crate) fn scalar_argument_at<'a>(
+    content: &'a str,
+    code: &CodeContext<'a>,
+) -> Option<(&'a str, ArgumentSlot<'a>)> {
+    let paren = code.open_brackets.last().filter(|b| b.byte == b'(')?;
+    argument_slot(content, paren, code.code_before)
 }
 
-/// Resource arrays name values; an associative key is bookkeeping, not a disk.
+/// The callable an array literal is passed to, and where among its
+/// arguments it sits, when `open` is the bracket that opens the array:
+/// a `[`, or the `(` of the legacy `array(...)` spelling.
+fn array_argument_at<'a>(
+    content: &'a str,
+    open: &OpenBracket,
+    paren: Option<&OpenBracket>,
+) -> Option<(&'a str, ArgumentSlot<'a>)> {
+    let before_open = &content[..open.code_before];
+    let before_array = match open.byte {
+        b'[' => before_open,
+        b'(' if open.callee_operator.is_none() => {
+            let token_start = scan_ident_backward(before_open.as_bytes(), before_open.len());
+            if !before_open[token_start..].eq_ignore_ascii_case("array") {
+                return None;
+            }
+            before_open[..token_start].trim_end()
+        }
+        _ => return None,
+    };
+    let paren = paren.filter(|b| b.byte == b'(')?;
+    argument_slot(content, paren, before_array)
+}
+
+/// Whether the literal is followed by an associative-array arrow.
 pub(super) fn string_literal_is_array_key(content: &str, cursor: usize, quote: u8) -> bool {
     let bytes = content.as_bytes();
     let mut index = cursor;
@@ -158,22 +152,29 @@ pub(super) fn string_literal_is_array_key(content: &str, cursor: usize, quote: u
 
 pub(super) fn string_argument_context<'a>(
     content: &'a str,
-    before_quote: &'a str,
+    code: &CodeContext<'a>,
     cursor: usize,
     quote: u8,
 ) -> Option<StringArgumentContext<'a>> {
-    if let Some((callable, slot)) = callable_before_array_argument(before_quote) {
-        if string_literal_is_array_key(content, cursor, quote) {
+    let mut brackets = code.open_brackets.iter().rev();
+    let innermost = brackets.next()?;
+    if let Some((callable, slot)) = array_argument_at(content, innermost, brackets.next()) {
+        let shape = if !string_literal_is_array_key(content, cursor, quote) {
+            StringArgumentShape::ArrayValue
+        } else if code.code_before.ends_with(['[', '(', ',']) {
+            StringArgumentShape::ArrayKey
+        } else {
+            // Part of a computed key, `'prefix' . 'po' => …`.
             return None;
-        }
+        };
         return Some(StringArgumentContext {
             callable,
             slot,
-            shape: StringArgumentShape::ArrayValue,
+            shape,
         });
     }
 
-    let (callable, slot) = callable_before_scalar_argument(before_quote)?;
+    let (callable, slot) = scalar_argument_at(content, code)?;
     Some(StringArgumentContext {
         callable,
         slot,
@@ -703,33 +704,29 @@ pub(super) fn detect_laravel_string_key_context(
     content: &str,
     position: Position,
 ) -> Option<LaravelStringKeyContext<'_>> {
-    detect_laravel_string_key_context_inner(content, position, None, None, None)
+    let cursor_offset = position_to_offset(content, position) as usize;
+    let code = crate::completion::source::code_context::code_context_at(content, cursor_offset)?;
+    detect_laravel_string_key_context_inner(content, position, &code, None, None, None)
 }
 
+/// `code` is the lexical position of `position`
+/// ([`code_context_at`](crate::completion::source::code_context::code_context_at)).
 pub(super) fn detect_laravel_string_key_context_inner<'a>(
     content: &'a str,
     position: Position,
+    code: &CodeContext<'a>,
     resolved_names: Option<&'a crate::names::OwnedResolvedNames>,
     indexed_function_exists: Option<&dyn Fn(&str) -> bool>,
     indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
 ) -> Option<LaravelStringKeyContext<'a>> {
     let cursor_offset = position_to_offset(content, position) as usize;
-    if cursor_offset == 0 || cursor_offset > content.len() {
-        return None;
-    }
-
-    let quote_pos = open_quote_before(content, cursor_offset)?;
-    let literal = &content[quote_pos + 1..cursor_offset];
+    let (quote_pos, quote) = code.open_string?;
     let literal_start = quote_pos + 1;
+    let literal = content.get(literal_start..cursor_offset)?;
 
     // ── Locate the call argument that owns this string ─────────────
-    let before_quote = content[..quote_pos].trim_end();
-    let argument = string_argument_context(
-        content,
-        before_quote,
-        cursor_offset,
-        content.as_bytes()[quote_pos],
-    )?;
+    let before_quote = code.code_before;
+    let argument = string_argument_context(content, code, cursor_offset, quote as u8)?;
     let before_paren = argument.callable;
 
     // ── Extract the function/method name ────────────────────────────
@@ -789,7 +786,8 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
 /// spells it.
 struct StringCall<'a, 'f> {
     content: &'a str,
-    /// The text before the string's opening quote, trimmed.
+    /// The code before the string's opening quote, with trailing
+    /// whitespace and comments cut off.
     before_quote: &'a str,
     /// The text before the call's `(`.
     before_paren: &'a str,
@@ -807,14 +805,26 @@ struct StringCall<'a, 'f> {
 
 impl StringCall<'_, '_> {
     /// Whether the string can name a `kind` in the shape it was written in:
-    /// as a scalar, or as a bare entry of a list the call takes (a value
-    /// under `'key' =>` is not one).
+    /// as a scalar, as a bare entry of a list the call takes (a value under
+    /// `'key' =>` is not one), or as a key of an array whose keys are the
+    /// names.
     fn shape_fits(&self, kind: &StringKeyKind) -> bool {
+        self.shape_fits_with(
+            argument_takes_name_list(kind, self.name),
+            argument_takes_name_keys(kind, self.name),
+        )
+    }
+
+    /// [`Self::shape_fits`] for a call that takes a list of names when
+    /// `takes_list`, and names them in its array's keys when `takes_keys`.
+    fn shape_fits_with(&self, takes_list: bool, takes_keys: bool) -> bool {
         match self.argument.shape {
             StringArgumentShape::Scalar => true,
+            // A bare entry is also a key whose `=>` is not typed yet.
             StringArgumentShape::ArrayValue => {
-                argument_takes_name_list(kind, self.name) && !self.before_quote.ends_with("=>")
+                (takes_list || takes_keys) && !self.before_quote.ends_with("=>")
             }
+            StringArgumentShape::ArrayKey => takes_keys,
         }
     }
 }
@@ -909,6 +919,7 @@ fn static_call_key<'a>(call: &StringCall<'a, '_>, before_colons: &'a str) -> Opt
         let shape_fits = match call.argument.shape {
             StringArgumentShape::Scalar => trigger.shape.accepts_scalar(),
             StringArgumentShape::ArrayValue => trigger.shape.accepts_array(),
+            StringArgumentShape::ArrayKey => false,
         };
         return (slot.is_first_or_named(trigger.argument) && shape_fits).then_some(
             StringKey::Whole(StringKeyKind::ConfigResource(trigger.kind)),
@@ -916,6 +927,7 @@ fn static_call_key<'a>(call: &StringCall<'a, '_>, before_colons: &'a str) -> Opt
     }
     if call.name.eq_ignore_ascii_case("middleware")
         && slot.is_first_or_named("middleware")
+        && call.argument.shape != StringArgumentShape::ArrayKey
         && is_laravel_facade_reference(call.content, reference, "Route", call.indexed_class_exists)
     {
         return middleware_key(call.literal);
@@ -929,6 +941,11 @@ fn static_call_key<'a>(call: &StringCall<'a, '_>, before_colons: &'a str) -> Opt
         return None;
     };
     let clean_class = written_class.trim_start_matches('\\');
+    if call.argument.shape != StringArgumentShape::Scalar
+        && let Some(kind) = facade_static_call_array_key_kind(clean_class, call.name, index)
+    {
+        return call.shape_fits(&kind).then_some(StringKey::Whole(kind));
+    }
     let kind = facade_static_call_arg_kind(clean_class, call.name, index)?;
     call.shape_fits(&kind).then_some(StringKey::Whole(kind))
 }
@@ -952,6 +969,7 @@ fn instance_call_key<'a>(
     let slot = call.argument.slot;
     if call.name.eq_ignore_ascii_case("middleware")
         && slot.is_first_or_named("middleware")
+        && call.argument.shape != StringArgumentShape::ArrayKey
         && receiver.roots_at_route()
     {
         return middleware_key(call.literal);
@@ -967,11 +985,6 @@ fn instance_call_key<'a>(
 /// markers Blade directives lower to.
 fn function_call_key(call: &StringCall<'_, '_>) -> Option<StringKeyKind> {
     let slot = call.argument.slot;
-    if call.argument.shape != StringArgumentShape::Scalar
-        && (!helper_function_accepts_name_list(call.name) || call.before_quote.ends_with("=>"))
-    {
-        return None;
-    }
     let bp_bytes = call.before_paren.as_bytes();
     let mut callable_start = call.name_start;
     while callable_start > 0
@@ -981,7 +994,7 @@ fn function_call_key(call: &StringCall<'_, '_>) -> Option<StringKeyKind> {
         callable_start -= 1;
     }
     let written_function = &call.before_paren[callable_start..];
-    if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
+    let kind = if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
         call.content,
         written_function,
         callable_start as u32,
@@ -989,12 +1002,17 @@ fn function_call_key(call: &StringCall<'_, '_>) -> Option<StringKeyKind> {
         call.indexed_function_exists,
     ) {
         slot.is_first_or_named(trigger.argument)
-            .then_some(StringKeyKind::ConfigResource(trigger.kind))
+            .then_some(StringKeyKind::ConfigResource(trigger.kind))?
     } else if slot == ArgumentSlot::Positional(0) {
-        helper_function_first_arg_kind(call.name)
+        helper_function_first_arg_kind(call.name)?
     } else {
-        None
-    }
+        return None;
+    };
+    call.shape_fits_with(
+        helper_function_accepts_name_list(call.name),
+        argument_takes_name_keys(&kind, call.name),
+    )
+    .then_some(kind)
 }
 
 /// The receiver of an instance method call, read from the text before its

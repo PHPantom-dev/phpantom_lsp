@@ -42,7 +42,7 @@ pub(crate) async fn open_headless_project(backend: &Backend, root: &Path, cfg: c
     backend.set_config(cfg);
     backend.set_php_version(php_version);
     backend
-        .init_single_project(root, php_version, composer_package, None)
+        .discover_workspace_symbols(root, php_version, composer_package, None)
         .await;
 }
 

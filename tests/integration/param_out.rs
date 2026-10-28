@@ -182,3 +182,38 @@ function f(): void {
         "expected $a to read as 5|6|7 after fill(), got: {text}"
     );
 }
+
+/// A `return` on which an untyped by-reference parameter still holds
+/// whatever the caller passed says nothing about it, so the out type is
+/// what the other ways out assigned rather than nothing at all.
+#[tokio::test]
+async fn an_untouched_untyped_parameter_on_an_early_return_adds_nothing() {
+    let content = r#"<?php
+class Reader {
+    public function read(&$dir, bool $ok)
+    {
+        if (!$ok) {
+            return 0;
+        }
+        $dir['offset'] = 5;
+        return 1;
+    }
+
+    public function run(): void
+    {
+        $info = array();
+        $this->read($info, true);
+        $info;
+    }
+}
+"#;
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, content).await;
+    let (line, character) = line_char_of(content, "$info;");
+    let text = markup_hover_at(&backend, &uri, line, character).await;
+    assert!(
+        text.contains("offset"),
+        "expected $info to carry the offset key after read(), got: {text}"
+    );
+}

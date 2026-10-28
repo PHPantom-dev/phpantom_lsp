@@ -80,13 +80,34 @@ impl Backend {
             p.set_percentage(10, "Reading composer.json");
         }
 
+        // Composer projects nested below this one with their own installed
+        // dependencies, which the root's autoloader knows nothing about.
+        // They are indexed the way a monorepo's subprojects are, and
+        // classify the workspace alongside the root the same way too.
+        let root_vendor = root.join(
+            composer_json
+                .as_ref()
+                .map(composer::get_vendor_dir)
+                .unwrap_or_else(|| "vendor".to_string()),
+        );
+        let subprojects: Vec<(PathBuf, Option<composer::ComposerPackage>)> =
+            composer::discover_installed_subprojects(root, &root_vendor)
+                .into_iter()
+                .map(|(sub_root, _)| {
+                    let package = composer::read_composer_package(&sub_root);
+                    (sub_root, package)
+                })
+                .collect();
+        let packages = || {
+            composer_json
+                .iter()
+                .chain(subprojects.iter().filter_map(|(_, pkg)| pkg.as_ref()))
+        };
+
         // Classify the project so Laravel-specific resolution (Eloquent
         // members, config/view/route keys, contract bindings, patches) is
         // skipped when no Laravel/Illuminate dependency is present.
-        let is_laravel = composer_json
-            .as_ref()
-            .map(composer::is_laravel_project)
-            .unwrap_or(false);
+        let is_laravel = packages().any(composer::is_laravel_project);
         self.resolved_class_cache
             .write()
             .laravel_mut()
@@ -97,35 +118,21 @@ impl Backend {
         // file settles it for an application whose `composer.json` says
         // neither way.
         self.set_is_application(
-            composer_json
-                .as_ref()
-                .is_some_and(composer::is_application_project)
-                || root.join("artisan").is_file(),
+            packages().any(composer::is_application_project)
+                || std::iter::once(root)
+                    .chain(subprojects.iter().map(|(sub_root, _)| sub_root.as_path()))
+                    .any(|dir| dir.join("artisan").is_file()),
         );
 
-        self.set_is_doctrine(
-            composer_json
-                .as_ref()
-                .is_some_and(composer::is_doctrine_project),
-        );
-        self.set_is_symfony(
-            composer_json
-                .as_ref()
-                .is_some_and(composer::is_symfony_project),
-        );
-        self.set_is_twig(
-            composer_json
-                .as_ref()
-                .is_some_and(composer::is_twig_project),
-        );
+        self.set_is_doctrine(packages().any(composer::is_doctrine_project));
+        self.set_is_symfony(packages().any(composer::is_symfony_project));
+        self.set_is_twig(packages().any(composer::is_twig_project));
+        self.set_is_yii(packages().any(composer::is_yii_project));
 
         // A permission package answers authorization checks from the database,
         // so the abilities this project uses are not written in its source and
         // the unknown-ability diagnostic has nothing to judge them against.
-        let runtime_permissions = composer_json
-            .as_ref()
-            .map(composer::has_runtime_permission_package)
-            .unwrap_or(false);
+        let runtime_permissions = packages().any(composer::has_runtime_permission_package);
         self.laravel
             .gates
             .write()
@@ -145,14 +152,40 @@ impl Backend {
             (&[][..], extra_roots.as_slice())
         };
 
+        let root_hi = if subprojects.is_empty() { 85 } else { 50 };
         let source_label = self.index_composer_project(
             root,
             composer_json.as_ref(),
             false,
             walked,
-            (15, 85),
+            (15, root_hi),
             progress,
         );
+
+        // The subprojects share what is left of the range, each reporting
+        // under its own label the way a monorepo's do.
+        let sub_count = subprojects.len() as u32;
+        for (sub_idx, (sub_root, package)) in subprojects.iter().enumerate() {
+            let sub_lo = root_hi + (sub_idx as u32 * (85 - root_hi)) / sub_count;
+            let sub_hi = root_hi + ((sub_idx as u32 + 1) * (85 - root_hi)) / sub_count;
+            if let Some(p) = progress {
+                let label = sub_root.strip_prefix(root).unwrap_or(sub_root).display();
+                p.set_label_prefix(format!("Subproject {label}"));
+            }
+            self.index_composer_project(
+                sub_root,
+                package.as_ref(),
+                true,
+                &[],
+                (sub_lo, sub_hi),
+                progress,
+            );
+        }
+        if !subprojects.is_empty()
+            && let Some(p) = progress
+        {
+            p.set_label_prefix("");
+        }
 
         self.finish_discovery(root, php_version, source_label, unwalked, progress)
             .await;
@@ -167,7 +200,7 @@ impl Backend {
     /// when the strategy walks it.  The work reports progress within
     /// `percent_range`.  Returns where the classmap came from, for the
     /// discovery log.
-    fn index_composer_project(
+    pub(super) fn index_composer_project(
         &self,
         root: &Path,
         composer_json: Option<&composer::ComposerPackage>,
@@ -198,10 +231,19 @@ impl Backend {
             .map(crate::composer::explicit_dependency_names)
             .unwrap_or_default();
 
+        // Composer's class lists name files without any walk reaching
+        // them, so `exclude` is applied to them here, where they merge.
+        let filters = self.index_filters();
+        let composer_classmap = || {
+            let mut classmap = composer::parse_autoload_classmap(root, &vendor_dir);
+            filters.retain_unexcluded(&mut classmap);
+            classmap
+        };
+
         let (mut scan, source_label) = match strategy {
             IndexingStrategy::None => {
                 let scan = WorkspaceScanResult {
-                    classmap: composer::parse_autoload_classmap(root, &vendor_dir),
+                    classmap: composer_classmap(),
                     package_roots: classmap_scanner::vendor_package_roots(
                         root,
                         &vendor_dir,
@@ -227,7 +269,6 @@ impl Backend {
                 if let Some(p) = progress {
                     p.begin_phase(0.0, 0.3, "Scanning workspace files");
                 }
-                let filters = self.index_filters();
                 let mut scan = classmap_scanner::scan_roots_full(
                     &[root.to_path_buf()],
                     library_roots,
@@ -260,7 +301,7 @@ impl Backend {
                 // The Composer classmap wins every name it lists, so a
                 // self-scan entry for one of them keeps neither its path
                 // nor its origin.
-                let composer_cm = composer::parse_autoload_classmap(root, &vendor_dir);
+                let composer_cm = composer_classmap();
                 let skip_paths: HashSet<PathBuf> = composer_cm.values().cloned().collect();
                 let mut self_scan = self.build_self_scan_composer(
                     root,
@@ -300,11 +341,8 @@ impl Backend {
             if let Some(p) = progress {
                 p.set_scope(at(55), at(59), "Scanning Drupal directories");
             }
-            let drupal_result = classmap_scanner::scan_drupal_directories(
-                &drupal_web_root,
-                &self.index_filters(),
-                progress,
-            );
+            let drupal_result =
+                classmap_scanner::scan_drupal_directories(&drupal_web_root, &filters, progress);
             let drupal_count = drupal_result.classmap.len()
                 + drupal_result.function_index.len()
                 + drupal_result.constant_index.len();
@@ -321,7 +359,8 @@ impl Backend {
         // (e.g. HTMLPurifier) are listed in `autoload_namespaces.php`.
         // Scan the listed directories and merge discovered classes into
         // the classmap so they are resolvable via `find_or_load_class`.
-        let psr0_cm = composer::parse_autoload_namespaces(root, &vendor_dir);
+        let mut psr0_cm = composer::parse_autoload_namespaces(root, &vendor_dir);
+        filters.retain_unexcluded(&mut psr0_cm);
         if !psr0_cm.is_empty() {
             let count = psr0_cm.len();
             self.symbols
@@ -335,7 +374,8 @@ impl Backend {
         // autoloader exists, so no autoload map lists them and no package
         // scan reaches them.  Code that introspects its own autoloader
         // names them directly.
-        let bootstrap_cm = composer::scan_composer_bootstrap_classes(root, &vendor_dir);
+        let mut bootstrap_cm = composer::scan_composer_bootstrap_classes(root, &vendor_dir);
+        filters.retain_unexcluded(&mut bootstrap_cm);
         if !bootstrap_cm.is_empty() {
             let count = bootstrap_cm.len();
             self.symbols
@@ -406,6 +446,7 @@ impl Backend {
         let mut any_doctrine = false;
         let mut any_symfony = false;
         let mut any_twig = false;
+        let mut any_yii = false;
 
         for (sub_idx, (sub_root, _)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;
@@ -435,6 +476,7 @@ impl Backend {
                 any_doctrine |= composer::is_doctrine_project(pkg);
                 any_symfony |= composer::is_symfony_project(pkg);
                 any_twig |= composer::is_twig_project(pkg);
+                any_yii |= composer::is_yii_project(pkg);
                 any_application |=
                     composer::is_application_project(pkg) || sub_root.join("artisan").is_file();
             }
@@ -457,6 +499,7 @@ impl Backend {
         self.set_is_doctrine(any_doctrine);
         self.set_is_symfony(any_symfony);
         self.set_is_twig(any_twig);
+        self.set_is_yii(any_yii);
         self.laravel
             .gates
             .write()

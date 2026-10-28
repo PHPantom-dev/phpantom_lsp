@@ -2426,6 +2426,15 @@ fn replace_deprecated_function_named_through_a_class_import() {
         .and_then(|edits| edits.first())
         .expect("Should offer a 'Replace' code action with an edit");
     assert_eq!(edit.new_text, "\\Lib\\Exif\\read('photo.jpg')");
+    // The replacement writes its own closing paren, so the call's is
+    // replaced along with the rest of it.
+    assert_eq!(
+        edit.range,
+        Range {
+            start: Position::new(3, 0),
+            end: Position::new(3, 27),
+        }
+    );
 }
 
 // ─── No replacement action when no replacement template ─────────────────────

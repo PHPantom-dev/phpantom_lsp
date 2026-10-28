@@ -5,8 +5,9 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
+use crate::blade::template_edits::TemplateText;
 use crate::completion::use_edit::{
-    UseBlockInfo, analyze_use_block_in, build_aliased_typed_use_edit, build_aliased_use_edit,
+    UseBlockInfo, build_aliased_typed_use_edit, build_aliased_use_edit,
 };
 use crate::symbol_map::{ClassRefContext, SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::position_to_byte_offset;
@@ -187,7 +188,8 @@ impl Backend {
         // The imports go into, and the usages come from, the `namespace`
         // block the cursor is in.
         let cursor_block = NamespaceSpan::containing(&namespace_spans, cursor_span.start);
-        let use_block = analyze_use_block_in(
+        let use_block = self.use_block_for(
+            uri,
             content,
             cursor_block
                 .filter(|_| namespace_spans.len() > 1)
@@ -200,11 +202,16 @@ impl Backend {
             namespace: &namespace,
         };
 
+        let template = self.template_text(uri);
+        if template.is_none() && self.is_blade_file(uri) {
+            return;
+        }
         let symbols = self.qualified_symbols(
             &symbol_map,
             &file,
             &namespace_spans,
             cursor_block.map(|span| span.start),
+            template.as_ref(),
         );
 
         // ── Import the symbol under the cursor ──────────────────────────
@@ -258,12 +265,17 @@ impl Backend {
     /// at `block_start` by the fully-qualified name it resolves to, in
     /// `use`-block order so a batch of imports comes out deterministically
     /// sorted.
+    ///
+    /// In a Blade template only the references the template wrote count:
+    /// its virtual PHP also names classes in the prologue and in the PHP a
+    /// component tag lowers to, which no import should be made for.
     fn qualified_symbols<'a>(
         &self,
         symbol_map: &'a SymbolMap,
         file: &FileContext,
         namespace_spans: &[NamespaceSpan],
         block_start: Option<u32>,
+        template: Option<&TemplateText>,
     ) -> Vec<QualifiedSymbol<'a>> {
         let mut symbols: Vec<QualifiedSymbol<'a>> = Vec::new();
         let mut index: HashMap<(ImportKind, String), usize> = HashMap::new();
@@ -275,6 +287,11 @@ impl Backend {
             if NamespaceSpan::containing(namespace_spans, span.start).map(|block| block.start)
                 != block_start
             {
+                continue;
+            }
+            if template.is_some_and(|template| {
+                !template.wrote_bytes(span.start as usize, span.end as usize)
+            }) {
                 continue;
             }
             let resolved = file.resolve_name_at(name, span.start);

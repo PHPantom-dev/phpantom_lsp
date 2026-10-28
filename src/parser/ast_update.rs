@@ -8,6 +8,7 @@
 //! [`super::name_resolution`].
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::ParseErrorEntry;
@@ -541,12 +542,18 @@ impl Backend {
         let mut symbol_map = if from_stub_path && !is_open {
             SymbolMap::default()
         } else {
+            let yii_dir = if self.is_yii_project() {
+                crate::util::uri_to_path(uri).and_then(|path| path.parent().map(Path::to_path_buf))
+            } else {
+                None
+            };
             extract_symbol_map_for_index(
                 program,
                 content,
                 &owned_resolved,
                 self.is_symfony_project(),
                 self.is_twig_project(),
+                yii_dir.as_deref(),
             )
         };
         // An open file's slow diagnostics are built on the previous

@@ -35,35 +35,40 @@ impl Backend {
         // and the editor re-requests them on each scroll and each refresh a
         // keystroke triggers, so the work runs off the request task.
         let backend = self.clone_for_blocking();
-        let result = crate::server::run_blocking_cancel_safe("inlay_hint", move || {
-            backend.with_file_content("textDocument/inlayHint", &uri, None, |content, _| {
+        crate::server::run_blocking_cancel_safe("inlay_hint", move || {
+            backend.with_current_symbol_map("textDocument/inlayHint", &uri, None, |content, _| {
                 backend.handle_inlay_hints(&uri, content, range)
             })
         })
         .await
-        .flatten();
-
-        Ok(result.flatten())
+        .unwrap_or(Ok(None))
     }
 
     /// Handle a `textDocument/inlayHint` request.
     ///
     /// Returns inlay hints for call-site parameter names and by-reference
-    /// indicators within the given range.
+    /// indicators within the given range, or `None` when the file's symbol
+    /// map was built from a different revision of `content`.
     pub fn handle_inlay_hints(
         &self,
         uri: &str,
         content: &str,
         range: Range,
     ) -> Option<Vec<InlayHint>> {
-        let symbol_map = self.symbol_map_for(uri)?;
-        // The editor asks for hints right after an edit, usually before the
-        // background parse has replaced the map.  The old map's offsets
-        // would land hints on whatever text now sits there; the parse's
-        // inlay hint refresh asks again once the map is current.
-        if !symbol_map.matches_source(content) {
+        // No map at all means the parser gave up on this file, which no
+        // re-request fixes, so that is "no hints" rather than a decline.
+        let Some(symbol_map) = self.symbol_map_for(uri) else {
             return Some(Vec::new());
+        };
+
+        // `did_change` rebuilds the map on a background task, so it can lag
+        // the buffer.  Its offsets index only the text it was built from:
+        // against newer content the labels land inside the arguments they
+        // name and the viewport selects the wrong call sites.
+        if !symbol_map.matches_source(content) {
+            return None;
         }
+
         let ctx = self.file_context(uri);
 
         // A template's request range arrives in Blade coordinates; the
@@ -713,6 +718,63 @@ mod tests {
         assert!(eq_ignore_case_snake("my_param", "myParam"));
         assert!(eq_ignore_case_snake("myParam", "my_param"));
         assert!(!eq_ignore_case_snake("foo", "bar"));
+    }
+
+    /// A stale symbol map must not answer like "no hints here", which would
+    /// blank the labels the client is showing.
+    #[tokio::test]
+    async fn a_decline_answers_content_modified_rather_than_an_empty_result() {
+        let backend = Backend::new_test();
+        let uri = "file:///test/declined_inlay.php";
+        let text =
+            "<?php\nfunction makeThing(string $needle, int $count): void {}\nmakeThing('aa', 1);\n";
+
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
+        backend.update_ast(uri, text);
+        backend.mark_workspace_indexed();
+
+        let params = InlayHintParams {
+            text_document: TextDocumentIdentifier {
+                uri: Uri::parse(uri).unwrap(),
+            },
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 100,
+                    character: 0,
+                },
+            },
+            work_done_progress_params: Default::default(),
+        };
+
+        let answered = backend.inlay_hint_request(params.clone()).await;
+        assert!(
+            matches!(answered, Ok(Some(ref hints)) if !hints.is_empty()),
+            "a request the map describes must still answer with hints: {answered:?}"
+        );
+
+        // The buffer one keystroke burst ahead of the map describing it,
+        // which is the state a background parse leaves behind.
+        let edited = text.replace("'aa'", "'aaYYYYYYYYYY'");
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(edited));
+
+        match backend.inlay_hint_request(params).await {
+            Err(error) => assert_eq!(
+                error.code.code(),
+                -32801,
+                "a decline must be ContentModified, not any other error: {error:?}"
+            ),
+            Ok(hints) => panic!("declined request answered {hints:?} instead of ContentModified"),
+        }
     }
 
     #[test]

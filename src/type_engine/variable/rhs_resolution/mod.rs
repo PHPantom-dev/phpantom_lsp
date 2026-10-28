@@ -114,6 +114,7 @@ pub(crate) use array_access::{class_string_inner_binding, insert_or_union, offse
 pub(crate) use assignment_value::{
     assignment_value, coalesce_assign_value, compound_assignment_result,
 };
+pub(crate) use branches::static_condition_truthiness;
 pub(crate) use calls::{
     ArgWalkerTypes, build_function_template_subs, first_class_callable_return_type,
     infer_closure_literal_type, is_array_like_wrapper, resolve_arg_call_raw_type,

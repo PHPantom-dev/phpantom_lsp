@@ -8,9 +8,9 @@
 
 use crate::common::message_text;
 use crate::common::{
-    LARAVEL_SRC_COMPOSER, completion_response, create_initialized_psr4_workspace,
-    definition_locations, goto_definition_at, hover_text_at, open_php_str, position_after,
-    references_response,
+    LARAVEL_SRC_COMPOSER, complete_at_opened, complete_labels_at_opened, completion_response,
+    create_initialized_psr4_workspace, definition_locations, goto_definition_at, hover_text_at,
+    open_php_str, position_after, references_response,
 };
 use tower_lsp_server::gen_lsp_types::*;
 
@@ -318,6 +318,165 @@ class Consumer {
         labels.contains(&"post".to_string()) && labels.contains(&"video".to_string()),
         "both registered aliases should complete, got {labels:?}"
     );
+}
+
+#[tokio::test]
+async fn morph_aliases_complete_in_registration_array_keys() {
+    let consumer = r#"<?php
+namespace App;
+use App\Models\Post;
+use App\Models\Video;
+use Illuminate\Database\Eloquent\Relations\Relation;
+
+Relation::morphMap(['' => Post::class]);
+Relation::enforceMorphMap(["" => Post::class]);
+Relation::morphMap(['post' => Post::class, '' => Video::class]);
+Relation::morphMap(array('' => Post::class));
+\Illuminate\Database\Eloquent\Relations\Relation::enforceMorphMap(['' => Post::class]);
+"#;
+    let (backend, _dir, uri) = workspace(false, consumer).await;
+    let uri = Uri::parse(&uri).unwrap();
+
+    for needle in [
+        "Relation::morphMap(['",
+        "enforceMorphMap([\"",
+        "'post' => Post::class, '",
+        "morphMap(array('",
+        "\\Illuminate\\Database\\Eloquent\\Relations\\Relation::enforceMorphMap(['",
+    ] {
+        let position = position_after(consumer, needle);
+        let labels =
+            complete_labels_at_opened(&backend, &uri, position.line, position.character).await;
+        assert_eq!(labels, ["post", "video"], "completion at `{needle}`");
+    }
+}
+
+#[tokio::test]
+async fn morph_aliases_complete_in_morph_query_array_values() {
+    let methods = [
+        "hasMorph",
+        "orHasMorph",
+        "doesntHaveMorph",
+        "orDoesntHaveMorph",
+        "whereHasMorph",
+        "orWhereHasMorph",
+        "whereDoesntHaveMorph",
+        "orWhereDoesntHaveMorph",
+        "whereMorphRelation",
+        "orWhereMorphRelation",
+        "whereMorphDoesntHaveRelation",
+        "orWhereMorphDoesntHaveRelation",
+    ];
+    let mut consumer = String::from(
+        "<?php\nnamespace App;\nuse App\\Models\\Comment;\n$query = Comment::query();\n",
+    );
+    for method in methods {
+        consumer.push_str(&format!(
+            "Comment::{method}('commentable', ['']);\n$query->{method}('commentable', array('post', ''));\n"
+        ));
+    }
+    let (backend, _dir, uri) = workspace(false, &consumer).await;
+    let uri = Uri::parse(&uri).unwrap();
+
+    for method in methods {
+        for needle in [
+            format!("Comment::{method}('commentable', ['"),
+            format!("$query->{method}('commentable', array('post', '"),
+        ] {
+            let position = position_after(&consumer, &needle);
+            let labels =
+                complete_labels_at_opened(&backend, &uri, position.line, position.character).await;
+            assert_eq!(labels, ["post", "video"], "completion at `{needle}`");
+        }
+    }
+}
+
+#[tokio::test]
+async fn morph_array_completion_filters_and_replaces_the_typed_prefix() {
+    let consumer = r#"<?php
+namespace App;
+use App\Models\Comment;
+use App\Models\Post;
+use Illuminate\Database\Eloquent\Relations\Relation;
+
+Relation::morphMap(['po' => Post::class]);
+Comment::whereHasMorph('commentable', ["vi"]);
+"#;
+    let (backend, _dir, uri) = workspace(false, consumer).await;
+    let uri = Uri::parse(&uri).unwrap();
+
+    for (needle, expected) in [
+        ("morphMap(['po", "post"),
+        ("whereHasMorph('commentable', [\"vi", "video"),
+    ] {
+        let position = position_after(consumer, needle);
+        let items = complete_at_opened(&backend, &uri, position.line, position.character).await;
+        let prefix = &needle[needle.len() - 2..];
+        assert!(items.iter().all(|item| item.label.starts_with(prefix)));
+        let item = items
+            .iter()
+            .find(|item| item.label == expected)
+            .unwrap_or_else(|| panic!("completion at `{needle}`: {items:?}"));
+        assert_eq!(item.kind, Some(CompletionItemKind::EnumMember));
+        let Some(CompletionItemTextEdit::TextEdit(edit)) = &item.text_edit else {
+            panic!("morph alias completion should replace the typed prefix");
+        };
+        assert_eq!(edit.new_text, expected);
+        assert_eq!(
+            edit.range,
+            Range::new(
+                Position::new(position.line, position.character - 2),
+                position,
+            ),
+        );
+    }
+}
+
+#[tokio::test]
+async fn morph_aliases_do_not_complete_in_other_array_positions() {
+    let consumer = r#"<?php
+namespace App;
+use App\Models\Comment;
+use App\Models\Post;
+use Illuminate\Database\Eloquent\Relations\Relation;
+
+Relation::morphMap(['post' => '']);
+Relation::morphMap([], ['' => Post::class]);
+Relation::morphMap(merge: ['' => Post::class]);
+Relation::morphMap([['' => Post::class]]);
+Comment::whereHasMorph([''], ['post']);
+Comment::whereHasMorph('commentable', ['' => 'post']);
+Comment::whereHasMorph('commentable', ['post'], ['']);
+Comment::whereHasMorph('commentable', [['']]);
+Comment::whereHasMorph(relation: [''], types: ['post']);
+Comment::whereHasMorph(callback: [''], relation: 'commentable', types: ['post']);
+Comment::whereHas('commentable', ['']);
+"#;
+    let (backend, _dir, uri) = workspace(false, consumer).await;
+    let uri = Uri::parse(&uri).unwrap();
+
+    for needle in [
+        "morphMap(['post' => '",
+        "morphMap([], ['",
+        "morphMap(merge: ['",
+        "morphMap([['",
+        "whereHasMorph(['",
+        "whereHasMorph('commentable', ['",
+        "whereHasMorph('commentable', ['post'], ['",
+        "whereHasMorph('commentable', [['",
+        "whereHasMorph(relation: ['",
+        "whereHasMorph(callback: ['",
+        "whereHas('commentable', ['",
+    ] {
+        let position = position_after(consumer, needle);
+        let items = complete_at_opened(&backend, &uri, position.line, position.character).await;
+        assert!(
+            items
+                .iter()
+                .all(|item| item.kind != Some(CompletionItemKind::EnumMember)),
+            "morph aliases should not complete at `{needle}`, got {items:?}",
+        );
+    }
 }
 
 #[tokio::test]

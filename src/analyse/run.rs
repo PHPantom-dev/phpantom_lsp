@@ -11,7 +11,7 @@ use crate::Backend;
 
 use super::diagnose::{DiagnosticPass, collect_diagnostics};
 use super::output::progress_bar;
-use super::stages::{OpenedProject, index_project, note_plain_php_project, open_project, report};
+use super::stages::{OpenedProject, index_project, note_workspace_layout, open_project, report};
 use super::{AnalyseOptions, OutputFormat};
 
 /// Run the analyse command and return the process exit code.
@@ -20,7 +20,7 @@ use super::{AnalyseOptions, OutputFormat};
 pub async fn run(options: AnalyseOptions) -> i32 {
     let root = &options.workspace_root;
 
-    note_plain_php_project(root, "analysing as a plain PHP project.");
+    note_workspace_layout(root, "analysing as a plain PHP project.");
 
     let cfg = super::load_config_or_default(root, options.global_config.as_deref());
     let ignore_rules =

@@ -326,6 +326,7 @@ impl Backend {
         if uri.ends_with("/Pest.php") {
             self.invalidate_pest_config();
         }
+        self.note_yii_config_change(&uri);
 
         // A save is a reliable sync point: re-diagnose the saved file
         // and all other open files.  This catches cross-file changes

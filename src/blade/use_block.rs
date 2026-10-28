@@ -52,6 +52,14 @@ enum TemplateTop {
 }
 
 impl TemplateUseBlock {
+    /// Every position [`Self::import_edit`] may write an import at.
+    pub(crate) fn anchors(&self) -> impl Iterator<Item = Position> + '_ {
+        let top = match self.top {
+            TemplateTop::LineStart(at) | TemplateTop::PhpBlock(at) | TemplateTop::LineEnd(at) => at,
+        };
+        self.line_ends.iter().copied().chain(std::iter::once(top))
+    }
+
     /// The edit that imports `import` (a name, or a name behind its
     /// `function` / `const` modifier) as `@use('import')`, or under `alias`
     /// as `@use('import', 'alias')`.

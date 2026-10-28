@@ -195,3 +195,79 @@ async fn reparsing_losing_file_does_not_steal_ownership() {
         "a_rich.php should still win even though b_bare.php was reparsed"
     );
 }
+
+const BASE: &str = "<?php\nnamespace Lib;\nabstract class Base { public static function getList(): array { return []; } }\n";
+const REAL_STORE: &str = "<?php\nnamespace Lib;\nclass Store extends Base {}\n";
+const DOUBLE_STORE: &str = "<?php\nnamespace Lib;\nclass Store {}\n";
+const CALLER: &str = "<?php\n\\Lib\\Store::getList();\n";
+
+fn unknown_members(backend: &phpantom_lsp::Backend, uri: &str, content: &str) -> Vec<String> {
+    backend.update_ast(uri, content);
+    let mut diags = Vec::new();
+    backend.collect_unknown_member_diagnostics(uri, content, &mut diags);
+    diags
+        .iter()
+        .map(|d| crate::common::message_text(&d.message).to_owned())
+        .collect()
+}
+
+/// A test double of a class is the only declaration of its name until the
+/// real file, sorting first, is parsed and takes the name over.  What
+/// callers resolved from the double must not outlive that: the real
+/// class's inherited members are found from then on.
+#[tokio::test]
+async fn real_declaration_parsed_after_a_double_brings_its_inherited_members() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///a_base.php", BASE);
+    backend.update_ast("file:///z_double.php", DOUBLE_STORE);
+
+    let before = unknown_members(&backend, "file:///caller.php", CALLER);
+    assert_eq!(
+        before.len(),
+        1,
+        "only the double declares Lib\\Store yet, which has no getList(): {before:?}"
+    );
+
+    backend.update_ast("file:///b_store.php", REAL_STORE);
+
+    let after = unknown_members(&backend, "file:///caller.php", CALLER);
+    assert!(
+        after.is_empty(),
+        "b_store.php sorts before the double, so getList() comes from its parent: {after:?}"
+    );
+}
+
+/// The same, when the real declaration arrives with a file loaded on
+/// demand for another class it declares.
+#[tokio::test]
+async fn real_declaration_loaded_on_demand_after_a_double_brings_its_inherited_members() {
+    let (backend, dir) = crate::common::create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "Lib\\": "src/" } } }"#,
+        &[
+            ("src/Base.php", BASE),
+            (
+                "src/Other.php",
+                "<?php\nnamespace Lib;\nclass Other { public function run(): void {} }\nclass Store extends Base {}\n",
+            ),
+        ],
+    );
+    // Sorts after the workspace's own files, wherever the temp dir is.
+    backend.update_ast("file:///zzz/double.php", DOUBLE_STORE);
+
+    let before = unknown_members(&backend, "file:///zzz/caller.php", CALLER);
+    assert_eq!(before.len(), 1, "only the double is parsed yet: {before:?}");
+
+    let other = "<?php\n(new \\Lib\\Other())->run();\n";
+    unknown_members(&backend, "file:///zzz/other_caller.php", other);
+    assert!(
+        backend.fqn_class_index().read().get("Lib\\Other").is_some(),
+        "src/Other.php should have been loaded for Lib\\Other"
+    );
+
+    let after = unknown_members(&backend, "file:///zzz/caller.php", CALLER);
+    assert!(
+        after.is_empty(),
+        "src/Other.php sorts before the double and declares Lib\\Store too: {after:?}"
+    );
+    drop(dir);
+}

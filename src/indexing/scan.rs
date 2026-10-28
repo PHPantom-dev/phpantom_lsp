@@ -118,24 +118,59 @@ impl Backend {
     pub(crate) fn rescan_composer_indexes(&self, root: &Path, changed_files: &[PathBuf]) {
         if let Some(pkg) = composer::read_composer_package(root) {
             self.rescan_composer_project(root, &pkg, false);
-        } else {
-            let changed_subprojects: Vec<PathBuf> = self
-                .workspace
-                .composer_projects
-                .read()
+        }
+
+        // The subprojects holding one of the changed files: a monorepo's,
+        // or the ones nested below a root project with their own vendor.
+        let root_aliases = path_aliases(root);
+        let known: Vec<PathBuf> = self
+            .workspace
+            .composer_projects
+            .read()
+            .iter()
+            .map(|project| project.root.clone())
+            .filter(|project_root| !root_aliases.contains(project_root))
+            .collect();
+        let holds = |project_root: &Path, file: &Path| {
+            path_aliases(project_root)
                 .iter()
-                .filter(|project| {
-                    let aliases = path_aliases(&project.root);
-                    changed_files
-                        .iter()
-                        .any(|file| aliases.iter().any(|alias| file.starts_with(alias)))
-                })
-                .map(|project| project.root.clone())
-                .collect();
-            for sub_root in changed_subprojects {
-                if let Some(pkg) = composer::read_composer_package(&sub_root) {
-                    self.rescan_composer_project(&sub_root, &pkg, true);
-                }
+                .any(|alias| file.starts_with(alias))
+        };
+        for sub_root in known
+            .iter()
+            .filter(|sub_root| changed_files.iter().any(|file| holds(sub_root, file)))
+        {
+            if let Some(pkg) = composer::read_composer_package(sub_root) {
+                self.rescan_composer_project(sub_root, &pkg, true);
+            }
+        }
+
+        // A nested project whose dependencies were installed after startup
+        // was not one discovery could find, so it is indexed now.
+        let vendor_dirs = self.workspace.vendor_dir_paths.lock().clone();
+        let mut fresh: Vec<PathBuf> = changed_files
+            .iter()
+            .filter_map(|file| file.parent())
+            .filter(|dir| {
+                !root_aliases.iter().any(|alias| dir == alias)
+                    && !known.iter().any(|sub_root| holds(sub_root, dir))
+                    && !vendor_dirs.iter().any(|vendor| dir.starts_with(vendor))
+            })
+            .map(Path::to_path_buf)
+            .collect();
+        fresh.sort();
+        fresh.dedup();
+        for sub_root in fresh {
+            let Some(pkg) = composer::read_composer_package(&sub_root) else {
+                continue;
+            };
+            let vendor_dir = composer::get_vendor_dir(&pkg);
+            if sub_root
+                .join(vendor_dir)
+                .join("composer/installed.json")
+                .is_file()
+            {
+                self.index_composer_project(&sub_root, Some(&pkg), true, &[], (0, 0), None);
             }
         }
 
@@ -250,8 +285,23 @@ impl Backend {
             .as_ref()
             .map(composer::stub_package_roots)
             .unwrap_or_default();
-        composer_project_entry(&mut self.workspace.composer_projects.write(), project_root)
-            .stub_packages = stub_packages;
+        let linked_packages = installed
+            .as_ref()
+            .map(composer::linked_package_roots)
+            .unwrap_or_default();
+        let vendor_paths = if vendor_path.is_dir() {
+            path_aliases(&vendor_path)
+        } else {
+            Vec::new()
+        };
+        {
+            let mut projects = self.workspace.composer_projects.write();
+            let project = composer_project_entry(&mut projects, project_root);
+            project.stub_packages = stub_packages;
+            project.vendor_paths = vendor_paths;
+            project.linked_packages = linked_packages;
+        }
+        self.workspace.forget_project_scopes();
 
         (vendor_dir, vendor_path)
     }

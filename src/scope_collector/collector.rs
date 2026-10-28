@@ -128,6 +128,11 @@ pub(super) fn walk_statement(stmt: &Statement<'_>, collector: &mut Collector<'_>
                 walk_expression(val, collector);
             }
         }
+        Statement::EchoTag(echo) => {
+            for val in echo.values.iter() {
+                walk_expression(val, collector);
+            }
+        }
         Statement::If(if_stmt) => {
             walk_expression(if_stmt.condition, collector);
             match &if_stmt.body {

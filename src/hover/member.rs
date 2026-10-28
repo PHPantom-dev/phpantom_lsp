@@ -11,6 +11,7 @@ use tower_lsp_server::gen_lsp_types::{Contents, Hover};
 use crate::Backend;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::PhpType;
+use crate::references::MemberRefKind;
 use crate::symbol_map::SubjectText;
 use crate::types::*;
 use crate::util::short_name;
@@ -343,7 +344,7 @@ impl Backend {
         subject_text: &SubjectText,
         member_name: &str,
         is_static: bool,
-        is_method_call: bool,
+        kind: MemberRefKind,
     ) -> Option<Hover> {
         let HoverSite {
             uri,
@@ -385,7 +386,7 @@ impl Backend {
                 &resolved_class_loader,
                 &self.resolved_class_cache,
             );
-            let find_result = Self::find_member_for_hover(&merged, member_name, is_method_call);
+            let find_result = Self::find_member_for_hover(&merged, member_name, kind);
 
             let (mut member_result, mut owner) = if find_result.is_some() {
                 (find_result, merged.clone())
@@ -394,7 +395,7 @@ impl Backend {
                 // contain model-specific members (e.g. Eloquent
                 // scope methods injected onto Builder<Model>)
                 // that the FQN-keyed cache does not have.
-                let result = Self::find_member_for_hover(target_class, member_name, is_method_call);
+                let result = Self::find_member_for_hover(target_class, member_name, kind);
                 (result, target_class.clone())
             };
 
@@ -418,11 +419,7 @@ impl Backend {
                         if let Some(ref ret) = method.return_type
                             && ret.references_any_template_param(&tpl_strings)
                             && let Some(HoverMemberHit::Method(subst_method)) =
-                                Self::find_member_for_hover(
-                                    target_class,
-                                    member_name,
-                                    is_method_call,
-                                )
+                                Self::find_member_for_hover(target_class, member_name, kind)
                         {
                             member_result = Some(HoverMemberHit::Method(subst_method));
                             owner = target_class.clone();
@@ -432,11 +429,7 @@ impl Backend {
                         if let Some(ref hint) = prop.type_hint
                             && hint.references_any_template_param(&tpl_strings)
                             && let Some(HoverMemberHit::Property(subst_prop)) =
-                                Self::find_member_for_hover(
-                                    target_class,
-                                    member_name,
-                                    is_method_call,
-                                )
+                                Self::find_member_for_hover(target_class, member_name, kind)
                         {
                             member_result = Some(HoverMemberHit::Property(subst_prop));
                             owner = target_class.clone();
@@ -558,29 +551,37 @@ impl Backend {
 
     /// Search `class` for a member matching `member_name`.
     ///
-    /// When `is_method_call` is true, only methods are considered.
-    /// Otherwise properties and constants are tried first, with a
-    /// final fallback to methods (handles method references without
-    /// call parentheses).
+    /// A method call considers only methods.  Otherwise the kind the
+    /// access names is tried first (a constant for `Foo::BAR`, a property
+    /// for `->bar` and `Foo::$bar`), then the other of the two, with a
+    /// final fallback to methods (handles method references without call
+    /// parentheses).
     pub(super) fn find_member_for_hover(
         class: &ClassInfo,
         member_name: &str,
-        is_method_call: bool,
+        kind: MemberRefKind,
     ) -> Option<HoverMemberHit> {
-        if is_method_call {
+        let method = || {
             class
                 .get_method_ci(member_name)
                 .map(|m| HoverMemberHit::Method(Box::new(m.clone())))
-        } else {
-            if let Some(prop) = class.get_property(member_name) {
-                return Some(HoverMemberHit::Property(Box::new(prop.clone())));
-            }
-            if let Some(constant) = class.get_constant(member_name) {
-                return Some(HoverMemberHit::Constant(Box::new(constant.clone())));
-            }
+        };
+        let property = || {
             class
-                .get_method_ci(member_name)
-                .map(|m| HoverMemberHit::Method(Box::new(m.clone())))
+                .get_property(member_name)
+                .map(|p| HoverMemberHit::Property(Box::new(p.clone())))
+        };
+        let constant = || {
+            class
+                .get_constant(member_name)
+                .map(|c| HoverMemberHit::Constant(Box::new(c.clone())))
+        };
+        match kind {
+            MemberRefKind::Method => method(),
+            MemberRefKind::Constant => constant().or_else(property).or_else(method),
+            MemberRefKind::Property | MemberRefKind::Either => {
+                property().or_else(constant).or_else(method)
+            }
         }
     }
 

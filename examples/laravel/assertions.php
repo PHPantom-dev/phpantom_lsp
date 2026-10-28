@@ -1140,6 +1140,34 @@ check(
     ($prefixedUris['ovens.show'] ?? null) === 'bakeries/ovens/{oven}'
 );
 
+// Keep malformed registrations on isolated routers, away from the demo routes.
+foreach (['' => '', '/photos/' => 'photos', 'photos/' => 'photos'] as $name => $prefix) {
+    $degenerateUris = $resourceUris($name);
+    check(
+        "resource '$name' retains its empty final segment",
+        $degenerateUris === [
+            'index' => $prefix === '' ? '/' : $prefix,
+            'create' => ltrim($prefix . '/create', '/'),
+            'store' => $prefix === '' ? '/' : $prefix,
+            'show' => ltrim($prefix . '/{}', '/'),
+            'edit' => ltrim($prefix . '/{}/edit', '/'),
+            'update' => ltrim($prefix . '/{}', '/'),
+            'destroy' => ltrim($prefix . '/{}', '/'),
+        ]
+    );
+}
+check(
+    'a leading slash preserves the resource route name',
+    $resourceUris('/photos') === $photoUris
+);
+$doubledDotUris = $resourceUris('photos..comments');
+check(
+    'doubled dots preserve an empty parent parameter and the route name',
+    ($doubledDotUris['photos..comments.index'] ?? null) === 'photos/{photo}//{}/comments'
+        && ($doubledDotUris['photos..comments.show'] ?? null) === 'photos/{photo}//{}/comments/{comment}'
+        && ! isset($doubledDotUris['photos.comments.show'])
+);
+
 // ─── Resource registrations written as a chain link ─────────────────────────
 
 // `ResourceRegistrar` builds its action from as/uses/middleware/where/missing,
@@ -1194,6 +1222,72 @@ check(
     'the last ->as() on a chain wins',
     isset($chainReplaced['b.photos.show'])
 );
+
+// ─── Plural resources and singletons ────────────────────────────────────────
+
+$demoResourceController = \App\Http\Controllers\ResourceDemoController::class;
+foreach ([
+    'resources' => ['index', 'create', 'store', 'show', 'edit', 'update', 'destroy'],
+    'apiResources' => ['index', 'store', 'show', 'update', 'destroy'],
+] as $method => $actions) {
+    $pluralRouter = new \Illuminate\Routing\Router(new \Illuminate\Events\Dispatcher());
+    $pluralRouter->name('catalog.')->prefix('catalog')->group(static function ($router) use ($method, $demoResourceController): void {
+        $router->$method([
+            'collections' => $demoResourceController,
+            'menus' => $demoResourceController,
+        ]);
+    });
+    $pluralUris = [];
+    foreach ($pluralRouter->getRoutes() as $route) {
+        $pluralUris[$route->getName()] = $route->uri();
+    }
+    $expectedNames = [];
+    foreach (['collections', 'menus'] as $resource) {
+        foreach ($actions as $action) {
+            $expectedNames[] = "catalog.$resource.$action";
+        }
+    }
+    check("$method generates each resource's conventional names", array_keys($pluralUris) === $expectedNames);
+    check(
+        "$method keeps group prefixes and singularizes each resource",
+        ($pluralUris['catalog.collections.show'] ?? null) === 'catalog/collections/{collection}'
+            && ($pluralUris['catalog.menus.show'] ?? null) === 'catalog/menus/{menu}'
+    );
+}
+
+foreach ([
+    ['singleton', null, ['show', 'edit', 'update']],
+    ['singleton', 'creatable', ['show', 'edit', 'update', 'create', 'store', 'destroy']],
+    ['singleton', 'destroyable', ['show', 'edit', 'update', 'destroy']],
+    ['apiSingleton', null, ['show', 'update']],
+    ['apiSingleton', 'creatable', ['show', 'update', 'store', 'destroy']],
+    ['apiSingleton', 'destroyable', ['show', 'update', 'destroy']],
+] as [$method, $modifier, $actions]) {
+    $singletonRouter = new \Illuminate\Routing\Router(new \Illuminate\Events\Dispatcher());
+    $singletonRouter->name('catalog.')->prefix('catalog')->group(static function ($router) use ($method, $modifier, $demoResourceController): void {
+        $registration = $router->$method('bakeries.profile', $demoResourceController);
+        if ($modifier !== null) {
+            $registration->$modifier();
+        }
+        $registration->register();
+    });
+    $singletonUris = [];
+    foreach ($singletonRouter->getRoutes() as $route) {
+        $singletonUris[$route->getName()] = $route->uri();
+    }
+    $expectedUris = [];
+    foreach ($actions as $action) {
+        $expectedUris["catalog.bakeries.profile.$action"] = 'catalog/bakeries/{bakery}/profile'
+            . (in_array($action, ['create', 'edit'], true) ? "/$action" : '');
+    }
+    check(
+        "$method " . ($modifier ?? 'defaults') . ' keeps only the parent parameter and its expected actions',
+        $singletonUris === $expectedUris
+    );
+}
+foreach (['index', 'create', 'store', 'show', 'edit', 'update', 'destroy'] as $action) {
+    assertMethodVisibility($demoResourceController, $action, 'public');
+}
 
 // ─── Resource modifiers ─────────────────────────────────────────────────────
 
@@ -2001,12 +2095,35 @@ check(
     ($castSampleCasts['toppings'] ?? null) === \Illuminate\Database\Eloquent\Casts\AsCollection::class . ':,' . \App\Models\Frosting::class
 );
 
-// ─── Morph aliases in column comparisons ────────────────────────────────────
+// ─── Morph aliases in maps, type arrays, and column comparisons ──────────────
 
 $previousMorphMap = \Illuminate\Database\Eloquent\Relations\Relation::morphMap();
+$previousRequiresMorphMap = \Illuminate\Database\Eloquent\Relations\Relation::requiresMorphMap();
 \Illuminate\Database\Eloquent\Relations\Relation::morphMap([
     'blog_post' => \App\Models\BlogPost::class,
 ]);
+\Illuminate\Database\Eloquent\Relations\Relation::enforceMorphMap([
+    'bakery' => \App\Models\Bakery::class,
+]);
+check(
+    'Morph map keys register aliases and enforced maps merge them',
+    \Illuminate\Database\Eloquent\Relations\Relation::getMorphedModel('blog_post') === \App\Models\BlogPost::class
+        && \Illuminate\Database\Eloquent\Relations\Relation::getMorphedModel('bakery') === \App\Models\Bakery::class
+        && \Illuminate\Database\Eloquent\Relations\Relation::requiresMorphMap()
+);
+\Illuminate\Database\Eloquent\Relations\Relation::requireMorphMap($previousRequiresMorphMap);
+$morphAliasCandidates = [];
+$morphAliasQuery = \App\Models\Review::whereHasMorph('reviewable', ['blog_post', 'bakery'], function ($query, $type) use (&$morphAliasCandidates) {
+    $morphAliasCandidates[] = [get_class($query->getModel()), $type];
+});
+check(
+    'Morph type arrays resolve aliases to their mapped models',
+    $morphAliasCandidates === [
+        [\App\Models\BlogPost::class, \App\Models\BlogPost::class],
+        [\App\Models\Bakery::class, \App\Models\Bakery::class],
+    ]
+);
+check('Morph type arrays bind their registered aliases', $morphAliasQuery->getBindings() === ['blog_post', 'bakery']);
 $review = new \App\Models\Review();
 $review->reviewable()->associate(new \App\Models\BlogPost());
 check('Review declares its morph type column', $review->reviewable()->getMorphType() === 'reviewable_type');

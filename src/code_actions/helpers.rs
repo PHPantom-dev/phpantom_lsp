@@ -179,6 +179,18 @@ impl FileTextEdits<'_> {
         }
     }
 
+    /// Run `f` on every edit's plain [`TextEdit`] until it rejects one, and
+    /// report whether it accepted them all.  A snippet edit, which has no
+    /// plain form, is rejected.
+    pub(crate) fn try_for_each_mut(&mut self, mut f: impl FnMut(&mut TextEdit) -> bool) -> bool {
+        match self {
+            Self::Plain(edits) => edits.iter_mut().all(f),
+            Self::Document(edits) => edits
+                .iter_mut()
+                .all(|edit| plain_text_edit(edit).is_some_and(&mut f)),
+        }
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         match self {
             Self::Plain(edits) => edits.is_empty(),

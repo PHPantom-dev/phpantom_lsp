@@ -243,8 +243,12 @@ pub(super) fn try_resolve_with_template_default(
             _ => false,
         }
     } else if let TypeKind::Named(s) = condition.kind() {
+        // `\Exception` and `Exception` are the same class: a leading `\`
+        // only marks the name as already fully qualified.
         match default_value.kind() {
-            TypeKind::Named(dv) => dv == s,
+            TypeKind::Named(dv) => dv
+                .trim_start_matches('\\')
+                .eq_ignore_ascii_case(s.trim_start_matches('\\')),
             _ => false,
         }
     } else {

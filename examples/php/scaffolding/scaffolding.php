@@ -2801,6 +2801,9 @@ class ScaffoldingCoordinate
 {
     public string $label = '';
 
+    /** @readonly */
+    public string $unit = 'px';
+
     public function __construct(
         public readonly int $x,
         public readonly int $y,

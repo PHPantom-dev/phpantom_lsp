@@ -14,18 +14,18 @@
 //! parameter carries no type at all, there is nothing to contradict and
 //! the reading stands on its own.
 //!
-//! The walk goes through [`resolve_variable_php_type`] — the same forward
-//! walker every other consumer asks — at each point the body can be left
-//! through, so branch merging and narrowing are accounted for by the
-//! shared pipeline rather than by a second one written here.
+//! The walk is the same forward walker every other consumer asks, run once
+//! to the end of the body while it reads the parameter at each point the
+//! body can be left through, so branch merging and narrowing are accounted
+//! for by the shared pipeline rather than by a second one written here.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use mago_span::HasSpan;
 use mago_syntax::cst::Program;
 use mago_syntax::cst::argument::ArgumentList;
-use mago_syntax::cst::block::Block;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
 use mago_syntax::cst::statement::Statement;
@@ -40,6 +40,7 @@ use crate::type_engine::conditional_resolution::{
     resolve_conditional_with_text_args_and_defaults,
 };
 use crate::type_engine::resolver::{FileCtx, Loaders, ResolutionCtx};
+use crate::type_engine::variable::forward_walk::{BodyOwner, FunctionLikeBody};
 use crate::type_engine::variable::resolution::VarQuery;
 use crate::types::{ClassInfo, FunctionInfo, ParameterInfo};
 
@@ -306,7 +307,8 @@ fn infer_out_type(
 /// a parameter every path assigns reads back as what they assigned and one
 /// only some paths touch reads back as the join with its declared type.
 /// A `return` leaves the parameter holding whatever it held there, which
-/// the closing brace never sees, so each one is read too.
+/// the closing brace never sees, so each one is read too. One walk of the
+/// body collects them all.
 fn read_out_type(
     backend: &Backend,
     uri: &str,
@@ -342,10 +344,10 @@ fn read_out_type(
     // declaring file, so share one parse of it with the rest of the pass.
     let _parse_guard = crate::parser::with_parse_cache_arc(std::sync::Arc::clone(&content));
     let types = with_parsed_program(&content, "out_param_body", |program, content| {
-        let Some(body) = body_block(program, name_offset) else {
+        let Some(body) = declared_body(program, name_offset) else {
             return Vec::new();
         };
-        let body_end = body.right_brace.start.offset;
+        let body_end = body.block.right_brace.start.offset;
         let enclosing_class = file_ctx.classes.iter().find(|c| {
             !c.name.starts_with("__anonymous@")
                 && body_end >= c.start_offset
@@ -359,58 +361,26 @@ fn read_out_type(
                 &placeholder
             }
         };
-        let loaders = Loaders::with_function(Some(&function_loader));
-
-        let mut returns = Vec::new();
-        crate::return_collection::collect_returns(body.statements.iter(), &mut returns);
-        let exit_ctx = crate::type_engine::type_ops::condition_facts::ExitCtx {
-            current_class,
-            all_classes: &file_ctx.classes,
-            class_loader: &resolved_class_loader,
-            source_class_loader: &class_loader,
-            source_imports: Some(use_map),
-            function_loader: loaders.function_loader,
-            resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
-            var_types: None,
-            receiver_resolver: None,
-            static_receiver_resolver: None,
-        };
-        // The walker reads a position no path reaches as the state before
-        // the statement that left, so a body whose every path returns
-        // would add a stale reading from its closing brace.
-        let falls_through =
-            !crate::type_engine::type_ops::condition_facts::statements_unconditionally_exit(
-                body.statements.iter(),
-                &exit_ctx,
-            );
-        let exits = returns
-            .iter()
-            .map(|&(_, _, _, return_keyword)| return_keyword as u32)
-            .chain(falls_through.then_some(body_end));
-
-        exits
-            .flat_map(|exit| {
-                crate::type_engine::variable::resolution::resolve_variable_types_in_program(
-                    program,
-                    VarQuery {
-                        loaders,
-                        ..VarQuery::new(
-                            param_name,
-                            FileCtx::new(
-                                content,
-                                &file_ctx.classes,
-                                &resolved_class_loader,
-                                &class_loader,
-                            )
-                            .with_imports(Some(use_map))
-                            .with_backend(Some(backend)),
-                            Some(current_class),
-                            exit,
-                        )
-                    },
+        crate::type_engine::variable::resolution::resolve_variable_at_body_exits(
+            program,
+            VarQuery {
+                loaders: Loaders::with_function(Some(&function_loader)),
+                ..VarQuery::new(
+                    param_name,
+                    FileCtx::new(
+                        content,
+                        &file_ctx.classes,
+                        &resolved_class_loader,
+                        &class_loader,
+                    )
+                    .with_imports(Some(use_map))
+                    .with_backend(Some(backend)),
+                    Some(current_class),
+                    body_end,
                 )
-            })
-            .collect()
+            },
+            body,
+        )
     });
     (!types.is_empty()).then(|| crate::types::ResolvedType::types_joined(&types))
 }
@@ -421,15 +391,20 @@ fn read_out_type(
 /// `None` for a declaration with no body (abstract, interface) and for an
 /// offset that names nothing in this file, which is what a stale index
 /// entry looks like.
-fn body_block<'a>(program: &'a Program<'a>, name_offset: u32) -> Option<&'a Block<'a>> {
+fn declared_body<'a>(program: &'a Program<'a>, name_offset: u32) -> Option<FunctionLikeBody<'a>> {
     fn in_statements<'a>(
         statements: impl Iterator<Item = &'a Statement<'a>>,
         name_offset: u32,
-    ) -> Option<&'a Block<'a>> {
+    ) -> Option<FunctionLikeBody<'a>> {
         for stmt in statements {
             let found = match stmt {
                 Statement::Function(func) if func.name.span.start.offset == name_offset => {
-                    Some(&func.body)
+                    Some(FunctionLikeBody {
+                        parameters: &func.parameter_list,
+                        block: &func.body,
+                        span_start: func.span().start.offset,
+                        owner: BodyOwner::FUNCTION,
+                    })
                 }
                 _ if let Some(body) = crate::parser::class_like_body(stmt) => {
                     in_members(body.members.iter(), name_offset)
@@ -448,13 +423,18 @@ fn body_block<'a>(program: &'a Program<'a>, name_offset: u32) -> Option<&'a Bloc
     fn in_members<'a>(
         members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
         name_offset: u32,
-    ) -> Option<&'a Block<'a>> {
+    ) -> Option<FunctionLikeBody<'a>> {
         for member in members {
             if let ClassLikeMember::Method(method) = member
                 && method.name.span.start.offset == name_offset
                 && let MethodBody::Concrete(block) = &method.body
             {
-                return Some(block);
+                return Some(FunctionLikeBody {
+                    parameters: &method.parameter_list,
+                    block,
+                    span_start: method.span().start.offset,
+                    owner: BodyOwner::method(method),
+                });
             }
         }
         None

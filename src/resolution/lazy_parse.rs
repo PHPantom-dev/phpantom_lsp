@@ -456,7 +456,8 @@ impl Backend {
         // This function is only reached when the class was NOT found
         // in uri_classes_index (find_class_in_uri_classes_index / fqn_index returned None).
         // That means the class has never been parsed — so it cannot
-        // have a direct entry in the resolved-class cache.
+        // have a direct entry in the resolved-class cache, unless another
+        // file declares the same name (the reowned names below).
         //
         // Dependents (e.g. a child class resolved before this parent
         // was available) *could* hold stale entries, but the transitive
@@ -489,6 +490,15 @@ impl Backend {
             drop(cache);
             // A first load only adds what a lookup would have found on disk
             // anyway, but a re-parse can change what open files resolve to.
+            self.diag.epoch.note_change();
+        } else if !reowned_fqns.is_empty() {
+            // A name this first load took over was resolved from the other
+            // file's declaration, so what open files resolve to changes too.
+            let mut cache = self.resolved_class_cache.write();
+            for fqn in &reowned_fqns {
+                let _ = crate::virtual_members::evict_fqn(&mut cache, fqn);
+            }
+            drop(cache);
             self.diag.epoch.note_change();
         }
 

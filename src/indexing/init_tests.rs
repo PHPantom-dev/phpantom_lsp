@@ -168,3 +168,96 @@ async fn a_composer_update_in_one_subproject_rescans_only_that_subproject() {
     drop(roots);
     assert!(mapping_base(&backend, "Demo\\Common\\").is_some());
 }
+
+/// Index `root` as a workspace with a `composer.json` of its own.
+async fn index_root_project(root: &Path) -> Backend {
+    let backend = Backend::new_test();
+    *backend.workspace.workspace_root.write() = Some(root.to_path_buf());
+    let package = crate::composer::read_composer_package(root);
+    assert!(package.is_some(), "the root needs a composer.json");
+    backend
+        .discover_workspace_symbols(root, Default::default(), package, None)
+        .await;
+    backend
+}
+
+fn indexes(backend: &Backend, fqn: &str) -> bool {
+    backend.symbols.fqn_uri_index.read().get(fqn).is_some()
+}
+
+#[tokio::test]
+async fn a_project_with_its_own_vendor_below_a_root_project_is_indexed() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("composer.json"),
+        r#"{ "require": { "php": ">=8.1" } }"#,
+    );
+    let platform = dir.path().join("platform");
+    write_subproject(&platform, &["Client"]);
+
+    let backend = index_root_project(dir.path()).await;
+
+    assert!(indexes(&backend, "Acme\\Lib\\Client"));
+    let own = mapping_base(&backend, "App\\").expect("the nested project's own namespace");
+    assert!(
+        Path::new(&own).starts_with(&platform),
+        "the mapping must point into platform/, got {own}"
+    );
+}
+
+#[tokio::test]
+async fn a_nested_composer_json_without_a_vendor_is_not_a_project() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("composer.json"),
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+    );
+    // A test fixture or a path-repository package: nothing installed.
+    write(
+        &dir.path().join("tests/fixtures/pkg/composer.json"),
+        r#"{ "autoload": { "psr-4": { "Fixture\\": "src/" } } }"#,
+    );
+    // A package the root installed, bundling a vendor of its own.
+    let bundled = dir.path().join("vendor/acme/bundled");
+    write(
+        &bundled.join("composer.json"),
+        r#"{ "autoload": { "psr-4": { "Bundled\\": "src/" } } }"#,
+    );
+    write(
+        &bundled.join("vendor/composer/installed.json"),
+        r#"{ "packages": [] }"#,
+    );
+
+    let backend = index_root_project(dir.path()).await;
+
+    assert!(mapping_base(&backend, "App\\").is_some());
+    assert!(mapping_base(&backend, "Fixture\\").is_none());
+    assert!(mapping_base(&backend, "Bundled\\").is_none());
+}
+
+#[tokio::test]
+async fn a_nested_project_installed_after_startup_is_indexed_on_rescan() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("composer.json"),
+        r#"{ "require": { "php": ">=8.1" } }"#,
+    );
+    let platform = dir.path().join("platform");
+    write(
+        &platform.join("composer.json"),
+        r#"{ "require": { "acme/lib": "*" } }"#,
+    );
+
+    let backend = index_root_project(dir.path()).await;
+    assert!(!indexes(&backend, "Acme\\Lib\\Client"));
+
+    write_subproject(&platform, &["Client"]);
+    backend.rescan_composer_indexes(dir.path(), &[platform.join("composer.lock")]);
+    assert!(indexes(&backend, "Acme\\Lib\\Client"));
+
+    // Known from now on, so a later update rescans it like any other.
+    write_subproject(&platform, &["Renamed"]);
+    backend.rescan_composer_indexes(dir.path(), &[platform.join("composer.lock")]);
+    assert!(indexes(&backend, "Acme\\Lib\\Renamed"));
+    assert!(!indexes(&backend, "Acme\\Lib\\Client"));
+}

@@ -136,3 +136,7 @@ harness = false
 [[bench]]
 name = "symfony_completion"
 harness = false
+
+[[bench]]
+name = "yii_completion"
+harness = false

@@ -51,6 +51,9 @@ impl Backend {
 
         // A translation key is shown as the message it looks up.
         let mut shown = key;
+        // A Yii view is keyed by the path it names, which reads best from
+        // the workspace root.
+        let view_path;
         let (label, detail) = match kind {
             StringKeyKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
             StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
@@ -268,6 +271,37 @@ impl Backend {
                     );
                 ("Messenger bus", detail)
             }
+            StringKeyKind::YiiRoute => {
+                let declared = self.symfony_declaration_locations(*kind, key);
+                let mut detail = declared
+                    .first()
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                    .map_or_else(
+                        || "Not declared in the project's routes".to_string(),
+                        |path| format!("Declared in `{}`", path),
+                    );
+                for path in self.yii_route_paths(key) {
+                    detail.push_str(&format!("\n\nPath `{}`", path));
+                }
+                ("Route", detail)
+            }
+            // An argument is shown by its name, under the paths that
+            // declare it.
+            StringKeyKind::YiiRouteArgument => {
+                let (handler, name) = crate::yii::routes::split_route_argument_key(key);
+                shown = name;
+                let paths = self.yii_handler_paths(handler);
+                let detail = if paths.is_empty() {
+                    "No route the project declares dispatches here".to_string()
+                } else {
+                    paths
+                        .iter()
+                        .map(|path| format!("Path `{}`", path))
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                };
+                ("Route argument", detail)
+            }
             // An installed bundle's schema is not read, so a key no schema
             // of the project's declares is only not one of its own.
             StringKeyKind::SymfonyConfigKey => {
@@ -280,6 +314,19 @@ impl Backend {
                         |path| format!("Declared in `{}`", path),
                     );
                 ("Configuration key", detail)
+            }
+            StringKeyKind::YiiView => {
+                view_path = self.yii_view_display(key);
+                shown = &view_path;
+                let detail = self
+                    .yii_view_file(key)
+                    .and_then(|file| crate::util::path_to_url(&file))
+                    .and_then(|uri| self.workspace_relative_path(uri.as_str()))
+                    .map_or_else(
+                        || "No template is there".to_string(),
+                        |path| format!("`{}`", path),
+                    );
+                ("View", detail)
             }
         };
 

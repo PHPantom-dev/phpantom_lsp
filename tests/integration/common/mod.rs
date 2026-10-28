@@ -853,6 +853,20 @@ pub fn get_code_actions_in_range(
     backend.handle_code_action(uri, content, &code_action_params(uri, range, vec![]))
 }
 
+/// Send a code action request for `range` that asks only for the kinds
+/// in `only`, the way an editor's filtered menus and on-save hooks do.
+pub fn get_code_actions_of_kinds(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    range: Range,
+    only: Vec<CodeActionKind>,
+) -> Vec<CodeActionResponse> {
+    let mut params = code_action_params(uri, range, vec![]);
+    params.context.only = Some(only);
+    backend.handle_code_action(uri, content, &params)
+}
+
 /// Send `textDocument/codeAction` through the `LanguageServer` trait
 /// method, the way an editor does.
 ///
