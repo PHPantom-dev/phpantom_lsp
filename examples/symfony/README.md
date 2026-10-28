@@ -36,7 +36,8 @@ catalogues together, the way a real Symfony project does.
   extend, or include them and the files in `templates/`. In
   `DemoController`, go to the definition of `demo/index.html.twig`, or
   complete a name inside `render('')` or `{% include '' %}`. A template that
-  does not exist is reported, with a quick fix that creates it.
+  does not exist is reported, with quick fixes that change it to a close
+  name or create it.
 - Form fields and validation mappings name the properties of the class they
   map. In `src/Form/RegistrationType.php` or `config/validator/User.yaml`, go
   to the definition of `email`, find the references of `$displayName` in

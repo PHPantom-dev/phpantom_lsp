@@ -1,0 +1,19 @@
+// test: an arrow function returning a method call on its own parameter keeps the call's type
+// feature: hover
+// expect: Closure(User): string
+---
+<?php
+
+class User
+{
+    public function label(): string
+    {
+        return '';
+    }
+}
+
+function demo(): void
+{
+    $fn = fn (User $u) => $u->label();
+    echo $f<>n;
+}

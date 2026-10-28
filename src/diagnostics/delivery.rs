@@ -74,6 +74,7 @@ impl Backend {
             tokio::spawn(crate::server::run_blocking_cancel_safe(
                 "diagnostics",
                 move || {
+                    let _project_guard = backend.enter_project_scope(&uri);
                     let blade = backend.blade_virtual_php_arc(&uri);
                     let effective = blade.clone().unwrap_or_else(|| Arc::clone(&content));
                     // The kept parse carries its own copy of the text.  The

@@ -64,6 +64,67 @@ pub(super) fn constant_array_key(expr: &Expression<'_>, scope: &ScopeState) -> O
     }
 }
 
+/// Drop the shape alternatives a key-existence check rules out: the ones
+/// that cannot hold the key when it is `present`, and the ones that
+/// require it when it is not. `array_key_exists(4, $data)` on
+/// `array{A, B}|array{A, B, C, D, E}` leaves only the second.
+///
+/// Leaves the type alone when every alternative would go: the check then
+/// contradicts what the variable is declared to hold, which says nothing
+/// about which alternative to keep.
+pub(super) fn drop_shapes_contradicting_key(
+    base_var: &str,
+    key_name: &str,
+    present: bool,
+    scope: &mut ScopeState,
+) {
+    let contradicts = |ty: &PhpType| {
+        if ty.as_unsealed_shape().is_some() {
+            return false;
+        }
+        let TypeKind::ArrayShape(entries) = ty.kind() else {
+            return false;
+        };
+        let Some(keys) = crate::php_type::runtime_shape_keys(entries) else {
+            return false;
+        };
+        match keys.iter().position(|key| key == key_name) {
+            Some(index) => !present && !entries[index].optional,
+            None => present,
+        }
+    };
+    let types = scope.get(base_var);
+    if !types
+        .iter()
+        .any(|rt| rt.type_string.union_members().into_iter().any(contradicts))
+    {
+        return;
+    }
+    let narrowed: Vec<ResolvedType> = types
+        .iter()
+        .filter_map(|rt| {
+            let members = rt.type_string.union_members();
+            if !members.iter().any(|member| contradicts(member)) {
+                return Some(rt.clone());
+            }
+            let kept: Vec<PhpType> = members
+                .into_iter()
+                .filter(|member| !contradicts(member))
+                .cloned()
+                .collect();
+            if kept.is_empty() {
+                return None;
+            }
+            let mut rt = rt.clone();
+            rt.type_string = PhpType::union(kept);
+            Some(rt)
+        })
+        .collect();
+    if !narrowed.is_empty() {
+        scope.set(base_var, narrowed);
+    }
+}
+
 /// Mark one key of an array shape as present, leaving its value type
 /// alone.
 ///

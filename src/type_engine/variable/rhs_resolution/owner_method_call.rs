@@ -286,23 +286,12 @@ pub(super) fn resolve_owner_method_call(
 
     let owner_method = owner.get_method_ci(method_name);
     let merged_method = merged.get_method_ci(method_name);
-    // Prefer the merged method's return type when the owner's method has no
-    // docblock override (return_type == native_return_type).  The merged
-    // method carries inherited types from interfaces/parents with template
-    // substitutions already applied (e.g. `V|null` → `User|null` from
-    // `@implements Collection<string, User>`).  The effective type is
-    // stored name-resolved while the native hint keeps the spelling from
-    // the source, so the two are compared as types, not verbatim.
-    let echoes_native = |m: &MethodInfo| match (&m.return_type, &m.native_return_type) {
-        (Some(ret), Some(native)) => ret.equivalent(native),
-        (ret, native) => ret == native,
-    };
-    // A conditional return type inherited the same way (an override with
-    // no docblock of its own) likewise decides the call.
+    // Prefer the merged method when the owner's own declaration only
+    // restates what it inherits (e.g. `V|null` → `User|null` from
+    // `@implements Collection<string, User>`).
     let method_ref = match (owner_method, merged_method) {
         (Some(om), Some(mm))
-            if (echoes_native(om) && !echoes_native(mm))
-                || (om.conditional_return().is_none() && mm.conditional_return().is_some()) =>
+            if crate::type_engine::call_resolution::answers_with_merged_method(om, mm) =>
         {
             Some(mm)
         }

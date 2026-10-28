@@ -21,6 +21,12 @@
 //! The answer is a set of extra string-key spans, indistinguishable from
 //! the ones the symbol map records, that every consumer of those keys reads
 //! alongside the map's own.
+//!
+//! A class of the project's own can stand in front of a receiver: a URL
+//! generator wrapped in a class whose `generate(string $name)` passes the
+//! name on to the real one.  A call on such a class names a key in the
+//! argument its method passes on, which is found by reading the method (see
+//! [`Backend::typed_receiver_key_kind`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,8 +36,10 @@ use mago_syntax::cst::literal::Literal;
 use mago_syntax::cst::*;
 
 use crate::Backend;
+use crate::class_lookup::ResolvedClassLoader;
 use crate::parser::with_parsed_program;
-use crate::symbol_map::{SymbolMap, SymbolSpan, TypedReceiverSite};
+use crate::php_type::PhpType;
+use crate::symbol_map::{ReceiverClass, StringKeyKind, SymbolMap, SymbolSpan, TypedReceiverSite};
 
 /// One file's confirmed extra string-key spans, and the source length they
 /// were derived from.
@@ -150,21 +158,237 @@ impl Backend {
                 else {
                     continue;
                 };
-                for site in call.sites {
-                    if let Some((_, kind)) = site.receiver.targets().iter().find(|(fqn, _)| {
-                        crate::class_lookup::is_subtype_of_named(
-                            &ty,
-                            fqn,
-                            loaders.resolved_class_loader(),
-                        )
-                    }) {
-                        confirmed.push(site.to_span(*kind));
+                for (site, index) in call.sites {
+                    if let Some(kind) = self.typed_receiver_key_kind(
+                        &ty,
+                        call.method,
+                        index,
+                        site.receiver,
+                        loaders.resolved_class_loader(),
+                    ) {
+                        confirmed.push(site.to_span(kind));
                     }
                 }
             }
             confirmed.sort_by_key(|span| span.start);
             confirmed
         })
+    }
+
+    /// What a call of `method` on a receiver of type `ty` names in its
+    /// argument `index`, when its receiver has to be a `receiver`: the kind
+    /// of the first target the type is a subtype of, or the kind a method
+    /// of the project's own passes the argument on to such a receiver as.
+    pub(crate) fn typed_receiver_key_kind(
+        &self,
+        ty: &PhpType,
+        method: &str,
+        index: usize,
+        receiver: ReceiverClass,
+        class_loader: &ResolvedClassLoader<'_>,
+    ) -> Option<StringKeyKind> {
+        if let Some((_, kind)) = receiver
+            .targets()
+            .iter()
+            .find(|(fqn, _)| crate::class_lookup::is_subtype_of_named(ty, fqn, class_loader))
+        {
+            return Some(*kind);
+        }
+        if !receiver.follows_wrappers() {
+            return None;
+        }
+        ty.top_level_class_names()
+            .iter()
+            .find_map(|class| self.forwarded_key_kind(class, method, index, receiver))
+    }
+
+    /// The kind of key the method `method` of `class` passes its parameter
+    /// `index` on as: the argument of a call on a `receiver` (or on another
+    /// such method) that the parameter is passed to as it is.
+    ///
+    /// Only a class of the project's own is read, and a method that comes
+    /// back to itself through the classes it passes the name on to names
+    /// nothing.
+    fn forwarded_key_kind(
+        &self,
+        class: &str,
+        method: &str,
+        index: usize,
+        receiver: ReceiverClass,
+    ) -> Option<StringKeyKind> {
+        let class = class.trim_start_matches('\\');
+        let (declaring, method_info) = self.declaring_method(class, method)?;
+        let uri = self.class_declaration_uri(&declaring)?;
+        if self
+            .workspace
+            .vendor_uri_prefixes
+            .lock()
+            .iter()
+            .any(|prefix| uri.starts_with(prefix.as_str()))
+        {
+            return None;
+        }
+        let _visiting = ForwardingGuard::enter(format!(
+            "{}::{}#{}",
+            declaring.to_ascii_lowercase(),
+            method.to_ascii_lowercase(),
+            index
+        ))?;
+        let content = self.get_file_content_arc(&uri)?;
+        let file_ctx = self.file_context(&uri);
+        let loaders = self.file_loaders(&file_ctx);
+        let _parse_guard = crate::parser::with_parse_cache(&content);
+        with_parsed_program(&content, "forwarded_key_kind", |program, content| {
+            let method = find_method(program.statements.iter(), method_info.name_offset)?;
+            let parameter = method.parameter_list.parameters.get(index)?;
+            let MethodBody::Concrete(body) = &method.body else {
+                return None;
+            };
+            let finder = ForwardFinder {
+                parameter: parameter.variable.name,
+                receiver,
+            };
+            let mut found = Vec::new();
+            for statement in body.statements.iter() {
+                mago_syntax::walker::Walker::walk_statement(&finder, statement, &mut found);
+            }
+            found.into_iter().find_map(|(object, callee, argument)| {
+                let var_ctx = loaders.var_ctx_at(content, object.span().start.offset);
+                let ty = crate::type_engine::variable::iterable_elements::resolve_expression_type(
+                    object, &var_ctx,
+                )?;
+                self.typed_receiver_key_kind(
+                    &ty,
+                    callee,
+                    argument,
+                    receiver,
+                    loaders.resolved_class_loader(),
+                )
+            })
+        })
+    }
+
+    /// The class that declares the method `method` that `class` has, by
+    /// walking up from `class` through its parents, with the method.
+    fn declaring_method(
+        &self,
+        class: &str,
+        method: &str,
+    ) -> Option<(String, Arc<crate::types::MethodInfo>)> {
+        let mut seen = std::collections::HashSet::new();
+        let mut current = class.to_string();
+        while seen.insert(current.to_ascii_lowercase()) {
+            let info = self.find_or_load_class(&current)?;
+            if let Some(found) = info
+                .methods
+                .iter()
+                .find(|candidate| candidate.name.eq_ignore_ascii_case(method))
+            {
+                return Some((current, Arc::clone(found)));
+            }
+            current = info.parent_class.as_ref()?.to_string();
+        }
+        None
+    }
+}
+
+/// The method whose name starts at `name_offset`, among `statements` and
+/// the namespaces and classes they declare.
+fn find_method<'p, 'a>(
+    statements: impl Iterator<Item = &'p Statement<'a>>,
+    name_offset: u32,
+) -> Option<&'p class_like::method::Method<'a>>
+where
+    'a: 'p,
+{
+    for statement in statements {
+        let members = match statement {
+            Statement::Namespace(namespace) => {
+                if let Some(method) = find_method(namespace.statements().iter(), name_offset) {
+                    return Some(method);
+                }
+                continue;
+            }
+            Statement::Class(class) => &class.members,
+            Statement::Trait(class) => &class.members,
+            Statement::Enum(class) => &class.members,
+            _ => continue,
+        };
+        for member in members.iter() {
+            if let ClassLikeMember::Method(method) = member
+                && method.name.span.start.offset == name_offset
+            {
+                return Some(method);
+            }
+        }
+    }
+    None
+}
+
+/// Finds the calls a method passes its parameter on to as an argument that
+/// names a key on the right receiver: each call's receiver, its method, and
+/// the argument's position.
+struct ForwardFinder<'p> {
+    parameter: &'p [u8],
+    receiver: ReceiverClass,
+}
+
+type Forwarded<'ast, 'arena> = Vec<(&'ast Expression<'arena>, &'ast str, usize)>;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Forwarded<'ast, 'arena>>
+    for ForwardFinder<'_>
+{
+    fn walk_in_method_call(
+        &self,
+        node: &'ast MethodCall<'arena>,
+        found: &mut Forwarded<'ast, 'arena>,
+    ) {
+        let ClassLikeMemberSelector::Identifier(name) = &node.method else {
+            return;
+        };
+        let callee = crate::atom::bytes_to_str(name.value);
+        for (index, argument) in node.argument_list.arguments.iter().enumerate() {
+            let Argument::Positional(argument) = argument else {
+                break;
+            };
+            let passes_parameter = matches!(
+                argument.value,
+                Expression::Variable(Variable::Direct(variable)) if variable.name == self.parameter
+            );
+            if passes_parameter
+                && crate::symbol_map::extraction::symfony_receiver_method(callee, index)
+                    .is_some_and(|(receiver, _)| receiver == self.receiver)
+            {
+                found.push((node.object, callee, index));
+            }
+        }
+    }
+}
+
+thread_local! {
+    /// The methods whose forwarding is being read on this thread, as
+    /// `class::method#index`.
+    static FORWARDING: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::default();
+}
+
+/// Marks one method as being read for as long as it lives.
+struct ForwardingGuard {
+    key: String,
+}
+
+impl ForwardingGuard {
+    /// Mark `key`, unless it is already being read further up.
+    fn enter(key: String) -> Option<Self> {
+        FORWARDING
+            .with(|reading| reading.borrow_mut().insert(key.clone()))
+            .then_some(Self { key })
+    }
+}
+
+impl Drop for ForwardingGuard {
+    fn drop(&mut self) {
+        FORWARDING.with(|reading| reading.borrow_mut().remove(&self.key));
     }
 }
 
@@ -204,10 +428,12 @@ fn empty_spans() -> Arc<Vec<SymbolSpan>> {
 }
 
 /// One method call that names at least one candidate key, paired with the
-/// receiver whose type decides what it names.
+/// receiver whose type decides what it names, and the method it calls.
 struct ReceiverCall<'ast, 'arena, 'sites> {
     receiver: &'ast Expression<'arena>,
-    sites: Vec<&'sites TypedReceiverSite>,
+    method: &'ast str,
+    /// Each candidate, with the position of the argument it is in.
+    sites: Vec<(&'sites TypedReceiverSite, usize)>,
 }
 
 struct CollectCtx<'w, 'ast, 'arena, 'sites> {
@@ -224,26 +450,31 @@ struct ReceiverCallWalker<'a, 'sites> {
 }
 
 impl<'sites> ReceiverCallWalker<'_, 'sites> {
-    /// The candidates one argument holds: the string itself, or the entries
-    /// of the array a `first(['a', 'b'])` names.
-    fn matching_sites(&self, expr: &Expression<'_>, out: &mut Vec<&'sites TypedReceiverSite>) {
+    /// The candidates the argument at `index` holds: the string itself, or
+    /// the entries of the array a `first(['a', 'b'])` names.
+    fn matching_sites(
+        &self,
+        expr: &Expression<'_>,
+        index: usize,
+        out: &mut Vec<(&'sites TypedReceiverSite, usize)>,
+    ) {
         match expr {
             Expression::Literal(Literal::String(s)) => {
                 if let Some(site) = self.sites.get(&(s.span.start.offset + 1)) {
-                    out.push(site);
+                    out.push((site, index));
                 }
             }
             Expression::Array(array) => {
                 for element in array.elements.iter() {
                     if let ArrayElement::Value(value) = element {
-                        self.matching_sites(value.value, out);
+                        self.matching_sites(value.value, index, out);
                     }
                 }
             }
             Expression::LegacyArray(array) => {
                 for element in array.elements.iter() {
                     if let ArrayElement::Value(value) = element {
-                        self.matching_sites(value.value, out);
+                        self.matching_sites(value.value, index, out);
                     }
                 }
             }
@@ -261,13 +492,17 @@ impl<'ast, 'arena, 'w, 'sites>
         node: &'ast MethodCall<'arena>,
         ctx: &mut CollectCtx<'w, 'ast, 'arena, 'sites>,
     ) {
+        let ClassLikeMemberSelector::Identifier(method) = &node.method else {
+            return;
+        };
         let mut sites = Vec::new();
-        for argument in node.argument_list.arguments.iter() {
-            self.matching_sites(argument.value(), &mut sites);
+        for (index, argument) in node.argument_list.arguments.iter().enumerate() {
+            self.matching_sites(argument.value(), index, &mut sites);
         }
         if !sites.is_empty() {
             ctx.calls.push(ReceiverCall {
                 receiver: node.object,
+                method: crate::atom::bytes_to_str(method.value),
                 sites,
             });
         }

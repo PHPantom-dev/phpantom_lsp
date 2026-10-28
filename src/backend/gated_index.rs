@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{ReentrantMutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// An index together with whether it holds anything and whether it is out
 /// of date.
@@ -18,6 +18,9 @@ pub(crate) struct GatedIndex<T> {
     has_any: AtomicBool,
     dirty: AtomicBool,
     generation: AtomicU64,
+    /// Held for the length of a rebuild; see [`Self::rebuild_if_dirty`].
+    rebuild_lock: ReentrantMutex<()>,
+    rebuilding: AtomicBool,
 }
 
 impl<T> GatedIndex<T> {
@@ -28,6 +31,8 @@ impl<T> GatedIndex<T> {
             has_any: AtomicBool::new(false),
             dirty: AtomicBool::new(true),
             generation: AtomicU64::new(0),
+            rebuild_lock: ReentrantMutex::new(()),
+            rebuilding: AtomicBool::new(false),
         }
     }
 
@@ -77,9 +82,38 @@ impl<T> GatedIndex<T> {
         self.dirty.store(true, Ordering::Relaxed);
     }
 
-    /// Whether the index had to be rebuilt, clearing the mark: the caller
-    /// takes on the rebuild.
-    pub(crate) fn take_dirty(&self) -> bool {
-        self.dirty.swap(false, Ordering::Relaxed)
+    /// Run `rebuild` if the index is out of date, or wait for the rebuild
+    /// another thread is already running.
+    ///
+    /// The mark is cleared when a rebuild starts, so without the wait a
+    /// thread arriving mid-rebuild would read the old index as current.
+    /// The lock is reentrant because a rebuild loads classes, and every
+    /// class load comes back through here on the same thread.
+    pub(crate) fn rebuild_if_dirty(&self, rebuild: impl FnOnce()) {
+        if !self.dirty.load(Ordering::SeqCst) && !self.rebuilding.load(Ordering::SeqCst) {
+            return;
+        }
+        let _lock = self.rebuild_lock.lock();
+        // Raised before the mark is taken, so that a thread which finds the
+        // mark gone also finds this set until the rebuild is over.  Only
+        // the outermost call on the thread lowers it again.
+        let _rebuilding =
+            (!self.rebuilding.swap(true, Ordering::SeqCst)).then(|| Lower(&self.rebuilding));
+        if self.dirty.swap(false, Ordering::SeqCst) {
+            rebuild();
+        }
     }
 }
+
+/// Lowers a flag when dropped, panic or not.
+struct Lower<'a>(&'a AtomicBool);
+
+impl Drop for Lower<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+#[path = "gated_index_tests.rs"]
+mod tests;

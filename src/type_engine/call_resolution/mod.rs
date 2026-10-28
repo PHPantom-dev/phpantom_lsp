@@ -94,8 +94,8 @@ pub(crate) use reflection::{
     resolve_reflected_property_at_new,
 };
 pub(crate) use return_types::{
-    MethodReturnCtx, class_constant_type, enum_case_property_literal, folded_global_constant_type,
-    resolve_static_access_type,
+    MethodReturnCtx, answers_with_merged_method, class_constant_type, enum_case_property_literal,
+    folded_global_constant_type, resolve_static_access_type,
 };
 #[cfg(test)]
 pub(crate) use target_cache::test_body_inferences;

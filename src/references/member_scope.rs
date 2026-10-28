@@ -11,8 +11,10 @@ use super::*;
 use std::collections::HashMap;
 
 use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset};
+use crate::inheritance::ancestry::find_declaring_ancestor;
 use crate::names::resolve_to_fqn;
-use crate::types::ClassInfo;
+use crate::symbol_map::SymbolKind;
+use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
 
 /// The class a member declared at `offset` belongs to.
 ///
@@ -103,6 +105,18 @@ impl MemberScope {
     }
 }
 
+/// What [`Backend::method_rename_contract_conflict`] found the rename
+/// would break.
+pub(crate) struct ContractConflict {
+    /// The class that would no longer implement the method.
+    pub(crate) class: String,
+    /// The declaration that requires it, as `Type::method()`.
+    pub(crate) contract: String,
+    /// Whether that declaration is in the project, where renaming it
+    /// instead renames every implementation along with it.
+    pub(crate) contract_renameable: bool,
+}
+
 impl Backend {
     /// Resolve the class hierarchy for a `MemberAccess` subject.
     ///
@@ -189,6 +203,138 @@ impl Backend {
             .clone()
             .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&[fqn]));
         Some((hierarchy, declaration_scope))
+    }
+
+    /// A class that renaming the method under the cursor would leave
+    /// without a method something outside the rename requires of it.
+    ///
+    /// A method rename reaches the declaring class and what inherits from
+    /// it, but not the interfaces and abstract methods it fulfils, so that
+    /// renaming one implementation leaves its siblings alone.  The edit is
+    /// only valid PHP when every class it reaches still has the method
+    /// under its old name wherever a contract outside the rename demands
+    /// it, which a concrete parent or trait outside the rename can provide.
+    pub(crate) fn method_rename_contract_conflict(
+        &self,
+        uri: &str,
+        content: &str,
+        kind: &SymbolKind,
+        span_start: u32,
+    ) -> Option<ContractConflict> {
+        let (name, scope) = match kind {
+            SymbolKind::MemberDeclaration {
+                name,
+                is_static,
+                is_method: true,
+            } => {
+                let is_method = self
+                    .symbols
+                    .uri_classes_index
+                    .read()
+                    .get(uri)?
+                    .iter()
+                    .flat_map(|c| c.methods.iter())
+                    .any(|m| m.name_offset != 0 && m.name_offset == span_start);
+                if !is_method {
+                    return None;
+                }
+                let (_, scope) = self.resolve_member_declaration_scopes(
+                    uri,
+                    span_start,
+                    name,
+                    *is_static,
+                    ReferenceSearchMode::Rename,
+                )?;
+                (name, scope?)
+            }
+            SymbolKind::MemberAccess {
+                subject_text,
+                member_name,
+                is_static,
+                is_method_call: true,
+                ..
+            } => {
+                let source = self.symbol_map_source(uri, content)?;
+                let (_, scope) = self.resolve_member_access_scopes(
+                    uri,
+                    subject_text.as_str(source),
+                    *is_static,
+                    span_start,
+                    member_name,
+                    ReferenceSearchMode::Rename,
+                );
+                (member_name, scope?)
+            }
+            _ => return None,
+        };
+
+        let class_loader =
+            |name: Fqn<'_>| -> Option<Arc<ClassInfo>> { self.find_or_load_class(&name) };
+        let outside_method = |c: &ClassInfo, keep: &dyn Fn(&MethodInfo) -> bool| {
+            !scope.indexed().contains(c.fqn().as_str())
+                && c.methods
+                    .iter()
+                    .any(|m| m.name.eq_ignore_ascii_case(name) && keep(m))
+        };
+        // A private parent method is not inherited, so it fulfils nothing.
+        let provided_outside = |c: &ClassInfo| {
+            c.kind != ClassLikeKind::Interface
+                && outside_method(c, &|m| {
+                    !m.is_abstract && m.visibility != Visibility::Private
+                })
+        };
+        let required_outside = |c: &ClassInfo| {
+            outside_method(c, &|m| c.kind == ClassLikeKind::Interface || m.is_abstract)
+        };
+
+        // Only a class that can be instantiated has to implement anything.
+        // An abstract class, interface or trait the rename reaches may keep
+        // the requirement open, and the concrete classes below it are
+        // checked on their own.  Sorted so that the class a refusal names
+        // does not depend on hash order.
+        let mut renamed: Vec<&String> = scope.indexed().iter().collect();
+        renamed.sort();
+        renamed.into_iter().find_map(|fqn| {
+            let class = class_loader(Fqn::new(fqn))?;
+            let concrete = match class.kind {
+                ClassLikeKind::Class => !class.is_abstract,
+                ClassLikeKind::Enum => true,
+                ClassLikeKind::Interface | ClassLikeKind::Trait => false,
+            };
+            if !concrete {
+                return None;
+            }
+            if find_declaring_ancestor(&class, &class_loader, &provided_outside).is_some() {
+                return None;
+            }
+            let (_, contract) = find_declaring_ancestor(&class, &class_loader, &required_outside)?;
+            let method = contract
+                .methods
+                .iter()
+                .find(|m| m.name.eq_ignore_ascii_case(name))?;
+            // A contract only the stubs or a dependency declare cannot be
+            // renamed in its place.
+            let contract_fqn = contract.fqn();
+            let in_project = self
+                .symbols
+                .fqn_uri_index
+                .read()
+                .get(contract_fqn.as_str())
+                .is_some_and(|contract_uri| {
+                    contract_uri.starts_with("file://")
+                        && !self
+                            .workspace
+                            .vendor_uri_prefixes
+                            .lock()
+                            .iter()
+                            .any(|prefix| contract_uri.starts_with(prefix.as_str()))
+                });
+            Some(ContractConflict {
+                class: class.fqn().to_string(),
+                contract: format!("{contract_fqn}::{}()", method.name),
+                contract_renameable: in_project,
+            })
+        })
     }
 
     /// Resolve a member-access subject to the FQN(s) of its type(s), using

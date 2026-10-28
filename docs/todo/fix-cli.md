@@ -12,26 +12,20 @@ Detects unused `use` statements and removes them. Handles simple imports,
 group imports (removing individual members), and blank-line collapsing to
 keep formatting clean.
 
+### `deprecated` — Replace deprecated symbol usage
+
+Rewrites calls to functions and methods whose
+`#[Deprecated(replacement: "...")]` attribute names a replacement, using
+the same expansion as the "Replace with" quickfix
+(`src/code_actions/replace_deprecated.rs`). Runs before `unused_import`
+so an import a rewritten call leaves unused goes in the same run.
+
 ---
 
 ## Planned Native Rules
 
 These rules use PHPantom's own diagnostics and do not require external
 tools.
-
-### FX1. `deprecated` — Replace deprecated symbol usage
-
-**Prerequisite:** The existing `replace_deprecated` code action
-(`src/code_actions/replace_deprecated.rs`), already implemented and
-shipped as an LSP quickfix.
-
-When a symbol carries a `#[Deprecated(replacement: "...")]` attribute
-(the phpstorm-stubs convention, using `%parametersList%`,
-`%parameter0%`, `%class%` template placeholders), automatically apply
-the replacement. The action already does this mechanically from the
-structured attribute, not from free-text message parsing; the
-remaining work is wiring it into `fix.rs`'s `NATIVE_RULES` the same
-way `unused_import` is wired.
 
 ### FX2. `unused_variable` — Remove unused variables
 

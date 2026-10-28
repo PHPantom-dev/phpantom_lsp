@@ -2515,3 +2515,25 @@ function test(): void {
         "`$x` is only a parameter of the closure type, got: {diags:?}"
     );
 }
+
+/// A `<?= … ?>` echo tag reads and writes variables the way `echo` does.
+#[test]
+fn echo_tag_reads_and_assignments_are_seen() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+?>
+<?= $total = 3 ?>
+<?= $missing ?>
+<?php
+    echo $total;
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "only `$missing` is undefined, got: {diags:?}"
+    );
+    assert!(message_text(&diags[0].message).contains("$missing"));
+}

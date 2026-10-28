@@ -21,7 +21,9 @@ use mago_syntax::cst::*;
 
 use crate::atom::atom;
 use crate::symbol_map::docblock::get_docblock_text_with_offset;
-use crate::types::{AssertionKind, CallableInvocation, ParameterInfo, PhpVersion, TypeAssertion};
+use crate::types::{
+    AssertionKind, CallableInvocation, DocReadonly, ParameterInfo, PhpVersion, TypeAssertion,
+};
 
 use super::parser::{
     DocblockInfo, TagInfo, TagValueInfo, collapse_newlines, parse_docblock_for_tags,
@@ -143,6 +145,31 @@ pub fn declares_impure(info: &DocblockInfo) -> bool {
             "impure" | "phpstan-impure" | "psalm-impure"
         )
     })
+}
+
+/// What a property's docblock says about writing to it.
+///
+/// `@readonly` and its `@psalm-`/`@phpstan-` forms make the property
+/// readonly by contract.  Psalm's `@psalm-readonly-allow-private-mutation`,
+/// or `@psalm-allow-private-mutation` next to a readonly tag, keeps it
+/// writable from inside its declaring class.  None of these is a tag the
+/// parser models, so they are matched by name.
+pub fn extract_doc_readonly_from_info(info: &DocblockInfo) -> DocReadonly {
+    let mut readonly = false;
+    let mut private_mutation = false;
+    for tag in &info.tags {
+        match tag.name.as_ref() {
+            "readonly" | "psalm-readonly" | "phpstan-readonly" => readonly = true,
+            "psalm-allow-private-mutation" => private_mutation = true,
+            "psalm-readonly-allow-private-mutation" => return DocReadonly::AllowPrivateMutation,
+            _ => {}
+        }
+    }
+    match (readonly, private_mutation) {
+        (true, true) => DocReadonly::AllowPrivateMutation,
+        (true, false) => DocReadonly::Readonly,
+        _ => DocReadonly::No,
+    }
 }
 
 /// Extract the PHP version from a `@removed` PHPDoc tag.

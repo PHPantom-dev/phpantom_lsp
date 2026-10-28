@@ -77,7 +77,10 @@ fn walk_try_body<'b>(
     for stmt in try_stmt.block.statements.iter() {
         let flat = matches!(
             stmt,
-            Statement::Expression(_) | Statement::Return(_) | Statement::Echo(_)
+            Statement::Expression(_)
+                | Statement::Return(_)
+                | Statement::Echo(_)
+                | Statement::EchoTag(_)
         );
         let mut stmt_throws = ThrowPoints::default();
         stmt_throws.collect(stmt, flat.then_some(&*scope), ctx);

@@ -17,6 +17,7 @@ use parking_lot::{Mutex, RwLock};
 use crate::ClassCompletionOrigin;
 use crate::composer;
 use crate::config;
+use crate::resolution::ProjectScopes;
 use crate::types::PhpVersion;
 
 /// Workspace root, PSR-4 mappings, vendor locations, PHP version, and the
@@ -48,6 +49,9 @@ pub(crate) struct WorkspaceEnv {
     /// Kept per project so a `composer update` in one subproject replaces
     /// that subproject's share and leaves the others' alone.
     pub(crate) composer_projects: Arc<RwLock<Vec<ComposerProjectPaths>>>,
+    /// The class-lookup scopes built from `composer_projects`, or `None`
+    /// until first asked for since the projects last changed.
+    pub(crate) project_scopes: Arc<RwLock<Option<Arc<ProjectScopes>>>>,
     /// The editor's workspace folders, as `initialize` and
     /// `workspace/didChangeWorkspaceFolders` report them.
     ///
@@ -141,6 +145,13 @@ pub(crate) struct ComposerProjectPaths {
     /// The directory holding the project's `composer.json`.
     pub(crate) root: PathBuf,
     pub(crate) psr4_mappings: Vec<composer::Psr4Mapping>,
+    /// Every spelling of the project's vendor directory, or empty when it
+    /// has none on disk.
+    pub(crate) vendor_paths: Vec<PathBuf>,
+    /// The packages it installed from outside its vendor directory (see
+    /// [`composer::linked_package_roots`]), which can lie in another
+    /// project's tree.
+    pub(crate) linked_packages: Vec<PathBuf>,
     pub(crate) package_roots: Vec<(PathBuf, ClassCompletionOrigin, String)>,
     /// The roots of the stub packages it installed, which are stub paths.
     pub(crate) stub_packages: Vec<PathBuf>,
@@ -167,6 +178,7 @@ impl WorkspaceEnv {
             library_claims: Mutex::new(Vec::new()),
             vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             composer_projects: Arc::new(RwLock::new(Vec::new())),
+            project_scopes: Arc::new(RwLock::new(None)),
             workspace_folders: Arc::new(RwLock::new(Vec::new())),
             php_version: Mutex::new(PhpVersion::default()),
             config: Arc::new(Mutex::new(config::Config::default())),
@@ -180,6 +192,28 @@ impl WorkspaceEnv {
     }
 }
 
+impl WorkspaceEnv {
+    /// The class-lookup scope of each Composer project.
+    pub(crate) fn project_scopes(&self) -> Arc<ProjectScopes> {
+        if let Some(scopes) = self.project_scopes.read().as_ref() {
+            return Arc::clone(scopes);
+        }
+        // Built under the write lock, so a build from projects read before
+        // a change cannot be stored after that change's `forget`.
+        let mut slot = self.project_scopes.write();
+        let scopes = slot
+            .get_or_insert_with(|| Arc::new(ProjectScopes::build(&self.composer_projects.read())));
+        Arc::clone(scopes)
+    }
+
+    /// Rebuild the project scopes on next use, after `composer_projects`
+    /// changed.  Call it with `composer_projects` unlocked: building the
+    /// scopes takes that lock while holding this one.
+    pub(crate) fn forget_project_scopes(&self) {
+        *self.project_scopes.write() = None;
+    }
+}
+
 impl Clone for WorkspaceEnv {
     fn clone(&self) -> Self {
         Self {
@@ -190,6 +224,7 @@ impl Clone for WorkspaceEnv {
             library_claims: Mutex::new(self.library_claims.lock().clone()),
             vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
             composer_projects: Arc::clone(&self.composer_projects),
+            project_scopes: Arc::clone(&self.project_scopes),
             workspace_folders: Arc::clone(&self.workspace_folders),
             php_version: Mutex::new(*self.php_version.lock()),
             config: Arc::clone(&self.config),

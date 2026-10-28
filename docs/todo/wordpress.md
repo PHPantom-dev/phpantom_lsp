@@ -67,6 +67,16 @@ if (is_wp_error($result)) { … }   // narrows $result to WP_Error
 wp_die();                         // nothing after it is reachable
 ```
 
+One gap is already known. Core's output constants (`OBJECT`, `ARRAY_A`,
+`ARRAY_N`) are `define()`d at runtime and are not in `wordpress-stubs`,
+so a default argument of `$output = OBJECT` cannot be told apart from the
+other branches, and `get_post($id)` comes back as
+`non-empty-array<string, mixed>|non-empty-array<int, mixed>|WP_Post|null`
+instead of `WP_Post|null`. PHPStan's WordPress extension declares these
+constants in its bootstrap, and `php-stubs/wordpress-globals` ships them.
+Ship them with the WordPress support (their values are fixed), so the
+conditional return types over `$output` resolve on the default.
+
 Go through what the stubs declare, write an assertion fixture for each
 construct, and file every one the engine reads wrongly as a bug in
 `bugs.md` or `type-inference.md`. Fixing those fixes them for every
@@ -135,6 +145,11 @@ is done at all, it belongs behind an opt-in.
 
 PHP Tools added hook navigation in 2026, and PhpStorm has it built in,
 so this is the feature a WordPress developer will compare first.
+PhpStorm, pointed at a WordPress install, completes core's and the
+project's own hook names in `add_action('…')`, navigates from a use to
+where the hook fires, and marks both ends in the gutter. Its completion
+only opens on an explicit Ctrl+Space; ours opens on the quote, since `'`
+and `"` are already completion triggers.
 
 **Where to look:** the string-key machinery Laravel and Symfony names
 use (`src/virtual_members/laravel/string_keys.rs`,

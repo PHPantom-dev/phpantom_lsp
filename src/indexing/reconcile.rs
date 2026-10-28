@@ -153,8 +153,8 @@ impl Backend {
     ///
     /// Only the *change* is applied. A file both filter sets exclude was
     /// put in the index by something the filters do not govern (a
-    /// Composer classmap entry names its file without any walk reaching
-    /// it), and evicting it would make an unrelated settings edit
+    /// Composer `files` autoload entry names its file without any walk
+    /// reaching it), and evicting it would make an unrelated settings edit
     /// silently unresolve classes a restart would still resolve.
     fn evict_newly_filtered_symbols(
         &self,
@@ -483,12 +483,13 @@ mod tests {
 
     /// Only what the change put out of scope is evicted. A file both
     /// filter sets exclude is in the index because something the filters
-    /// do not govern put it there (Composer's classmap names its file
-    /// without any walk reaching it), so an unrelated settings edit must
+    /// do not govern put it there (Composer's `files` autoload names its
+    /// file without any walk reaching it), so an unrelated settings edit must
     /// not quietly unresolve classes a restart would still resolve.
     #[test]
     fn a_file_excluded_before_and_after_is_left_alone() {
-        let (backend, _dir) = backend_indexing(&["src/Kept.php", "generated/FromClassmap.php"]);
+        let (backend, _dir) =
+            backend_indexing(&["src/Kept.php", "generated/FromAutoloadFiles.php"]);
         backend.set_client_indexing_options(client_options(&["generated"]));
 
         let previous = backend.discovery_inputs();

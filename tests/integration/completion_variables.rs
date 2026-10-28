@@ -832,7 +832,7 @@ async fn test_completion_ambiguous_variable_if_block_union() {
     let text = concat!(
         "<?php\n",
         "class SessionManager {\n",
-        "    public function callCustomCreator2(): void {}\n",
+        "    public function callCustomCreator2(): bool { return true; }\n",
         "    public function start(): void {}\n",
         "}\n",
         "\n",

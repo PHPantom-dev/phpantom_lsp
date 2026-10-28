@@ -105,6 +105,22 @@ pub(crate) enum StringKeyKind {
     /// `framework.messenger.buses`, and read by `default_bus`,
     /// `#[AsMessageHandler(bus: …)]`, and a `BusNameStamp`.
     MessengerBus,
+    /// A Yii view: the template a view renderer's `render()` family or a
+    /// view's own `render()` loads, keyed by the path it names (see
+    /// `yii::views`).
+    YiiView,
+    /// A Yii route name: declared by a `Route` definition's `->name()`,
+    /// after the name prefixes of the groups around it, and read by a URL
+    /// generator's `generate()`, `generateAbsolute()`, and
+    /// `generateFromCurrent()`, and by the methods of a class of the
+    /// project's own that pass a name on to one.
+    YiiRoute,
+    /// The route argument a handler's `#[RouteArgument('id')]` reads, keyed
+    /// by the handler as well as the name (see
+    /// `yii::routes::route_argument_key`): an `id` only means something
+    /// under the routes that dispatch to that handler, whose paths declare
+    /// it.
+    YiiRouteArgument,
 }
 
 impl StringKeyKind {
@@ -131,6 +147,14 @@ impl StringKeyKind {
                 | Self::SymfonyConfigKey
                 | Self::SymfonyEvent
                 | Self::MessengerBus
+        )
+    }
+
+    /// Whether this key belongs to Yii.
+    pub(crate) const fn is_yii(self) -> bool {
+        matches!(
+            self,
+            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument
         )
     }
 }
@@ -363,6 +387,39 @@ pub(crate) enum ContainerValue {
     Type(crate::php_type::PhpType),
 }
 
+// ─── Routes ─────────────────────────────────────────────────────────────────
+
+/// A route a file declares, with what its name alone does not say: the path
+/// it matches and the handler it dispatches to.
+///
+/// Kept beside the spans rather than in them, since a path's placeholders
+/// only mean something under their route (every route has its own `id`),
+/// and only the route files of a project hold one.  A named route is keyed
+/// back to its name's declaration span by [`Self::name_start`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RouteSite {
+    /// Byte offset of the route name's declaration span, when the route
+    /// has a name.
+    pub name_start: Option<u32>,
+    /// The whole path, with the prefixes of the groups around it, or
+    /// `None` when one of them is not written as a literal.
+    pub path: Option<String>,
+    /// The placeholders of the path the file spells out, each with the byte
+    /// range of its name, the group prefixes' included.
+    pub placeholders: Vec<RoutePlaceholder>,
+    /// The handler the route dispatches to, as
+    /// `yii::routes::handler_key` spells it, when it names one.
+    pub handler: Option<String>,
+}
+
+/// One `{name}` in a route's path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RoutePlaceholder {
+    pub name: String,
+    pub start: u32,
+    pub end: u32,
+}
+
 // ─── String keys behind a typed receiver ────────────────────────────────────
 
 const PSR_CONTAINER: &str = "Psr\\Container\\ContainerInterface";
@@ -382,6 +439,7 @@ const SYMFONY_SERVICE_CONFIGURATOR: &str =
 const SYMFONY_PARAMETERS_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ParametersConfigurator";
 const SYMFONY_URL_GENERATOR: &str = "Symfony\\Component\\Routing\\Generator\\UrlGeneratorInterface";
+const YII_URL_GENERATOR: &str = "Yiisoft\\Router\\UrlGeneratorInterface";
 const SYMFONY_ROUTING_CONFIGURATOR: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator";
 const SYMFONY_TRANSLATOR: &str = "Symfony\\Contracts\\Translation\\TranslatorInterface";
@@ -393,6 +451,11 @@ const SYMFONY_EVENT_DISPATCHER_CONTRACT: &str =
     "Symfony\\Contracts\\EventDispatcher\\EventDispatcherInterface";
 const SYMFONY_EVENT_DISPATCHER: &str =
     "Symfony\\Component\\EventDispatcher\\EventDispatcherInterface";
+const YII_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\Renderer\\ViewRenderer";
+const YII_WEB_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\Renderer\\WebViewRenderer";
+/// The renderer before `yiisoft/yii-view-renderer` 7 moved it.
+const YII_LEGACY_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\ViewRenderer";
+const YII_VIEW: &str = "Yiisoft\\View\\ViewInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -438,7 +501,8 @@ pub(crate) enum ReceiverClass {
     /// the shortcuts a Symfony controller inherits.
     ControllerRouting,
     /// A URL generator, the router included, whose `generate()` takes a
-    /// route name.
+    /// route name: Symfony's, and Yii's, whose `generateAbsolute()` takes
+    /// one too and whose `generateFromCurrent()` takes a fallback.
     UrlGenerator,
     /// A PHP routing configurator, whose `add()` declares a route.
     RoutingConfigurator,
@@ -460,6 +524,9 @@ pub(crate) enum ReceiverClass {
     /// `hasListeners()`, `getListeners()`, and `getListenerPriority()`
     /// look listeners up by it.
     EventListeners,
+    /// What renders a Yii view by its first argument: a view renderer's
+    /// `render()` family, and a view's own `render()` inside a template.
+    YiiViewRenderer,
 }
 
 impl ReceiverClass {
@@ -468,7 +535,7 @@ impl ReceiverClass {
     pub(crate) fn targets(self) -> &'static [(&'static str, StringKeyKind)] {
         use StringKeyKind::{
             ContainerParameter, ServiceId, SymfonyEvent, SymfonyRoute, SymfonyTranslation,
-            TranslationDomain, TwigTemplate, View,
+            TranslationDomain, TwigTemplate, View, YiiRoute, YiiView,
         };
         match self {
             // The concrete `Illuminate\View\Factory` implements the
@@ -501,7 +568,10 @@ impl ReceiverClass {
             ],
             Self::ServiceConfigurator => &[(SYMFONY_SERVICE_CONFIGURATOR, ServiceId)],
             Self::ControllerRouting => &[(SYMFONY_ABSTRACT_CONTROLLER, SymfonyRoute)],
-            Self::UrlGenerator => &[(SYMFONY_URL_GENERATOR, SymfonyRoute)],
+            Self::UrlGenerator => &[
+                (SYMFONY_URL_GENERATOR, SymfonyRoute),
+                (YII_URL_GENERATOR, YiiRoute),
+            ],
             // Only the top-level configurator: a route a collection's
             // `add()` declares takes the collection's name prefix.
             Self::RoutingConfigurator => &[(SYMFONY_ROUTING_CONFIGURATOR, SymfonyRoute)],
@@ -517,6 +587,12 @@ impl ReceiverClass {
             // contract covers both.
             Self::EventDispatcher => &[(SYMFONY_EVENT_DISPATCHER_CONTRACT, SymfonyEvent)],
             Self::EventListeners => &[(SYMFONY_EVENT_DISPATCHER, SymfonyEvent)],
+            Self::YiiViewRenderer => &[
+                (YII_WEB_VIEW_RENDERER, YiiView),
+                (YII_VIEW_RENDERER, YiiView),
+                (YII_LEGACY_VIEW_RENDERER, YiiView),
+                (YII_VIEW, YiiView),
+            ],
         }
     }
 
@@ -533,6 +609,14 @@ impl ReceiverClass {
         }
     }
 
+    /// Whether a call on a class of the project's own that passes the
+    /// argument on to this receiver names a key too.  Only a URL generator
+    /// is wrapped that way, and a call's method is read for it, so only
+    /// one is followed.
+    pub(crate) fn follows_wrappers(self) -> bool {
+        self == Self::UrlGenerator
+    }
+
     /// Whether the call names a template.
     pub(crate) fn names_views(self) -> bool {
         matches!(
@@ -546,10 +630,10 @@ impl ReceiverClass {
         matches!(self, Self::TemplateRenderer | Self::TemplatedEmail)
     }
 
-    /// The kind of key the call names on its first target, which says
-    /// which framework the receiver belongs to.
-    pub(crate) fn key_kind(self) -> StringKeyKind {
-        self.targets()[0].1
+    /// Whether the call can name a key in a project for which `enabled`
+    /// holds of some kind of key one of its targets names.
+    pub(crate) fn names_any(self, enabled: impl Fn(StringKeyKind) -> bool) -> bool {
+        self.targets().iter().any(|(_, kind)| enabled(*kind))
     }
 }
 

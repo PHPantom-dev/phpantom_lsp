@@ -2,9 +2,11 @@
 //! class, and enum cases.
 
 use crate::common::{
-    apply_edits, create_test_backend, edits_for_uri, line_char_of, open_php, prepare_rename,
+    apply_edits, create_initialized_psr4_workspace, create_test_backend,
+    create_test_backend_with_full_stubs, edits_for_uri, line_char_of, open_php, prepare_rename,
     rename, rename_result,
 };
+use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
 // ─── Method Rename ──────────────────────────────────────────────────────────
@@ -456,7 +458,7 @@ async fn rename_listener_private_method_cross_file_stays_scoped() {
 }
 
 #[tokio::test]
-async fn rename_method_on_implementation_does_not_leak_to_sibling_implementors() {
+async fn rename_method_on_implementation_is_refused_instead_of_breaking_the_interface() {
     let backend = create_test_backend();
     let uri = Uri::parse("file:///test.php").unwrap();
     let text = concat!(
@@ -478,41 +480,16 @@ async fn rename_method_on_implementation_does_not_leak_to_sibling_implementors()
 
     open_php(&backend, &uri, text).await;
 
-    let edit = rename(&backend, &uri, 5, 20, "calculate").await;
-    assert!(edit.is_some(), "Rename should produce edits");
-
-    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
-    let result = apply_edits(text, &file_edits);
-
-    assert!(
-        result.contains(
-            "class Listener implements Recalculates {\n    public function calculate(): void {}"
-        ),
-        "Implementation declaration should be renamed; got:\n{}",
-        result
-    );
-    assert!(
-        result.contains("$listener->calculate()"),
-        "Listener call should be renamed; got:\n{}",
-        result
-    );
-    assert!(
-        result.contains("interface Recalculates {\n    public function recalculate(): void;"),
-        "Interface declaration should remain unchanged; got:\n{}",
-        result
-    );
-    assert!(
-        result.contains(
-            "class Worker implements Recalculates {\n    public function recalculate(): void {}"
-        ),
-        "Sibling implementation should remain unchanged; got:\n{}",
-        result
-    );
-    assert!(
-        result.contains("$worker->recalculate()"),
-        "Sibling call should remain unchanged; got:\n{}",
-        result
-    );
+    // From the implementation's declaration and from a call on it.
+    for (line, character) in [(5, 20), (11, 17)] {
+        let refusal = rename_result(&backend, &uri, line, character, "calculate")
+            .await
+            .expect_err("renaming one implementation would break the interface");
+        assert!(
+            refusal.contains("`Listener`") && refusal.contains("`Recalculates::recalculate()`"),
+            "the refusal should name the class and the contract; got: {refusal}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -1191,5 +1168,624 @@ async fn rename_data_provider_updates_the_metadata_naming_it() {
             "    public static function matching(): iterable { yield ['a']; }\n",
             "}\n",
         )
+    );
+}
+
+// ─── Methods another type requires ──────────────────────────────────────────
+
+/// Line and character of `sub` inside the first occurrence of `needle`.
+fn position_in(text: &str, needle: &str, sub: &str) -> (u32, u32) {
+    let (line, character) = line_char_of(text, needle);
+    (line, character + needle.find(sub).unwrap() as u32)
+}
+
+/// Open `text` as the only file and rename the `sub` inside `needle`,
+/// returning the refusal.
+async fn refusal_for(text: &str, needle: &str, sub: &str, new_name: &str) -> String {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, text).await;
+    let (line, character) = position_in(text, needle, sub);
+    match rename_result(&backend, &uri, line, character, new_name).await {
+        Err(refusal) => refusal,
+        Ok(edit) => panic!(
+            "renaming {sub:?} in {needle:?} should be refused; it was renamed to:\n{}",
+            edit.map(|e| apply_edits(text, &edits_for_uri(&e, &uri)))
+                .unwrap_or_default()
+        ),
+    }
+}
+
+/// Open `text` as the only file and rename the `sub` inside `needle`,
+/// returning the text with the edits applied.
+async fn renamed_text(text: &str, needle: &str, sub: &str, new_name: &str) -> String {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, text).await;
+    let (line, character) = position_in(text, needle, sub);
+    let edit = rename(&backend, &uri, line, character, new_name)
+        .await
+        .expect("expected a rename");
+    apply_edits(text, &edits_for_uri(&edit, &uri))
+}
+
+const GREETERS: &str = concat!(
+    "<?php\n",
+    "interface Greeting { public function greet(): string; }\n",
+    "class Greeter implements Greeting {\n",
+    "    public function greet(): string { return 'hello'; }\n",
+    "}\n",
+    "class OtherGreeter implements Greeting {\n",
+    "    public function greet(): string { return 'other'; }\n",
+    "}\n",
+    "$a = new Greeter(); $a->greet();\n",
+    "$b = new OtherGreeter(); $b->greet();\n",
+    "function greetAny(Greeting $g): string { return $g->greet(); }\n",
+);
+
+#[tokio::test]
+async fn renaming_an_implementation_from_its_declaration_is_refused() {
+    let refusal = refusal_for(
+        GREETERS,
+        "function greet(): string { return 'hello'",
+        "greet",
+        "greetAll",
+    )
+    .await;
+    assert!(
+        refusal.contains("`Greeter`") && refusal.contains("`Greeting::greet()`"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn renaming_an_implementation_from_a_call_on_it_is_refused() {
+    for needle in ["$a->greet", "$b->greet"] {
+        let refusal = refusal_for(GREETERS, needle, "greet", "greetAll").await;
+        assert!(refusal.contains("`Greeting::greet()`"), "{refusal}");
+    }
+}
+
+#[tokio::test]
+async fn renaming_the_interface_method_renames_the_whole_contract() {
+    let expected = GREETERS.replace("greet()", "greetAll()");
+    for (needle, sub) in [
+        ("interface Greeting { public function greet", "greet"),
+        ("$g->greet", "greet"),
+    ] {
+        assert_eq!(
+            renamed_text(GREETERS, needle, sub, "greetAll").await,
+            expected,
+            "renaming from {needle:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn renaming_the_only_implementation_is_refused() {
+    let text = concat!(
+        "<?php\n",
+        "interface Greeting { public function greet(): string; }\n",
+        "class Greeter implements Greeting {\n",
+        "    public function greet(): string { return 'hello'; }\n",
+        "}\n",
+    );
+    let refusal = refusal_for(text, "function greet(): string {", "greet", "greetAll").await;
+    assert!(refusal.contains("`Greeting::greet()`"), "{refusal}");
+}
+
+#[tokio::test]
+async fn renaming_a_static_implementation_is_refused() {
+    let text = concat!(
+        "<?php\n",
+        "interface Factory { public static function make(): static; }\n",
+        "final class Widget implements Factory {\n",
+        "    public static function make(): static { return new static(); }\n",
+        "}\n",
+        "Widget::make();\n",
+    );
+    for needle in ["function make(): static {", "Widget::make"] {
+        let refusal = refusal_for(text, needle, "make", "build").await;
+        assert!(refusal.contains("`Factory::make()`"), "{refusal}");
+    }
+}
+
+#[tokio::test]
+async fn renaming_an_implementation_is_refused_whatever_the_case_it_is_spelled_in() {
+    let text = concat!(
+        "<?php\n",
+        "interface Greeting { public function greet(): string; }\n",
+        "class Greeter implements Greeting {\n",
+        "    public function GREET(): string { return 'hello'; }\n",
+        "}\n",
+    );
+    let refusal = refusal_for(text, "function GREET", "GREET", "greetAll").await;
+    assert!(refusal.contains("`Greeting::greet()`"), "{refusal}");
+}
+
+#[tokio::test]
+async fn renaming_an_enum_implementation_is_refused() {
+    let text = concat!(
+        "<?php\n",
+        "interface HasLabel { public function label(): string; }\n",
+        "enum Suit: string implements HasLabel {\n",
+        "    case Hearts = 'H';\n",
+        "    public function label(): string { return 'hearts'; }\n",
+        "}\n",
+    );
+    let refusal = refusal_for(text, "function label(): string {", "label", "title").await;
+    assert!(
+        refusal.contains("`Suit`") && refusal.contains("`HasLabel::label()`"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn a_contract_inherited_through_an_interface_is_kept() {
+    let text = concat!(
+        "<?php\n",
+        "interface Named { public function name(): string; }\n",
+        "interface Labelled extends Named { public function name(): string; }\n",
+        "class Tag implements Labelled {\n",
+        "    public function name(): string { return 'tag'; }\n",
+        "}\n",
+    );
+    // Each step up the chain names the next contract to rename instead.
+    for (needle, contract) in [
+        ("function name(): string { return", "`Labelled::name()`"),
+        (
+            "Labelled extends Named { public function name",
+            "`Named::name()`",
+        ),
+    ] {
+        let refusal = refusal_for(text, needle, "name", "title").await;
+        assert!(refusal.contains(contract), "{refusal}");
+    }
+    assert_eq!(
+        renamed_text(
+            text,
+            "interface Named { public function name",
+            "name",
+            "title"
+        )
+        .await,
+        text.replace("name()", "title()"),
+    );
+}
+
+#[tokio::test]
+async fn a_contract_from_an_interface_the_parent_implements_is_kept() {
+    let text = concat!(
+        "<?php\n",
+        "interface Named { public function name(): string; }\n",
+        "abstract class Base implements Named {}\n",
+        "class Tag extends Base {\n",
+        "    public function name(): string { return 'tag'; }\n",
+        "}\n",
+    );
+    let refusal = refusal_for(text, "function name(): string {", "name", "title").await;
+    assert!(refusal.contains("`Named::name()`"), "{refusal}");
+}
+
+#[tokio::test]
+async fn renaming_from_one_of_two_interfaces_requiring_the_method_is_refused() {
+    let text = concat!(
+        "<?php\n",
+        "interface Reader { public function close(): void; }\n",
+        "interface Writer { public function close(): void; }\n",
+        "class Stream implements Reader, Writer {\n",
+        "    public function close(): void {}\n",
+        "}\n",
+    );
+    let refusal = refusal_for(text, "Reader { public function close", "close", "shutdown").await;
+    assert!(
+        refusal.contains("`Stream`") && refusal.contains("`Writer::close()`"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn an_abstract_parent_method_is_kept() {
+    let text = concat!(
+        "<?php\n",
+        "abstract class Shape { abstract public function area(): float; }\n",
+        "class Square extends Shape {\n",
+        "    public function area(): float { return 1.0; }\n",
+        "}\n",
+        "(new Square())->area();\n",
+    );
+    for needle in ["function area(): float {", "->area"] {
+        let refusal = refusal_for(text, needle, "area", "surface").await;
+        assert!(
+            refusal.contains("`Square`") && refusal.contains("`Shape::area()`"),
+            "{refusal}"
+        );
+    }
+    assert_eq!(
+        renamed_text(text, "abstract public function area", "area", "surface").await,
+        text.replace("area()", "surface()"),
+    );
+}
+
+#[tokio::test]
+async fn an_abstract_trait_method_is_kept() {
+    let text = concat!(
+        "<?php\n",
+        "trait Greets { abstract public function greet(): string; }\n",
+        "class Greeter {\n",
+        "    use Greets;\n",
+        "    public function greet(): string { return 'hello'; }\n",
+        "}\n",
+    );
+    let refusal = refusal_for(text, "function greet(): string {", "greet", "greetAll").await;
+    assert!(refusal.contains("`Greets::greet()`"), "{refusal}");
+}
+
+#[tokio::test]
+async fn a_parent_method_another_class_implements_an_interface_with_is_kept() {
+    let text = concat!(
+        "<?php\n",
+        "interface Greeting { public function greet(): string; }\n",
+        "class Base { public function greet(): string { return 'hi'; } }\n",
+        "class Greeter extends Base implements Greeting {}\n",
+    );
+    let refusal = refusal_for(text, "Base { public function greet", "greet", "greetAll").await;
+    assert!(
+        refusal.contains("`Greeter`") && refusal.contains("`Greeting::greet()`"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn an_override_whose_concrete_parent_still_implements_the_contract_is_renamed() {
+    let text = concat!(
+        "<?php\n",
+        "interface Recalculates { public function recalculate(): void; }\n",
+        "class BaseListener implements Recalculates {\n",
+        "    public function recalculate(): void {}\n",
+        "}\n",
+        "class InvoiceListener extends BaseListener {\n",
+        "    public function recalculate(): void { parent::recalculate(); }\n",
+        "}\n",
+        "class OrderListener extends BaseListener {\n",
+        "    public function recalculate(): void {}\n",
+        "}\n",
+    );
+    assert_eq!(
+        renamed_text(
+            text,
+            "function recalculate(): void { parent",
+            "recalculate",
+            "calculate"
+        )
+        .await,
+        text.replace(
+            "function recalculate(): void { parent",
+            "function calculate(): void { parent"
+        ),
+    );
+}
+
+#[tokio::test]
+async fn an_override_of_a_method_a_trait_still_provides_is_renamed() {
+    let text = concat!(
+        "<?php\n",
+        "interface Greeting { public function greet(): string; }\n",
+        "trait DefaultGreeting { public function greet(): string { return 'hi'; } }\n",
+        "class Greeter implements Greeting {\n",
+        "    use DefaultGreeting;\n",
+        "    public function greet(): string { return 'hello'; }\n",
+        "}\n",
+    );
+    assert_eq!(
+        renamed_text(text, "greet(): string { return 'hello'", "greet", "shout").await,
+        text.replace(
+            "greet(): string { return 'hello'",
+            "shout(): string { return 'hello'"
+        ),
+    );
+}
+
+#[tokio::test]
+async fn a_same_named_method_on_an_unrelated_class_is_renamed_alone() {
+    let text = format!(
+        "{GREETERS}{}",
+        concat!(
+            "class Robot { public function greet(): string { return 'beep'; } }\n",
+            "$r = new Robot(); $r->greet();\n",
+        )
+    );
+    assert_eq!(
+        renamed_text(&text, "$r->greet", "greet", "beep").await,
+        text.replace(
+            "Robot { public function greet",
+            "Robot { public function beep"
+        )
+        .replace("$r->greet", "$r->beep"),
+    );
+}
+
+const NAMED_TAG: &str = concat!(
+    "<?php\n",
+    "interface Named { public function name(): string; }\n",
+    "class Tag implements Named {\n",
+    "    const name = 'tag';\n",
+    "    public string $name = 'tag';\n",
+    "    public function name(): string { return self::name . $this->name; }\n",
+    "}\n",
+);
+
+#[tokio::test]
+async fn a_property_or_constant_named_like_a_required_method_is_not_refused() {
+    for (needle, renamed) in [
+        ("$name = 'tag'", "$label = 'tag';"),
+        ("const name", "const label = 'tag';"),
+    ] {
+        let result = renamed_text(NAMED_TAG, needle, "name", "label").await;
+        assert!(result.contains(renamed), "renaming {needle:?}: {result}");
+    }
+}
+
+#[tokio::test]
+async fn an_invalid_new_name_is_reported_before_the_contract() {
+    let refusal = refusal_for(
+        GREETERS,
+        "function greet(): string { return 'hello'",
+        "greet",
+        "1greet",
+    )
+    .await;
+    assert!(refusal.contains("not a valid PHP name"), "{refusal}");
+}
+
+#[tokio::test]
+async fn a_contract_in_an_unopened_file_is_kept() {
+    let greeter = "<?php\nnamespace App;\nclass Greeter implements Greeting\n{\n    public function greet(): string { return 'hello'; }\n}\n";
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[
+            (
+                "src/Greeting.php",
+                "<?php\nnamespace App;\ninterface Greeting\n{\n    public function greet(): string;\n}\n",
+            ),
+            ("src/Greeter.php", greeter),
+        ],
+        "src/Greeter.php",
+    )
+    .await;
+
+    let (line, character) = position_in(greeter, "function greet", "greet");
+    let refusal = rename_result(&backend, &uri, line, character, "greetAll")
+        .await
+        .expect_err("the interface in the unopened file still requires greet()");
+    assert!(
+        refusal.contains("`App\\Greeter`")
+            && refusal.contains("Rename `App\\Greeting::greet()` instead"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn a_contract_from_a_dependency_is_kept() {
+    let installed_json = r#"{"packages": [{
+        "name": "acme/contracts",
+        "version": "1.0.0",
+        "install-path": "../acme/contracts",
+        "autoload": {"psr-4": {"Acme\\": ""}}
+    }]}"#;
+    let handler = "<?php\nnamespace App;\nclass Handler implements \\Acme\\Handles\n{\n    public function handle(): void {}\n}\n";
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[
+            ("vendor/composer/installed.json", installed_json),
+            (
+                "vendor/acme/contracts/Handles.php",
+                "<?php\nnamespace Acme;\ninterface Handles\n{\n    public function handle(): void;\n}\n",
+            ),
+            ("src/Handler.php", handler),
+        ],
+        "src/Handler.php",
+    )
+    .await;
+
+    let (line, character) = position_in(handler, "function handle", "handle");
+    let refusal = rename_result(&backend, &uri, line, character, "process")
+        .await
+        .expect_err("a dependency's interface still requires handle()");
+    assert!(
+        refusal.contains("`Acme\\Handles::handle()` is declared outside the project"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn a_contract_from_the_standard_library_is_kept() {
+    let text = concat!(
+        "<?php\n",
+        "class Point implements JsonSerializable {\n",
+        "    public function jsonSerialize(): mixed { return []; }\n",
+        "}\n",
+    );
+    let backend = create_test_backend_with_full_stubs();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, text).await;
+    let (line, character) = position_in(text, "function jsonSerialize", "jsonSerialize");
+    let refusal = rename_result(&backend, &uri, line, character, "toJson")
+        .await
+        .expect_err("JsonSerializable still requires jsonSerialize()");
+    assert!(
+        refusal.contains("`JsonSerializable::jsonSerialize()` is declared outside the project"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn renaming_a_trait_method_a_using_class_implements_with_is_refused() {
+    let text = concat!(
+        "<?php\n",
+        "interface Greeting { public function greet(): string; }\n",
+        "trait Greets { public function greet(): string { return 'x'; } }\n",
+        "class Greeter implements Greeting { use Greets; }\n",
+    );
+    let refusal = refusal_for(text, "function greet(): string { return", "greet", "hello").await;
+    assert!(
+        refusal.contains("`Greeter`") && refusal.contains("`Greeting::greet()`"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn an_abstract_class_may_leave_a_requirement_open() {
+    let text = concat!(
+        "<?php\n",
+        "abstract class Base { abstract public function run(): void; }\n",
+        "abstract class Mid extends Base { public function run(): void {} }\n",
+    );
+    assert_eq!(
+        renamed_text(text, "function run(): void {}", "run", "go").await,
+        text.replace("function run(): void {}", "function go(): void {}"),
+    );
+}
+
+#[tokio::test]
+async fn a_private_parent_method_does_not_fulfil_the_contract() {
+    let text = concat!(
+        "<?php\n",
+        "interface Greeting { public function greet(): string; }\n",
+        "class Base { private function greet(): string { return 'b'; } }\n",
+        "class Greeter extends Base implements Greeting {\n",
+        "    public function greet(): string { return 'g'; }\n",
+        "}\n",
+    );
+    let refusal = refusal_for(
+        text,
+        "public function greet(): string { return 'g'",
+        "greet",
+        "hello",
+    )
+    .await;
+    assert!(refusal.contains("`Greeting::greet()`"), "{refusal}");
+}
+
+#[tokio::test]
+async fn prepare_rename_refuses_an_implementation_before_asking_for_a_name() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, GREETERS).await;
+    let (line, character) = position_in(
+        GREETERS,
+        "function greet(): string { return 'hello'",
+        "greet",
+    );
+    let params = TextDocumentPositionParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        position: Position { line, character },
+    };
+    let refusal = backend
+        .prepare_rename(params)
+        .await
+        .expect_err("prepareRename should refuse");
+    assert!(
+        refusal.message.contains("`Greeting::greet()`"),
+        "{refusal:?}"
+    );
+
+    let (line, character) = position_in(
+        GREETERS,
+        "interface Greeting { public function greet",
+        "greet",
+    );
+    assert!(
+        prepare_rename(&backend, &uri, line, character)
+            .await
+            .is_some()
+    );
+}
+
+// ─── Constants versus same-named methods and properties ─────────────────────
+
+const TAG: &str = concat!(
+    "<?php\n",
+    "class Tag {\n",
+    "    const name = 'tag';\n",
+    "    public string $name = 'tag';\n",
+    "    public function name(): string {\n",
+    "        return self::name . $this->name . $this->name();\n",
+    "    }\n",
+    "}\n",
+    "echo Tag::name;\n",
+);
+
+#[tokio::test]
+async fn renaming_a_constant_leaves_a_same_named_method_and_property_alone() {
+    let expected = TAG
+        .replace("const name", "const label")
+        .replace("self::name", "self::label")
+        .replace("Tag::name", "Tag::label");
+    for needle in ["const name", "self::name", "Tag::name"] {
+        assert_eq!(
+            renamed_text(TAG, needle, "name", "label").await,
+            expected,
+            "renaming from {needle:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn renaming_a_method_or_property_leaves_a_same_named_constant_alone() {
+    for needle in ["function name", "$this->name()", "$name = 'tag'"] {
+        let renamed = renamed_text(TAG, needle, "name", "label").await;
+        for constant in ["const name", "self::name", "Tag::name"] {
+            assert!(
+                renamed.contains(constant),
+                "renaming from {needle:?} touched {constant:?}:\n{renamed}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn renaming_a_static_property_or_a_constant_leaves_the_other_alone() {
+    let text = concat!(
+        "<?php\n",
+        "class Config {\n",
+        "    const path = '/etc';\n",
+        "    public static string $path = '/tmp';\n",
+        "}\n",
+        "echo Config::path;\n",
+        "echo Config::$path;\n",
+    );
+    assert_eq!(
+        renamed_text(text, "Config::path", "path", "root").await,
+        text.replace("const path", "const root")
+            .replace("Config::path", "Config::root"),
+    );
+    assert_eq!(
+        renamed_text(text, "Config::$path", "path", "root").await,
+        text.replace("$path", "$root"),
+    );
+}
+
+#[tokio::test]
+async fn renaming_an_enum_case_leaves_a_same_named_static_method_alone() {
+    let text = concat!(
+        "<?php\n",
+        "enum Suit {\n",
+        "    case Hearts;\n",
+        "    public static function Hearts(): self { return self::Hearts; }\n",
+        "}\n",
+        "Suit::Hearts();\n",
+        "$s = Suit::Hearts;\n",
+    );
+    assert_eq!(
+        renamed_text(text, "case Hearts", "Hearts", "Spades").await,
+        text.replace("case Hearts", "case Spades")
+            .replace("self::Hearts", "self::Spades")
+            .replace("$s = Suit::Hearts", "$s = Suit::Spades"),
+    );
+    assert_eq!(
+        renamed_text(text, "function Hearts", "Hearts", "Deal").await,
+        text.replace("function Hearts", "function Deal")
+            .replace("Suit::Hearts()", "Suit::Deal()"),
     );
 }

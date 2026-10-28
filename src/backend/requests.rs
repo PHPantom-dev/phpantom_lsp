@@ -43,25 +43,39 @@ pub(crate) struct RequestScope<'a> {
     // Shared chain prefixes (e.g. `$model->where(...)` in
     // `$model->where(...)->orderBy(...)`) are resolved once and reused.
     _chain: crate::type_engine::resolver::ChainCacheGuard,
+    // Classes are looked up as the Composer project holding the file
+    // sees them.  Entered first, so it outlives every cache filled
+    // under it.
+    _project: crate::resolution::project_scope::ProjectScopeGuard,
 }
 
 impl Backend {
-    /// Enter a [`RequestScope`] for `content`, which the parse cache
-    /// shares instead of copying.
-    pub(crate) fn enter_request_scope(&self, content: Arc<String>) -> RequestScope<'static> {
-        self.request_scope_with(|| crate::parser::with_parse_cache_arc(content))
+    /// Enter a [`RequestScope`] for `content`, the text of `uri`, which
+    /// the parse cache shares instead of copying.
+    pub(crate) fn enter_request_scope(
+        &self,
+        uri: &str,
+        content: Arc<String>,
+    ) -> RequestScope<'static> {
+        self.request_scope_with(uri, || crate::parser::with_parse_cache_arc(content))
     }
 
     /// [`enter_request_scope`](Self::enter_request_scope) for a caller
     /// that only borrows the content.
-    pub(crate) fn enter_request_scope_borrowed<'a>(&self, content: &'a str) -> RequestScope<'a> {
-        self.request_scope_with(|| crate::parser::with_parse_cache(content))
+    pub(crate) fn enter_request_scope_borrowed<'a>(
+        &self,
+        uri: &str,
+        content: &'a str,
+    ) -> RequestScope<'a> {
+        self.request_scope_with(uri, || crate::parser::with_parse_cache(content))
     }
 
     fn request_scope_with<'a>(
         &self,
+        uri: &str,
         parse: impl FnOnce() -> crate::parser::ParseCacheGuard<'a>,
     ) -> RequestScope<'a> {
+        let _project = self.enter_project_scope(uri);
         let _chain = crate::type_engine::resolver::with_chain_resolution_cache();
         let _type_engine = crate::type_engine::call_resolution::activate_type_engine_caches();
         let _resolved_classes =
@@ -71,6 +85,7 @@ impl Backend {
             _resolved_classes,
             _type_engine,
             _chain,
+            _project,
         }
     }
 
@@ -114,7 +129,7 @@ impl Backend {
             None => (self.analysable_content(uri)?, None),
         };
 
-        let _scope = self.enter_request_scope(Arc::clone(&content));
+        let _scope = self.enter_request_scope(uri, Arc::clone(&content));
         crate::util::catch_panic_unwind_safe(handler_name, uri, pos, || f(&content, pos))
     }
 
@@ -155,6 +170,52 @@ impl Backend {
         Ok(self
             .with_file_content(handler_name, uri, None, |content, _| f(content))
             .flatten())
+    }
+
+    /// [`with_file_content`](Self::with_file_content) for a feature that
+    /// maps symbol-map offsets onto the buffer it answers for.
+    ///
+    /// `did_change` rebuilds the map on a background task, so a request
+    /// arriving between a keystroke and that rebuild sees a map built from
+    /// older text, whose offsets land a keystroke's worth away from their
+    /// symbols.  Such a request answers `ContentModified` instead of a
+    /// result: the client keeps what it shows until the refresh
+    /// `did_change` sends once the new map commits, or, for a feature with
+    /// no refresh, re-requests on the next cursor move.  A file with no map
+    /// (the parser gave up on it, or a resource document) is not declined,
+    /// since no re-request would fix that.
+    pub(crate) fn with_current_symbol_map<T>(
+        &self,
+        handler_name: &str,
+        uri: &str,
+        position: Option<Position>,
+        f: impl FnOnce(&str, Option<Position>) -> Option<T>,
+    ) -> Result<Option<T>> {
+        let outcome = self.with_file_content(handler_name, uri, position, |content, pos| {
+            let checked = self.symbol_map_for(uri);
+            if checked
+                .as_ref()
+                .is_some_and(|map| !map.matches_source(content))
+            {
+                return None;
+            }
+            let result = f(content, pos);
+            // A map committed while `f` ran may have handed it offsets into
+            // text newer than `content`.  Holding `checked` keeps its
+            // allocation alive, so an unchanged pointer means `f` read the
+            // map that was checked.
+            let unchanged = match (&checked, &self.symbol_map_for(uri)) {
+                (Some(before), Some(after)) => Arc::ptr_eq(before, after),
+                (before, after) => before.is_none() && after.is_none(),
+            };
+            unchanged.then_some(result)
+        });
+        match outcome {
+            Some(Some(result)) => Ok(result),
+            Some(None) => Err(content_modified(handler_name)),
+            // Not readable, or the handler panicked.
+            None => Ok(None),
+        }
     }
 
     /// Run an expensive whole-file request (`kind`) for `uri` with coalescing.
@@ -205,6 +266,16 @@ impl Backend {
             );
         }
         Ok(result)
+    }
+}
+
+/// The answer to a request whose result would describe a different
+/// revision of the document than the one the client holds.
+fn content_modified(handler_name: &str) -> tower_lsp_server::jsonrpc::Error {
+    tower_lsp_server::jsonrpc::Error {
+        code: tower_lsp_server::jsonrpc::ErrorCode::ContentModified,
+        message: format!("{handler_name} is not current for this document version").into(),
+        data: None,
     }
 }
 
@@ -318,6 +389,137 @@ mod request_scope_tests {
             active,
             Some(std::ptr::from_ref(&backend.resolved_class_cache)),
             "the handler must see this backend's store, not a throwaway"
+        );
+    }
+}
+
+#[cfg(test)]
+mod current_symbol_map_tests {
+    use std::sync::Arc;
+
+    use tower_lsp_server::LanguageServer;
+    use tower_lsp_server::gen_lsp_types::*;
+
+    use crate::Backend;
+
+    const URI: &str = "file:///test/lagging_map.php";
+    const SOURCE: &str = "<?php\nclass Widget {\n    public function run(): void {}\n}\n\
+                          function useWidget(Widget $widget): void { $widget->run(); }\n";
+
+    /// A backend whose buffer is one keystroke ahead of the symbol map
+    /// describing it, the state a background `did_change` parse leaves
+    /// behind until it commits.
+    fn backend_with_lagging_map() -> Backend {
+        let backend = Backend::new_test();
+        backend
+            .open_files
+            .write()
+            .insert(URI.to_string(), Arc::new(SOURCE.to_string()));
+        backend.update_ast(URI, SOURCE);
+        backend.mark_workspace_indexed();
+        let edited = SOURCE.replace("class Widget", "\nclass Widget");
+        backend
+            .open_files
+            .write()
+            .insert(URI.to_string(), Arc::new(edited));
+        backend
+    }
+
+    fn assert_content_modified<T: std::fmt::Debug>(
+        feature: &str,
+        answer: tower_lsp_server::jsonrpc::Result<T>,
+    ) {
+        match answer {
+            Err(error) => assert_eq!(
+                error.code,
+                tower_lsp_server::jsonrpc::ErrorCode::ContentModified,
+                "{feature}: a decline must be ContentModified, not any other error"
+            ),
+            Ok(answer) => panic!("{feature} answered {answer:?} from a lagging map"),
+        }
+    }
+
+    fn document() -> TextDocumentIdentifier {
+        TextDocumentIdentifier {
+            uri: Uri::parse(URI).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn semantic_tokens_decline_while_the_map_lags_the_buffer() {
+        let backend = backend_with_lagging_map();
+        let answer = backend
+            .semantic_tokens_full(SemanticTokensParams {
+                text_document: document(),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await;
+        assert_content_modified("semantic tokens", answer);
+    }
+
+    #[tokio::test]
+    async fn code_lens_declines_while_the_map_lags_the_buffer() {
+        let backend = backend_with_lagging_map();
+        let answer = backend
+            .code_lens(CodeLensParams {
+                text_document: document(),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await;
+        assert_content_modified("code lens", answer);
+    }
+
+    #[tokio::test]
+    async fn document_highlight_declines_while_the_map_lags_the_buffer() {
+        let backend = backend_with_lagging_map();
+        let answer = backend
+            .document_highlight(DocumentHighlightParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: document(),
+                    position: Position::new(2, 9),
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await;
+        assert_content_modified("document highlight", answer);
+    }
+
+    /// Once the parse commits, the same requests answer normally.
+    #[tokio::test]
+    async fn a_committed_map_answers_again() {
+        let backend = backend_with_lagging_map();
+        let edited = backend.get_file_content(URI).unwrap();
+        backend.update_ast(URI, &edited);
+
+        let tokens = backend
+            .semantic_tokens_full(SemanticTokensParams {
+                text_document: document(),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await;
+        assert!(
+            matches!(tokens, Ok(Some(ref tokens)) if !tokens.data.is_empty()),
+            "{tokens:?}"
+        );
+
+        // `Widget` in `useWidget(Widget $widget)`, one line lower now.
+        let highlights = backend
+            .document_highlight(DocumentHighlightParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: document(),
+                    position: Position::new(5, 21),
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await;
+        assert!(
+            matches!(highlights, Ok(Some(ref h)) if h.len() == 2),
+            "{highlights:?}"
         );
     }
 }

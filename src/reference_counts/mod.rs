@@ -189,7 +189,7 @@ impl Backend {
 
         let epoch = self.member_ref_counts.epoch.load(Ordering::Acquire);
         let locations =
-            self.member_declaration_references(uri, offset, &member, slot.is_static, slot.kind());
+            self.member_declaration_references(uri, offset, &member, slot.is_static, slot.kind);
         let invalidated_since = self.member_ref_counts.epoch.load(Ordering::Acquire) != epoch;
         self.member_ref_counts.store(
             class_fqn,

@@ -97,10 +97,11 @@ src/
 │
 │   # LSP features (one module each)
 ├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
-├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
+├── definition/             # Go-to-definition (resolve, member, variable/, implementation, declaration, type_definition)
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
 ├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
 ├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner
+├── yii/                    # Yii views and the path aliases they are named through (the alias table read from the params files, view keys resolved to templates), and route names and route arguments (route paths and handlers, looked up in the declaring files' route side tables)
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 ├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting/
@@ -246,6 +247,7 @@ The symbol map also stores:
 - **Candidate typed-receiver sites** (`typed_receiver_sites`): the string keys a method call spells when only the receiver's *type* decides what it names — a constructor-injected `Factory $views` behind `$this->views->make('page')`, a mailable held in a local, a Symfony `ContainerInterface $container` behind `$container->get('app.mailer')`, a configurator's `$services->set('app.mailer')`, a URL generator's `$urls->generate('blog_index')`, a translator's `$translator->trans('demo.title')`, a controller's or Twig's `render('page.html.twig')`, an event dispatcher's `$events->dispatch($event, 'app.order.placed')`. Each site records the classes its receiver may be and the kind of key each makes it (`ReceiverClass::targets`). Extraction runs before the file's classes are resolved and cannot type the receiver, so it records the candidates and `blade/typed_receiver.rs` confirms them lazily through the shared type engine, once per file. Consumers of those keys (the call-site diagnostics, call-site inference, `lookup_symbol_map`, find-references, the Symfony declaration lookup) read the confirmed spans alongside the map's own `StringKey` spans. The reference candidate index takes the *unconfirmed* candidates, under every kind each could turn out to be, since a file has to be findable before it can be asked.
 - **Config-backed Laravel resource names**: one declarative table maps direct helpers, facades, contextual attributes, and middleware parameters to their config subtrees. A `SymbolSpan` whose string-key kind is `ConfigResource(...)` stores the short source name, while completion, navigation, diagnostics, and references derive the full dot key only at the config boundary. This keeps source ranges and reference identity exact without duplicating one trigger table across LSP features.
 - **Candidate morph-column aliases** (`morph_column_sites`): literals compared with properties or query columns are confirmed lazily by `virtual_members/laravel/typed_morph_columns.rs`. The shared type engine identifies the receiver model, and its parsed `morphTo()` metadata identifies the column. Array values in one query share a single model and column check. Confirmed literals become ordinary `MorphAlias` spans for completion, navigation, references, and diagnostics. Model metadata changes invalidate dependent confirmations, including when a relation's column changes without changing its PHP signature.
+- **Routes** (`routes`): each route a file declares, with what its name alone does not say: its path, group prefixes included, the placeholders the file spells out, and the handler it dispatches to. A path's placeholders only mean something under their route, so they are a side table keyed back to the name's span rather than spans of their own. Yii's route definitions fill it (`symbol_map/extraction/yii_routes.rs`), and a `#[RouteArgument]` is resolved through it by its handler.
 - **Messenger handlers** (`messenger_handlers`): each method a Symfony `#[AsMessageHandler]` registers, with the message class it receives, read from the attribute's `handles:` or the method's first parameter type. A handler is a fact about a class rather than a string at a cursor, so it is a side table rather than a span. The files holding one are among the Symfony declaring files (`symfony/mod.rs`), which is how the CodeLens on a message class finds the handlers that receive it.
 
 ### Tier 2: Stored Byte Offsets (cross-file jumps)
@@ -284,12 +286,16 @@ emits it.
 The spans come from two places, and nowhere else:
 
 - **PHP** is read from the AST during symbol-map extraction
-  (`symbol_map/extraction/laravel/` and `symbol_map/extraction/symfony.rs`).
+  (`symbol_map/extraction/laravel/`, `symbol_map/extraction/symfony.rs`,
+  `symbol_map/extraction/yii.rs`, and `symbol_map/extraction/yii_routes.rs`).
   A function, an attribute, or a `new` is recognised by its resolved name.
   A method call whose name is too common to claim on sight (`get()`,
   `set()`, `render()`, `dispatch()`) is recorded as a candidate
   typed-receiver site (see above) and settled by the shared type engine,
-  never by guessing from the receiver's spelling.
+  never by guessing from the receiver's spelling. A URL generator may
+  stand behind a class of the project's own whose method passes the name
+  on; that method is read to see which of its parameters it passes to a
+  URL generator (`Backend::typed_receiver_key_kind`).
 - **YAML, XML, XLIFF, and Twig** are read as text by the scanners in
   `symfony/` and `twig/`, which build each resource file's symbol map
   (`resource_navigation.rs`). These files have no AST we share, and their
@@ -312,7 +318,16 @@ files' symbol maps on demand. The maps are kept current by the ordinary
 document and watched-file lifecycle, and the reference index files every
 span by its key, so references need no second walk. All of it is gated on
 the project: Symfony names are only read when the project builds a Symfony
-container, and Laravel's only when it is a Laravel application.
+container, Laravel's only when it is a Laravel application, and Yii's only
+when it routes with Yii's router. Yii's route names are declared in the
+same way, by spans in the PHP files that define its routes, so those files
+are among the declaring files too.
+
+A Yii view is keyed by the path it names rather than by a name a file
+declares, with its alias left in (`@views/blog/index`), so two spellings
+of one template share no key. Its references are found by resolving each
+view key in the workspace to a file and comparing files, and the template
+itself declares nothing: the CodeLens at its top runs the same search.
 
 ## Go-to-Type-Definition Architecture
 
@@ -534,6 +549,12 @@ find_or_load_class("Iterator")
 │   (see "Stub Paths" below).
 │   ↓ miss
 │
+├── Project scope: another Composer project's dependency
+│   In a workspace of several Composer projects, a name the index
+│   holds in another project's vendor/ resolves to the asking
+│   project's own copy, or to nothing (see "Monorepo Support").
+│   ↓ not another project's
+│
 ├── Phase 0: fqn_class_index (O(1) hash hit)
 │   Direct lookup by FQN. This is where cached results from
 │   previous phases are found on subsequent lookups.
@@ -607,6 +628,13 @@ appears there once a second file declares it, so the overwhelming
 majority of symbols cost nothing, and keeping the runners-up is what lets
 the name pass to the next declarant when the winning file stops declaring
 it (rename, deletion, or an edit that removes it) instead of vanishing.
+
+`duplicate_classes` only knows parsed declarations. Discovery also finds
+names in more than one file before anything parses them (two Composer
+projects of a workspace installing the same package), and a merge that
+keeps one location records the others in `class_alternates`, again only
+for names found more than once. A name whose indexed file goes away
+passes to one of them.
 
 Both class indexing paths (`apply_ast_index_updates_batch` for editor
 files, `parse_and_cache_content_versioned` for lazily loaded ones) and the
@@ -939,7 +967,7 @@ The indexing strategy is configurable via `[indexing] strategy` in `.phpantom.to
 
 The merged pipeline works in three steps: (1) load `autoload_classmap.php` into a `HashMap<String, PathBuf>`, (2) collect the classmap's file paths into a `HashSet<PathBuf>` skip set, (3) self-scan all PSR-4 and vendor directories, skipping files already in the skip set. The result is a merged index: classmap entries for everything Composer already knew about, plus self-scanned entries for everything it missed. When the classmap is complete (the common case), the self-scanner walks directories but skips every file, finishing almost instantly. When the classmap is empty or absent, it falls back to a full self-scan. When the classmap is partial (e.g. vendor classes only), vendor files are skipped and only user code is scanned. Every state of the classmap helps.
 
-When self-scanning with a `composer.json` present, the scanner reads `autoload.psr-4`, `autoload-dev.psr-4`, `autoload.classmap`, and `autoload-dev.classmap` to determine which directories to walk. PSR-4 directories are filtered: only classes whose FQN matches the namespace prefix plus the relative file path are included. Vendor packages are discovered from `vendor/composer/installed.json` (both Composer 1 and 2 formats); the JSON packages array is borrowed rather than cloned to avoid allocating a copy of the entire vendor manifest. All directory walkers (full-scan, PSR-4 scanner, vendor package scanner, and go-to-implementation file collector) use the `ignore` crate for gitignore-aware traversal. Hidden directories are skipped automatically, and `.gitignore` rules are respected at every level. Paths listed under `[indexing] include` in `.phpantom.toml` are scanned at the end of every discovery pipeline with the gitignore and hidden-entry filters disabled. `[indexing] exclude` still prunes below an included directory, but no exclude applies to a named path itself, including the built-in laravel-ide-helper skip, which is compiled into a matcher of its own so a `!` in `exclude` cannot cancel it. `IndexFilters` carries the named paths so the watcher and eviction honour the same exemption. Because they run last, included paths fill gaps rather than displacing what discovery found. An included path inside the workspace is project code: the full background index parses it, so function-only files reach find-references and workspace symbols, and `analyze` reports on it. One outside the workspace is registered like a vendor directory, so it resolves but is never analysed, renamed into, or searched for references. The editor's other workspace folders (from `initialize` and `workspace/didChangeWorkspaceFolders`, deduplicated by containment in `Backend::extra_roots`) are library code in the same way: they join the project root's `walk_roots` call, so a link between them is walked once, and each registration records its claimant in `library_claims` so removing a folder releases only the spellings nothing else claims before its files are evicted. When no `composer.json` exists at all, the scanner falls back to walking all `.php` files under the workspace root.
+When self-scanning with a `composer.json` present, the scanner reads `autoload.psr-4`, `autoload-dev.psr-4`, `autoload.classmap`, and `autoload-dev.classmap` to determine which directories to walk. PSR-4 directories are filtered: only classes whose FQN matches the namespace prefix plus the relative file path are included. Vendor packages are discovered from `vendor/composer/installed.json` (both Composer 1 and 2 formats); the JSON packages array is borrowed rather than cloned to avoid allocating a copy of the entire vendor manifest. All directory walkers (full-scan, PSR-4 scanner, vendor package scanner, and go-to-implementation file collector) use the `ignore` crate for gitignore-aware traversal. Hidden directories are skipped automatically, and `.gitignore` rules are respected at every level. Paths listed under `[indexing] include` in `.phpantom.toml` are scanned at the end of every discovery pipeline with the gitignore and hidden-entry filters disabled. `[indexing] exclude` still prunes below an included directory, but no exclude applies to a named path itself, including the built-in laravel-ide-helper skip, which is compiled into a matcher of its own so a `!` in `exclude` cannot cancel it. `IndexFilters` carries the named paths so the watcher and eviction honour the same exemption. The class lists Composer hands over without a walk (the classmap, the PSR-0 map, and the bootstrap classes in `vendor/composer`) pass through `IndexFilters::retain_unexcluded` where they merge into the index, so `exclude` means the same thing for a listed file as for a walked one. Because they run last, included paths fill gaps rather than displacing what discovery found. An included path inside the workspace is project code: the full background index parses it, so function-only files reach find-references and workspace symbols, and `analyze` reports on it. One outside the workspace is registered like a vendor directory, so it resolves but is never analysed, renamed into, or searched for references. The editor's other workspace folders (from `initialize` and `workspace/didChangeWorkspaceFolders`, deduplicated by containment in `Backend::extra_roots`) are library code in the same way: they join the project root's `walk_roots` call, so a link between them is walked once, and each registration records its claimant in `library_claims` so removing a folder releases only the spellings nothing else claims before its files are evicted. When no `composer.json` exists at all, the scanner falls back to walking all `.php` files under the workspace root.
 
 **Directory symlinks.** The walkers descend into a symlinked directory, so a project that keeps its framework or a shared library outside the repository and links it into the tree gets the linked code indexed with the rest. Every path keeps the symlink spelling rather than the target's, which is what makes a file reached through the link the same file the editor opened. `LinkClaims` gives each walk one visit per target directory: the walk's own roots and its skipped trees are claimed up front, and each link claims its target the first time it is descended, so two links to one tree, a link pointing back at something the walk already covers, and a chain of directories holding several links apiece all cost one pass rather than one per route. `orchestra/testbench-core` ships `laravel/vendor -> <project>/vendor`, which is why the skipped trees are claimed and not merely pruned by path. Each link the index reached through also gets a watcher based at it (see `build_watched_file_registration`), since a workspace-relative watcher pattern never covers a path outside the workspace folders.
 
@@ -971,7 +999,9 @@ When the workspace root has no `composer.json` but contains subdirectories that 
 
 **Vendor tracking.** Each subproject's vendor directory is registered in both `vendor_uri_prefixes` (for URI-level vendor detection in diagnostics, find references, and rename) and `vendor_dir_paths` (for filesystem-level skip logic in go-to-implementation and workspace indexing).
 
-**Trade-offs.** Conflicting class versions across subprojects result in first-wins resolution. A single PHP version is used for the entire workspace. Per-subproject `.phpantom.toml` is not supported. Multi-root LSP workspaces (separate `workspaceFolders`) are a separate feature.
+**Per-project class lookups.** The class index is shared, but a file only sees its own Composer project's classes and dependencies. When the workspace has two or more projects with a vendor directory, each gets a `ProjectScope` (`resolution/project_scope.rs`): its own root and vendor directory, the packages it installed from outside its vendor directory (path repositories, which can live in another project's tree), and every other project's root and vendor directory. A file belongs to the innermost project whose root holds it, and files outside every project are visible to all of them. The work done for one file (an LSP request through `RequestScope`, the file's diagnostic pass, `analyze` and `fix`) runs with the scope of the innermost project holding it, and `find_or_load_class` answers a name the index holds in another project with the project's own copy from `class_alternates` or `duplicate_classes`, or with nothing. Work that is not about one file, and files outside every project, see the shared index. The class memo and the resolved-class cache key their entries by scope, since a class resolves differently when its ancestors come from a different copy. A workspace with a single installed project has no scopes and pays nothing.
+
+**Trade-offs.** A single PHP version is used for the entire workspace. Per-subproject `.phpantom.toml` is not supported. Multi-root LSP workspaces (separate `workspaceFolders`) are a separate feature.
 
 ### Function Resolution Priority
 

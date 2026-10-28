@@ -45,6 +45,9 @@ pub struct PropertyInfo {
     /// `readonly class`) have this `false`: a subclass of a readonly class is
     /// itself readonly, and repeating the keyword there is a compile error.
     pub is_readonly: bool,
+    /// Whether the property's docblock marks it readonly, for code that
+    /// enforces the contract by convention instead of the native modifier.
+    pub doc_readonly: DocReadonly,
     /// Visibility of the property (public, protected, or private).
     pub visibility: Visibility,
     /// Deprecation message from the `@deprecated` PHPDoc tag.
@@ -160,6 +163,21 @@ pub enum PropertySource {
     DocblockTag,
 }
 
+/// What a property's docblock says about writing to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocReadonly {
+    /// No readonly tag.
+    No,
+    /// `@readonly` (or `@psalm-readonly`, `@phpstan-readonly`): written
+    /// once, from inside the declaring class, the way native `readonly`
+    /// is.
+    Readonly,
+    /// `@psalm-readonly-allow-private-mutation`, or `@readonly` together
+    /// with `@psalm-allow-private-mutation`: read-only outside the
+    /// declaring class, freely writable inside it.
+    AllowPrivateMutation,
+}
+
 impl PropertyInfo {
     /// Compare two properties by signature-relevant fields only.
     ///
@@ -172,6 +190,7 @@ impl PropertyInfo {
             && self.visibility == other.visibility
             && self.is_static == other.is_static
             && self.is_readonly == other.is_readonly
+            && self.doc_readonly == other.doc_readonly
             && self.description == other.description
             && self.deprecation_message == other.deprecation_message
             && self.deprecated_replacement == other.deprecated_replacement
@@ -224,6 +243,7 @@ impl PropertyInfo {
             description: None,
             is_static: false,
             is_readonly: false,
+            doc_readonly: DocReadonly::No,
             visibility: Visibility::Public,
             deprecation_message: None,
             deprecated_replacement: None,

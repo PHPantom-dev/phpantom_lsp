@@ -2202,7 +2202,7 @@ function f(Result $result): void
 #[test]
 fn a_guard_narrows_a_call_whose_return_type_is_only_declared_upstream() {
     assert_no_type_errors(
-        r#"<?php
+        r#"<?php declare(strict_types=1);
 namespace Repro;
 
 abstract class BaseReflection
@@ -2237,7 +2237,7 @@ function f(ReflectionAdapter $reflection): void
 #[test]
 fn a_second_getter_on_the_receiver_leaves_the_first_ones_guard_standing() {
     assert_no_type_errors(
-        r#"<?php
+        r#"<?php declare(strict_types=1);
 namespace Repro;
 
 class Reflection
@@ -2269,7 +2269,7 @@ function f(Reflection $reflection): void
 #[test]
 fn a_call_returning_nothing_does_drop_the_receivers_guard() {
     assert_type_error(
-        r#"<?php
+        r#"<?php declare(strict_types=1);
 namespace Repro;
 
 class Reflection

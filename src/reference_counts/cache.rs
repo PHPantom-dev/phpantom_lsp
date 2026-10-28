@@ -90,7 +90,7 @@ impl PendingCount {
             offset: self.offset,
             member: self.member,
             is_static: self.slot.is_static,
-            kind: self.slot.kind(),
+            kind: self.slot.kind,
         }
     }
 }
@@ -144,8 +144,8 @@ impl CompactLocation {
 ///
 /// The member name is the outer key because that is the granularity the
 /// reference index can invalidate at: a file that gains or loses an access
-/// to `save` can only change counts of members named `save`.  The two
-/// slots are the instance and static member of that name.
+/// to `save` can only change counts of members named `save`.  The slots
+/// are indexed by [`MemberSlot`].
 type MemberCounts = AtomMap<[Option<CachedReferences>; MemberSlot::COUNT]>;
 
 #[derive(Default)]
@@ -181,22 +181,25 @@ pub(crate) struct MemberRefCounts {
 /// Which of a class's members of one name a count belongs to.
 ///
 /// A static and an instance member can share a name, and so can a method
-/// and a property (`$email` and `email()`), so each gets a count of its own.
+/// and a property (`$email` and `email()`), or a constant and a static
+/// property (`const path` and `static $path`), so each gets a count of its
+/// own.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct MemberSlot {
     pub(crate) is_static: bool,
-    pub(crate) is_method: bool,
+    pub(crate) kind: MemberRefKind,
 }
 
 impl MemberSlot {
-    const COUNT: usize = 4;
+    const COUNT: usize = 5;
 
     fn index(self) -> usize {
-        usize::from(self.is_static) | (usize::from(self.is_method) << 1)
-    }
-
-    pub(crate) fn kind(self) -> MemberRefKind {
-        MemberRefKind::of_method(self.is_method)
+        match self.kind {
+            MemberRefKind::Method => usize::from(self.is_static),
+            // A declaration always has a kind; `Either` only names accesses.
+            MemberRefKind::Property | MemberRefKind::Either => 2 | usize::from(self.is_static),
+            MemberRefKind::Constant => 4,
+        }
     }
 }
 

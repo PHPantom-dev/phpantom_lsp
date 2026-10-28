@@ -305,6 +305,8 @@ impl Backend {
                 continue;
             }
 
+            self.note_yii_config_change(&uri_str);
+
             // Open files are already tracked via did_open/did_change.
             if is_open(&uri_str) {
                 continue;

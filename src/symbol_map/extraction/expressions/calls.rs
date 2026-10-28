@@ -467,6 +467,7 @@ fn extract_method_call<'a>(
         let member_name = crate::atom::atom_bytes(ident.value);
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
         record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
+        record_yii_view_sites(object, &member_name, argument_list, ctx);
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
         emit_call_site(
@@ -660,7 +661,7 @@ mod tests {
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
 
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, true, true,
+            program, php, &names, true, true, None,
         );
 
         assert_eq!(map.conditional_string_key_spans.len(), 1);

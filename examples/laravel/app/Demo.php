@@ -737,6 +737,7 @@ class Demo
         // welcome.blade.php declares a @bladestan-signature, so this call
         // is checked against it the way a function call is checked against
         // its parameters.
+        // Try: change 'welcome' to 'welcom' and apply "Change to 'welcome'".
         $posts = BlogPost::where('published', true)->get();
         $user = BlogAuthor::first();
         view('welcome', compact('posts', 'user'));
@@ -1105,6 +1106,8 @@ class Demo
         // `Relation::morphMap()` call.  Hover shows the model each alias maps
         // to, go-to-definition offers the registration and the model, and
         // find-references links every usage of the alias.
+        // Try: complete either string in the types array to see both aliases.
+        // They also complete as keys in DemoServiceProvider's morph map.
         Review::whereHasMorph('reviewable', ['blog_post', 'bakery'])->get();
 
         // The same alias resolves in Relation::getMorphedModel(), where
@@ -1131,6 +1134,9 @@ class Demo
         config('app.name');
         Config::get('database.default');
         Config::set('app.timezone', 'UTC');
+        // Try: complete the keys in these config writes.
+        Config::set(['app.timezone' => 'UTC']);
+        config(['app.name' => 'PHPantom Demo']);
     }
 
 

@@ -712,6 +712,31 @@ function f(array $frame): void {
     );
 }
 
+/// A union of shapes is one of them at runtime, so a check that only some
+/// of them can pass picks those out: the guard's fall-through has the
+/// longer tuple, and a write to its last slot does not report the shorter
+/// one gaining a slot.
+#[test]
+fn array_key_exists_picks_the_shapes_that_hold_the_key() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_shape_union.php";
+    let content = r#"<?php
+/** @param array{string, null}|array{string, bool, int} $data */
+function f(array $data): void {
+    if (!array_key_exists(2, $data)) {
+        return;
+    }
+    $data; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("array{string, bool, int}") && !text.contains("null"),
+        "only the shape holding key 2 passes the check: {text}"
+    );
+}
+
 /// The subject may be a property rather than a local, and the guard may
 /// be written as an early return.
 #[test]

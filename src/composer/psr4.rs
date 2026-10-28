@@ -200,11 +200,23 @@ pub fn resolve_class_path(
     workspace_root: &Path,
     class_name: &str,
 ) -> Option<PathBuf> {
+    psr4_class_files(mappings, workspace_root, class_name).next()
+}
+
+/// Every existing file PSR-4 places `class_name` at, in mapping order:
+/// [`resolve_class_path`]'s answer first, then the ones a longer prefix
+/// shadowed.
+pub(crate) fn psr4_class_files<'a>(
+    mappings: &'a [Psr4Mapping],
+    workspace_root: &'a Path,
+    class_name: &'a str,
+) -> impl Iterator<Item = PathBuf> + 'a {
     // Skip built-in type keywords that are never real classes
-    if crate::php_type::is_keyword_type(class_name) {
-        return None;
-    }
-    psr4_candidate_paths(mappings, workspace_root, class_name).find(|path| path.is_file())
+    (!crate::php_type::is_keyword_type(class_name))
+        .then(|| psr4_candidate_paths(mappings, workspace_root, class_name))
+        .into_iter()
+        .flatten()
+        .filter(|path| path.is_file())
 }
 
 /// The part of `namespace` that lies below a PSR-4 mapping's prefix, or

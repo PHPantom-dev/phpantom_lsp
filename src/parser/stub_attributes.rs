@@ -634,7 +634,8 @@ pub(crate) fn has_no_discard_attribute(
 }
 
 /// Extract the string value from a literal string expression by reading
-/// the source text between the expression's span and stripping quotes.
+/// the source text between the expression's span, stripping the quotes,
+/// and unescaping it the way PHP does: `'\\Foo\\bar()'` is `\Foo\bar()`.
 fn extract_string_literal_value(
     expr: &expression::Expression<'_>,
     content: &str,
@@ -643,13 +644,6 @@ fn extract_string_literal_value(
     let start = span.start.offset as usize;
     let end = span.end.offset as usize;
     let raw = content.get(start..end)?;
-    // Strip surrounding quotes (single or double).
     let trimmed = raw.trim();
-    if (trimmed.starts_with('\'') && trimmed.ends_with('\''))
-        || (trimmed.starts_with('"') && trimmed.ends_with('"'))
-    {
-        Some(trimmed[1..trimmed.len() - 1].to_string())
-    } else {
-        Some(trimmed.to_string())
-    }
+    Some(crate::util::unescape_php_string_literal(trimmed).unwrap_or_else(|| trimmed.to_string()))
 }

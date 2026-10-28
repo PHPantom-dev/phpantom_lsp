@@ -49,9 +49,9 @@ fn claim_laravel_name(backend: &Backend, name: &str) -> Option<Option<Arc<ClassI
 fn laravel_refine_generation(backend: &Backend) -> u64 {
     let laravel = &backend.laravel;
     // Rebuilding bumps the index's generation, so this comes first.
-    if laravel.pivots.is_dirty() && laravel.pivots.take_dirty() {
-        backend.rebuild_laravel_pivot_index();
-    }
+    laravel
+        .pivots
+        .rebuild_if_dirty(|| backend.rebuild_laravel_pivot_index());
     laravel
         .config_facts_generation()
         .wrapping_add(laravel.aliases.generation())

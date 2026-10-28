@@ -70,6 +70,17 @@ pub(crate) struct SymbolIndex {
     /// `fqn_class_index`, and keeping the runners-up means the name
     /// survives the winning file dropping it.
     pub(crate) duplicate_classes: Arc<RwLock<DuplicateDeclarations<Arc<ClassInfo>>>>,
+    /// The other files a class name was discovered in, when discovery
+    /// found more than one: the locations a merge kept out of
+    /// `fqn_uri_index` because the name was already indexed elsewhere,
+    /// and the ones a later entry displaced from it.
+    ///
+    /// Like `duplicate_classes`, a name only appears here once a second
+    /// file is found to declare it.  What this adds is the declarations no
+    /// one has parsed yet: two Composer projects of a workspace that
+    /// install the same package each have a copy, and a lookup from the
+    /// project whose copy lost the index has to be able to find its own.
+    pub(crate) class_alternates: Arc<RwLock<CiMap<Vec<String>>>>,
     /// Negative-result cache for `find_or_load_class`.
     pub(crate) class_not_found_cache: Arc<RwLock<CiSet>>,
     /// Negative-result cache for `find_or_load_function`.
@@ -132,6 +143,7 @@ impl SymbolIndex {
             fqn_origin_index: Arc::new(RwLock::new(CiMap::new())),
             fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
             duplicate_classes: Arc::new(RwLock::new(CiMap::new())),
+            class_alternates: Arc::new(RwLock::new(CiMap::new())),
             class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             function_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
@@ -202,7 +214,26 @@ impl SymbolIndex {
         self.class_lookup_generation.fetch_add(1, Ordering::Release);
     }
 
-    /// Run `f` with the three class indexes locked together.
+    /// Every file known to declare the class `fqn` other than the one
+    /// `fqn_uri_index` names, parsed or not.
+    pub(crate) fn alternate_class_uris(&self, fqn: &str) -> Vec<String> {
+        let mut uris: Vec<String> = self
+            .duplicate_classes
+            .read()
+            .get(fqn)
+            .map(|decls| decls.keys().cloned().collect())
+            .unwrap_or_default();
+        if let Some(alternates) = self.class_alternates.read().get(fqn) {
+            for uri in alternates {
+                if !uris.contains(uri) {
+                    uris.push(uri.clone());
+                }
+            }
+        }
+        uris
+    }
+
+    /// Run `f` with the class indexes locked together.
     ///
     /// Every path that records or drops a class declaration goes through
     /// this, so `fqn_uri_index` and `fqn_class_index` cannot end up
@@ -217,10 +248,12 @@ impl SymbolIndex {
         let mut uris = self.fqn_uri_index.write();
         let mut classes = self.fqn_class_index.write();
         let mut dupes = self.duplicate_classes.write();
+        let mut alternates = self.class_alternates.write();
         f(&mut ClassDeclarations {
             uris: &mut uris,
             classes: &mut classes,
             dupes: &mut dupes,
+            alternates: &mut alternates,
         })
     }
 }
@@ -288,21 +321,47 @@ impl SymbolIndex {
             })
             .collect();
         let in_tree = |path: &PathBuf| tree.iter().any(|dir| path.starts_with(dir));
+        let uri_in_tree = |uri: &str| {
+            uri_prefixes
+                .iter()
+                .any(|(exact, prefix)| uri == exact || uri.starts_with(prefix.as_str()))
+        };
         {
             let mut index = self.fqn_uri_index.write();
-            index.retain(|_, uri| {
-                !uri_prefixes
-                    .iter()
-                    .any(|(exact, prefix)| uri == exact || uri.starts_with(prefix.as_str()))
+            let mut origins = self.fqn_origin_index.write();
+            let mut alternates = self.class_alternates.write();
+            let mut purged: Vec<String> = Vec::new();
+            index.retain(|fqn, uri| {
+                let keep = !uri_in_tree(uri);
+                if !keep && !alternates.is_empty() {
+                    purged.push(fqn.to_owned());
+                }
+                keep
             });
+            if !alternates.is_empty() {
+                alternates.retain(|_, uris| {
+                    uris.retain(|uri| !uri_in_tree(uri));
+                    !uris.is_empty()
+                });
+            }
             merge_into(
                 &mut *index,
-                &mut *self.fqn_origin_index.write(),
+                &mut *origins,
                 classmap,
                 class_origins,
                 crate::util::path_to_uri,
                 OnConflict::Replace,
+                Some(&mut |fqn: &str, uri: String| push_alternate(&mut alternates, fqn, uri)),
             );
+            // A name the rescan no longer declares falls to another file
+            // that does, as it would for a parsed duplicate.
+            for fqn in purged {
+                if !index.contains_key(&fqn)
+                    && let Some(uri) = pop_alternate(&mut alternates, &fqn)
+                {
+                    index.insert(fqn, uri);
+                }
+            }
         }
         {
             let mut index = self.autoload_function_index.write();
@@ -314,6 +373,7 @@ impl SymbolIndex {
                 function_origins,
                 Path::to_path_buf,
                 OnConflict::Replace,
+                None,
             );
         }
         {
@@ -326,6 +386,7 @@ impl SymbolIndex {
                 constant_origins,
                 Path::to_path_buf,
                 OnConflict::Replace,
+                None,
             );
         }
         self.prune_orphaned_origins();
@@ -345,13 +406,17 @@ impl SymbolIndex {
             package_roots: _,
         } = scan;
         if !classmap.is_empty() {
+            let mut index = self.fqn_uri_index.write();
+            let mut origins = self.fqn_origin_index.write();
+            let mut alternates = self.class_alternates.write();
             merge_into(
-                &mut *self.fqn_uri_index.write(),
-                &mut *self.fqn_origin_index.write(),
+                &mut *index,
+                &mut *origins,
                 classmap,
                 class_origins,
                 class_uri,
                 OnConflict::Keep,
+                Some(&mut |fqn: &str, uri: String| push_alternate(&mut alternates, fqn, uri)),
             );
         }
         if !function_index.is_empty() {
@@ -362,6 +427,7 @@ impl SymbolIndex {
                 function_origins,
                 Path::to_path_buf,
                 OnConflict::Keep,
+                None,
             );
         }
         if !constant_index.is_empty() {
@@ -372,14 +438,25 @@ impl SymbolIndex {
                 constant_origins,
                 Path::to_path_buf,
                 OnConflict::Keep,
+                None,
             );
         }
     }
 }
 
+/// Receives a location of a name that a merge did not index; see
+/// [`merge_into`].
+type Displaced<'a, V> = &'a mut dyn FnMut(&str, V);
+
 /// Merge one kind of symbol into its index and origin map.  `location`
 /// turns a scanned path into what the index stores, and is only called
 /// when the index needs it.
+///
+/// `displaced` is handed every location of a name that the index ended up
+/// not holding because another location of it won: the scan's own when it
+/// is kept out, the one already indexed when the scan's replaces it.
+/// Without it, a conflict only works out the scan's location when the
+/// origin needs refreshing.
 fn merge_into<V: PartialEq>(
     index: &mut impl NameMap<V>,
     origins: &mut impl NameMap<ClassCompletionOrigin>,
@@ -387,6 +464,7 @@ fn merge_into<V: PartialEq>(
     mut scan_origins: HashMap<String, ClassCompletionOrigin>,
     location: impl Fn(&Path) -> V,
     on_conflict: OnConflict,
+    mut displaced: Option<Displaced<'_, V>>,
 ) {
     for (name, path) in entries {
         let origin = scan_origins.remove_entry(&name);
@@ -398,7 +476,42 @@ fn merge_into<V: PartialEq>(
                     // own file.
                     None => origins.remove(&name),
                 }
-                index.insert(name, location(&path));
+                let here = location(&path);
+                match displaced.as_mut() {
+                    Some(displaced) => {
+                        if let Some(previous) = index.insert(name.clone(), here)
+                            && index.get(&name) != Some(&previous)
+                        {
+                            displaced(&name, previous);
+                        }
+                    }
+                    None => {
+                        index.insert(name, here);
+                    }
+                }
+            }
+            OnConflict::Keep if displaced.is_some() => {
+                match index.try_insert_with(name, || location(&path)) {
+                    Ok(()) => {
+                        if let Some((key, origin)) = origin
+                            && origin != ClassCompletionOrigin::Project
+                        {
+                            origins.insert(key, origin);
+                        }
+                    }
+                    Err((name, existing)) => {
+                        let here = location(&path);
+                        if *existing != here {
+                            if let Some(displaced) = displaced.as_mut() {
+                                displaced(&name, here);
+                            }
+                        } else if let Some((key, origin)) = origin
+                            && recorded_origin(origins, &name) != origin
+                        {
+                            set_origin(origins, key, origin);
+                        }
+                    }
+                }
             }
             OnConflict::Keep => match index.try_insert_with(name, || location(&path)) {
                 // A name new to the index has no origin of its own to clear.
@@ -460,7 +573,8 @@ trait NameMap<V> {
         name: String,
         make: impl FnOnce() -> V,
     ) -> Result<(), (String, &V)>;
-    fn insert(&mut self, name: String, value: V);
+    /// Insert `value` under `name`, returning what it replaced.
+    fn insert(&mut self, name: String, value: V) -> Option<V>;
     fn remove(&mut self, name: &str);
 }
 
@@ -477,8 +591,8 @@ impl<V> NameMap<V> for CiMap<V> {
         CiMap::try_insert_with(self, name, make)
     }
 
-    fn insert(&mut self, name: String, value: V) {
-        CiMap::insert(self, name, value);
+    fn insert(&mut self, name: String, value: V) -> Option<V> {
+        CiMap::insert(self, name, value)
     }
 
     fn remove(&mut self, name: &str) {
@@ -506,8 +620,8 @@ impl<V> NameMap<V> for HashMap<String, V> {
         Ok(())
     }
 
-    fn insert(&mut self, name: String, value: V) {
-        HashMap::insert(self, name, value);
+    fn insert(&mut self, name: String, value: V) -> Option<V> {
+        HashMap::insert(self, name, value)
     }
 
     fn remove(&mut self, name: &str) {
@@ -604,6 +718,7 @@ pub(crate) struct ClassDeclarations<'a> {
     uris: &'a mut CiMap<String>,
     classes: &'a mut CiMap<Arc<ClassInfo>>,
     dupes: &'a mut DuplicateDeclarations<Arc<ClassInfo>>,
+    alternates: &'a mut CiMap<Vec<String>>,
 }
 
 impl ClassDeclarations<'_> {
@@ -635,12 +750,16 @@ impl ClassDeclarations<'_> {
         // A parse is better information than a classmap entry, which only
         // claims the name lives in a file: it names a file we have just
         // seen declare the name.  So only a second *parsed* declaration
-        // starts a duplicate record.
-        let reowned = self.uris.get(fqn).is_some_and(|owner| owner != uri);
+        // starts a duplicate record, and only displacing one counts as
+        // taking the name over: nothing was indexed or resolved from an
+        // unparsed classmap entry, so there is nothing stale to evict.
         let displaced = match self.classes.get(fqn) {
-            Some(class) if reowned => Some(Arc::clone(class)),
+            Some(class) if self.uris.get(fqn).is_some_and(|owner| owner != uri) => {
+                Some(Arc::clone(class))
+            }
             _ => None,
         };
+        let reowned = displaced.is_some();
         match displaced {
             Some(displaced) => {
                 let owner = self.uris.get(fqn).expect("reowned means an owner").clone();
@@ -655,7 +774,13 @@ impl ClassDeclarations<'_> {
                 }
             }
             None => {
-                self.uris.insert(fqn, uri.to_owned());
+                // An unparsed classmap entry for another file is only
+                // displaced, not disproved.
+                if let Some(previous) = self.uris.insert(fqn, uri.to_owned())
+                    && previous != uri
+                {
+                    push_alternate(self.alternates, fqn, previous);
+                }
                 self.classes.insert(fqn, Arc::clone(class));
                 Declared { won: true, reowned }
             }
@@ -687,9 +812,16 @@ impl ClassDeclarations<'_> {
     /// disagree about which file the name refers to.
     pub(crate) fn note_discovered(&mut self, fqn: &str, uri: String) {
         if self.classes.contains_key(fqn) {
+            if self.uris.get(fqn) != Some(&uri) {
+                push_alternate(self.alternates, fqn, uri);
+            }
             return;
         }
-        self.uris.insert(fqn, uri);
+        if let Some(previous) = self.uris.insert(fqn, uri)
+            && self.uris.get(fqn) != Some(&previous)
+        {
+            push_alternate(self.alternates, fqn, previous);
+        }
     }
 
     /// Drop every declaration contributed by `uris`, promoting the
@@ -735,6 +867,23 @@ impl ClassDeclarations<'_> {
             self.classes.remove(fqn);
         }
 
+        // A name whose last parsed declaration went falls to a file
+        // discovery found declaring it too.
+        if !self.alternates.is_empty() {
+            self.alternates.retain(|_, alternates| {
+                alternates.retain(|uri| !uris.contains(uri.as_str()));
+                !alternates.is_empty()
+            });
+            dropped.retain(|fqn| match pop_alternate(self.alternates, fqn) {
+                Some(uri) => {
+                    self.uris.insert(fqn.as_str(), uri);
+                    promoted.push(fqn.clone());
+                    false
+                }
+                None => true,
+            });
+        }
+
         WithdrawnClasses { dropped, promoted }
     }
 
@@ -761,6 +910,30 @@ impl ClassDeclarations<'_> {
             self.dupes.remove(fqn);
         }
     }
+}
+
+/// Record `uri` as a file that also declares `fqn`.
+fn push_alternate(alternates: &mut CiMap<Vec<String>>, fqn: &str, uri: String) {
+    match alternates.get_mut(fqn) {
+        Some(uris) => {
+            if !uris.contains(&uri) {
+                uris.push(uri);
+            }
+        }
+        None => {
+            alternates.insert(fqn, vec![uri]);
+        }
+    }
+}
+
+/// Take one of the files recorded as also declaring `fqn`.
+fn pop_alternate(alternates: &mut CiMap<Vec<String>>, fqn: &str) -> Option<String> {
+    let uris = alternates.get_mut(fqn)?;
+    let uri = uris.pop();
+    if uris.is_empty() {
+        alternates.remove(fqn);
+    }
+    uri
 }
 
 /// What [`ClassDeclarations::declare`] did, for refreshing the indexes
@@ -870,6 +1043,65 @@ mod tests {
         );
         assert_eq!(class_entry(&index, "Removed"), (None, None));
         assert_eq!(class_entry(&index, "Local"), (uri("/src/Local.php"), None));
+    }
+
+    #[test]
+    fn a_merge_remembers_the_declaration_it_kept_out() {
+        let index = SymbolIndex::new();
+        index.merge_scan(class_scan(&[("Foo", "/a/vendor/Foo.php", VendorExplicit)]));
+        index.merge_scan(class_scan(&[("Foo", "/b/vendor/Foo.php", VendorExplicit)]));
+        // The same file again is not a second declaration.
+        index.merge_scan(class_scan(&[("Foo", "/a/vendor/Foo.php", VendorExplicit)]));
+
+        assert_eq!(class_entry(&index, "Foo").0, uri("/a/vendor/Foo.php"));
+        assert_eq!(
+            index.alternate_class_uris("Foo"),
+            vec![uri("/b/vendor/Foo.php").unwrap()]
+        );
+    }
+
+    #[test]
+    fn replacing_a_tree_hands_a_name_it_dropped_to_another_declaration() {
+        let index = SymbolIndex::new();
+        index.merge_scan(class_scan(&[("Foo", "/a/vendor/Foo.php", VendorExplicit)]));
+        index.merge_scan(class_scan(&[("Foo", "/b/vendor/Foo.php", VendorExplicit)]));
+        index.replace_tree(
+            &[PathBuf::from("/a/vendor")],
+            WorkspaceScanResult::default(),
+        );
+
+        assert_eq!(class_entry(&index, "Foo").0, uri("/b/vendor/Foo.php"));
+        assert!(index.alternate_class_uris("Foo").is_empty());
+    }
+
+    #[test]
+    fn a_rescan_that_takes_a_name_over_remembers_the_one_it_replaced() {
+        let index = SymbolIndex::new();
+        index.merge_scan(class_scan(&[("Foo", "/a/vendor/Foo.php", VendorExplicit)]));
+        index.replace_tree(
+            &[PathBuf::from("/b/vendor")],
+            class_scan(&[("Foo", "/b/vendor/Foo.php", VendorExplicit)]),
+        );
+
+        assert_eq!(class_entry(&index, "Foo").0, uri("/b/vendor/Foo.php"));
+        assert_eq!(
+            index.alternate_class_uris("Foo"),
+            vec![uri("/a/vendor/Foo.php").unwrap()]
+        );
+    }
+
+    #[test]
+    fn withdrawing_a_file_hands_its_names_to_another_declaration() {
+        let index = SymbolIndex::new();
+        index.merge_scan(class_scan(&[("Foo", "/a/vendor/Foo.php", VendorExplicit)]));
+        index.merge_scan(class_scan(&[("Foo", "/b/vendor/Foo.php", VendorExplicit)]));
+        let withdrawn = index.with_class_declarations(|decls| {
+            decls.withdraw_uris(&HashSet::from([uri("/a/vendor/Foo.php").unwrap()]))
+        });
+
+        assert_eq!(withdrawn.promoted, vec!["Foo".to_string()]);
+        assert!(withdrawn.dropped.is_empty());
+        assert_eq!(class_entry(&index, "Foo").0, uri("/b/vendor/Foo.php"));
     }
 
     #[test]

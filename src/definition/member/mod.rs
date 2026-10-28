@@ -91,6 +91,8 @@ pub(super) enum MemberAccessHint {
     MethodCall,
     /// No `(` after the name — looks like a property / constant access.
     PropertyAccess,
+    /// `Foo::BAR` with no `$` — can only read a constant or enum case.
+    ConstantAccess,
     /// Cannot determine (fallback to original order).
     Unknown,
 }
@@ -660,6 +662,17 @@ impl Backend {
                 }
                 if has_constant {
                     return Some(MemberKind::Constant);
+                }
+                if has_method || has_virtual_method {
+                    return Some(MemberKind::Method);
+                }
+            }
+            MemberAccessHint::ConstantAccess => {
+                if has_constant {
+                    return Some(MemberKind::Constant);
+                }
+                if has_property || has_virtual_property {
+                    return Some(MemberKind::Property);
                 }
                 if has_method || has_virtual_method {
                     return Some(MemberKind::Method);

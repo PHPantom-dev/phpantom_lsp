@@ -35,7 +35,7 @@ use tower_lsp_server::gen_lsp_types::{CompletionResponse, Position};
 use crate::Backend;
 use crate::completion::eloquent_string::detect_string_call_context;
 use crate::completion::laravel_string_keys::{
-    ArgumentSlot, attribute_class_start, callable_before_scalar_argument, string_key_item_kind,
+    ArgumentSlot, attribute_class_start, scalar_argument_at, string_key_item_kind,
     string_key_response,
 };
 use crate::completion::source::code_context::CodeContext;
@@ -75,8 +75,21 @@ impl Backend {
         let (kind, prefix_start) = self
             .symfony_call_key(content, cursor, code, ctx)
             .map(|kind| (kind, literal_start))
-            .or_else(|| attribute_key(content, quote, literal, literal_start, ctx))
+            .or_else(|| attribute_key(content, code, literal, literal_start, ctx))
             .filter(|(kind, _)| self.string_key_kind_enabled(*kind))?;
+        if kind == StringKeyKind::YiiRouteArgument {
+            let arguments = handler_at(ctx, literal_start as u32)
+                .and_then(|handler| self.yii_handler_arguments(&handler))
+                .unwrap_or_default();
+            return self.symfony_names_response(
+                kind,
+                arguments,
+                content,
+                prefix_start,
+                cursor,
+                position,
+            );
+        }
         if kind == StringKeyKind::SymfonyTranslation {
             let domain = self.translation_domain_at(uri, content, literal_start);
             let messages = self.symfony_translation_messages(&domain);
@@ -224,8 +237,28 @@ impl Backend {
         if call.is_static {
             return None;
         }
-        let (receiver, _) = symfony_receiver_method(&call.method_name, call.arg_index)?;
+        self.receiver_call_key(
+            subject,
+            &call.method_name,
+            call.arg_index,
+            content,
+            cursor,
+            ctx,
+        )
+    }
 
+    /// What the argument `index` of a call of `method` on `subject`, written
+    /// at `cursor`, names, by the receiver the type engine resolves it to.
+    pub(crate) fn receiver_call_key(
+        &self,
+        subject: &str,
+        method: &str,
+        index: usize,
+        content: &str,
+        cursor: usize,
+        ctx: &FileContext,
+    ) -> Option<StringKeyKind> {
+        let (receiver, _) = symfony_receiver_method(method, index)?;
         let loaders = self.file_loaders(ctx);
         let class_loader = loaders.resolved_class_loader();
         let rctx = loaders.resolution_ctx_at(content, cursor as u32);
@@ -233,9 +266,13 @@ impl Backend {
             .into_iter()
             .filter_map(|resolved| resolved.class_info)
             .find_map(|class| {
-                receiver.targets().iter().find_map(|(fqn, kind)| {
-                    crate::class_lookup::is_subtype_of(&class, fqn, class_loader).then_some(*kind)
-                })
+                self.typed_receiver_key_kind(
+                    &crate::php_type::PhpType::named(class.fqn()),
+                    method,
+                    index,
+                    receiver,
+                    class_loader,
+                )
             })
     }
 
@@ -357,13 +394,12 @@ impl Backend {
 /// `#[AsMessageHandler]`'s `bus:` a bus.
 fn attribute_key(
     content: &str,
-    quote: usize,
+    code: &CodeContext<'_>,
     literal: &str,
     literal_start: usize,
     ctx: &FileContext,
 ) -> Option<(StringKeyKind, usize)> {
-    let before_quote = content[..quote].trim_end();
-    let (callable, slot) = callable_before_scalar_argument(before_quote)?;
+    let (callable, slot) = scalar_argument_at(content, code)?;
     let name_start = callable.len() - trailing_name(callable).len();
     let class_start = attribute_class_start(callable, name_start)?;
     let written = &callable[class_start..];
@@ -381,6 +417,13 @@ fn attribute_key(
             ArgumentSlot::Named("event") | ArgumentSlot::Positional(0)
         )
         .then_some((StringKeyKind::SymfonyEvent, literal_start));
+    }
+    if crate::yii::routes::is_route_argument_attribute(&attribute) {
+        return matches!(
+            slot,
+            ArgumentSlot::Named("name") | ArgumentSlot::Positional(0)
+        )
+        .then_some((StringKeyKind::YiiRouteArgument, literal_start));
     }
     if is_message_handler_attribute(&attribute) {
         return matches!(
@@ -404,6 +447,23 @@ fn attribute_key(
         }
         _ => None,
     }
+}
+
+/// The handler whose declaration `offset` is in, as a route argument's key
+/// names it: the innermost class around it, and the last of its methods
+/// whose name comes before it.
+fn handler_at(ctx: &FileContext, offset: u32) -> Option<String> {
+    let class = ctx
+        .classes
+        .iter()
+        .filter(|class| class.start_offset <= offset && offset < class.end_offset)
+        .min_by_key(|class| class.end_offset - class.start_offset)?;
+    let method = class
+        .methods
+        .iter()
+        .filter(|method| method.name_offset != 0 && method.name_offset < offset)
+        .max_by_key(|method| method.name_offset)?;
+    Some(crate::yii::routes::handler_key(&class.fqn(), &method.name))
 }
 
 /// Where the name of a `%placeholder%` the end of `text` is inside starts.

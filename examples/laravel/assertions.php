@@ -2024,12 +2024,35 @@ check(
     ($castSampleCasts['toppings'] ?? null) === \Illuminate\Database\Eloquent\Casts\AsCollection::class . ':,' . \App\Models\Frosting::class
 );
 
-// ─── Morph aliases in column comparisons ────────────────────────────────────
+// ─── Morph aliases in maps, type arrays, and column comparisons ──────────────
 
 $previousMorphMap = \Illuminate\Database\Eloquent\Relations\Relation::morphMap();
+$previousRequiresMorphMap = \Illuminate\Database\Eloquent\Relations\Relation::requiresMorphMap();
 \Illuminate\Database\Eloquent\Relations\Relation::morphMap([
     'blog_post' => \App\Models\BlogPost::class,
 ]);
+\Illuminate\Database\Eloquent\Relations\Relation::enforceMorphMap([
+    'bakery' => \App\Models\Bakery::class,
+]);
+check(
+    'Morph map keys register aliases and enforced maps merge them',
+    \Illuminate\Database\Eloquent\Relations\Relation::getMorphedModel('blog_post') === \App\Models\BlogPost::class
+        && \Illuminate\Database\Eloquent\Relations\Relation::getMorphedModel('bakery') === \App\Models\Bakery::class
+        && \Illuminate\Database\Eloquent\Relations\Relation::requiresMorphMap()
+);
+\Illuminate\Database\Eloquent\Relations\Relation::requireMorphMap($previousRequiresMorphMap);
+$morphAliasCandidates = [];
+$morphAliasQuery = \App\Models\Review::whereHasMorph('reviewable', ['blog_post', 'bakery'], function ($query, $type) use (&$morphAliasCandidates) {
+    $morphAliasCandidates[] = [get_class($query->getModel()), $type];
+});
+check(
+    'Morph type arrays resolve aliases to their mapped models',
+    $morphAliasCandidates === [
+        [\App\Models\BlogPost::class, \App\Models\BlogPost::class],
+        [\App\Models\Bakery::class, \App\Models\Bakery::class],
+    ]
+);
+check('Morph type arrays bind their registered aliases', $morphAliasQuery->getBindings() === ['blog_post', 'bakery']);
 $review = new \App\Models\Review();
 $review->reviewable()->associate(new \App\Models\BlogPost());
 check('Review declares its morph type column', $review->reviewable()->getMorphType() === 'reviewable_type');

@@ -1,0 +1,22 @@
+// test: calling a closure whose body calls a method on its own parameter yields that method's type
+// feature: hover
+// expect: string
+---
+<?php
+
+class User
+{
+    public function label(): string
+    {
+        return '';
+    }
+}
+
+function demo(User $user): void
+{
+    $fn = function (User $u) {
+        return $u->label();
+    };
+    $result = $fn($user);
+    echo $res<>ult;
+}

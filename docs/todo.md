@@ -32,6 +32,9 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| WP2 | [Audit what the WordPress stubs declare against the engine](todo/wordpress.md#wp2-audit-what-the-wordpress-stubs-declare-against-the-engine) | High        | Low         |
+| T57 | [A `global` variable is untyped unless a `@var` sits above it](todo/type-inference.md#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it) | High        | Medium      |
+| D41 | [A mismatch that is only a possible `null` or `false` is reported by default](todo/diagnostics.md#d41-a-mismatch-that-is-only-a-possible-null-or-false-is-reported-by-default) | High        | Low-Medium  |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -54,20 +57,19 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | F59 | [Send Twig, YAML, and XML documents to the server from Zed](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed) (Zed PR) | Medium | Low |
 | P86 | [A Symfony app's generated `config/reference.php` is slow to parse](todo/performance.md#p86-a-symfony-apps-generated-configreferencephp-is-slow-to-parse) | Medium | Medium |
-| F35 | [Suggest a close name for an unknown template or view](todo/lsp-features.md#f35-suggest-a-close-name-for-an-unknown-template-or-view) | Low-Medium  | Low         |
+| F28 | [Symfony route names a loader composes](todo/lsp-features.md#f28-symfony-route-names-a-loader-composes) (blocks the unknown-route diagnostic) | Medium-High | Medium      |
+| F29 | [Report Symfony translation keys nothing declares](todo/lsp-features.md#f29-report-symfony-translation-keys-nothing-declares) (blocks full Symfony support) | Medium-High | Medium      |
+| F32 | [Report unknown Symfony names in Twig templates](todo/lsp-features.md#f32-report-unknown-symfony-names-in-twig-templates) (blocks full Twig support) | Medium-High | Medium      |
+| F37 | [Twig template variables](todo/lsp-features.md#f37-twig-template-variables) (blocks full Twig support) | Medium-High | Medium-High |
 | F27 | [Symfony route parameters](todo/lsp-features.md#f27-symfony-route-parameters) (blocks full Symfony support) | Medium      | Medium      |
-| F29 | [Report Symfony translation keys nothing declares](todo/lsp-features.md#f29-report-symfony-translation-keys-nothing-declares) (blocks full Symfony support) | Medium      | Medium      |
-| F32 | [Report unknown Symfony names in Twig templates](todo/lsp-features.md#f32-report-unknown-symfony-names-in-twig-templates) (blocks full Twig support) | Medium      | Medium      |
 | F36 | [Twig block navigation](todo/lsp-features.md#f36-twig-block-navigation) (blocks full Twig support) | Medium      | Medium      |
 | F50 | [Twig filters and functions](todo/lsp-features.md#f50-twig-filters-and-functions) (blocks full Twig support) | Medium      | Medium      |
 | F57 | ["Add translation" quick fix for an undeclared Symfony key](todo/lsp-features.md#f57-add-translation-quick-fix-for-an-undeclared-symfony-key) (depends on F29) | Medium      | Medium      |
 | F58 | [Configured Twig roots and namespaces](todo/lsp-features.md#f58-configured-twig-roots-and-namespaces) | Low-Medium  | Medium      |
 | F31 | [Symfony Twig templates outside `templates/`](todo/lsp-features.md#f31-symfony-twig-templates-outside-templates) | Low-Medium  | Medium      |
 | F30 | [Symfony translations outside YAML, XLIFF, and the `trans` filter](todo/lsp-features.md#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter) | Low-Medium  | Medium      |
-| F28 | [Symfony route names a loader composes](todo/lsp-features.md#f28-symfony-route-names-a-loader-composes) | Low-Medium  | Medium      |
 | T54 | [Messenger handlers a service tag registers](todo/type-inference.md#t54-messenger-handlers-a-service-tag-registers) | Low-Medium  | Medium      |
 | T55 | [Symfony array parameters are typed as plain `array`](todo/type-inference.md#t55-symfony-array-parameters-are-typed-as-plain-array) | Low         | Medium      |
-| F37 | [Twig template variables](todo/lsp-features.md#f37-twig-template-variables) (blocks full Twig support) | Medium      | Medium-High |
 | F34 | [Template names a PHP wrapper builds](todo/lsp-features.md#f34-template-names-a-php-wrapper-builds) | Medium      | Medium-High |
 | F38 | [Twig components](todo/lsp-features.md#f38-twig-components) | Low-Medium  | Medium-High |
 | F56 | [Live components](todo/lsp-features.md#f56-live-components) (depends on F38) | Low-Medium  | Medium-High |
@@ -106,8 +108,8 @@ ships, remove every row that names it.
 | WP1 | [WordPress demo project and a real-world baseline](todo/wordpress.md#wp1-wordpress-demo-project-and-a-real-world-baseline) | High        | Low-Medium  |
 | WP2 | [Audit what the WordPress stubs declare against the engine](todo/wordpress.md#wp2-audit-what-the-wordpress-stubs-declare-against-the-engine) | High        | Low         |
 | WP4 | [Hook names](todo/wordpress.md#wp4-hook-names) | High        | Medium      |
+| T57 | [A `global` variable is untyped unless a `@var` sits above it](todo/type-inference.md#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it) | High        | Medium      |
 | WP3 | [WordPress core for a plugin or theme opened on its own](todo/wordpress.md#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own) | Medium-High | Medium      |
-| T57 | [A `global` variable is untyped unless a `@var` sits above it](todo/type-inference.md#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it) | Medium      | Medium      |
 | WP6 | [Template parts](todo/wordpress.md#wp6-template-parts) | Medium      | Medium      |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | WP7 | [Return types the WordPress stubs do not declare](todo/wordpress.md#wp7-return-types-the-wordpress-stubs-do-not-declare) (depends on WP2) | Medium      | Medium      |
@@ -128,6 +130,18 @@ ships, remove every row that names it.
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
 | DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) (depends on DR3) | Medium-High | High        |
 
+## Yii
+
+| #   | Item                                                                                                                                                            | Impact      | Complexity  |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| Y5  | [Alias definitions](todo/yii.md#y5-alias-definitions) | Medium      | Low-Medium  |
+| Y6  | [`$params` keys in configuration](todo/yii.md#y6-params-keys-in-configuration) | Medium      | Medium      |
+| Y4  | [DI container configuration](todo/yii.md#y4-di-container-configuration) | Medium-High | Medium-High |
+| Y9  | [Views a template renders by name](todo/yii.md#y9-views-a-template-renders-by-name) | Medium      | Medium      |
+| Y10 | [The renderer's configured view path](todo/yii.md#y10-the-renderers-configured-view-path) (builds on Y6) | Medium      | Medium      |
+| Y7  | [Render parameters against the template's `@var` list](todo/yii.md#y7-render-parameters-against-the-templates-var-list) | Medium      | Medium-High |
+| Y8  | [Column names in query arrays](todo/yii.md#y8-column-names-in-query-arrays) | Low-Medium  | High        |
+
 ## PHPUnit & Pest
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
@@ -144,27 +158,33 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| L27 | [Legacy `Controller@method` action strings](todo/laravel.md#l27-legacy-controllermethod-action-strings)                                                                     | Low         | Low         |
-| L60 | [Read relation callback overrides and fallbacks from the declared signature](todo/laravel.md#l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature) | Low         | Low-Medium  |
-| L29 | [Livewire and Volt component names](todo/laravel.md#l29-livewire-and-volt-component-names) (Livewire projects only)                                                          | Low         | Low-Medium  |
-| L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Medium      |
+| L62 | [Validation rule strings](todo/laravel.md#l62-validation-rule-strings) | High | Medium |
+| L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | High        | Medium      |
+| L68 | [Unknown methods on Eloquent models and builders](todo/laravel.md#l68-unknown-methods-on-eloquent-models-and-builders) | High | Medium |
+| L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
+| L63 | [Middleware alias names](todo/laravel.md#l63-middleware-alias-names) | Medium-High | Medium |
+| L64 | [Routes on controller methods](todo/laravel.md#l64-routes-on-controller-methods) | Medium-High | Medium |
+| L65 | [Unknown Blade and Livewire components](todo/laravel.md#l65-unknown-blade-and-livewire-components) | Medium-High | Medium |
+| L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
+| L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L56 | [Typed Laravel connection names](todo/laravel.md#l56-typed-laravel-connection-names)                                                                                        | Medium      | Medium      |
 | L58 | [Laravel rate limiter names](todo/laravel.md#l58-laravel-rate-limiter-names)                                                                                                | Medium      | Medium      |
 | L53 | [Collection key types from the column for `keyBy` / `groupBy` / `pluck`](todo/laravel.md#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck)                   | Medium      | Medium      |
-| L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
-| L57 | [Laravel queue names](todo/laravel.md#l57-laravel-queue-names)                                                                                                              | Low-Medium  | Medium      |
+| L66 | [Related-file navigation for models, events, and listeners](todo/laravel.md#l66-related-file-navigation-for-models-events-and-listeners) | Medium | Medium |
+| L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (assets, Inertia) | Medium | Medium |
+| E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | L59 | [Typed controller middleware names](todo/laravel.md#l59-typed-controller-middleware-names)                                                                                  | Low-Medium  | Medium      |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |
-| L42 | [Morph alias completion in array positions](todo/laravel.md#l42-morph-alias-completion-in-array-positions)                                                                  | Low-Medium  | Medium      |
 | L61 | [Resolve aliased facade imports during route discovery](todo/laravel.md#l61-resolve-aliased-facade-imports-during-route-discovery)                                          | Low-Medium  | Medium      |
-| L10 | [`RedirectResponse::withX()` dynamic methods](todo/laravel.md#l10-redirectresponsewithx-dynamic-methods)                                                                  | Low         | Medium      |
-| L39 | [Unused view and translation key detection](todo/laravel.md#l39-unused-view-and-translation-key-detection)                                                                  | Low         | Medium      |
-| L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
-| L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium-High |
-| E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
-| L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
+| L67 | [Laravel refactoring intentions](todo/laravel.md#l67-laravel-refactoring-intentions) | Low-Medium | Medium |
+| L57 | [Laravel queue names](todo/laravel.md#l57-laravel-queue-names)                                                                                                              | Low-Medium  | Medium      |
 | L8  | [`withSum`/`withAvg`/`withMin`/`withMax` aggregate properties](todo/laravel.md#l8-withsum-withavg-withmin-withmax-aggregate-properties)                                  | Low-Medium  | High        |
 | L45 | [`*_count` properties are offered on every relationship](todo/laravel.md#l45-_count-properties-are-offered-on-every-relationship)                                           | Low-Medium  | High        |
+| L27 | [Legacy `Controller@method` action strings](todo/laravel.md#l27-legacy-controllermethod-action-strings)                                                                     | Low         | Low         |
+| L60 | [Read relation callback overrides and fallbacks from the declared signature](todo/laravel.md#l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature) | Low         | Low-Medium  |
+| L29 | [Livewire and Volt component names](todo/laravel.md#l29-livewire-and-volt-component-names) (Livewire projects only)                                                          | Low         | Low-Medium  |
+| L10 | [`RedirectResponse::withX()` dynamic methods](todo/laravel.md#l10-redirectresponsewithx-dynamic-methods)                                                                  | Low         | Medium      |
+| L39 | [Unused view and translation key detection](todo/laravel.md#l39-unused-view-and-translation-key-detection)                                                                  | Low         | Medium      |
 
 ## Type Inference
 
@@ -190,11 +210,11 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| D41 | [A mismatch that is only a possible `null` or `false` is reported by default](todo/diagnostics.md#d41-a-mismatch-that-is-only-a-possible-null-or-false-is-reported-by-default) | High        | Low-Medium  |
 | D29 | [`namespace` and `declare` bodies break the reachability flow](todo/diagnostics.md#d29-namespace-and-declare-bodies-break-the-reachability-flow)                              | Low         | Low-Medium  |
 | D19 | [`invalid_member_access` cannot tell a property read from a write](todo/diagnostics.md#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write) (includes PHP 8.4 `private(set)`) | Medium      | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
 | D33 | [Private properties nothing reads or writes are not reported](todo/diagnostics.md#d33-private-properties-nothing-reads-or-writes-are-not-reported) | Low-Medium  | Medium      |
-| D39 | [Writes to a `@readonly` property are not checked](todo/diagnostics.md#d39-writes-to-a-readonly-property-are-not-checked) | Low         | Medium      |
 | D20 | [`Foo::$bar` and `Foo::bar` are the same span](todo/diagnostics.md#d20-foobar-and-foobar-are-the-same-span)                                                                  | Low         | Medium      |
 | D15 | [Unused parameter diagnostic](todo/diagnostics.md#d15-unused-parameter-diagnostic)                                                                                          | Low         | Medium      |
 | D22 | [Member provenance is recomputed instead of recorded](todo/diagnostics.md#d22-member-provenance-is-recomputed-instead-of-recorded)                                        | Medium      | Medium-High |
@@ -222,7 +242,6 @@ ships, remove every row that names it.
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | A28 | [Explicit nullable parameter type](todo/actions.md#a28-explicit-nullable-parameter-type-php-84-deprecation) (PHP 8.4 deprecation)                                           | Medium      | Low         |
-| FX1 | [`deprecated` — replace deprecated symbol usage](todo/fix-cli.md#fx1-deprecated-replace-deprecated-symbol-usage)                                                           | Medium      | Low         |
 | FX3 | [`phpstan.return.unusedType` — remove unused type from return union](todo/fix-cli.md#fx3-phpstanreturnunusedtype-remove-unused-type-from-return-union)                     | Medium      | Low         |
 | H19 | `property.unused` / `method.unused` — remove unused member                                                                                                                  | Low         | Low         |
 | H23 | `instanceof.alwaysTrue` — remove redundant instanceof check                                                                                                                 | Low         | Low         |
@@ -243,11 +262,9 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration)                                                                                                              | Low-Medium  | Low         |
 | F7  | [Evaluatable expression support (DAP integration)](todo/lsp-features.md#f7-evaluatable-expression-support-dap-integration)                                                  | Low-Medium  | Low         |
 | F16 | [On-type `}` brace de-indent](todo/lsp-features.md#f16-on-type-brace-de-indent)                                                                                            | Low         | Low         |
 | S2  | [Closure / arrow function parameter signature help](todo/signature-help.md#s2-closure-arrow-function-parameter-signature-help)                                             | Medium      | Medium      |
-| A46 | [Honor `context.only` in code action responses](todo/actions.md#a46-honor-contextonly-in-code-action-responses)                                                             | Medium      | Medium      |
 | N1  | Template engine (type-aware snippets)                                                                                                                                       | Medium      | Medium      |
 | C8  | [Filesystem proximity as an affinity tiebreaker](todo/completion.md#c8-filesystem-proximity-as-an-affinity-tiebreaker)                                                      | Low-Medium  | Medium      |
 | C3  | Go-to-definition for array shape keys via bracket access                                                                                                                    | Low-Medium  | Medium      |
@@ -275,7 +292,6 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| X16 | [Composer's own class lists bypass `[indexing] exclude`](todo/indexing.md#x16-composers-own-class-lists-bypass-indexing-exclude)                                            | Low-Medium  | Low         |
 | X14 | [Forward Zed's `file_scan_exclusions` and `file_types`](todo/indexing.md#x14-forward-zeds-file_scan_exclusions-and-file_types) (waiting on [zed#66121](https://github.com/zed-industries/zed/pull/66121)) | Low         | Low         |
 | X18 | [Watch `[indexing] include` and stub paths outside the workspace](todo/indexing.md#x18-watch-indexing-include-and-stub-paths-outside-the-workspace)                                         | Low-Medium  | Medium      |
 | X13 | [Decide how workspace-wide edits treat excluded files](todo/indexing.md#x13-decide-how-workspace-wide-edits-treat-excluded-files)                                           | Low-Medium  | Medium      |

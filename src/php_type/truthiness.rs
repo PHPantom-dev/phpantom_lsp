@@ -52,7 +52,8 @@ impl PhpType {
     /// This is a single atomic member's truthiness: a union or nullable
     /// spans its members and is therefore undecided.
     pub fn truthiness(&self) -> Option<bool> {
-        if self.is_null() || self.is_false() {
+        // A `void` result reads as `null` at runtime.
+        if self.is_null() || self.is_void() || self.is_false() {
             return Some(false);
         }
         if self.is_true() {

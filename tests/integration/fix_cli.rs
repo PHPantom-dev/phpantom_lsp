@@ -1,8 +1,8 @@
 //! Integration tests for the `fix` CLI module.
 //!
-//! Tests exercise the unused-import fixer with a real `Backend` to
-//! verify end-to-end correctness: parse → detect unused → build edits
-//! → apply edits → verify output.
+//! Tests exercise the unused-import and deprecated-call fixers with a real
+//! `Backend` to verify end-to-end correctness: parse → detect → build
+//! edits → apply edits → verify output.
 
 use crate::common::create_test_backend;
 use phpantom_lsp::Backend;
@@ -754,4 +754,198 @@ fn unused_use_directives_are_removed_from_the_template() {
          \n\
          <div>{{ User::query()->count() }} {{ Team::first() }}</div>\n"
     );
+}
+
+// ── Deprecated calls ────────────────────────────────────────────────────────
+
+/// Parse a PHP file into the backend and run the deprecated-call fixer,
+/// returning the fixed content and the number of fixes applied.
+fn fix_deprecated(backend: &Backend, uri: &str, content: &str) -> (String, usize) {
+    backend.update_ast(uri, content);
+    let (result, fixes) = phpantom_lsp::fix::fix_deprecated(backend, uri, content);
+    (result, fixes.len())
+}
+
+const DEPRECATED_FUNCTIONS: &str = r#"<?php
+
+namespace App;
+
+use JetBrains\PhpStorm\Deprecated;
+
+#[Deprecated(replacement: 'sum(%parametersList%)')]
+function add(int $a, int $b): int { return $a + $b; }
+
+function sum(int $a, int $b): int { return $a + $b; }
+
+"#;
+
+#[test]
+fn replaces_deprecated_function_calls() {
+    let backend = create_test_backend();
+    let content = format!("{DEPRECATED_FUNCTIONS}echo add(1, 2);\necho add($x, 3);\n");
+
+    let (result, fixes) = fix_deprecated(&backend, "file:///test.php", &content);
+
+    assert_eq!(fixes, 2);
+    assert!(
+        result.ends_with("echo sum(1, 2);\necho sum($x, 3);\n"),
+        "Both calls should be replaced. Got:\n{result}"
+    );
+}
+
+/// A replacement carries its arguments over as written, so the call
+/// nested in the outer one's arguments is rewritten on a later pass.
+#[test]
+fn replaces_deprecated_calls_nested_in_each_other() {
+    let backend = create_test_backend();
+    let content = format!("{DEPRECATED_FUNCTIONS}echo add(add(1, 2), add(3, 4));\n");
+
+    let (result, fixes) = fix_deprecated(&backend, "file:///test.php", &content);
+
+    assert_eq!(fixes, 3);
+    assert!(
+        result.ends_with("echo sum(sum(1, 2), sum(3, 4));\n"),
+        "Every nested call should be replaced. Got:\n{result}"
+    );
+}
+
+#[test]
+fn replaces_deprecated_method_call_including_its_subject() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+
+namespace App;
+
+use JetBrains\PhpStorm\Deprecated;
+
+class Clock {
+    #[Deprecated(replacement: '%class%->now()')]
+    public function current(): int { return 0; }
+
+    public function now(): int { return 0; }
+}
+
+function tick(Clock $clock): int {
+    return $clock->current();
+}
+"#;
+
+    let (result, fixes) = fix_deprecated(&backend, "file:///test.php", content);
+
+    assert_eq!(fixes, 1);
+    assert!(
+        result.contains("return $clock->now();"),
+        "The call should be replaced. Got:\n{result}"
+    );
+}
+
+#[test]
+fn leaves_deprecated_calls_without_a_replacement() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+
+namespace App;
+
+use JetBrains\PhpStorm\Deprecated;
+
+#[Deprecated('use something else')]
+function old(): int { return 1; }
+
+echo old();
+"#;
+
+    let (result, fixes) = fix_deprecated(&backend, "file:///test.php", content);
+
+    assert_eq!(fixes, 0);
+    assert_eq!(result, content);
+}
+
+#[test]
+fn deprecated_fix_is_idempotent() {
+    let backend = create_test_backend();
+    let content = format!("{DEPRECATED_FUNCTIONS}echo add(add(1, 2), 3);\n");
+
+    let (first_pass, _) = fix_deprecated(&backend, "file:///test.php", &content);
+    let (second_pass, fixes) = fix_deprecated(&backend, "file:///test.php", &first_pass);
+
+    assert_eq!(fixes, 0);
+    assert_eq!(first_pass, second_pass);
+}
+
+/// The `fix` command runs every rule on the text the one before it left:
+/// replacing a deprecated function's calls leaves its import unused, and
+/// the import goes in the same run.
+#[tokio::test]
+async fn fix_command_removes_the_import_a_replaced_call_left_unused() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let root = dir.path();
+    std::fs::write(
+        root.join("lib.php"),
+        r#"<?php
+
+namespace Lib;
+
+use JetBrains\PhpStorm\Deprecated;
+
+#[Deprecated(replacement: '\\Lib\\sum(%parametersList%)')]
+function add(int $a, int $b): int { return $a + $b; }
+
+function sum(int $a, int $b): int { return $a + $b; }
+"#,
+    )
+    .unwrap();
+    let app = root.join("app.php");
+    std::fs::write(
+        &app,
+        r#"<?php
+
+namespace App;
+
+use function Lib\add;
+
+echo add(1, 2);
+"#,
+    )
+    .unwrap();
+
+    let exit_code = phpantom_lsp::fix::run(phpantom_lsp::fix::FixOptions {
+        workspace_root: root.to_path_buf(),
+        path_filter: None,
+        rules: Vec::new(),
+        dry_run: false,
+        use_colour: false,
+        with_phpstan: false,
+        output_format: phpantom_lsp::analyse::OutputFormat::Json,
+        global_config: None,
+    })
+    .await;
+
+    assert_eq!(exit_code, 0);
+    assert_eq!(
+        std::fs::read_to_string(&app).unwrap(),
+        "<?php\n\nnamespace App;\n\necho \\Lib\\sum(1, 2);\n"
+    );
+}
+
+/// A template's calls are found in the PHP it lowers to and rewritten in
+/// the template's own text.
+#[test]
+fn replaces_deprecated_calls_in_a_template() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///lib.php",
+        &format!("{DEPRECATED_FUNCTIONS}\n").replace("namespace App;", "namespace Lib;"),
+    );
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let path = dir.path().join("page.blade.php");
+    let content = "<div>{{ \\Lib\\add(\\Lib\\add(1, 2), 3) }}</div>\n";
+    std::fs::write(&path, content).expect("failed to write the template");
+    let uri = tower_lsp_server::gen_lsp_types::Uri::from_file_path(&path)
+        .expect("a file URI")
+        .to_string();
+
+    let (result, fixes) = fix_deprecated(&backend, &uri, content);
+
+    assert_eq!(fixes, 2);
+    assert_eq!(result, "<div>{{ sum(sum(1, 2), 3) }}</div>\n");
 }

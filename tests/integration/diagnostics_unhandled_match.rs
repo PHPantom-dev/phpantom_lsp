@@ -127,7 +127,7 @@ function name(Suit $s): int {
 }
 
 #[test]
-fn comparing_the_backing_value_does_not_narrow_the_enum() {
+fn comparing_the_backing_value_rules_its_case_out() {
     let php = with_suit(
         r#"
 function name(Suit $s): string {
@@ -140,10 +140,44 @@ function name(Suit $s): string {
 }
 "#,
     );
+    assert!(messages(&php).is_empty());
+}
+
+#[test]
+fn a_backing_value_no_case_carries_rules_nothing_out() {
+    let php = with_suit(
+        r#"
+function name(Suit $s): string {
+    if ($s->value === 'X') {
+        return 'nothing';
+    }
+    return match ($s) {
+        Suit::Spades, Suit::Clubs => 'black',
+    };
+}
+"#,
+    );
     assert_eq!(
         messages(&php),
         ["Match expression does not handle remaining value: Suit::Hearts"]
     );
+}
+
+#[test]
+fn a_match_true_arm_on_the_backing_value_rules_its_case_out() {
+    let php = with_suit(
+        r#"
+function name(Suit $s): string {
+    return match (true) {
+        $s->value === 'H' => 'hearts',
+        default => match ($s) {
+            Suit::Spades, Suit::Clubs => 'black',
+        },
+    };
+}
+"#,
+    );
+    assert!(messages(&php).is_empty());
 }
 
 #[test]

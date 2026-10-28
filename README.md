@@ -62,7 +62,7 @@ Independent, re-runnable type-inference conformance results across twelve PHP en
 </p>
 
 > [!TIP]
-> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. For Laravel specifically, open [`examples/laravel/`](examples/laravel/) — a standalone project with real Eloquent models, config, routes, views, and translations that exercises Eloquent property resolution, query builder chaining, scopes, custom collections, and go-to-definition for config keys, route names, and translation strings. For Symfony, open [`examples/symfony/`](examples/symfony/), which uses attributes, YAML, XML, PHP configurators, Twig, and translation catalogues together; its README lists what to try.
+> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. For Laravel specifically, open [`examples/laravel/`](examples/laravel/) — a standalone project with real Eloquent models, config, routes, views, and translations that exercises Eloquent property resolution, query builder chaining, scopes, custom collections, and go-to-definition for config keys, route names, and translation strings. For Symfony, open [`examples/symfony/`](examples/symfony/), which uses attributes, YAML, XML, PHP configurators, Twig, and translation catalogues together; its README lists what to try. For Yii 3, open [`examples/yii/`](examples/yii/), an application generated from `yiisoft/app` with a route, a view, a DI definition, and an alias of its own.
 
 ## Context-Aware Intelligence
 
@@ -90,6 +90,7 @@ PHPantom understands Composer projects out of the box, but works without setup o
 - **Drupal project support.** Detects Drupal projects via `composer.json`, resolves the web root, and indexes Drupal-specific directories and PHP extensions (`.module`, `.install`, `.theme`, etc.) with `.gitignore` bypassed so that Composer-managed core and contrib code is always available.
 - **`require_once` discovery.** Functions from required files are available for completion.
 - **Go-to-implementation.** Jump from an interface or abstract class to all concrete implementations. Scans open files, classmap, PSR-4 directories, and embedded stubs.
+- **Go-to-declaration.** Jump from a method call or a method to the interface or abstract method it implements.
 - **Workspace-wide diagnostics.** After startup, diagnostics run in the background across every file in the project, not just the ones you have open, so problems are already visible when you navigate to a file. Configured external tools (PHPStan, PHPCS, PHPMD, Mago) run project-wide too, once the background pass finishes. Both are deferred until after startup so they never slow down time to ready.
 
 ## Acknowledgements

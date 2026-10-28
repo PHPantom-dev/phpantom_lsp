@@ -335,3 +335,67 @@ async fn include_lifts_the_default_ide_helper_skip() {
         );
     }
 }
+
+/// Composer's class lists name their files without any walk reaching
+/// them, and `exclude` still has to keep those files out: the classmap
+/// under the strategies that read it, the PSR-0 directories, and the
+/// bootstrap classes in `vendor/composer`.
+#[tokio::test]
+async fn exclude_applies_to_composer_class_lists() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let root = dir.path();
+    let composer = root.join("vendor/composer");
+    fs::create_dir_all(&composer).unwrap();
+    fs::create_dir_all(root.join("generated")).unwrap();
+    fs::create_dir_all(root.join("legacy/Old")).unwrap();
+    fs::create_dir_all(root.join("src")).unwrap();
+
+    fs::write(root.join("composer.json"), "{}").unwrap();
+    fs::write(
+        root.join("generated/Generated.php"),
+        "<?php\nclass Generated {}\n",
+    )
+    .unwrap();
+    fs::write(root.join("src/Kept.php"), "<?php\nclass Kept {}\n").unwrap();
+    fs::write(
+        composer.join("autoload_classmap.php"),
+        "<?php\n\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\n\nreturn array(\n    'Generated' => $baseDir . '/generated/Generated.php',\n    'Kept' => $baseDir . '/src/Kept.php',\n);\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("legacy/Old/Thing.php"),
+        "<?php\nclass Old_Thing {}\n",
+    )
+    .unwrap();
+    fs::write(
+        composer.join("autoload_namespaces.php"),
+        "<?php\n\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\n\nreturn array(\n    'Old_' => array($baseDir . '/legacy'),\n);\n",
+    )
+    .unwrap();
+    fs::write(
+        composer.join("ClassLoader.php"),
+        "<?php\nnamespace Composer\\Autoload;\nclass ClassLoader {}\n",
+    )
+    .unwrap();
+
+    for strategy in ["composer", "none"] {
+        fs::write(
+            root.join(".phpantom.toml"),
+            format!(
+                "[indexing]\nstrategy = \"{strategy}\"\nexclude = [\"generated\", \"legacy\", \"vendor/composer\"]\n"
+            ),
+        )
+        .unwrap();
+        let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
+        backend.initialized(InitializedParams {}).await;
+
+        let index = backend.fqn_uri_index().read();
+        assert!(
+            index.get("Kept").is_some(),
+            "{strategy}: an unexcluded entry stays"
+        );
+        for fqn in ["Generated", "Old_Thing", "Composer\\Autoload\\ClassLoader"] {
+            assert!(index.get(fqn).is_none(), "{strategy}: {fqn} is excluded");
+        }
+    }
+}

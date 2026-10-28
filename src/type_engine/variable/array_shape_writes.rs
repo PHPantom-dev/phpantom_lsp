@@ -114,6 +114,43 @@ pub(super) fn merge_nested_array_write(
     // it. A write on only some paths gives the promise back at the branch
     // join, where `array{} | non-empty-array<K, V>` widens to
     // `array<K, V>`.
+    //
+    // A union of shapes is one of them at runtime, and the write lands in
+    // whichever it is. Merging it into the union as a whole found no shape
+    // to update and fell back to the generic pair, which pooled every
+    // slot's type into one: `$pair[3] = $x` on `list{A, B}|array{C, D}` read
+    // back as `array<int, A|B|C|D|X>`. A write to an entry each alternative
+    // already has keeps each the kind of array it is, so it lands in each
+    // too. Any other write pools a union of generic arrays into one.
+    if let TypeKind::Union(members) = base.kind()
+        && (members
+            .iter()
+            .all(|member| member.shape_entries().is_some())
+            || members
+                .iter()
+                .all(|member| writes_existing_entry(member, keys)))
+    {
+        let written = members
+            .iter()
+            .map(|member| merge_nested_array_write(member, keys, value_type, in_loop));
+        // An append grows every alternative by one entry, and kept apart
+        // they would double at each conditional append.
+        return if matches!(keys, [ArrayWriteKey::Append]) {
+            PhpType::fold_key_subset_shapes(
+                written
+                    .flat_map(|member| {
+                        member
+                            .union_members()
+                            .into_iter()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .collect(),
+            )
+        } else {
+            PhpType::union(written.collect())
+        };
+    }
     let merged = merge_nested_array_write_inner(base, keys, value_type, in_loop);
     // A write to an entry the array already has leaves it exactly as empty
     // as it was.
@@ -139,23 +176,6 @@ fn merge_nested_array_write_inner(
     in_loop: bool,
 ) -> PhpType {
     debug_assert!(!keys.is_empty());
-    // A union of shapes is one of them at runtime, and the write lands in
-    // whichever it is. Merging it into the union as a whole found no shape
-    // to update and fell back to the generic pair, which pooled every
-    // slot's type into one: `$pair[3] = $x` on `list{A, B}|array{C, D}` read
-    // back as `array<int, A|B|C|D|X>`.
-    if let TypeKind::Union(members) = base.kind()
-        && members
-            .iter()
-            .all(|member| member.shape_entries().is_some())
-    {
-        return PhpType::union(
-            members
-                .iter()
-                .map(|member| merge_nested_array_write_inner(member, keys, value_type, in_loop))
-                .collect(),
-        );
-    }
     // A keyed write that runs once stores the exact value, the way an
     // assignment to a variable does. One in a loop body may run any number
     // of times with a different value each time, so only its base type is
@@ -369,12 +389,13 @@ fn with_element_type(base: &PhpType, element: &PhpType) -> Option<PhpType> {
 /// written the same way an array literal's own entries do — a shape is
 /// only worth tracking at all because it is exact, and unlike a mutation
 /// onto a generic `array<K, V>` pair this keeps the shape's arity rather
-/// than folding into a wider domain. When that index is not knowable — an
-/// optional integer-keyed entry may or may not be there, and shifts every
-/// index after it — the shape widens to `array<K, V>` instead.
+/// than folding into a wider domain. When an optional integer-keyed entry
+/// leaves that index open, the append lands at each index it can take (see
+/// [`append_past_optional_keys`]).
 fn append_to_shape(base: &PhpType, entries: &[ShapeEntry], value_type: &PhpType) -> PhpType {
     let Some(index) = next_append_index(entries) else {
-        return merge_keyed_type(base, &PhpType::int(), value_type);
+        return append_past_optional_keys(base, entries, value_type)
+            .unwrap_or_else(|| merge_keyed_type(base, &PhpType::int(), value_type));
     };
     // A positional entry is read back by counting the positional entries
     // before it, so it only spells the same key the append writes while no
@@ -392,6 +413,95 @@ fn append_to_shape(base: &PhpType, entries: &[ShapeEntry], value_type: &PhpType)
     } else {
         shape
     }
+}
+
+/// A `[]` append to a shape whose optional integer-keyed entries leave the
+/// next free index open: one alternative per index the append can land on,
+/// folded back into as few shapes as describe them. `array{0: A, 1?: B}`
+/// gains `C` at `1` when the `B` entry is absent and at `2` when it is
+/// there, which folds to `array{0: A, 1: B|C, 2?: C}`.
+///
+/// In each alternative the entries at or past the index it appends at are
+/// absent, and the one just before it is present. A list holds every index
+/// below its length, so there all the ones before it are.
+fn append_past_optional_keys(
+    base: &PhpType,
+    entries: &[ShapeEntry],
+    value_type: &PhpType,
+) -> Option<PhpType> {
+    let keys = runtime_shape_keys(entries)?;
+    let int_keys: Vec<Option<i64>> = keys
+        .iter()
+        .map(|key| crate::php_type::canonical_int_key(key))
+        .collect();
+    let mut required_next: i64 = 0;
+    for (entry, key) in entries.iter().zip(&int_keys) {
+        if let Some(key) = key
+            && !entry.optional
+        {
+            required_next = required_next.max(key.checked_add(1)?);
+        }
+    }
+    let mut indexes = vec![required_next];
+    for (entry, key) in entries.iter().zip(&int_keys) {
+        if let Some(key) = key
+            && entry.optional
+        {
+            let after = key.checked_add(1)?;
+            if after > required_next {
+                indexes.push(after);
+            }
+        }
+    }
+    indexes.sort_unstable();
+    indexes.dedup();
+
+    let list = base.is_list_shape();
+    let alternatives = indexes
+        .iter()
+        .map(|&index| {
+            let mut variant: Vec<ShapeEntry> = Vec::with_capacity(entries.len() + 1);
+            for ((entry, key), int_key) in entries.iter().zip(&keys).zip(&int_keys) {
+                match int_key {
+                    Some(int_key) if *int_key >= index => {}
+                    Some(int_key) => variant.push(ShapeEntry {
+                        key: Some(key.clone()),
+                        value_type: entry.value_type.clone(),
+                        optional: entry.optional && !list && int_key + 1 != index,
+                    }),
+                    None => variant.push(entry.clone()),
+                }
+            }
+            variant.push(ShapeEntry {
+                key: Some(index.to_string()),
+                value_type: value_type.clone(),
+                optional: false,
+            });
+            // The leading entries that sit at `0, 1, 2, …` are spelled
+            // positionally, the way an append to a shape with no optional
+            // entry spells them. A branch join only keeps a positional shape
+            // apart from `array{}` rather than making every entry optional.
+            for (position, entry) in variant.iter_mut().enumerate() {
+                if entry.optional
+                    || entry
+                        .key
+                        .as_deref()
+                        .and_then(crate::php_type::canonical_int_key)
+                        != i64::try_from(position).ok()
+                {
+                    break;
+                }
+                entry.key = None;
+            }
+            let shape = PhpType::array_shape(variant);
+            if list {
+                PhpType::as_list_shape(shape)
+            } else {
+                shape
+            }
+        })
+        .collect();
+    Some(PhpType::fold_key_subset_shapes(alternatives))
 }
 
 /// The integer key a `[]` append writes to a shape holding `entries`.

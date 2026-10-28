@@ -533,7 +533,7 @@ fn type_error_messages(backend: &phpantom_lsp::Backend, uri: &str, text: &str) -
 /// A `Holder` whose property is a `T|false` union — the shape a `T|false`
 /// return gets cached into, and the one with no permissive
 /// "the caller may have guarded" escape hatch at the call site.
-const HANDLE_SCAFFOLD: &str = r#"<?php
+const HANDLE_SCAFFOLD: &str = r#"<?php declare(strict_types=1);
 namespace Handle;
 
 function useString(string $value): void {}
@@ -717,7 +717,7 @@ function run(Holder $h): void {{
 /// A `Holder` whose argument-less method returns `T|false` — the call-key
 /// equivalent of `HANDLE_SCAFFOLD`'s property, seeded the same way once
 /// the guard names it.
-const HANDLE_CALL_SCAFFOLD: &str = r#"<?php
+const HANDLE_CALL_SCAFFOLD: &str = r#"<?php declare(strict_types=1);
 namespace HandleCall;
 
 function useString(string $value): void {}
@@ -783,7 +783,7 @@ class C {{
 // explicit `else`, `!empty()`, and the implicit else an `||` guard's De
 // Morgan expansion produces.
 
-const READ_IT_SCAFFOLD: &str = r#"<?php
+const READ_IT_SCAFFOLD: &str = r#"<?php declare(strict_types=1);
 namespace ReadIt;
 
 function useString(string $value): void {}
@@ -860,7 +860,7 @@ function run(): void {{
 
 /// Scaffolding for the `if (!guard1 || !guard2) { exit; }` idiom: a wide
 /// union parameter and consumers that only accept one of its members.
-const EXIT_GUARD_SCAFFOLD: &str = r#"<?php
+const EXIT_GUARD_SCAFFOLD: &str = r#"<?php declare(strict_types=1);
 namespace ExitGuard;
 
 function useString(string $value): void {}
@@ -1125,7 +1125,7 @@ function concatenated(?string $s): void {{
 
 /// Scaffolding for short-circuit narrowing: a wide union source and
 /// consumers that accept only part of it.
-const SHORT_CIRCUIT_SCAFFOLD: &str = r#"<?php
+const SHORT_CIRCUIT_SCAFFOLD: &str = r#"<?php declare(strict_types=1);
 namespace ShortCircuit;
 
 function useStringBool(string $value): bool { return true; }
@@ -1228,7 +1228,7 @@ function alternativeSyntax(Source $source, bool $flag): void {{
 /// Scaffolding for narrowing keyed on a *call* rather than a variable:
 /// a free function and a method that both return a union, plus consumers
 /// that reject the un-narrowed half.
-const CALL_SUBJECT_SCAFFOLD: &str = r#"<?php
+const CALL_SUBJECT_SCAFFOLD: &str = r#"<?php declare(strict_types=1);
 namespace CallSubject;
 
 function findPos(string $haystack, string $needle): int|false { return 0; }

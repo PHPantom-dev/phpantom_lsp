@@ -298,6 +298,9 @@ pub(crate) struct SymbolMap {
     /// parameter declarations give, sorted by `start`.  Empty for every file
     /// that declares none.
     pub container_values: Vec<ContainerValueSite>,
+    /// The routes the file declares, in source order.  Empty for every file
+    /// that declares none.
+    pub routes: Vec<RouteSite>,
     /// Byte length of the source text this map was extracted from, or
     /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit
     /// in the `u32` fields above anyway).

@@ -30,6 +30,7 @@ use tower_lsp_server::gen_lsp_types::*;
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
+use crate::references::MemberRefKind;
 use crate::resolution::FileLoaders;
 use crate::symbol_map::{SymbolKind, SymbolSpan};
 use crate::types::*;
@@ -65,7 +66,7 @@ impl Backend {
     /// Return a Markdown provenance line for a class FQN, or `None` for
     /// project-local classes.
     pub(crate) fn provenance_line_for_class(&self, fqn: &str) -> Option<String> {
-        let class_uri = self.symbols.fqn_uri_index.read().get(fqn).cloned()?;
+        let class_uri = self.class_declaration_uri(fqn)?;
         let (origin, pkg_name) = self.package_info_for_uri(&class_uri);
         format_provenance_line(origin, pkg_name.as_deref())
     }
@@ -107,7 +108,7 @@ impl Backend {
         // Inside a request this re-enters the scope `with_file_content`
         // opened; a caller holding its own content (the type-assertion
         // runner, in-process tests) gets the same caches a request does.
-        let _scope = self.enter_request_scope_borrowed(content);
+        let _scope = self.enter_request_scope_borrowed(uri, content);
         let offset = crate::text_position::position_to_offset(content, position);
 
         if let Some(symbol) = self.lookup_symbol_map(uri, offset)
@@ -232,14 +233,13 @@ impl Backend {
                 subject_text,
                 member_name,
                 is_static,
-                is_method_call,
                 ..
             } => self.hover_member_access(
                 &site,
                 subject_text,
                 member_name,
                 *is_static,
-                *is_method_call,
+                MemberRefKind::of_access(symbol)?,
             ),
             SymbolKind::ClassReference {
                 name,

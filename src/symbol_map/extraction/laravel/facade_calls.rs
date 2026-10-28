@@ -134,6 +134,35 @@ pub(crate) fn argument_takes_name_list(kind: &StringKeyKind, member_name: &str) 
     }
 }
 
+/// Whether an array argument that names a `kind` names it in its keys, for
+/// a static or an instance call of `member_name` (or the helper of that
+/// name): the aliases `Relation::morphMap([…])` registers, the config keys
+/// `Config::set([…])` and `config([…])` write, and the keys
+/// `Config::getMany([…])` reads with a default beside them.
+pub(crate) fn argument_takes_name_keys(kind: &StringKeyKind, member_name: &str) -> bool {
+    match kind {
+        StringKeyKind::MorphAlias => is_morph_map_registration_method(member_name),
+        StringKeyKind::Config => ["set", "getMany", "config"]
+            .iter()
+            .any(|name| member_name.eq_ignore_ascii_case(name)),
+        _ => false,
+    }
+}
+
+/// The kind of name a static Laravel call takes only in the keys of the
+/// array it is passed at `index`, never as a scalar: the aliases
+/// `Relation::morphMap(['post' => Post::class])` registers.
+pub(crate) fn facade_static_call_array_key_kind(
+    clean_subject: &str,
+    member_name: &str,
+    index: usize,
+) -> Option<StringKeyKind> {
+    (index == 0
+        && is_relation_class_name(clean_subject)
+        && is_morph_map_registration_method(member_name))
+    .then_some(StringKeyKind::MorphAlias)
+}
+
 /// [`facade_static_call_arg_kind`] for the first argument, which most of
 /// these calls name what they name in.
 fn facade_static_call_first_arg_kind(
