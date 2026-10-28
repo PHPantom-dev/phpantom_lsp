@@ -158,7 +158,6 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                                        | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| L62 | [Validation rule strings](todo/laravel.md#l62-validation-rule-strings) | High | Medium |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | High        | Medium      |
 | L68 | [Unknown methods on Eloquent models and builders](todo/laravel.md#l68-unknown-methods-on-eloquent-models-and-builders) | High | Medium |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |

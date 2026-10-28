@@ -157,6 +157,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         reads_every_body: false,
     },
     laravel(
+        "invalid_validation_rule",
+        Backend::collect_validation_string_diagnostics,
+    ),
+    laravel(
         "invalid_command_parameter",
         Backend::collect_invalid_command_param_diagnostics,
     ),

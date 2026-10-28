@@ -486,6 +486,11 @@ impl Backend {
         self.repopulate_resolved_classes(&evicted_fqns);
 
         let structural_changed = any_signature_changed || any_function_changed;
+        if any_signature_changed {
+            // A class can become a model or validation rule through an
+            // ancestor, even if it was not part of the previous catalog.
+            self.laravel.string_key_cache.write().validation_rules = None;
+        }
         if structural_changed {
             self.invalidate_signature_dependents(&changed_names);
         } else {

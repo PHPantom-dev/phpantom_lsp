@@ -245,6 +245,7 @@ mod laravel_translation_depth;
 mod laravel_translation_keys;
 mod laravel_unique_ids;
 mod laravel_validated_shape;
+mod laravel_validation_strings;
 mod laravel_view_names;
 mod lsp_concurrency;
 mod lsp_refresh_resilience;

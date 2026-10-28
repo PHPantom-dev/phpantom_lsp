@@ -25,7 +25,9 @@ fn test_enum(name: Fqn<'_>) -> Option<Arc<ClassInfo>> {
 
 /// Build the shape for a rules array written as PHP source, and render it.
 fn shape_of(array_text: &str) -> String {
-    let rules = rules_from_array_text(array_text).expect("rules should parse");
+    let source = "<?php use Illuminate\\Validation\\Rule; use Illuminate\\Validation\\Rules\\Enum;";
+    let rules = rules_from_array_text_in_context(array_text, source, source.len() as u32)
+        .expect("rules should parse");
     rules_to_shape(&rules, &test_enum)
         .map(|ty| ty.to_string())
         .unwrap_or_else(|| "array".to_string())
@@ -252,11 +254,13 @@ fn a_declared_type_rule_still_wins_over_the_enum_backing_type() {
 
 #[test]
 fn an_enum_rule_resolves_its_class_through_the_declaring_files_imports() {
-    let mut rules = rules_from_array_text("['role' => [new Enum(Role::class)]]").unwrap();
-    resolve_enum_class_names(
-        &mut rules,
-        "<?php\nnamespace App\\Http\\Requests;\nuse App\\Enums\\Role;\n",
-    );
+    let source = "<?php\nnamespace App\\Http\\Requests;\nuse App\\Enums\\Role;\nuse Illuminate\\Validation\\Rules\\Enum;\n";
+    let rules = rules_from_array_text_in_context(
+        "['role' => [new Enum(Role::class)]]",
+        source,
+        source.len() as u32,
+    )
+    .unwrap();
     assert_eq!(
         rules.entries[0].enum_class.as_deref(),
         Some("App\\Enums\\Role")
@@ -265,8 +269,13 @@ fn an_enum_rule_resolves_its_class_through_the_declaring_files_imports() {
 
 #[test]
 fn an_unimported_enum_class_resolves_against_the_declaring_namespace() {
-    let mut rules = rules_from_array_text("['role' => [Rule::enum(Role::class)]]").unwrap();
-    resolve_enum_class_names(&mut rules, "<?php\nnamespace App\\Enums;\n");
+    let source = "<?php\nnamespace App\\Enums;\nuse Illuminate\\Validation\\Rule;\n";
+    let rules = rules_from_array_text_in_context(
+        "['role' => [Rule::enum(Role::class)]]",
+        source,
+        source.len() as u32,
+    )
+    .unwrap();
     assert_eq!(
         rules.entries[0].enum_class.as_deref(),
         Some("App\\Enums\\Role")

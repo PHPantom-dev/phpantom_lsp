@@ -318,6 +318,17 @@ impl ReferenceIndexInner {
         self.by_key.get(key)
     }
 
+    fn method_candidate_uris(&self, names: &[&str]) -> HashSet<Arc<str>> {
+        self.by_key
+            .iter()
+            .filter(|(key, _)| {
+                matches!(key, ReferenceIndexKey::Member { name, .. }
+                if names.iter().any(|wanted| name.eq_ignore_ascii_case(wanted)))
+            })
+            .flat_map(|(_, entries)| entries.keys().cloned())
+            .collect()
+    }
+
     /// Memory-audit tooling: expose the internal maps for deep-size
     /// accounting.
     #[allow(clippy::type_complexity)]
@@ -479,6 +490,19 @@ impl Backend {
             }
         }
         Some(uris)
+    }
+
+    /// Candidate files for method names, matching PHP's case-insensitive
+    /// lookup across static and instance calls. Existing member keys retain
+    /// their spelling because property and constant names are case-sensitive.
+    pub(crate) fn reference_candidate_uris_for_methods(
+        &self,
+        names: &[&str],
+    ) -> Option<HashSet<Arc<str>>> {
+        if self.skip_reference_index || !self.workspace_index.indexed.load(Ordering::Acquire) {
+            return None;
+        }
+        Some(self.reference_index.read().method_candidate_uris(names))
     }
 
     /// Number of indexed reference occurrences for `key`.
@@ -1120,6 +1144,50 @@ mod tests {
     use crate::symbol_map::{LaravelConfigResource, SymbolMap, SymbolSpan};
 
     #[test]
+    fn method_candidates_match_arbitrary_case_without_changing_member_keys() {
+        let mut index = ReferenceIndexInner::default();
+        for (name, is_static, uri) in [
+            ("extendDependent", false, "file:///project/instance.php"),
+            ("eXtEnDiMpLiCiT", true, "file:///project/static.php"),
+            ("EXTENDDEPENDENT", false, "file:///project/static.php"),
+            ("extendOther", false, "file:///project/unrelated.php"),
+        ] {
+            index.by_key.insert(
+                ReferenceIndexKey::Member {
+                    name: name.to_string(),
+                    is_static,
+                },
+                HashMap::from([(Arc::from(uri), 1)]),
+            );
+        }
+        index.by_key.insert(
+            ReferenceIndexKey::function("extendDependent"),
+            HashMap::from([(Arc::from("file:///project/function.php"), 1)]),
+        );
+        let candidates = index.method_candidate_uris(&["extenddependent", "EXTENDIMPLICIT"]);
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates.contains("file:///project/instance.php"));
+        assert!(candidates.contains("file:///project/static.php"));
+        assert!(index.method_candidate_uris(&["missing"]).is_empty());
+        assert!(
+            index
+                .get(&ReferenceIndexKey::Member {
+                    name: "extendDependent".to_string(),
+                    is_static: false
+                })
+                .is_some()
+        );
+        assert!(
+            index
+                .get(&ReferenceIndexKey::Member {
+                    name: "extenddependent".to_string(),
+                    is_static: false
+                })
+                .is_none()
+        );
+    }
+
+    #[test]
     fn candidate_lookup_is_disabled_until_workspace_is_indexed() {
         let backend = Backend::new_test();
         let uri = "file:///project/src/Foo.php";
@@ -1132,6 +1200,11 @@ mod tests {
             backend.reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Foo")]);
 
         assert!(candidates.is_none());
+        assert!(
+            backend
+                .reference_candidate_uris_for_methods(&["extend"])
+                .is_none()
+        );
     }
 
     #[test]
@@ -1147,6 +1220,11 @@ mod tests {
             backend.reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Foo")]);
 
         assert!(candidates.is_none());
+        assert!(
+            backend
+                .reference_candidate_uris_for_methods(&["extend"])
+                .is_none()
+        );
     }
 
     #[test]

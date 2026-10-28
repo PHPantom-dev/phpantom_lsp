@@ -298,6 +298,7 @@ pub(crate) mod unresolved_member_access;
 mod unused_imports;
 pub(crate) mod unused_variables;
 pub(crate) mod use_statements;
+mod validation_strings;
 pub(crate) mod workspace;
 
 use tower_lsp_server::gen_lsp_types::*;
