@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793146266184,
+  "lastUpdate": 1793156315218,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7589,6 +7589,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 101.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7f6a4504ad6d4e3137d21f9d2ed45f7fdc88dc3e",
+          "message": "Update roadmap",
+          "timestamp": "2026-10-28T03:39:45+01:00",
+          "tree_id": "0ff1fe0994b4fc93da3881a31077268c40907be5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7f6a4504ad6d4e3137d21f9d2ed45f7fdc88dc3e"
+        },
+        "date": 1793156303367,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 87.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 73.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 96.2,
             "unit": "MiB"
           }
         ]
