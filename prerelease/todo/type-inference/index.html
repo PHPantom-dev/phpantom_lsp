@@ -2183,7 +2183,7 @@ project's <code>doctrine.yaml</code>.</p>
 <code>Doctrine/Driver/DriverDetector</code>).</p>
 <hr />
 <h2 id="t57-a-global-variable-is-untyped-unless-a-var-sits-above-it">T57. A <code>global</code> variable is untyped unless a <code>@var</code> sits above it<a class="headerlink" href="#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><strong>Impact: High · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/**</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x"> * @global wpdb $wpdb WordPress database abstraction object.</span>
 <a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x"> */</span>
@@ -2192,6 +2192,10 @@ project's <code>doctrine.yaml</code>.</p>
 <a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">    return (int) $wpdb-&gt;get_var("SELECT COUNT(*) FROM {$wpdb-&gt;prefix}acme_orders");</span>
 <a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">}</span>
 </code></pre></div>
+<p>PhpStorm types <code>$wpdb</code> as <code>wpdb</code> in a theme once it is pointed at a
+WordPress install, and reports an unknown method on it; we leave it
+untyped. <code>$wpdb</code> is how WordPress code reaches the database, so it is
+one of the most used variables in any plugin or theme.</p>
 <p><code>global $x</code> takes its type from the same file's top-level scope, or from
 a <code>@var</code> docblock directly above the statement. Two more sources are
 ignored:</p>

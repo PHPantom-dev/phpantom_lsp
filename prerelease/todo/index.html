@@ -1324,6 +1324,24 @@ contributor even though it's short.</p>
 </thead>
 <tbody>
 <tr>
+<td>WP2</td>
+<td><a href="../todo/wordpress/#wp2-audit-what-the-wordpress-stubs-declare-against-the-engine">Audit what the WordPress stubs declare against the engine</a></td>
+<td>High</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>T57</td>
+<td><a href="../todo/type-inference/#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it">A <code>global</code> variable is untyped unless a <code>@var</code> sits above it</a></td>
+<td>High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>D41</td>
+<td><a href="../todo/diagnostics/#d41-a-mismatch-that-is-only-a-possible-null-or-false-is-reported-by-default">A mismatch that is only a possible <code>null</code> or <code>false</code> is reported by default</a></td>
+<td>High</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
 <td></td>
 <td><strong>Release 1.0.0 + IDE extensions</strong></td>
 <td></td>
@@ -1366,20 +1384,32 @@ ships, remove every row that names it.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>F27</td>
-<td><a href="../todo/lsp-features/#f27-symfony-route-parameters">Symfony route parameters</a> (blocks full Symfony support)</td>
-<td>Medium</td>
+<td>F28</td>
+<td><a href="../todo/lsp-features/#f28-symfony-route-names-a-loader-composes">Symfony route names a loader composes</a> (blocks the unknown-route diagnostic)</td>
+<td>Medium-High</td>
 <td>Medium</td>
 </tr>
 <tr>
 <td>F29</td>
 <td><a href="../todo/lsp-features/#f29-report-symfony-translation-keys-nothing-declares">Report Symfony translation keys nothing declares</a> (blocks full Symfony support)</td>
-<td>Medium</td>
+<td>Medium-High</td>
 <td>Medium</td>
 </tr>
 <tr>
 <td>F32</td>
 <td><a href="../todo/lsp-features/#f32-report-unknown-symfony-names-in-twig-templates">Report unknown Symfony names in Twig templates</a> (blocks full Twig support)</td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>F37</td>
+<td><a href="../todo/lsp-features/#f37-twig-template-variables">Twig template variables</a> (blocks full Twig support)</td>
+<td>Medium-High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>F27</td>
+<td><a href="../todo/lsp-features/#f27-symfony-route-parameters">Symfony route parameters</a> (blocks full Symfony support)</td>
 <td>Medium</td>
 <td>Medium</td>
 </tr>
@@ -1420,12 +1450,6 @@ ships, remove every row that names it.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>F28</td>
-<td><a href="../todo/lsp-features/#f28-symfony-route-names-a-loader-composes">Symfony route names a loader composes</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
 <td>T54</td>
 <td><a href="../todo/type-inference/#t54-messenger-handlers-a-service-tag-registers">Messenger handlers a service tag registers</a></td>
 <td>Low-Medium</td>
@@ -1436,12 +1460,6 @@ ships, remove every row that names it.</p>
 <td><a href="../todo/type-inference/#t55-symfony-array-parameters-are-typed-as-plain-array">Symfony array parameters are typed as plain <code>array</code></a></td>
 <td>Low</td>
 <td>Medium</td>
-</tr>
-<tr>
-<td>F37</td>
-<td><a href="../todo/lsp-features/#f37-twig-template-variables">Twig template variables</a> (blocks full Twig support)</td>
-<td>Medium</td>
-<td>Medium-High</td>
 </tr>
 <tr>
 <td>F34</td>
@@ -1655,14 +1673,20 @@ ships, remove every row that names it.</p>
 <td>Medium</td>
 </tr>
 <tr>
+<td>T57</td>
+<td><a href="../todo/type-inference/#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it">A <code>global</code> variable is untyped unless a <code>@var</code> sits above it</a></td>
+<td>High</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>WP3</td>
 <td><a href="../todo/wordpress/#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own">WordPress core for a plugin or theme opened on its own</a></td>
 <td>Medium-High</td>
 <td>Medium</td>
 </tr>
 <tr>
-<td>T57</td>
-<td><a href="../todo/type-inference/#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it">A <code>global</code> variable is untyped unless a <code>@var</code> sits above it</a></td>
+<td>P88</td>
+<td><a href="../todo/performance/#p88-reading-a-by-reference-parameters-out-type-walks-the-callee-once-per-return">Reading a by-reference parameter's out type walks the callee once per <code>return</code></a></td>
 <td>Medium</td>
 <td>Medium</td>
 </tr>
@@ -1887,26 +1911,56 @@ ships, remove every row that names it.</p>
 </thead>
 <tbody>
 <tr>
-<td>L27</td>
-<td><a href="../todo/laravel/#l27-legacy-controllermethod-action-strings">Legacy <code>Controller@method</code> action strings</a></td>
-<td>Low</td>
-<td>Low</td>
-</tr>
-<tr>
-<td>L60</td>
-<td><a href="../todo/laravel/#l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature">Read relation callback overrides and fallbacks from the declared signature</a></td>
-<td>Low</td>
-<td>Low-Medium</td>
-</tr>
-<tr>
-<td>L29</td>
-<td><a href="../todo/laravel/#l29-livewire-and-volt-component-names">Livewire and Volt component names</a> (Livewire projects only)</td>
-<td>Low</td>
-<td>Low-Medium</td>
+<td>L62</td>
+<td><a href="../todo/laravel/#l62-validation-rule-strings">Validation rule strings</a></td>
+<td>High</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td>L30</td>
 <td><a href="../todo/laravel/#l30-eloquent-attribute-array-key-completion">Eloquent attribute-array key completion</a></td>
+<td>High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L68</td>
+<td><a href="../todo/laravel/#l68-unknown-methods-on-eloquent-models-and-builders">Unknown methods on Eloquent models and builders</a></td>
+<td>High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L1</td>
+<td><a href="../todo/laravel/#l1-facade-completion-upstream-method-generator-improvement">Facade completion</a> (upstream <code>facade-documenter</code> PRs)</td>
+<td>High</td>
+<td>High</td>
+</tr>
+<tr>
+<td>L63</td>
+<td><a href="../todo/laravel/#l63-middleware-alias-names">Middleware alias names</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L64</td>
+<td><a href="../todo/laravel/#l64-routes-on-controller-methods">Routes on controller methods</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L65</td>
+<td><a href="../todo/laravel/#l65-unknown-blade-and-livewire-components">Unknown Blade and Livewire components</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L46</td>
+<td><a href="../todo/laravel/#l46-can-on-a-user-model-the-receiver-does-not-name"><code>-&gt;can()</code> on a user model the receiver does not name</a></td>
+<td>Medium-High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>L49</td>
+<td><a href="../todo/laravel/#l49-unguarded-eloquent-mass-assignment-diagnostic">Unguarded Eloquent mass assignment diagnostic</a></td>
 <td>Medium</td>
 <td>Medium</td>
 </tr>
@@ -1929,16 +1983,22 @@ ships, remove every row that names it.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>L49</td>
-<td><a href="../todo/laravel/#l49-unguarded-eloquent-mass-assignment-diagnostic">Unguarded Eloquent mass assignment diagnostic</a></td>
+<td>L66</td>
+<td><a href="../todo/laravel/#l66-related-file-navigation-for-models-events-and-listeners">Related-file navigation for models, events, and listeners</a></td>
 <td>Medium</td>
 <td>Medium</td>
 </tr>
 <tr>
-<td>L57</td>
-<td><a href="../todo/laravel/#l57-laravel-queue-names">Laravel queue names</a></td>
-<td>Low-Medium</td>
+<td>L17</td>
+<td><a href="../todo/laravel/#l17-additional-string-contexts-without-booting">Additional string contexts without booting</a> (assets, Inertia)</td>
 <td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>E7</td>
+<td><a href="../todo/external-stubs/#e7-stub-based-framework-patches">Stub-based framework patches</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
 </tr>
 <tr>
 <td>L59</td>
@@ -1965,40 +2025,16 @@ ships, remove every row that names it.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>L10</td>
-<td><a href="../todo/laravel/#l10-redirectresponsewithx-dynamic-methods"><code>RedirectResponse::withX()</code> dynamic methods</a></td>
-<td>Low</td>
+<td>L67</td>
+<td><a href="../todo/laravel/#l67-laravel-refactoring-intentions">Laravel refactoring intentions</a></td>
+<td>Low-Medium</td>
 <td>Medium</td>
 </tr>
 <tr>
-<td>L39</td>
-<td><a href="../todo/laravel/#l39-unused-view-and-translation-key-detection">Unused view and translation key detection</a></td>
-<td>Low</td>
+<td>L57</td>
+<td><a href="../todo/laravel/#l57-laravel-queue-names">Laravel queue names</a></td>
+<td>Low-Medium</td>
 <td>Medium</td>
-</tr>
-<tr>
-<td>L46</td>
-<td><a href="../todo/laravel/#l46-can-on-a-user-model-the-receiver-does-not-name"><code>-&gt;can()</code> on a user model the receiver does not name</a></td>
-<td>Medium-High</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>L17</td>
-<td><a href="../todo/laravel/#l17-additional-string-contexts-without-booting">Additional string contexts without booting</a> (middleware, assets, validation, Inertia)</td>
-<td>Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>E7</td>
-<td><a href="../todo/external-stubs/#e7-stub-based-framework-patches">Stub-based framework patches</a></td>
-<td>Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>L1</td>
-<td><a href="../todo/laravel/#l1-facade-completion-upstream-method-generator-improvement">Facade completion</a> (upstream <code>facade-documenter</code> PRs)</td>
-<td>High</td>
-<td>High</td>
 </tr>
 <tr>
 <td>L8</td>
@@ -2011,6 +2047,36 @@ ships, remove every row that names it.</p>
 <td><a href="../todo/laravel/#l45-_count-properties-are-offered-on-every-relationship"><code>*_count</code> properties are offered on every relationship</a></td>
 <td>Low-Medium</td>
 <td>High</td>
+</tr>
+<tr>
+<td>L27</td>
+<td><a href="../todo/laravel/#l27-legacy-controllermethod-action-strings">Legacy <code>Controller@method</code> action strings</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>L60</td>
+<td><a href="../todo/laravel/#l60-read-relation-callback-overrides-and-fallbacks-from-the-declared-signature">Read relation callback overrides and fallbacks from the declared signature</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>L29</td>
+<td><a href="../todo/laravel/#l29-livewire-and-volt-component-names">Livewire and Volt component names</a> (Livewire projects only)</td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>L10</td>
+<td><a href="../todo/laravel/#l10-redirectresponsewithx-dynamic-methods"><code>RedirectResponse::withX()</code> dynamic methods</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L39</td>
+<td><a href="../todo/laravel/#l39-unused-view-and-translation-key-detection">Unused view and translation key detection</a></td>
+<td>Low</td>
+<td>Medium</td>
 </tr>
 </tbody>
 </table>
@@ -2128,6 +2194,12 @@ ships, remove every row that names it.</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>D41</td>
+<td><a href="../todo/diagnostics/#d41-a-mismatch-that-is-only-a-possible-null-or-false-is-reported-by-default">A mismatch that is only a possible <code>null</code> or <code>false</code> is reported by default</a></td>
+<td>High</td>
+<td>Low-Medium</td>
+</tr>
 <tr>
 <td>D29</td>
 <td><a href="../todo/diagnostics/#d29-namespace-and-declare-bodies-break-the-reachability-flow"><code>namespace</code> and <code>declare</code> bodies break the reachability flow</a></td>

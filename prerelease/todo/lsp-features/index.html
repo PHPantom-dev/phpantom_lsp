@@ -2172,7 +2172,22 @@ of the same design: <code>src/symbol_map/extraction/yii_routes.rs</code>, <code>
 <code>src/completion/yii_route_params.rs</code>.</p>
 <hr />
 <h2 id="f28-symfony-route-names-a-loader-composes">F28. Symfony route names a loader composes<a class="headerlink" href="#f28-symfony-route-names-a-loader-composes" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
+<p>Until this lands, the unknown-route diagnostic is inert in most real
+applications: it only judges names under <code>app_</code>, and applications that
+name their routes by area (<code>blog_post</code>, <code>admin_post_edit</code>, as the official
+Symfony demo does) never trigger it. A typo in <code>redirectToRoute()</code> or
+<code>path()</code> goes unreported there.</p>
+<p>Unlike service IDs, routes are a closed world the project spells out:
+every route enters through an import in <code>config/routes.yaml</code> /
+<code>config/routes/*</code> (or the kernel's <code>configureRoutes()</code>), and a bundle's
+routes come from the file that import names
+(<code>resource: '@WebProfilerBundle/Resources/config/routing/wdt.php'</code>).
+Following those imports into the bundle's routing files gives the full set,
+so the <code>app_</code> restriction can go. The exceptions are imports that run code,
+<code>type: service</code> loaders (the security logout loader) and custom loaders;
+an application with one of those keeps the world open only for the names
+that loader could produce, or entirely if that cannot be told.</p>
 <p>A route's name is read where it is declared: a <code>#[Route]</code> attribute, with
 its class's name prefix, a routing YAML or XML entry, or a routing
 configurator's <code>add()</code>. A few names are put together elsewhere, and are
@@ -2193,7 +2208,7 @@ missed:</p>
 (<code>ReceiverClass::RoutingConfigurator</code>).</p>
 <hr />
 <h2 id="f29-report-symfony-translation-keys-nothing-declares">F29. Report Symfony translation keys nothing declares<a class="headerlink" href="#f29-report-symfony-translation-keys-nothing-declares" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
 <p>Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$translator-&gt;trans('demo.titel'); // a typo of demo.title</span>
 </code></pre></div>
@@ -2287,7 +2302,7 @@ extension's <code>src/client.ts</code> for which requests a resource document is
 registered for.</p>
 <hr />
 <h2 id="f32-report-unknown-symfony-names-in-twig-templates">F32. Report unknown Symfony names in Twig templates<a class="headerlink" href="#f32-report-unknown-symfony-names-in-twig-templates" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
 <p>Blocks full Twig support: the README keeps Twig marked as partial until this lands.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="cp">{%</span> <span class="k">include</span> <span class="s1">'partials/crad.html.twig'</span> <span class="cp">%}</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">&lt;a href="../</span><span class="cp">{{</span> <span class="nv">path</span><span class="o">(</span><span class="s1">'app_hme'</span><span class="o">)</span> <span class="cp">}}</span><span class="x">"&gt;Home&lt;/a&gt;</span>
@@ -2365,7 +2380,7 @@ block, and complete the block names a child can override.</p>
 <code>src/blade/block_index.rs</code>.</p>
 <hr />
 <h2 id="f37-twig-template-variables">F37. Twig template variables<a class="headerlink" href="#f37-twig-template-variables" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
 <p>Blocks full Twig support: the README keeps Twig marked as partial until this lands.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">return $this-&gt;render('post/show.html.twig', ['post' =&gt; $post]);</span>
 </code></pre></div>
