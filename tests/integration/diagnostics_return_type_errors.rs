@@ -322,7 +322,7 @@ function get_processor(): string {
 
 #[test]
 fn flags_bool_returned_from_int_function() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function get_count(): int {
     return true;
 }
@@ -472,7 +472,7 @@ class Service {
 
 #[test]
 fn flags_wrong_return_in_while() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function search(): string {
     while (true) {
         return false;
@@ -2068,7 +2068,7 @@ function get_count(): int {
 
 #[test]
 fn flags_bool_returned_from_string() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function get_label(): string {
     return false;
 }
@@ -2082,7 +2082,7 @@ function get_label(): string {
 
 #[test]
 fn flags_string_returned_from_bool() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function check(): bool {
     return "yes";
 }

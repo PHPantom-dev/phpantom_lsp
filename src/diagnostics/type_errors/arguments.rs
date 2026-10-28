@@ -887,13 +887,15 @@ impl ArgumentCheck<'_> {
             arg_type,
         );
         // Two signatures printed side by side leave the reader to
-        // diff them by eye, so name the half that disagrees.
+        // diff them by eye, so name the half that disagrees.  The return
+        // type is judged as the compatibility check judges it, without the
+        // `strict_types` coercions.
         if let (TypeKind::Callable(arg_sig), TypeKind::Callable(param_sig)) =
             (arg_type.kind(), param_type.kind())
         {
             if let (Some(arg_return), Some(param_return)) =
                 (&arg_sig.return_type, &param_sig.return_type)
-                && !compatible(arg_return, param_return)
+                && !is_type_compatible(arg_return, param_return, self.class_loader, true)
             {
                 message.push_str(&format!(
                     " (return type {arg_return} does not satisfy {param_return})"

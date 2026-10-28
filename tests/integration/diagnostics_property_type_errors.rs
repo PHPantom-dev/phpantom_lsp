@@ -129,7 +129,7 @@ class Config {
 
 #[test]
 fn flags_bool_assigned_to_int_property() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 class Counter {
     public int $value;
 
@@ -209,7 +209,7 @@ class Foo {
 
 #[test]
 fn flags_bool_assigned_to_string_or_int_property() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 class Foo {
     public string|int $value;
 
@@ -335,7 +335,7 @@ class User {
 
 #[test]
 fn flags_wrong_assignment_in_try() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 class Loader {
     public string $result;
 
@@ -403,7 +403,7 @@ class Aggregator {
 
 #[test]
 fn flags_wrong_assignment_in_while() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 class Runner {
     public bool $running;
 
@@ -822,7 +822,7 @@ class Config {
 
 #[test]
 fn flags_bool_assigned_to_union_string_int_null() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 class Config {
     public string|int|null $value;
 
@@ -1501,7 +1501,7 @@ class Counter {
 
 #[test]
 fn flags_bool_assigned_to_string_property() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 class Label {
     public string $text;
 
@@ -1519,7 +1519,7 @@ class Label {
 
 #[test]
 fn flags_string_assigned_to_bool_property() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 class Toggle {
     public bool $on;
 

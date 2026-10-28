@@ -25,38 +25,6 @@ No outstanding items.
 
 ## Type comparison
 
-### B698. A `bool` argument to a scalar parameter is reported outside `strict_types`
-
-**Impact: High · Complexity: Low**
-
-```php
-// no declare(strict_types=1)
-function label(string $s): void {}
-function count_it(int $i): void {}
-
-label(false);                  // expects string, got false
-label(strpos($haystack, 'x')); // expects string, got int<0, max>|false
-count_it(true);                // expects int, got true
-```
-
-Outside `strict_types`, PHP coerces a `bool` argument to a `string`,
-`int`, or `float` parameter (`false` becomes `""` or `0`), so none of
-these is an error at runtime. PHPStan accepts them too: its
-`toCoercedArgumentType()` widens a scalar parameter to take `bool` in a
-non-strict file. `coercions()` in `class_lookup/compatibility.rs`
-already lets `int`/`float` reach `string` and numeric strings reach
-numbers, but has no `bool` arm. WordPress core, which never declares
-strict types, gets about 1,200 reports from this alone (`false` to
-`string` is the largest single kind of argument mismatch it shows).
-
-Two neighbours of the same arm are missing too: an integer range or
-other refined `int` (`int<0, 255>` from `ord()`) is not coerced to
-`string` the way a plain `int` is, and a scalar passed to a `bool`
-parameter (`0`, `'yes'`) is reported although PHP coerces every scalar
-to `bool`. Check the whole non-strict coercion table against PHP's
-rules (and PHPStan's `toCoercedArgumentType()`) rather than adding arms
-one at a time.
-
 ### B703. A bare `return;` is reported against a docblock `@return void|T`
 
 **Impact: Low-Medium · Complexity: Low**

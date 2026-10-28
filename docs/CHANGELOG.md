@@ -77,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Scalar coercion outside `strict_types`.** In a file without `declare(strict_types=1)`, a `bool` passed to a `string`, `int` or `float` parameter, an integer range passed to `string`, and any scalar passed to `bool` are no longer reported, since PHP converts them. The same holds for return values and property assignments. A callback's return value is still checked strictly, because nothing converts it.
 - **`[indexing] exclude` covers Composer's class lists.** A class Composer's classmap or PSR-0 map names no longer resolves from a path you excluded, so excluding a path mid-session and restarting give the same result.
 - **"Replace with" no longer leaves a stray parenthesis.** Replacing a call to a deprecated function or method now replaces its closing parenthesis too, instead of leaving an extra `)` behind.
 - **Escaped backslashes in attribute strings.** A `#[Deprecated]` replacement or reason, or another stub attribute's string, written with doubled backslashes (`'\\Foo\\bar()'`) now reads as the single-backslash name PHP sees.

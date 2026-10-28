@@ -62,6 +62,13 @@ fn has_type_error(diags: &[Diagnostic]) -> bool {
     })
 }
 
+fn type_error_count(diags: &[Diagnostic]) -> usize {
+    diags
+        .iter()
+        .filter(|d| matches!(&d.code, Some(Code::String(s)) if s == "type_mismatch_argument"))
+        .count()
+}
+
 // ─── Basic: string passed to int parameter ──────────────────────────────────
 
 #[test]
@@ -373,7 +380,7 @@ function test(): void {
 
 #[test]
 fn flags_bool_passed_to_string() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takes_string(string $x): void {}
 
 function test(): void {
@@ -2839,7 +2846,7 @@ function test(): void {
 
 #[test]
 fn still_flags_bool_to_int() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takes_int(int $x): void {}
 
 function test(): void {
@@ -5059,6 +5066,73 @@ function test(): void {
     );
 }
 
+/// The scalars PHP converts to a scalar parameter outside `strict_types`.
+const SCALAR_COERCIONS: &str = r#"
+function label(string $s): void {}
+function count_it(int $i): void {}
+function ratio(float $f): void {}
+function flag(bool $b): void {}
+
+/** @param int<0, 255> $byte */
+function test(string $haystack, bool $b, int $byte, float $f, string $s): void {
+    label(false);
+    label($b);
+    label(strpos($haystack, 'x'));
+    label($byte);
+    label(ord($haystack));
+    count_it(true);
+    count_it($b);
+    ratio(false);
+    ratio($b);
+    flag(0);
+    flag($f);
+    flag('yes');
+    flag($s);
+}
+"#;
+
+#[test]
+fn no_strict_types_allows_scalar_coercions() {
+    let php = format!("<?php\n{SCALAR_COERCIONS}");
+    let diags = collect_with_full_stubs(&php);
+    assert!(
+        !has_type_error(&diags),
+        "Without strict_types, PHP coerces these scalars, got: {diags:?}"
+    );
+}
+
+#[test]
+fn strict_types_flags_scalar_coercions() {
+    let php = format!("<?php\ndeclare(strict_types=1);\n{SCALAR_COERCIONS}");
+    let diags = collect_with_full_stubs(&php);
+    assert_eq!(
+        type_error_count(&diags),
+        13,
+        "Under strict_types=1 every coercion is a TypeError, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_strict_types_flags_non_numeric_string_passed_to_int() {
+    // A non-numeric string is the one scalar PHP refuses for `int` and
+    // `float` even outside strict_types.
+    let php = r#"<?php
+function count_it(int $i): void {}
+function ratio(float $f): void {}
+
+function test(string $s): void {
+    count_it('abc');
+    ratio($s);
+}
+"#;
+    let diags = collect(php);
+    assert_eq!(
+        type_error_count(&diags),
+        2,
+        "Non-numeric strings are still rejected by int and float, got: {diags:?}"
+    );
+}
+
 // ─── int / int reaching an int parameter ────────────────────────────────────
 
 /// `int / int` is `int|float`, but the float half only turns up when the
@@ -5235,7 +5309,7 @@ function test($v, int $exp): void {
 
 #[test]
 fn flags_string_passed_to_bool() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takes_bool(bool $x): void {}
 
 function test(): void {
@@ -11139,13 +11213,34 @@ namespace App;
 /** @param callable(int): string $callback */
 function takesStringCallback(callable $callback): void {}
 
-takesStringCallback(static fn (int $value) => $value);
-takesStringCallback(static function (int $value) { return $value; });
+takesStringCallback(static fn (int $value) => undefined_helper($value));
+takesStringCallback(static function (int $value) { return undefined_helper($value); });
 takesStringCallback(strlen(...));
 takesStringCallback('strlen');
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Nothing converts a callback's return value on its way back to the
+/// caller, so the scalar coercions PHP applies to arguments outside
+/// `strict_types` do not make a `string` return satisfy `bool`.
+#[test]
+fn callable_spec_return_type_is_not_coerced_without_strict_types() {
+    let php = r#"<?php
+namespace App;
+
+/** @param callable(int): bool $callback */
+function takesPredicate(callable $callback): void {}
+
+takesPredicate(static fn (int $value): string => 'x');
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("does not satisfy bool"),
+        "got {messages:?}"
+    );
 }
 
 /// A `static` return type needs the class context the compatibility layer
@@ -12273,7 +12368,7 @@ useString(content() ?: '');
 /// then branch contributes every member of its own type.
 #[test]
 fn a_full_ternary_keeps_its_then_branch_whole() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function useString(string $value): void {}
 
 /** @return string|false */
@@ -12356,7 +12451,7 @@ useInt(parseImage([]));
 /// still ignored: the native hint is the more trustworthy of the two.
 #[test]
 fn a_docblock_unrelated_to_the_native_union_is_ignored() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function useString(string $value): void {}
 
 /**
@@ -12541,7 +12636,7 @@ function test(): void {
 /// function whose failure the caller has to deal with.
 #[test]
 fn an_ordinary_failure_branch_is_still_enforced() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takesString(string $path): void {}
 
 /** @return string|false */
@@ -12563,7 +12658,7 @@ function test(): void {
 /// found", which is an answer the caller is expected to read.
 #[test]
 fn a_failure_branch_that_carries_meaning_is_still_enforced() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takesInt(int $offset): void {}
 
 function test(): void {
@@ -12640,7 +12735,7 @@ function afterWhile(bool $flag): void {
 /// code spelled out itself is still enforced on the other side of an `if`.
 #[test]
 fn a_spelled_out_failure_branch_survives_a_branch_merge_too() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function takesString(string $path): void {}
 
 /** @return string|false */
@@ -12740,7 +12835,7 @@ while ($line !== null) {
 /// the write.
 #[test]
 fn a_while_body_reassignment_widens_below_itself() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function useString(string $value): void {}
 
 /** @return string|false */
@@ -13231,7 +13326,7 @@ function test(): void {
 /// must terminate rather than chase the cycle.
 #[test]
 fn a_cyclic_constant_leaves_the_declared_union() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function useString(string $value): void {}
 
 class Encoder {
@@ -13254,7 +13349,7 @@ class Encoder {
 /// Without the flag the failure branch is real and still reported.
 #[test]
 fn json_encode_without_throw_on_error_may_be_false() {
-    let php = r#"<?php
+    let php = r#"<?php declare(strict_types=1);
 function useString(string $value): void {}
 
 function test(mixed $value): void {
