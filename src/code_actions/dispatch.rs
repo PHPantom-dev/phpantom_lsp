@@ -165,6 +165,7 @@ static COLLECTORS: &[Collector] = &[
     offer(QUICKFIX, Backend::collect_fix_class_case_actions),
     offer(EXTRACT, Backend::collect_extract_interface_actions),
     offer_in_resource(QUICKFIX, Backend::collect_create_missing_view_actions),
+    offer(QUICKFIX, Backend::collect_create_missing_route_actions),
     offer_in_resource(QUICKFIX, Backend::collect_insert_translation_key_actions),
 ];
 

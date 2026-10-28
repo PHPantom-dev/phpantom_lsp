@@ -175,7 +175,6 @@ ships, remove every row that names it.
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | L59 | [Typed controller middleware names](todo/laravel.md#l59-typed-controller-middleware-names)                                                                                  | Low-Medium  | Medium      |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |
-| L50 | ["Create route" quick-fix for an unresolved route name](todo/laravel.md#l50-create-route-quick-fix-for-an-unresolved-route-name)                                            | Low-Medium  | Medium      |
 | L61 | [Resolve aliased facade imports during route discovery](todo/laravel.md#l61-resolve-aliased-facade-imports-during-route-discovery)                                          | Low-Medium  | Medium      |
 | L67 | [Laravel refactoring intentions](todo/laravel.md#l67-laravel-refactoring-intentions) | Low-Medium | Medium |
 | L57 | [Laravel queue names](todo/laravel.md#l57-laravel-queue-names)                                                                                                              | Low-Medium  | Medium      |

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Create missing Laravel routes.** An unknown route name now offers a quick fix that adds a named route stub to the project's routes file, ready for you to finish. Contributed by @shuvroroy.
 - **Go to declaration.** On a method call or a method's own declaration, go-to-declaration jumps to the interface or abstract method it implements. Where there is none, it lands where go-to-definition does.
 - **Morph aliases and config keys complete as array keys.** Registered aliases are suggested for the keys of `Relation::morphMap([...])`, and config keys for the keys of `Config::set([...])` and `config([...])`. Contributed by @shuvroroy.
 - **Plural and singleton resource routes in Laravel.** Routes registered with `Route::resources()`, `Route::singleton()` and their API and plural variants now complete, navigate, and are no longer reported as unknown. Resource names with stray slashes or empty segments get the same route names Laravel gives them. Contributed by @shuvroroy.
