@@ -855,17 +855,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b698-a-bool-argument-to-a-scalar-parameter-is-reported-outside-strict_types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B698. A <code>bool</code> argument to a scalar parameter is reported outside <code>strict_types</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b703-a-bare-return-is-reported-against-a-docblock-return-voidt" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1596,17 +1585,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b698-a-bool-argument-to-a-scalar-parameter-is-reported-outside-strict_types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B698. A <code>bool</code> argument to a scalar parameter is reported outside <code>strict_types</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b703-a-bare-return-is-reported-against-a-docblock-return-voidt" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1889,43 +1867,17 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<h3 id="b698-a-bool-argument-to-a-scalar-parameter-is-reported-outside-strict_types">B698. A <code>bool</code> argument to a scalar parameter is reported outside <code>strict_types</code><a class="headerlink" href="#b698-a-bool-argument-to-a-scalar-parameter-is-reported-outside-strict_types" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// no declare(strict_types=1)</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function label(string $s): void {}</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">function count_it(int $i): void {}</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">label(false);                  // expects string, got false</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">label(strpos($haystack, 'x')); // expects string, got int&lt;0, max&gt;|false</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">count_it(true);                // expects int, got true</span>
-</code></pre></div>
-<p>Outside <code>strict_types</code>, PHP coerces a <code>bool</code> argument to a <code>string</code>,
-<code>int</code>, or <code>float</code> parameter (<code>false</code> becomes <code>""</code> or <code>0</code>), so none of
-these is an error at runtime. PHPStan accepts them too: its
-<code>toCoercedArgumentType()</code> widens a scalar parameter to take <code>bool</code> in a
-non-strict file. <code>coercions()</code> in <code>class_lookup/compatibility.rs</code>
-already lets <code>int</code>/<code>float</code> reach <code>string</code> and numeric strings reach
-numbers, but has no <code>bool</code> arm. WordPress core, which never declares
-strict types, gets about 1,200 reports from this alone (<code>false</code> to
-<code>string</code> is the largest single kind of argument mismatch it shows).</p>
-<p>Two neighbours of the same arm are missing too: an integer range or
-other refined <code>int</code> (<code>int&lt;0, 255&gt;</code> from <code>ord()</code>) is not coerced to
-<code>string</code> the way a plain <code>int</code> is, and a scalar passed to a <code>bool</code>
-parameter (<code>0</code>, <code>'yes'</code>) is reported although PHP coerces every scalar
-to <code>bool</code>. Check the whole non-strict coercion table against PHP's
-rules (and PHPStan's <code>toCoercedArgumentType()</code>) rather than adding arms
-one at a time.</p>
 <h3 id="b703-a-bare-return-is-reported-against-a-docblock-return-voidt">B703. A bare <code>return;</code> is reported against a docblock <code>@return void|T</code><a class="headerlink" href="#b703-a-bare-return-is-reported-against-a-docblock-return-voidt" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @return void|string Void if 'echo' argument is true.</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> */</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">function wp_list_comments($args = []) {</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    if ($echo) {</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">        return;   // Function with return type void|string must not return without a value</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    }</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    return $html;</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/**</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x"> * @return void|string Void if 'echo' argument is true.</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x"> */</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">function wp_list_comments($args = []) {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    if ($echo) {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        return;   // Function with return type void|string must not return without a value</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    }</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    return $html;</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">}</span>
 </code></pre></div>
 <p>A docblock that lists <code>void</code> in its return union says the function may
 return nothing, so a bare <code>return;</code> is exactly what it describes. The
@@ -1933,12 +1885,12 @@ check treats the union as if <code>void</code> were not in it. WordPress core us
 <code>void|string</code> and <code>void|false</code> this way (18 reports).</p>
 <h3 id="b699-a-conditional-return-over-an-array-shape-matches-arrays-without-the-key">B699. A conditional return over an array shape matches arrays without the key<a class="headerlink" href="#b699-a-conditional-return-over-an-array-shape-matches-arrays-without-the-key" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/**</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x"> * @phpstan-return ($args is array{ fields: 'ids', ... } ? int[] : WP_Post[])</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x"> */</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">function get_posts($args = null) { … }</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">get_posts(['post_type' =&gt; 'post']);   // want WP_Post[], get int[]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @phpstan-return ($args is array{ fields: 'ids', ... } ? int[] : WP_Post[])</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> */</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">function get_posts($args = null) { … }</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">get_posts(['post_type' =&gt; 'post']);   // want WP_Post[], get int[]</span>
 </code></pre></div>
 <p>The argument has no <code>fields</code> key, so it cannot be <code>array{fields: 'ids',
 ...}</code>, yet the condition is taken as true. Every <code>get_posts()</code> and
@@ -1957,16 +1909,16 @@ undecided.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b700-emptyx-prop-does-not-narrow-the-way-issetx-prop-does">B700. <code>!empty($x-&gt;prop)</code> does not narrow the way <code>isset($x-&gt;prop)</code> does<a class="headerlink" href="#b700-emptyx-prop-does-not-narrow-the-way-issetx-prop-does" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @return object|array|WP_Error */</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function plugins_api() { … }</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$result = plugins_api();</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">if (isset($result-&gt;slug)) {</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    echo $result-&gt;slug;   // fine</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">}</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">if (! empty($result-&gt;name)) {</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    echo $result-&gt;name;   // Property 'name' not found on class 'WP_Error'</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @return object|array|WP_Error */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function plugins_api() { … }</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$result = plugins_api();</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">if (isset($result-&gt;slug)) {</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    echo $result-&gt;slug;   // fine</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">}</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">if (! empty($result-&gt;name)) {</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    echo $result-&gt;name;   // Property 'name' not found on class 'WP_Error'</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>!empty($x-&gt;prop)</code> implies <code>isset($x-&gt;prop)</code>, so it must remove the same
 union members: here <code>WP_Error</code>, which declares no <code>name</code> and has no
@@ -1974,12 +1926,12 @@ union members: here <code>WP_Error</code>, which declares no <code>name</code> a
 the <code>empty</code> form leaves the union whole. Found in WordPress core's plugin
 installer screen. <code>(int)</code> of a <code>ctype_digit()</code>-checked string is not non-negative</p>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function wait(string $delay): void {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    if (!ctype_digit($delay)) {</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">        return;</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    }</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    sleep((int) $delay);   // expects int&lt;0, max&gt;, got int</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function wait(string $delay): void {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    if (!ctype_digit($delay)) {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">        return;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    }</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    sleep((int) $delay);   // expects int&lt;0, max&gt;, got int</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>A string that passes <code>ctype_digit()</code> holds only the digits 0-9, so casting
 it to <code>int</code> cannot give a negative number, and <code>sleep()</code>'s
@@ -1995,13 +1947,13 @@ seconds a rate-limit message names.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <h3 id="b695-a-primitive-cast-on-a-nullable-column-drops-the-null">B695. A primitive cast on a nullable column drops the <code>null</code><a class="headerlink" href="#b695-a-primitive-cast-on-a-nullable-column-drops-the-null" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// schema: `is_franchise` tinyint(1) DEFAULT NULL</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">class AdminUser extends Model</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">{</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    protected $casts = ['is_franchise' =&gt; 'boolean'];</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">}</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">$user-&gt;is_franchise;   // want bool|null, get bool</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// schema: `is_franchise` tinyint(1) DEFAULT NULL</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">class AdminUser extends Model</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">{</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    protected $casts = ['is_franchise' =&gt; 'boolean'];</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">$user-&gt;is_franchise;   // want bool|null, get bool</span>
 </code></pre></div>
 <p><code>Model::castAttribute()</code> returns a <code>null</code> value untouched for every
 primitive cast type (<code>bool</code>, <code>int</code>, <code>float</code>, <code>string</code>, <code>array</code>, dates, …),
@@ -2013,13 +1965,13 @@ this right from the same schema.</p>
 the column nullable.</p>
 <h3 id="b696-a-relation-whose-related-class-comes-from-config-is-typed-model">B696. A relation whose related class comes from <code>config()</code> is typed <code>Model</code><a class="headerlink" href="#b696-a-relation-whose-related-class-comes-from-config-is-typed-model" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// spatie/laravel-permission's HasRoles</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">public function roles(): BelongsToMany</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">{</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    return $this-&gt;morphToMany(config('permission.models.role'), 'model', …);</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">$user-&gt;roles;   // want Collection&lt;int, Role&gt;, get Collection&lt;int, Model&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// spatie/laravel-permission's HasRoles</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">public function roles(): BelongsToMany</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">{</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    return $this-&gt;morphToMany(config('permission.models.role'), 'model', …);</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">}</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">$user-&gt;roles;   // want Collection&lt;int, Role&gt;, get Collection&lt;int, Model&gt;</span>
 </code></pre></div>
 <p>The related class is a <code>config()</code> value, and <code>config/permission.php</code> holds
 a literal <code>Role::class</code> under that key. We already type config values, but
@@ -2045,13 +1997,13 @@ both ways.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first">B704. A function declared in two files resolves to whichever is found first<a class="headerlink" href="#b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">function __() {}</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">function __() {}</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
 </code></pre></div>
 <p>WordPress core declares nineteen of its functions a second time as
 no-ops for its script loader. Calls across the project resolve to the
@@ -2070,10 +2022,10 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b701-variables-a-required-file-defines-are-reported-as-undefined">B701. Variables a <code>require</code>d file defines are reported as undefined<a class="headerlink" href="#b701-variables-a-required-file-defines-are-reported-as-undefined" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">function core_upgrade(): string {</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    return $wp_version;                          // Undefined variable '$wp_version'</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">function core_upgrade(): string {</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    return $wp_version;                          // Undefined variable '$wp_version'</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>An <code>include</code>/<code>require</code> runs the file in the current scope, so every
 variable its top level assigns exists afterwards. We report them as
@@ -2086,10 +2038,10 @@ variables in it rather than guess. WordPress core gets 47 of these
 <code>require</code>s).</p>
 <h3 id="b702-uses-with-a-variable-or-a-description-is-reported-as-an-unknown-function">B702. <code>@uses</code> with a variable or a description is reported as an unknown function<a class="headerlink" href="#b702-uses-with-a-variable-or-a-description-is-reported-as-an-unknown-function" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/**</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x"> * @uses global $wp_meta_boxes Used to retrieve registered meta boxes.</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x"> * @uses $fn_get_css To run the function that gets the CSS.</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x"> */</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/**</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x"> * @uses global $wp_meta_boxes Used to retrieve registered meta boxes.</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x"> * @uses $fn_get_css To run the function that gets the CSS.</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x"> */</span>
 </code></pre></div>
 <p>The first word after <code>@uses</code> is checked as a function name, giving
 "Function 'global' not found" and "Function '$fn_get_css' not found".

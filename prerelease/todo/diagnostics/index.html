@@ -1847,8 +1847,7 @@ value turns out to be the empty case. That is pedantic, and it should be
 off by default. PHPStan reports a partially wrong union only from level
 7, and a nullable one only from level 8; PhpStorm does not report either.
 On WordPress core 2,262 of the 3,601 argument mismatches are of this kind
-(after <a href="../bugs/#b698-a-bool-argument-to-a-scalar-parameter-is-reported-outside-strict_types">B698</a>
-removes the ones PHP accepts outright), and comment templates that
+(after leaving out the ones PHP accepts outright), and comment templates that
 PhpStorm reports nothing on get dozens.</p>
 <p>Report these only behind an opt-in, the way <code>partial-union-members</code>
 already gates the same question for member access. The existing
