@@ -529,24 +529,6 @@ in its view are implemented (`blade/discovery.rs`). Three gaps remain:
   Neither value completes, navigates, or reports a name the component
   does not declare. Laravel Idea reports an unknown `wire:click` action.
 
-#### L30. Eloquent attribute-array key completion
-
-**Impact: High · Complexity: Medium**
-
-Our Eloquent string completion covers where-style column arguments and
-relation names, but not **attribute-array keys**: `User::create(['name'
-=> …])`, `fill()`, `make()`, `update()`, `updateOrCreate()`,
-`firstOrCreate()`, `firstOrNew()`, `createOrFirst()` should complete
-array keys from the model's column sources (preferring fillable
-columns, skipping keys already present in the literal). Also extend the
-scalar column list with `firstWhere()`, `whereColumn()`, and the
-aggregate methods (`min`/`max`/`sum`/`avg`), and cover the model-level
-PHP attributes that take column-name arguments where the installed
-framework version has them. The Laravel LSP gets its column list from
-`artisan model:show --json` (live DB required); ours comes from the
-same static sources the model provider already uses (casts, fillable,
-accessors, `@property` tags) — no database needed.
-
 #### L31. String-key rename, highlight, and semantic tokens
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -669,9 +651,9 @@ individually) and whose target model declares neither `$fillable` nor
 `$guarded`, nor the `#[Fillable]`/`#[Guarded]`/`#[Unguarded]` model
 attributes, and the project never calls `Model::unguard()`, on `create()`, `fill()`, `update()`,
 `updateOrCreate()`, `firstOrCreate()`, and `firstOrNew()`. The model
-resolution and column-source machinery L30 already needs (and the
-diagnostic's model-argument matching) share the same receiver-typing
-path, so build them together.
+resolution and column-source machinery used by attribute-array key
+completion shares the same receiver-typing path as the diagnostic's
+model-argument matching, so reuse it.
 
 **Where to look:** `virtual_members/laravel/model_extraction/` for
 existing `$fillable`/`$guarded` reads; `diagnostics/` for the

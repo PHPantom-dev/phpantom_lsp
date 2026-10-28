@@ -421,3 +421,45 @@ fn all_sources_combined() {
         "from @property: {names:?}"
     );
 }
+
+#[test]
+fn columns_exclude_synthesized_relationship_properties() {
+    let mut model = make_model("User");
+    model.laravel_mut().column_names = vec!["*".into()];
+    model.laravel_mut().timestamps = Some(false);
+    model.laravel_mut().has_get_key_name_method = true;
+    use crate::types::PropertySource;
+    for (name, source) in [
+        (
+            "display_name",
+            PropertySource::Accessor {
+                method: "getDisplayNameAttribute".into(),
+                mutator: None,
+                column: None,
+            },
+        ),
+        (
+            "posts",
+            PropertySource::Relationship {
+                method: "posts".into(),
+                kind: "HasMany".into(),
+                pivot_accessor: None,
+                pivot_using: None,
+                pivot_columns: Vec::new(),
+            },
+        ),
+        (
+            "posts_count",
+            PropertySource::RelationshipCount {
+                relationship: "posts".into(),
+            },
+        ),
+        ("pivot", PropertySource::Pivot),
+    ] {
+        let mut property = PropertyInfo::virtual_property(name, None);
+        property.source = Some(source);
+        model.properties.push(Arc::new(property));
+    }
+    let columns = super::collect_column_names(&model);
+    assert_eq!(columns, ["display_name"]);
+}

@@ -69,6 +69,40 @@ fn test_detect_column_method_where() {
 }
 
 #[test]
+fn column_arguments_preserve_lists_and_named_parameters() {
+    for source in [
+        "User::select('email', '",
+        "User::select(columns: ['",
+        "User::addSelect(column: ['",
+        "User::groupBy(groups: '",
+        "User::whereNull(columns: ['",
+        "User::whereNotNull(['email', '",
+        "User::pluck('email', '",
+        "User::pluck(key: '",
+        "User::where(value: 1, column: '",
+    ] {
+        assert_eq!(
+            eloquent_ctx_at(source, at_end(source)).unwrap().kind,
+            EloquentStringKind::Column,
+            "{source}"
+        );
+    }
+    for source in [
+        "User::select(options: '",
+        "User::where(['",
+        "User::orderBy('email', '",
+        "User::whereIn('email', ['",
+        "User::whereNull(['email'], '",
+        "create(['",
+    ] {
+        assert!(
+            eloquent_ctx_at(source, at_end(source)).is_none(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn test_detect_instance_call() {
     let content = "<?php\n$user->load('";
     let pos = Position {

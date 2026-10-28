@@ -78,6 +78,8 @@ mod completion_conditional_classes;
 mod completion_cross_file;
 mod completion_deprecated;
 mod completion_dnf_return_type;
+mod completion_eloquent_attributes;
+mod completion_eloquent_model_attributes;
 mod completion_enums;
 mod completion_first_class_callable;
 mod completion_foreach_collections;
