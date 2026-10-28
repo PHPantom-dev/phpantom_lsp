@@ -26,6 +26,9 @@ pub(crate) enum ReturnFrame {
     /// and the stack holds one frame per body being walked rather than one
     /// per statement, so the indirection is paid once per closure.
     Open(Option<Box<ScopeState>>),
+    /// Collects what one variable holds at each `return` out of the body,
+    /// in source order.
+    Reads(crate::atom::Atom, Vec<ResolvedType>),
     /// A nested body's returns say nothing about the body outside it.
     Barrier,
 }
@@ -45,14 +48,27 @@ impl ReturnFrameGuard<'_> {
     /// `None` when the body has no reachable `return`.
     pub(crate) fn finish(mut self) -> Option<ScopeState> {
         self.open = false;
-        pop_return_frame(self.flow)
+        match self.flow.return_edges.borrow_mut().pop() {
+            Some(ReturnFrame::Open(state)) => state.map(|s| *s),
+            _ => None,
+        }
+    }
+
+    /// Close a frame [`push_return_reads`] opened and return the types its
+    /// variable held at each `return`, one reading after another.
+    pub(crate) fn finish_reads(mut self) -> Vec<ResolvedType> {
+        self.open = false;
+        match self.flow.return_edges.borrow_mut().pop() {
+            Some(ReturnFrame::Reads(_, types)) => types,
+            _ => Vec::new(),
+        }
     }
 }
 
 impl Drop for ReturnFrameGuard<'_> {
     fn drop(&mut self) {
         if self.open {
-            pop_return_frame(self.flow);
+            self.flow.return_edges.borrow_mut().pop();
         }
     }
 }
@@ -64,11 +80,18 @@ pub(crate) fn push_return_frame(flow: &WalkFlow) -> ReturnFrameGuard<'_> {
     ReturnFrameGuard { flow, open: true }
 }
 
-fn pop_return_frame(flow: &WalkFlow) -> Option<ScopeState> {
-    match flow.return_edges.borrow_mut().pop() {
-        Some(ReturnFrame::Open(state)) => state.map(|s| *s),
-        _ => None,
-    }
+/// Open a frame that reads `var_name` at every `return` out of the body
+/// about to be walked.
+///
+/// Unlike [`push_return_frame`], nothing else in the scope is kept: a
+/// reader after one variable joins only the paths that say something
+/// about it, where a join of whole scopes would let a path that never
+/// touched the variable erase what the others assigned.
+pub(crate) fn push_return_reads<'f>(flow: &'f WalkFlow, var_name: &str) -> ReturnFrameGuard<'f> {
+    flow.return_edges
+        .borrow_mut()
+        .push(ReturnFrame::Reads(crate::atom::atom(var_name), Vec::new()));
+    ReturnFrameGuard { flow, open: true }
 }
 
 /// Lifts the barrier [`suspend_return_edges`] put in place.
@@ -106,11 +129,13 @@ pub(crate) fn record_return_edge(flow: &WalkFlow, scope: &ScopeState) {
     if scope.unreachable {
         return;
     }
-    if let Some(ReturnFrame::Open(state)) = flow.return_edges.borrow_mut().last_mut() {
-        match state {
-            Some(accumulated) => accumulated.merge_branch(scope),
-            None => *state = Some(Box::new(scope.clone())),
+    match flow.return_edges.borrow_mut().last_mut() {
+        Some(ReturnFrame::Open(Some(accumulated))) => accumulated.merge_branch(scope),
+        Some(ReturnFrame::Open(state)) => *state = Some(Box::new(scope.clone())),
+        Some(ReturnFrame::Reads(var_name, types)) => {
+            types.extend(scope.get(var_name.as_str()).iter().cloned());
         }
+        Some(ReturnFrame::Barrier) | None => {}
     }
 }
 

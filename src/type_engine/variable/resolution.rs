@@ -235,22 +235,6 @@ pub(crate) fn resolve_variable_types(query: VarQuery<'_>) -> Vec<ResolvedType> {
     })
 }
 
-/// The forward walk behind [`resolve_variable_types`], over a program the
-/// caller has already parsed.
-///
-/// For a caller that needs the parse for something else first (finding
-/// the offset to resolve at, say) and would otherwise parse the file
-/// twice. It bypasses the per-pass memo and the diagnostic scope cache,
-/// both of which key on offsets into the request's own file.
-pub(crate) fn resolve_variable_types_in_program(
-    program: &Program<'_>,
-    query: VarQuery<'_>,
-) -> Vec<ResolvedType> {
-    let mut placeholder = None;
-    let current_class = query_class(&query, &mut placeholder);
-    resolve_variable_in_statements(program.statements.iter(), &query.var_ctx(current_class))
-}
-
 /// Resolve the type of a variable at `cursor_offset` as a [`PhpType`].
 ///
 /// This is the **single entry point** for all consumers that need to
@@ -331,49 +315,16 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
     // once (if needed) to walk top-level statements.
     let stmts: Vec<&Statement> = statements.collect();
 
-    // Pre-compute top-level variable scope so that `global $x` inside
-    // function bodies can look up `$x`'s type from the file's top level.
-    // Only do the expensive full-file walk when the file actually uses the
-    // `global` keyword.  When the cursor turns out to be at the top level
-    // (not inside any class or function), this scope is also reused for
-    // the variable lookup, avoiding a redundant second forward walk.
-    let file_has_global_keyword = ctx.file.content.contains("global ");
-    let top_level_scope = if ctx.top_level_scope.is_none() && file_has_global_keyword {
-        // Guard 1: prevent re-entrant top-level scope construction for
-        // the same file.  RHS resolution during the walk can trigger
-        // another resolve_variable_types call, which would start a
-        // second top-level walk on the same file content.
-        if let Some(_tl_guard) = try_acquire_top_level_guard(ctx.file.content) {
-            let flow = super::forward_walk::WalkFlow::default();
-            let tl_fw_ctx = super::forward_walk::ForwardWalkCtx {
-                cursor_offset: u32::MAX,
-                ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx, &flow)
-            };
-            let tl_scope =
-                super::forward_walk::top_level_scope_for_globals(stmts.iter().copied(), &tl_fw_ctx);
-            if tl_scope.locals.is_empty() {
-                None
-            } else {
-                Some(tl_scope.locals)
-            }
-        } else {
-            None
-        }
-    } else {
-        ctx.top_level_scope.clone()
-    };
-
-    // Shadow ctx with one that carries the pre-computed top-level
-    // scope, copying all other fields unchanged.
+    // When the cursor turns out to be at the top level (not inside any
+    // class or function), the top-level scope built for `global` is also
+    // reused for the variable lookup, avoiding a redundant second walk.
     let ctx_with_tls;
-    let ctx: &VarResolutionCtx<'_> = if top_level_scope.is_some() && ctx.top_level_scope.is_none() {
-        ctx_with_tls = VarResolutionCtx {
-            top_level_scope,
-            ..ctx.clone()
-        };
-        &ctx_with_tls
-    } else {
-        ctx
+    let ctx = match with_top_level_scope(&stmts, ctx) {
+        Some(with_tls) => {
+            ctx_with_tls = with_tls;
+            &ctx_with_tls
+        }
+        None => ctx,
     };
 
     for &stmt in &stmts {
@@ -469,6 +420,63 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
     }
 
     vec![]
+}
+
+/// `ctx` carrying the file's top-level scope, so that `global $x` inside a
+/// function body can look up `$x`'s type from the file's top level, or
+/// `None` when `ctx` already carries one or there is none to build.
+///
+/// Only does the full-file walk when the file actually uses the `global`
+/// keyword.
+fn with_top_level_scope<'c>(
+    stmts: &[&Statement<'_>],
+    ctx: &VarResolutionCtx<'c>,
+) -> Option<VarResolutionCtx<'c>> {
+    if ctx.top_level_scope.is_some() || !ctx.file.content.contains("global ") {
+        return None;
+    }
+    // Guard 1: prevent re-entrant top-level scope construction for the
+    // same file.  RHS resolution during the walk can trigger another
+    // resolve_variable_types call, which would start a second top-level
+    // walk on the same file content.
+    let _tl_guard = try_acquire_top_level_guard(ctx.file.content)?;
+    let flow = super::forward_walk::WalkFlow::default();
+    let tl_fw_ctx = super::forward_walk::ForwardWalkCtx {
+        cursor_offset: u32::MAX,
+        ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(ctx, &flow)
+    };
+    let tl_scope =
+        super::forward_walk::top_level_scope_for_globals(stmts.iter().copied(), &tl_fw_ctx);
+    (!tl_scope.locals.is_empty()).then(|| VarResolutionCtx {
+        top_level_scope: Some(tl_scope.locals),
+        ..ctx.clone()
+    })
+}
+
+/// The types `query.var_name` holds when control leaves `body`, joined
+/// over every `return` and the closing brace, from a single walk of a
+/// program the caller has already parsed.
+///
+/// `query.cursor_offset` must sit inside `body`; it places the reads of
+/// the declaration's own docblock. It bypasses the per-pass memo and the
+/// diagnostic scope cache, both of which key on offsets into the
+/// request's own file.
+pub(crate) fn resolve_variable_at_body_exits(
+    program: &Program<'_>,
+    query: VarQuery<'_>,
+    body: super::forward_walk::FunctionLikeBody<'_>,
+) -> Vec<ResolvedType> {
+    let mut placeholder = None;
+    let current_class = query_class(&query, &mut placeholder);
+    let ctx = query.var_ctx(current_class);
+    let stmts: Vec<&Statement> = program.statements.iter().collect();
+    let ctx = with_top_level_scope(&stmts, &ctx).unwrap_or(ctx);
+    let flow = super::forward_walk::WalkFlow::default();
+    let fw_ctx = super::forward_walk::ForwardWalkCtx {
+        top_level_scope: ctx.top_level_scope.clone(),
+        ..super::forward_walk::ForwardWalkCtx::fresh_from_var_ctx(&ctx, &flow)
+    };
+    super::forward_walk::resolve_at_body_exits(ctx.var_name, body, &fw_ctx)
 }
 
 /// Try to resolve the target variable inside a `Function` declaration.

@@ -110,7 +110,6 @@ ships, remove every row that names it.
 | WP4 | [Hook names](todo/wordpress.md#wp4-hook-names) | High        | Medium      |
 | T57 | [A `global` variable is untyped unless a `@var` sits above it](todo/type-inference.md#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it) | High        | Medium      |
 | WP3 | [WordPress core for a plugin or theme opened on its own](todo/wordpress.md#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own) | Medium-High | Medium      |
-| P88 | [Reading a by-reference parameter's out type walks the callee once per `return`](todo/performance.md#p88-reading-a-by-reference-parameters-out-type-walks-the-callee-once-per-return) | Medium      | Medium      |
 | WP6 | [Template parts](todo/wordpress.md#wp6-template-parts) | Medium      | Medium      |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | WP7 | [Return types the WordPress stubs do not declare](todo/wordpress.md#wp7-return-types-the-wordpress-stubs-do-not-declare) (depends on WP2) | Medium      | Medium      |

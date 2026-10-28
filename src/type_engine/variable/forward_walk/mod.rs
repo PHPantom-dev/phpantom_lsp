@@ -352,6 +352,56 @@ pub(crate) fn resolve_in_function_body<'b>(
     )
 }
 
+/// A function or method body, with what seeding its scope needs.
+#[derive(Clone, Copy)]
+pub(crate) struct FunctionLikeBody<'b> {
+    pub parameters: &'b FunctionLikeParameterList<'b>,
+    pub block: &'b Block<'b>,
+    /// Where the declaration starts, docblock excluded.
+    pub span_start: u32,
+    pub owner: BodyOwner<'b>,
+}
+
+/// The types `var_name` holds when control leaves `body`, read at every
+/// way out: each `return`, and the closing brace when a path falls
+/// through to it, one reading after another in source order.
+///
+/// One walk to the end of the body, with a return frame reading the
+/// variable at each `return`, answers for all of them at once. A way out
+/// on which the variable holds nothing known adds nothing. Empty when no
+/// path leaves the body normally (every one throws).
+pub(crate) fn resolve_at_body_exits(
+    var_name: &str,
+    body: FunctionLikeBody<'_>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ResolvedType> {
+    // The declaration's templates and `@return` read at the position the
+    // caller gave; the walk itself runs to the end of the body.
+    let ctx = &ctx
+        .for_declaration(body.span_start)
+        .with_cursor_offset(u32::MAX);
+    let statements: Vec<&Statement<'_>> = body.block.statements.iter().collect();
+    // A transient read of another body: it must not write into an active
+    // diagnostic scope cache.
+    let _suspend = suspend_snapshot_recording();
+    let mut scope = seed_body_scope(
+        body.parameters.parameters.iter(),
+        &statements,
+        body.span_start,
+        body.owner,
+        ctx,
+    );
+    let return_reads = push_return_reads(ctx.flow, var_name);
+    walk_body_forward(statements.iter().copied(), &mut scope, ctx);
+    let mut types = return_reads.finish_reads();
+    // The end-of-body scope of a body whose every path returns is the
+    // state before the statement that left, which no path carries out.
+    if !scope.unreachable && !branch_exits_stmts(statements.iter().copied(), &scope, ctx) {
+        types.extend(scope.get(var_name).iter().cloned());
+    }
+    types
+}
+
 /// Resolve the target variable from top-level code (outside any
 /// function or class body) using the forward walker.
 ///
