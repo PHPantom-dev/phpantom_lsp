@@ -411,7 +411,24 @@ of the same design: `src/symbol_map/extraction/yii_routes.rs`, `src/yii/routes.r
 
 ## F28. Symfony route names a loader composes
 
-**Impact: Low-Medium · Complexity: Medium**
+**Impact: Medium-High · Complexity: Medium**
+
+Until this lands, the unknown-route diagnostic is inert in most real
+applications: it only judges names under `app_`, and applications that
+name their routes by area (`blog_post`, `admin_post_edit`, as the official
+Symfony demo does) never trigger it. A typo in `redirectToRoute()` or
+`path()` goes unreported there.
+
+Unlike service IDs, routes are a closed world the project spells out:
+every route enters through an import in `config/routes.yaml` /
+`config/routes/*` (or the kernel's `configureRoutes()`), and a bundle's
+routes come from the file that import names
+(`resource: '@WebProfilerBundle/Resources/config/routing/wdt.php'`).
+Following those imports into the bundle's routing files gives the full set,
+so the `app_` restriction can go. The exceptions are imports that run code,
+`type: service` loaders (the security logout loader) and custom loaders;
+an application with one of those keeps the world open only for the names
+that loader could produce, or entirely if that cannot be told.
 
 A route's name is read where it is declared: a `#[Route]` attribute, with
 its class's name prefix, a routing YAML or XML entry, or a routing
@@ -436,7 +453,7 @@ missed:
 
 ## F29. Report Symfony translation keys nothing declares
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Medium-High · Complexity: Medium**
 
 Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.
 
@@ -554,7 +571,7 @@ registered for.
 
 ## F32. Report unknown Symfony names in Twig templates
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Medium-High · Complexity: Medium**
 
 Blocks full Twig support: the README keeps Twig marked as partial until this lands.
 
@@ -660,7 +677,7 @@ block, and complete the block names a child can override.
 
 ## F37. Twig template variables
 
-**Impact: Medium · Complexity: Medium-High**
+**Impact: Medium-High · Complexity: Medium-High**
 
 Blocks full Twig support: the README keeps Twig marked as partial until this lands.
 

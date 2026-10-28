@@ -388,52 +388,75 @@ The scanners already enumerate every valid key for go-to-definition. The
 items below mostly wire that existing enumeration into three more LSP
 endpoints rather than building new analysis.
 
+#### L62. Validation rule strings
+
+**Impact: High · Complexity: Medium**
+
+Completion, hover, and diagnostics for the rule strings in
+`'field' => 'required|email'`. Laravel Idea completes these and
+advertises it on its front page; rules arrays are written in nearly every
+controller and form request, so this is the most frequent string context
+we leave blank.
+
+Rather than hardcoding a rule list (the Laravel LSP ships ~90 rules as
+LSP snippets, e.g. `between:${min},${max}`), derive it from the installed
+framework: the `Validator` concern declares one `validate{Rule}` method
+per rule, so scanning that vendor class yields the exact rule set for the
+project's Laravel version, plus whether each rule takes parameters.
+Custom rule classes (implementing `ValidationRule`) and literal
+`Validator::extend('name', …)` registrations extend the set. Trigger
+contexts to match: `$request->validate()` arg 0, `Validator::make()`
+arg 1, `$validator->sometimes()` arg 1, and array *values* (never keys,
+which are field names) inside the `rules()` method of `FormRequest` /
+`Livewire\Form` subclasses.
+
+**Rule parameters are references too:** `exists:users,email` and
+`unique:users` name a table and column (resolve to the model/column via
+the schema/migration table map or the model's own column sources);
+`same:password`, `different:`, `required_with:`, `gt/gte/lt/lte:`,
+`after:`/`before:` name *other fields* in the same rules array (complete
+and navigate to the sibling key); `in:`/`Rule::in()` values on an
+enum-cast field can complete from the enum's cases.
+
+**Messages and attributes.** The keys of a form request's `messages()`
+(`'email.required'`) and `attributes()` arrays name a field from
+`rules()`, optionally followed by a rule. Complete them from the rules
+array and report a key that names neither.
+
+#### L63. Middleware alias names
+
+**Impact: Medium-High · Complexity: Medium**
+
+Completion, go-to-definition, diagnostics, and hover for
+`->middleware('auth')`, `->withoutMiddleware(...)`, and the
+`#[Middleware]` controller attribute (string and array arguments).
+Every route file names middleware, and today only the parameter part
+(`auth:web`, `can:update`) is understood. Aliases are declared statically
+in `bootstrap/app.php` (`$middleware->alias([...])`) on Laravel 11+, or
+the HTTP Kernel's `$middlewareAliases`/`$routeMiddleware` on older
+versions (an application may have more than one kernel); the framework's
+built-in aliases and default groups live in
+`Illuminate\Foundation\Configuration\Middleware` and the Kernel base
+class, parseable from vendor source the same way the container alias
+table already is. Be **parameter-aware**: `auth:web` and `throttle:60,1`
+validate the alias before the `:`, and hover can show the middleware's
+`handle()` parameter signature. For groups (`'web'`, `'api'`), hover
+lists the member middleware. Named `throttle:` limiters are
+[L58](#l58-laravel-rate-limiter-names).
+
 #### L17. Additional string contexts without booting
 
-**Impact: Medium · Complexity: Medium-High**
+**Impact: Medium · Complexity: Medium**
 
 Constructs the extension and the Laravel LSP cover that we don't, and
 that are statically recoverable (no booting):
 
-- **Middleware aliases** — completion/go-to/diagnostics/hover for
-  `->middleware('auth')`, `->withoutMiddleware(...)`, and the
-  `#[Middleware]` controller attribute (string and array arguments).
-  Aliases are declared statically in `bootstrap/app.php`
-  (`$middleware->alias([...])`) on Laravel 11+, or the HTTP Kernel's
-  `$middlewareAliases`/`$routeMiddleware` on older versions; the
-  framework's built-in aliases and default groups live in
-  `Illuminate\Foundation\Configuration\Middleware` and the Kernel base
-  class, parseable from vendor source the same way the container alias
-  table already is. Be **parameter-aware**: `auth:web` and
-  `throttle:60,1` validate the alias before the `:`, and hover can show
-  the middleware's `handle()` parameter signature. For groups (`'web'`,
-  `'api'`), hover lists the member middleware.
 - **Asset paths** — `asset('...')` (and `UrlGenerator::asset()`) against
   a filesystem walk of `public/`. Two cheap extensions the Laravel LSP
   has or lacks: `mix('...')` against `public/mix-manifest.json` (static
   JSON, legacy projects), and — which they do *not* support — Vite
   entry-point strings (`Vite::asset('resources/js/app.js')`, `@vite`
   arguments) checked against source-file existence.
-- **Validation rules** — completion for the rule strings in
-  `'field' => 'required|email'`. Rather than hardcoding a rule list
-  (the Laravel LSP ships ~90 rules as LSP snippets, e.g.
-  `between:${min},${max}`), derive it from the installed framework:
-  the `Validator` concern declares one `validate{Rule}` method per
-  rule, so scanning that vendor class yields the exact rule set for
-  the project's Laravel version, plus whether each rule takes
-  parameters. Custom rule classes (implementing `ValidationRule`) and
-  literal `Validator::extend('name', …)` registrations extend the set.
-  Trigger contexts to match: `$request->validate()` arg 0,
-  `Validator::make()` arg 1, `$validator->sometimes()` arg 1, and array
-  *values* (never keys — those are field names) inside the `rules()`
-  method of `FormRequest` / `Livewire\Form` subclasses.
-  **Rule parameters are references too:** `exists:users,email` and
-  `unique:users` name a table and column (resolve to the model/column
-  via the schema/migration table map or the model's own column sources);
-  `same:password`, `different:`, `required_with:`, `gt/gte/lt/lte:`,
-  `after:`/`before:` name *other fields* in the same rules array
-  (complete and navigate to the sibling key); `in:`/`Rule::in()` values
-  on an enum-cast field can complete from the enum's cases.
 - **Inertia page paths** — `Inertia::render('...')` and
   `Inertia::modal()` arg 0, `Route::inertia()` arg 1, and the
   `inertia()` helper, against a filesystem walk of `resources/js/Pages`
@@ -492,7 +515,7 @@ resolve the relation. Both decisions ignore what the declaration says:
 Class components under the Livewire class namespace (`app/Livewire/`,
 nested names), the `<livewire:foo-bar>` tag resolution on the Blade
 side, and hover on a Livewire component's public properties via `$this`
-in its view are implemented (`blade/discovery.rs`). Two gaps remain:
+in its view are implemented (`blade/discovery.rs`). Three gaps remain:
 
 - **View-based components.** Volt and Livewire v4 single-file
   components (a Blade view that carries its own component class) are
@@ -500,10 +523,15 @@ in its view are implemented (`blade/discovery.rs`). Two gaps remain:
 - **PHP-side triggers.** `Volt::route('/path', 'component')` (arg 1)
   and `Route::livewire()` get no completion, go-to-definition, or
   unknown-component diagnostic.
+- **`wire:` attribute values.** `wire:model="…"` names a public property
+  of the component and `wire:click="…"` one of its public methods (the
+  actions `backing_class.rs` already tells apart from view variables).
+  Neither value completes, navigates, or reports a name the component
+  does not declare. Laravel Idea reports an unknown `wire:click` action.
 
 #### L30. Eloquent attribute-array key completion
 
-**Impact: Medium · Complexity: Medium**
+**Impact: High · Complexity: Medium**
 
 Our Eloquent string completion covers where-style column arguments and
 relation names, but not **attribute-array keys**: `User::create(['name'
@@ -683,3 +711,116 @@ including grouped imports, without treating unrelated classes named
 **Where to look:** `virtual_members/laravel/route_names/discovery.rs` and
 `virtual_members/laravel/route_names/traversal.rs`, particularly
 `GroupPrefix::chain_reaches_router()` and `is_facade()`.
+
+---
+
+## Navigation and code actions
+
+Editor features Laravel Idea has that do not live inside a string.
+
+#### L64. Routes on controller methods
+
+**Impact: Medium-High · Complexity: Medium**
+
+A controller method that a route points at shows nothing about it: not
+the URL, not the HTTP verb, not the route name. Laravel Idea marks each
+such method in the gutter, lists its routes, and jumps to the
+registration. Add a code lens above the method (`GET /orders/{order}
+· orders.show`, one per route, navigating to the route definition), fed
+by the route discovery that already resolves `[Controller::class,
+'method']` actions, `Route::controller()` groups, and resource routes.
+A method no route reaches gets no lens. Code lens already carries
+framework annotations for Doctrine, Messenger, and Yii, so the shape is
+established.
+
+**Where to look:** `code_lens.rs`;
+`virtual_members/laravel/route_names/` for the discovered routes and
+their actions.
+
+#### L65. Unknown Blade and Livewire components
+
+**Impact: Medium-High · Complexity: Medium**
+
+`<x-buttons.bakc />` and `<livewire:orders.overveiw />` name nothing, and
+nothing says so: component tags complete and navigate, but a tag that
+resolves to no class and no view is not reported (the tag diagnostics in
+`diagnostics/blade_component_tags.rs` only check that tags balance).
+Laravel Idea reports both, though on a project that keeps its Blade views
+outside `resources/views` it also flags components that exist. Report a
+tag that `blade/discovery.rs` cannot resolve, keeping the world open for
+component namespaces and paths the project registers in a way we cannot
+read.
+
+Pair it with a "Create component" quick fix, as an unknown view already
+offers "Create view" (`create_missing_view.rs`). Offer to create the anonymous component's Blade file at the path the tag
+resolves to (`resources/views/components/alert.blade.php`, honouring
+anonymous component namespaces and nested names), and as a second option
+the class-backed pair (`app/View/Components/Alert.php` plus its view).
+
+#### L68. Unknown methods on Eloquent models and builders
+
+**Impact: High · Complexity: Medium**
+
+```php
+$order->getTotl();          // BadMethodCallException at runtime, reported by nothing
+Order::whereStatsu('paid'); // fine: a dynamic where on a column
+```
+
+A method call on a class with `__call` is never reported
+(`diagnostics/unknown_members/member_check.rs` returns `MagicFallback`),
+which is right for a proxy that accepts any name but wrong for Eloquent.
+`Model::__call` forwards to the model's query builder, and the builder's
+`__call` accepts only a closed set: its own and the base query builder's
+methods, scopes, macros registered on the builder, and dynamic
+`where{Column}` calls. Anything else throws. So a typo in any model method
+call, in PHP or in a Blade template, goes unreported, while Larastan and
+Laravel Idea both report it.
+
+Judge an Eloquent receiver against that set instead of letting `__call`
+accept everything. The set is what completion already offers on a model
+and its builder, so the work is in the open-world edges: a project that
+registers macros we cannot read, `resolveRelationUsing()` dynamic
+relations, and a model or builder that overrides `__call` itself. In
+each of those, stay silent. Properties are a different case:
+`Model::__get` returns `null` for an unknown attribute instead of
+throwing, unless the application enables
+`Model::preventAccessingMissingAttributes()`, so property reports should
+follow that setting. An application that turns it on (directly or through
+`Model::shouldBeStrict()`) makes an unknown attribute a
+`MissingAttributeException`, so there the report belongs on by default
+rather than behind `report-magic-properties`. A production Laravel app
+used for comparison does exactly this, and its attribute typos go
+unreported unless the opt-in is set.
+
+#### L66. Related-file navigation for models, events, and listeners
+
+**Impact: Medium · Complexity: Medium**
+
+Laravel Idea links an Eloquent model to its factory, policy, observer,
+migrations, JSON resource, and custom collection, and an event
+to its listeners and back. We navigate none of these. The links are
+conventions or static registrations: `HasFactory` and the factory's
+model, `Gate::policy()`/`#[UsePolicy]`/the `Policies\{Model}Policy`
+guess, `#[ObservedBy]`/`::observe()`, `Event::listen()` and listener
+`handle(Event $e)` signatures (Laravel's event discovery reads exactly
+that type hint). Expose them as a code lens on the class or through
+go-to-implementation, whichever reads better in practice. The migrations
+link reuses the table map `database_schema/` already builds.
+
+#### L67. Laravel refactoring intentions
+
+**Impact: Low-Medium · Complexity: Medium**
+
+Laravel Idea's intention actions with no counterpart here, grouped
+because each is a small, independent code action:
+
+- Convert a pipe-delimited rule string to an array, and a rule to its
+  `Rule::` object form.
+- Extract an inline `$request->validate([...])` into a new `FormRequest`
+  and type-hint it on the action.
+- Replace a facade call with an injected dependency (constructor
+  property), and back.
+- In Blade, toggle `{{ }}` and `{!! !!}`, and extract a selection into a
+  new component.
+
+Pick them off individually; none depends on another.

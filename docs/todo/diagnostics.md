@@ -23,6 +23,39 @@ PHPantom assigns diagnostic severity based on runtime consequences:
 
 ---
 
+## D41. A mismatch that is only a possible `null` or `false` is reported by default
+
+**Impact: High · Complexity: Low-Medium**
+
+```php
+$comment = get_comment($id);           // WP_Comment|null
+comment_author($comment);             // expects int|WP_Comment, got WP_Comment|null
+
+$path = realpath($dir);                // string|false
+array_merge($list, glob($path));      // expects array, got array<string>|false
+```
+
+When every member of the argument's type fits the parameter except a
+`null` or `false`, the call is not wrong; it is possibly wrong if the
+value turns out to be the empty case. That is pedantic, and it should be
+off by default. PHPStan reports a partially wrong union only from level
+7, and a nullable one only from level 8; PhpStorm does not report either.
+On WordPress core 2,262 of the 3,601 argument mismatches are of this kind
+(after [B698](bugs.md#b698-a-bool-argument-to-a-scalar-parameter-is-reported-outside-strict_types)
+removes the ones PHP accepts outright), and comment templates that
+PhpStorm reports nothing on get dozens.
+
+Report these only behind an opt-in, the way `partial-union-members`
+already gates the same question for member access. The existing
+`downgrade-nullable-argument-mismatch` key becomes that opt-in (or is
+replaced by it); the default leaves the report out entirely. The same
+rule should hold for returns and property assignments
+(`type_mismatch_return`, `type_mismatch_property`), so one setting decides
+"possibly empty" everywhere. A mismatch where some other member fails is
+still reported as today.
+
+---
+
 ## D5. External tool diagnostic suppression actions
 
 **Impact: Low · Complexity: Low (per tool, after proxy exists)**

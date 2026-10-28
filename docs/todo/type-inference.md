@@ -630,7 +630,7 @@ The fixtures are `tests/phpstan_doctrine/data/DBAL/pdo/` and
 
 ## T57. A `global` variable is untyped unless a `@var` sits above it
 
-**Impact: Medium · Complexity: Medium**
+**Impact: High · Complexity: Medium**
 
 ```php
 /**
@@ -641,6 +641,11 @@ function acme_count_orders(): int {
     return (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}acme_orders");
 }
 ```
+
+PhpStorm types `$wpdb` as `wpdb` in a theme once it is pointed at a
+WordPress install, and reports an unknown method on it; we leave it
+untyped. `$wpdb` is how WordPress code reaches the database, so it is
+one of the most used variables in any plugin or theme.
 
 `global $x` takes its type from the same file's top-level scope, or from
 a `@var` docblock directly above the statement. Two more sources are

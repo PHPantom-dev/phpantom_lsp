@@ -90,6 +90,50 @@ in `src/php_type/shape_keys.rs`.
 
 ---
 
+## P88. Reading a by-reference parameter's out type walks the callee once per `return`
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+function privParseOptions(&$p_options_list, $p_size, &$v_result_list, $v_requested_options = false)
+{
+    // ~340 lines, 25 `return` statements
+}
+
+$v_result = $this->privParseOptions($v_arg_list, $v_size, $v_options, [...]);
+```
+
+When a call passes a variable to a by-reference parameter, the walker
+reads the callee's body for what it leaves there (`read_out_type` in
+`src/type_engine/call_resolution/out_param.rs`). It does so by running a
+separate `resolve_variable_types_in_program` query at every exit, each
+`return` plus the closing brace, with the diagnostic scope cache
+suspended, so each query walks the body from the top. A body with R
+returns costs R full walks per out-parameter, and the walks themselves
+reach other by-reference calls whose callees are read the same way (up
+to `MAX_OUT_TYPE_DEPTH`).
+
+WordPress core's bundled `class-pclzip.php` (5,700 lines, by-reference
+array parameters on nearly every private method) takes 10.1 s on its own
+in a debug `analyze`, the slowest file in core by a factor of two and
+about 8% of the whole project's CPU time. The same file with the `&`
+removed from its parameters takes 3.0 s. Every method on its own takes
+0.1 to 0.4 s, so the cost is all in the cross-method readings. An editor
+opening the file pays it on each diagnostic pass.
+
+Read every exit in one walk: walk the body once and record the
+parameter's type as the walk passes each `return` (the walker already
+visits them in order), then join the recordings. That makes a reading
+O(body) instead of O(returns × body), and the existing memo keeps it to
+one reading per out-parameter per pass.
+
+**Where to look:** `read_out_type` and `infer_out_type` in
+`src/type_engine/call_resolution/out_param.rs`;
+`resolve_variable_types_in_program` in
+`src/type_engine/variable/resolution/`.
+
+---
+
 ## Appendix: Profiling
 
 ### Commands
