@@ -268,116 +268,10 @@ impl Backend {
             };
         }
 
-        // Find every file whose symbol map contains a View string key
-        // matching one of this template's names.
-        let keys: Vec<crate::reference_index::ReferenceIndexKey> = view_names
-            .iter()
-            .map(
-                |name| crate::reference_index::ReferenceIndexKey::StringKey {
-                    kind: StringKeyKind::View,
-                    key: name.clone(),
-                },
-            )
-            .collect();
-        let own_snapshot;
-        let snapshot = match shared {
-            Some(shared) => shared.files.as_slice(),
-            None => {
-                // Never trigger (or wait on) workspace indexing from here:
-                // this runs while a Blade file is being opened or a
-                // controller saved, and a keystroke must not pay for a
-                // workspace walk.  Before the index is ready this scans
-                // whatever is parsed; the post-index refresh pass picks up
-                // call sites discovered later.
-                own_snapshot = self.user_file_symbol_maps_for_reference_keys_nonblocking(&keys);
-                own_snapshot.as_slice()
-            }
-        };
-        // A shared snapshot holds every file in the workspace that renders
-        // any view. Use its compact local index during headless analysis and
-        // the workspace reference index in the editor, so each template only
-        // reads callers that can name it. Before editor indexing completes,
-        // `None` conservatively reads the parsed snapshot whole.
-        let local_candidates = shared.and_then(|snapshot| snapshot.local_candidates.as_ref());
-        let candidates = shared
-            .filter(|_| local_candidates.is_none())
-            .and_then(|_| self.reference_candidate_uris_for_keys(&keys));
-
         // Union the variables from every call site, per name.
         let mut merged: HashMap<String, Vec<PhpType>> = HashMap::new();
-        for (snapshot_index, (file_uri, snapshot_map)) in snapshot.iter().enumerate() {
-            // A template must not feed itself: a recursive `@include` names
-            // the template the spans it would be read from belong to.
-            if file_uri == uri {
-                continue;
-            }
-            if let Some(local_candidates) = local_candidates
-                && !view_names.iter().any(|name| {
-                    local_candidates
-                        .get(name)
-                        .is_some_and(|indices| indices.binary_search(&snapshot_index).is_ok())
-                })
-            {
-                continue;
-            }
-            if let Some(candidates) = &candidates
-                && !candidates.contains(file_uri.as_str())
-            {
-                continue;
-            }
-            // A Blade caller's map indexes its virtual PHP, and the refresh
-            // pass rewrites that as it re-infers templates, so the
-            // snapshot's copy can describe a text that no longer exists.
-            let is_blade = self.is_blade_file(file_uri);
-            let symbol_map = match is_blade {
-                true => match self.symbol_map_for(file_uri) {
-                    Some(map) => map,
-                    None => continue,
-                },
-                false => Arc::clone(snapshot_map),
-            };
-            // A render site whose receiver only a type settles is not in
-            // the map, so ask for the file's confirmed extras — but only
-            // when a candidate names one of *this* template's views, since
-            // the loop below keeps no other key anyway.  Confirming a
-            // candidate resolves its receiver's type, and a file that
-            // spells many candidates it will never confirm (`$xw->text(…)`
-            // on an `XMLWriter` reads as a mailable's `text()` until the
-            // receiver is resolved) would otherwise pay for all of them
-            // here, in the refresh pass, rather than in the diagnostic pass
-            // that has a warm scope cache.
-            let has_candidate = symbol_map
-                .typed_receiver_sites
-                .iter()
-                .any(|site| site.receiver.names_views() && view_names.contains(&site.key));
-            let extra = if has_candidate {
-                self.typed_receiver_spans_for(file_uri, &symbol_map)
-            } else {
-                Arc::new(Vec::new())
-            };
-            let offsets: Vec<u32> = symbol_map
-                .spans
-                .iter()
-                .chain(extra.iter())
-                .filter_map(|span| match &span.kind {
-                    SymbolKind::StringKey {
-                        kind: StringKeyKind::View,
-                        key,
-                        ..
-                    } if view_names.iter().any(|n| n == key) => Some(span.start),
-                    _ => None,
-                })
-                .collect();
-            if offsets.is_empty() {
-                continue;
-            }
-            // Read only once the caller is known to name this template: a
-            // Blade caller's text is its whole virtual PHP, which is far too
-            // much to copy for every template in the project.
-            let Some(content) = self.caller_source(file_uri, is_blade, &symbol_map) else {
-                continue;
-            };
-            for site in self.extract_call_site_vars(file_uri, &content, &offsets) {
+        for (_, sites) in self.view_render_sites(uri, &view_names, shared) {
+            for site in sites {
                 for var in site.vars {
                     merged.entry(var.name).or_default().push(var.ty);
                 }
@@ -486,6 +380,134 @@ impl Backend {
             this_class,
             components,
         }
+    }
+
+    /// Every render site outside the template at `uri` that names one of
+    /// its `view_names`, grouped by the file it is written in: the
+    /// `view()` calls of the project's PHP and the `@include` family of
+    /// the templates that render it.
+    ///
+    /// `shared` is a refresh pass's snapshot of the files that render any
+    /// view; without one, only what is already parsed is read, so this
+    /// never triggers (or waits on) workspace indexing.
+    pub(crate) fn view_render_sites(
+        &self,
+        uri: &str,
+        view_names: &[String],
+        shared: Option<&ViewCallerSnapshot>,
+    ) -> Vec<(String, Vec<ResolvedViewCall>)> {
+        // Find every file whose symbol map contains a View string key
+        // matching one of this template's names.
+        let keys: Vec<crate::reference_index::ReferenceIndexKey> = view_names
+            .iter()
+            .map(
+                |name| crate::reference_index::ReferenceIndexKey::StringKey {
+                    kind: StringKeyKind::View,
+                    key: name.clone(),
+                },
+            )
+            .collect();
+        let own_snapshot;
+        let snapshot = match shared {
+            Some(shared) => shared.files.as_slice(),
+            None => {
+                // Never trigger (or wait on) workspace indexing from here:
+                // this runs while a Blade file is being opened or a
+                // controller saved, and a keystroke must not pay for a
+                // workspace walk.  Before the index is ready this scans
+                // whatever is parsed; the post-index refresh pass picks up
+                // call sites discovered later.
+                own_snapshot = self.user_file_symbol_maps_for_reference_keys_nonblocking(&keys);
+                own_snapshot.as_slice()
+            }
+        };
+        // A shared snapshot holds every file in the workspace that renders
+        // any view. Use its compact local index during headless analysis and
+        // the workspace reference index in the editor, so each template only
+        // reads callers that can name it. Before editor indexing completes,
+        // `None` conservatively reads the parsed snapshot whole.
+        let local_candidates = shared.and_then(|snapshot| snapshot.local_candidates.as_ref());
+        let candidates = shared
+            .filter(|_| local_candidates.is_none())
+            .and_then(|_| self.reference_candidate_uris_for_keys(&keys));
+
+        let mut found = Vec::new();
+        for (snapshot_index, (file_uri, snapshot_map)) in snapshot.iter().enumerate() {
+            // A template must not feed itself: a recursive `@include` names
+            // the template the spans it would be read from belong to.
+            if file_uri == uri {
+                continue;
+            }
+            if let Some(local_candidates) = local_candidates
+                && !view_names.iter().any(|name| {
+                    local_candidates
+                        .get(name)
+                        .is_some_and(|indices| indices.binary_search(&snapshot_index).is_ok())
+                })
+            {
+                continue;
+            }
+            if let Some(candidates) = &candidates
+                && !candidates.contains(file_uri.as_str())
+            {
+                continue;
+            }
+            // A Blade caller's map indexes its virtual PHP, and the refresh
+            // pass rewrites that as it re-infers templates, so the
+            // snapshot's copy can describe a text that no longer exists.
+            let is_blade = self.is_blade_file(file_uri);
+            let symbol_map = match is_blade {
+                true => match self.symbol_map_for(file_uri) {
+                    Some(map) => map,
+                    None => continue,
+                },
+                false => Arc::clone(snapshot_map),
+            };
+            // A render site whose receiver only a type settles is not in
+            // the map, so ask for the file's confirmed extras — but only
+            // when a candidate names one of *this* template's views, since
+            // the loop below keeps no other key anyway.  Confirming a
+            // candidate resolves its receiver's type, and a file that
+            // spells many candidates it will never confirm (`$xw->text(…)`
+            // on an `XMLWriter` reads as a mailable's `text()` until the
+            // receiver is resolved) would otherwise pay for all of them
+            // here, in the refresh pass, rather than in the diagnostic pass
+            // that has a warm scope cache.
+            let has_candidate = symbol_map
+                .typed_receiver_sites
+                .iter()
+                .any(|site| site.receiver.names_views() && view_names.contains(&site.key));
+            let extra = if has_candidate {
+                self.typed_receiver_spans_for(file_uri, &symbol_map)
+            } else {
+                Arc::new(Vec::new())
+            };
+            let offsets: Vec<u32> = symbol_map
+                .spans
+                .iter()
+                .chain(extra.iter())
+                .filter_map(|span| match &span.kind {
+                    SymbolKind::StringKey {
+                        kind: StringKeyKind::View,
+                        key,
+                        ..
+                    } if view_names.iter().any(|n| n == key) => Some(span.start),
+                    _ => None,
+                })
+                .collect();
+            if offsets.is_empty() {
+                continue;
+            }
+            // Read only once the caller is known to name this template: a
+            // Blade caller's text is its whole virtual PHP, which is far too
+            // much to copy for every template in the project.
+            let Some(content) = self.caller_source(file_uri, is_blade, &symbol_map) else {
+                continue;
+            };
+            let sites = self.extract_call_site_vars(file_uri, &content, &offsets);
+            found.push((file_uri.clone(), sites));
+        }
+        found
     }
 
     /// The text one caller file's symbol map offsets index: a Blade
