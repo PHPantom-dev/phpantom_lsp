@@ -22,7 +22,7 @@
 //! Both are computed from raw Blade source, so a template that has never
 //! been opened or preprocessed can still be judged.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::Backend;
 use crate::php_type::PhpType;
@@ -278,15 +278,22 @@ impl Backend {
     /// every render agrees on. A template nothing is known to render keeps
     /// to its own scope.
     pub(crate) fn blade_inbound_scope(&self, uri: &str) -> Option<HashSet<String>> {
-        self.blade_inbound_scope_within(uri, &mut vec![uri.to_string()])
+        self.blade_inbound_scope_within(uri, &mut vec![uri.to_string()], &mut HashMap::new())
     }
 
     /// [`Self::blade_inbound_scope`], with the templates whose renders are
-    /// already being read on the way here.
+    /// already being read on the way here, and what each includer already
+    /// read during this lookup hands the templates it includes.
+    ///
+    /// An includer reachable along many paths is read once: only settled
+    /// answers are remembered, and an unsettled one (a cycle, or a render
+    /// that hands over something unreadable) ends the whole lookup, so a
+    /// remembered answer never depends on the path it was reached by.
     fn blade_inbound_scope_within(
         &self,
         uri: &str,
         visiting: &mut Vec<String>,
+        forwarded_by: &mut HashMap<String, HashSet<String>>,
     ) -> Option<HashSet<String>> {
         let view_names = self.view_names_for_blade_uri(uri);
         if view_names.is_empty() {
@@ -301,13 +308,20 @@ impl Backend {
                     if visiting.contains(&caller) {
                         return None;
                     }
-                    visiting.push(caller.clone());
-                    let scope = self.blade_rendering_scope(&caller).and_then(|mut scope| {
-                        scope.extend(self.blade_inbound_scope_within(&caller, visiting)?);
-                        Some(scope)
-                    });
-                    visiting.pop();
-                    Some(scope?)
+                    if !forwarded_by.contains_key(&caller) {
+                        visiting.push(caller.clone());
+                        let scope = self.blade_rendering_scope(&caller).and_then(|mut scope| {
+                            scope.extend(self.blade_inbound_scope_within(
+                                &caller,
+                                visiting,
+                                forwarded_by,
+                            )?);
+                            Some(scope)
+                        });
+                        visiting.pop();
+                        forwarded_by.insert(caller.clone(), scope?);
+                    }
+                    forwarded_by.get(&caller)
                 } else {
                     None
                 };
@@ -318,7 +332,7 @@ impl Backend {
                 let mut names: HashSet<String> =
                     site.vars.into_iter().map(|var| var.name).collect();
                 if site.forwards_scope
-                    && let Some(forwarded) = &forwarded
+                    && let Some(forwarded) = forwarded
                 {
                     names.extend(forwarded.iter().cloned());
                 }
