@@ -1205,4 +1205,59 @@ class ViewServiceProvider
         .await;
         assert!(diags.is_empty(), "expected no report, got {diags:?}");
     }
+
+    /// A template reachable along many include paths is read once per
+    /// lookup, not once per path: six levels of six templates, each
+    /// including every template one level below, hand the bottom level
+    /// what the top level holds.
+    #[tokio::test]
+    async fn a_wide_include_lattice_is_read_once_per_template() {
+        const WIDTH: usize = 6;
+        const DEPTH: usize = 6;
+        let path = |level: usize, i: usize| format!("resources/views/l{level}/t{i}.blade.php");
+        let mut files: Vec<(String, String)> = vec![(
+            "resources/views/leaf.blade.php".to_string(),
+            "@php\n/**\n * @var string $title\n * @var string $a\n * @var string $b\n */\n@endphp\n<p>{{ $title }} {{ $a }} {{ $b }}</p>\n".to_string(),
+        )];
+        for level in 0..DEPTH {
+            for i in 0..WIDTH {
+                // The top level declares what the leaf reads, except for
+                // one template that never holds `$b`.
+                let header = match (level, i) {
+                    (0, 0) => "@php\n/**\n * @bladestan-signature\n * @var string $title\n * @var string $a\n */\n@endphp\n".to_string(),
+                    (0, _) => "@php\n/**\n * @bladestan-signature\n * @var string $title\n * @var string $a\n * @var string $b\n */\n@endphp\n".to_string(),
+                    _ => "@php\n/** @var string $title */\n@endphp\n".to_string(),
+                };
+                let includes: String = match level + 1 < DEPTH {
+                    true => (0..WIDTH)
+                        .map(|j| format!("@include('l{}.t{j}')\n", level + 1))
+                        .collect(),
+                    false => "@include('leaf')\n".to_string(),
+                };
+                files.push((
+                    path(level, i),
+                    format!("{header}<p>{{{{ $title }}}}</p>\n{includes}"),
+                ));
+            }
+        }
+        let borrowed: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(p, t)| (p.as_str(), t.as_str()))
+            .collect();
+        let (backend, dir) = workspace(&borrowed);
+        // Every includer has to be parsed to be found rendering the level
+        // below it.
+        for (relative, text) in &files[1..] {
+            let uri = Uri::from_file_path(dir.path().join(relative)).unwrap();
+            open_document(&backend, &uri, "blade", text).await;
+        }
+        let diags = call_site_diagnostics(&backend, &dir, &path(DEPTH - 1, 0), "blade").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(
+            diags[0].1.contains("$b") && !diags[0].1.contains("$a"),
+            "only $b fails to reach the leaf along every path, got {:?}",
+            diags[0].1
+        );
+    }
 }
