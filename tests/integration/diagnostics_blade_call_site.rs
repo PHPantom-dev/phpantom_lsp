@@ -1097,4 +1097,167 @@ class ViewServiceProvider
             call_site_diagnostics(&backend, &dir, "resources/views/table.blade.php", "blade").await;
         assert!(diags.is_empty(), "expected no report, got {diags:?}");
     }
+
+    /// The innermost partial of a nested include chain: it declares three
+    /// variables, none of which the template that includes it declares.
+    const WP_SCRIPT: &str = "@php\n/**\n * @var \\App\\Models\\User $server\n * @var string $VERSION\n * @var array $data\n */\n@endphp\n<script>{{ $server->email }} {{ $VERSION }} {{ count($data) }}</script>\n";
+
+    /// The middle template: it types the one variable it reads itself, and
+    /// hands the partial its whole scope.
+    const APP_SCRIPTS: &str = "@php\n/** @var string $VERSION */\n@endphp\n<p>{{ $VERSION }}</p>\n@include('scripts.apps.wp')\n";
+
+    /// The diagnostics of the middle template of a chain whose outer end
+    /// is `outer`, written either as a template or as a controller.
+    async fn middle_of_chain_diagnostics(outer: (&str, &str)) -> Vec<(String, String)> {
+        let (backend, dir) = workspace(&[
+            ("resources/views/scripts/apps/wp.blade.php", WP_SCRIPT),
+            ("resources/views/scripts/apps.blade.php", APP_SCRIPTS),
+            outer,
+        ]);
+        // The outer end has to be parsed to be found rendering the middle.
+        let (outer_path, outer_text) = outer;
+        let language_id = match outer_path.ends_with(".blade.php") {
+            true => "blade",
+            false => "php",
+        };
+        let outer_uri = Uri::from_file_path(dir.path().join(outer_path)).unwrap();
+        open_document(&backend, &outer_uri, language_id, outer_text).await;
+        call_site_diagnostics(
+            &backend,
+            &dir,
+            "resources/views/scripts/apps.blade.php",
+            "blade",
+        )
+        .await
+    }
+
+    /// An `@include` without data hands the partial everything in scope,
+    /// and the scope of an included template is what *its* includer holds,
+    /// so a variable two levels up still reaches the innermost partial.
+    #[tokio::test]
+    async fn a_nested_include_inherits_what_the_outer_template_holds() {
+        let diags = middle_of_chain_diagnostics((
+            "resources/views/servers/show.blade.php",
+            "@php\n/**\n * @bladestan-signature\n * @var \\App\\Models\\User $server\n * @var string $VERSION\n * @var array $data\n */\n@endphp\n@include('scripts.apps')\n",
+        ))
+        .await;
+        assert!(
+            diags.is_empty(),
+            "the outer template holds every variable the partial declares, got {diags:?}"
+        );
+    }
+
+    /// The same holds for what a controller passes the middle template:
+    /// the names it hands over are in scope for the partial even though
+    /// the middle template never declares them.
+    #[tokio::test]
+    async fn a_nested_include_inherits_what_the_controller_passes() {
+        let diags = middle_of_chain_diagnostics((
+            "app/ScriptController.php",
+            "<?php\nnamespace App;\nuse App\\Models\\User;\nclass ScriptController {\n    public function show(User $server): mixed {\n        return view('scripts.apps', ['server' => $server, 'VERSION' => '1.0', 'data' => []]);\n    }\n}\n",
+        ))
+        .await;
+        assert!(
+            diags.is_empty(),
+            "the controller passes every variable the partial declares, got {diags:?}"
+        );
+    }
+
+    /// A name no render of the middle template hands it is still missing
+    /// from the partial.
+    #[tokio::test]
+    async fn a_name_no_caller_hands_the_includer_is_still_missing() {
+        let diags = middle_of_chain_diagnostics((
+            "app/ScriptController.php",
+            "<?php\nnamespace App;\nuse App\\Models\\User;\nclass ScriptController {\n    public function show(User $server): mixed {\n        return view('scripts.apps', ['server' => $server, 'VERSION' => '1.0']);\n    }\n}\n",
+        ))
+        .await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(
+            diags[0].1.contains("$data"),
+            "only $data is passed by no caller, got {:?}",
+            diags[0].1
+        );
+    }
+
+    /// A caller whose data cannot be read may be handing the middle
+    /// template anything, so nothing the partial declares is provably
+    /// missing.
+    #[tokio::test]
+    async fn an_includer_rendered_with_unreadable_data_stands_the_missing_check_down() {
+        let diags = middle_of_chain_diagnostics((
+            "app/ScriptController.php",
+            "<?php\nnamespace App;\nclass ScriptController {\n    public function show(array $payload): mixed {\n        return view('scripts.apps', $payload);\n    }\n}\n",
+        ))
+        .await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
+
+    /// An outer template that declares no contract hands the middle one an
+    /// unknown scope, so the check stands down rather than guessing.
+    #[tokio::test]
+    async fn an_includer_included_from_an_undeclared_template_is_not_checked_for_missing_data() {
+        let diags = middle_of_chain_diagnostics((
+            "resources/views/servers/show.blade.php",
+            "<h1>Server</h1>\n@include('scripts.apps')\n",
+        ))
+        .await;
+        assert!(diags.is_empty(), "expected no report, got {diags:?}");
+    }
+
+    /// A template reachable along many include paths is read once per
+    /// lookup, not once per path: six levels of six templates, each
+    /// including every template one level below, hand the bottom level
+    /// what the top level holds.
+    #[tokio::test]
+    async fn a_wide_include_lattice_is_read_once_per_template() {
+        const WIDTH: usize = 6;
+        const DEPTH: usize = 6;
+        let path = |level: usize, i: usize| format!("resources/views/l{level}/t{i}.blade.php");
+        let mut files: Vec<(String, String)> = vec![(
+            "resources/views/leaf.blade.php".to_string(),
+            "@php\n/**\n * @var string $title\n * @var string $a\n * @var string $b\n */\n@endphp\n<p>{{ $title }} {{ $a }} {{ $b }}</p>\n".to_string(),
+        )];
+        for level in 0..DEPTH {
+            for i in 0..WIDTH {
+                // The top level declares what the leaf reads, except for
+                // one template that never holds `$b`.
+                let header = match (level, i) {
+                    (0, 0) => "@php\n/**\n * @bladestan-signature\n * @var string $title\n * @var string $a\n */\n@endphp\n".to_string(),
+                    (0, _) => "@php\n/**\n * @bladestan-signature\n * @var string $title\n * @var string $a\n * @var string $b\n */\n@endphp\n".to_string(),
+                    _ => "@php\n/** @var string $title */\n@endphp\n".to_string(),
+                };
+                let includes: String = match level + 1 < DEPTH {
+                    true => (0..WIDTH)
+                        .map(|j| format!("@include('l{}.t{j}')\n", level + 1))
+                        .collect(),
+                    false => "@include('leaf')\n".to_string(),
+                };
+                files.push((
+                    path(level, i),
+                    format!("{header}<p>{{{{ $title }}}}</p>\n{includes}"),
+                ));
+            }
+        }
+        let borrowed: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(p, t)| (p.as_str(), t.as_str()))
+            .collect();
+        let (backend, dir) = workspace(&borrowed);
+        // Every includer has to be parsed to be found rendering the level
+        // below it.
+        for (relative, text) in &files[1..] {
+            let uri = Uri::from_file_path(dir.path().join(relative)).unwrap();
+            open_document(&backend, &uri, "blade", text).await;
+        }
+        let diags = call_site_diagnostics(&backend, &dir, &path(DEPTH - 1, 0), "blade").await;
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(diags[0].0, "missing_view_variable");
+        assert!(
+            diags[0].1.contains("$b") && !diags[0].1.contains("$a"),
+            "only $b fails to reach the leaf along every path, got {:?}",
+            diags[0].1
+        );
+    }
 }

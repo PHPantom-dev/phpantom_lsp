@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Nested `@include`s inherit their includer's data.** A partial included without data no longer reports a variable as not passed when the template including it receives that variable from everywhere it is rendered or included, even if that template never declares it. Contributed by @zerone0x.
 - **Scalar coercion outside `strict_types`.** In a file without `declare(strict_types=1)`, a `bool` passed to a `string`, `int` or `float` parameter, an integer range passed to `string`, and any scalar passed to `bool` are no longer reported, since PHP converts them. The same holds for return values and property assignments. A callback's return value is still checked strictly, because nothing converts it.
 - **`[indexing] exclude` covers Composer's class lists.** A class Composer's classmap or PSR-0 map names no longer resolves from a path you excluded, so excluding a path mid-session and restarting give the same result.
 - **"Replace with" no longer leaves a stray parenthesis.** Replacing a call to a deprecated function or method now replaces its closing parenthesis too, instead of leaving an extra `)` behind.

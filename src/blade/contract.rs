@@ -22,7 +22,7 @@
 //! Both are computed from raw Blade source, so a template that has never
 //! been opened or preprocessed can still be judged.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::Backend;
 use crate::php_type::PhpType;
@@ -264,6 +264,85 @@ impl Backend {
             self.blade_supplied_names(layout_source, &layout_names, &mut names);
         }
         Some(names)
+    }
+
+    /// The names every known render of the template at `uri` hands it on
+    /// top of what [`Self::blade_rendering_scope`] reads off the template
+    /// itself, or `None` when one of them hands it something unreadable.
+    ///
+    /// A signature says what a caller has to pass, not everything it may:
+    /// a caller can hand over a name only a partial further down reads, and
+    /// an `@include` without data hands over everything its includer holds,
+    /// which is in turn whatever *that* template's renders hand it. A name
+    /// is only short when some render leaves it out, so the answer is what
+    /// every render agrees on. A template nothing is known to render keeps
+    /// to its own scope.
+    pub(crate) fn blade_inbound_scope(&self, uri: &str) -> Option<HashSet<String>> {
+        self.blade_inbound_scope_within(uri, &mut vec![uri.to_string()], &mut HashMap::new())
+    }
+
+    /// [`Self::blade_inbound_scope`], with the templates whose renders are
+    /// already being read on the way here, and what each includer already
+    /// read during this lookup hands the templates it includes.
+    ///
+    /// An includer reachable along many paths is read once: only settled
+    /// answers are remembered, and an unsettled one (a cycle, or a render
+    /// that hands over something unreadable) ends the whole lookup, so a
+    /// remembered answer never depends on the path it was reached by.
+    fn blade_inbound_scope_within(
+        &self,
+        uri: &str,
+        visiting: &mut Vec<String>,
+        forwarded_by: &mut HashMap<String, HashSet<String>>,
+    ) -> Option<HashSet<String>> {
+        let view_names = self.view_names_for_blade_uri(uri);
+        if view_names.is_empty() {
+            return Some(HashSet::new());
+        }
+        let mut common: Option<HashSet<String>> = None;
+        for (caller, sites) in self.view_render_sites(uri, &view_names, None) {
+            let forwarded =
+                if sites.iter().any(|site| site.forwards_scope) && self.is_blade_file(&caller) {
+                    // Templates that include each other in a cycle never settle
+                    // what reaches any of them.
+                    if visiting.contains(&caller) {
+                        return None;
+                    }
+                    if !forwarded_by.contains_key(&caller) {
+                        visiting.push(caller.clone());
+                        let scope = self.blade_rendering_scope(&caller).and_then(|mut scope| {
+                            scope.extend(self.blade_inbound_scope_within(
+                                &caller,
+                                visiting,
+                                forwarded_by,
+                            )?);
+                            Some(scope)
+                        });
+                        visiting.pop();
+                        forwarded_by.insert(caller.clone(), scope?);
+                    }
+                    forwarded_by.get(&caller)
+                } else {
+                    None
+                };
+            for site in sites {
+                if !site.complete {
+                    return None;
+                }
+                let mut names: HashSet<String> =
+                    site.vars.into_iter().map(|var| var.name).collect();
+                if site.forwards_scope
+                    && let Some(forwarded) = forwarded
+                {
+                    names.extend(forwarded.iter().cloned());
+                }
+                match &mut common {
+                    Some(common) => common.retain(|name| names.contains(name)),
+                    None => common = Some(names),
+                }
+            }
+        }
+        Some(common.unwrap_or_default())
     }
 
     /// Every name the template behind `view_name` is addressable by, for
