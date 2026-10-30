@@ -18,6 +18,8 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct FormattingConfig {
+    /// Explicitly disable all formatting
+    pub enabled: Option<bool>,
     /// Command (path or name) to run php-cs-fixer.
     ///
     /// - `None` (default) — check `require-dev` in `composer.json`;
@@ -90,12 +92,9 @@ impl FormattingConfig {
         self.timeout.unwrap_or(10_000)
     }
 
-    /// Whether formatting is entirely disabled (every tool explicitly
-    /// set to an empty string).
+    /// Whether formatting is explicitly disabled
     pub fn is_disabled(&self) -> bool {
-        crate::formatting::Tool::ALL
-            .into_iter()
-            .all(|tool| tool.configured(self) == Some(""))
+        self.enabled == Some(false)
     }
 }
 
