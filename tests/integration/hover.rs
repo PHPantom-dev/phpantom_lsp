@@ -17079,3 +17079,26 @@ function f(Base $b): void {
     let text = hover_text(&hover);
     assert!(text.contains("Leaf"), "{text}");
 }
+
+#[test]
+fn hover_call_after_var_retype_ignores_earlier_argument_call() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+/** @template T */
+class Box { /** @return T */ public function get() {} }
+
+function make(): mixed { return null; }
+
+/** @var Box<int> $box */
+$box = make();
+strlen($box->get());
+
+/** @var Box<string> $box */
+$box = make();
+$result = $box->get();
+"#;
+    assert_eq!(
+        crate::common::assigned_type(&backend, "file:///test.php", content, "$result"),
+        "string"
+    );
+}

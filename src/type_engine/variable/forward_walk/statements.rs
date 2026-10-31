@@ -284,6 +284,11 @@ pub(crate) fn process_expression_statement<'b>(
                     None => scope.locals.remove(&key),
                 }
                 process_expr(value, scope, ctx);
+                // The write still replaces the value, so whatever was
+                // recorded through the old one (`$box->get()`) goes, as
+                // it does for an assignment without a docblock.
+                scope.invalidate_dependent_keys(name);
+                scope.invalidate_proofs(name);
                 match declared {
                     Some(types) => scope.locals.insert(key, types),
                     None => scope.locals.remove(&key),

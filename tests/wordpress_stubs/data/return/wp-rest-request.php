@@ -21,7 +21,7 @@ assertType('bool', $request->has_param('maybeParam'));
  */
 $request = Faker::wpRestRequest();
 
-assertType('string|null', $request->get_param('maybeParam')); // SKIP: the same call as an argument earlier in the file keeps the type of `$request`'s first `@var`
+assertType('string|null', $request->get_param('maybeParam'));
 assertType('string|null', $request['maybeParam']); // SKIP: `T[K]` on a class template is not resolved
 assertType('array<string, string>', $request->get_params());
 assertType('bool', $request->has_param('maybeParam'));

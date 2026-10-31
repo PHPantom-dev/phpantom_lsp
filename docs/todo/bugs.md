@@ -446,30 +446,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B716. A call in another call's arguments keeps its receiver's first `@var` type
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @template T */
-class Box { /** @return T */ public function get() {} }
-
-/** @var Box<int> $box */
-$box = make();
-strlen($box->get());
-
-/** @var Box<string> $box */
-$box = make();
-$box->get();   // want string, get int
-```
-
-After a `@var` gives `$box` a new type, a call on it is resolved with the
-old one when the same call appeared as an argument of another call
-before the reassignment. It does not happen when the earlier call is a
-statement of its own, or when the variable is retyped by an assignment
-whose right-hand side has the new type. Found by the WordPress stubs
-fixtures (`return/wp-rest-request.php`).
-
 ### B717. Variables a `require`d file defines have no type
 
 **Impact: Low · Complexity: Medium**
