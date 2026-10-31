@@ -667,3 +667,82 @@ gap is in the generic engine.
 **Where to look:** `src/type_engine/variable/forward_walk/statements.rs`
 (`Statement::Global`), `apply_global_var_docblocks` in
 `src/type_engine/variable/forward_walk/var_docblocks.rs`.
+
+---
+
+## T58. `new<T>` is not supported
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+/**
+ * @template T of string
+ * @param T $class_name
+ * @return ($class_name is 'WP_Posts_List_Table'|'WP_Users_List_Table'|… ? new<T> : false)
+ */
+function _get_list_table($class_name, $args = []) { … }
+
+_get_list_table('WP_Posts_List_Table');   // want WP_Posts_List_Table, get new<<T>>
+```
+
+`new<T>` is PHPStan's type for an instance of the class a string names,
+used where a function instantiates the class it is given by name. We
+leave it unresolved, and hover shows `new<<T>>`. It should resolve like
+`T` bound to a `class-string<C>` gives `C`: a class-name literal gives
+that class, a `class-string<C>` gives `C`, anything else `object`. 21
+assertions of the WordPress stubs fixtures (`tests/wordpress_stubs/`)
+are marked with this.
+
+---
+
+## T59. `T[K]` on a class template is not resolved
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/**
+ * @template T of array = array<string, mixed>
+ * @implements ArrayAccess<key-of<T>, value-of<T>>
+ */
+class WP_REST_Request implements ArrayAccess {
+    /**
+     * @template TOffset of key-of<T>
+     * @param TOffset $key
+     * @return T[TOffset]|null
+     */
+    public function get_param($key) { … }
+}
+
+/** @var WP_REST_Request<array{id: int, name: string}> $request */
+$request->get_param('id');   // want int|null, get array{id: int, name: string}['id']|null
+$request['id'];              // want int|null, get array{id: int, name: string}
+```
+
+An offset access type over a class template stays as written once the
+template is bound, and array access on the object (through
+`ArrayAccess<key-of<T>, value-of<T>>`) gives the whole `T` instead of
+its value type. The offset should read the bound array's value type for
+the key, or the union of its values for a key it does not declare. A REST
+API endpoint that types its request this way gets every parameter wrong.
+8 assertions of the WordPress stubs fixtures.
+
+---
+
+## T60. A float literal is typed `float`, not its value
+
+**Impact: Low · Complexity: Low**
+
+```php
+/**
+ * @template T
+ * @param T $data
+ * @return (T is array|object|string ? string : T)
+ */
+function maybe_serialize($data) { … }
+
+maybe_serialize(0.0);   // want 0.0, get float
+```
+
+Integer, string and boolean literals keep their value as their type;
+float literals become `float`. A template bound to one, or a condition
+over one, loses the value. 2 assertions of the WordPress stubs fixtures.

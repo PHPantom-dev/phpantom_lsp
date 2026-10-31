@@ -333,6 +333,7 @@ pub(crate) mod virtual_members;
 /// target miscompiles the completion path (see `docs/wasm.md`).
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod wasm_wasi;
+mod wordpress;
 mod workspace_env;
 mod workspace_symbols;
 mod yii;

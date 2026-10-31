@@ -22,7 +22,9 @@
 //! The fixtures ported from PHPStan's Symfony and Doctrine extensions
 //! (`tests/phpstan_symfony/data/`, `tests/phpstan_doctrine/data/`) need a
 //! project around them: the framework classes, and the configuration a
-//! booted application would answer from. A fixture inside a directory
+//! booted application would answer from. So do the WordPress stubs' own
+//! type tests (`tests/wordpress_stubs/data/`), which run against the
+//! stubs as a stub path. A fixture inside a directory
 //! holding a `composer.json` is opened in a backend rooted at that
 //! directory (see `tests/support/fixture_project.rs`).
 //!
@@ -1518,4 +1520,5 @@ datatest_stable::harness! {
 { test = run_assert_type, root = "tests/psalm_assertions", pattern = r"\.php$" },
 { test = run_assert_type, root = "tests/phpstan_data", pattern = r"\.php$" },
 { test = run_assert_type, root = "tests/phpstan_symfony/data", pattern = r"\.php$" },
-{ test = run_assert_type, root = "tests/phpstan_doctrine/data", pattern = r"\.php$" },}
+{ test = run_assert_type, root = "tests/phpstan_doctrine/data", pattern = r"\.php$" },
+{ test = run_assert_type, root = "tests/wordpress_stubs/data", pattern = r"\.php$" },}

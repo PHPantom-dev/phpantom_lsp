@@ -212,8 +212,10 @@ impl Backend {
             index.roots.len()
         );
         let active = !index.is_empty();
+        let declares_wordpress = index.classes.contains_key("wpdb");
         *self.external_stubs.write() = Arc::new(index);
         self.has_external_stubs.store(active, Ordering::Release);
+        self.sync_wordpress_constants(declares_wordpress);
 
         self.clear_not_found_caches();
         self.clear_resolved_class_cache();
