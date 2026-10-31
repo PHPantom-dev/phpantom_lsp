@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793474772574,
+  "lastUpdate": 1793485951017,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7853,6 +7853,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 105.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b204a4e76963ce3a13bbcec53895665d0766e546",
+          "message": "Variadic template parameters take every argument",
+          "timestamp": "2026-10-31T23:16:02+01:00",
+          "tree_id": "21649ec8ac81b51709bc9aa06cf3864b96eaae87",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b204a4e76963ce3a13bbcec53895665d0766e546"
+        },
+        "date": 1793485943410,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 85.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 77.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 100.2,
             "unit": "MiB"
           }
         ]
