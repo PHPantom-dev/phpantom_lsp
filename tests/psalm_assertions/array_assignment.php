@@ -846,8 +846,7 @@ namespace PsalmTest_array_assignment_59 {
         $arr["hello"]["goodbye"] = 5;
     }
 
-    // PHPantom keeps the write's shape beside the declared `array`.
-    assertType('array|array{hello: array{goodbye: 5}}', $arr);
+    assertType('array', $arr);
 }
 
 // Test: manipulateArrayTwice

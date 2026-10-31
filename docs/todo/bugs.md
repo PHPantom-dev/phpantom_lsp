@@ -25,30 +25,6 @@ No outstanding items.
 
 ## Type comparison
 
-### B712. A type and its own subtype are not collapsed
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @var string $path */
-if (wp_is_stream($path)) {   // @phpstan-assert-if-true =non-falsy-string $path
-    // …
-}
-$path;   // want string, get string|non-falsy-string
-
-/** @return string&'foo' */
-function f() { … }
-f();   // want 'foo', get string&'foo'
-```
-
-A union that holds a type and one of its subtypes is the supertype, and an
-intersection of the two is the subtype. We keep both members, so the type
-after an `if` without an `else` that narrowed a variable is spelled as
-the two branches side by side, and `string&'foo'` stays as written instead
-of `'foo'`. Hover reads worse, and a comparison against a declared type
-has more members to check than it needs. 10 assertions of the WordPress
-stubs fixtures (`tests/wordpress_stubs/`) are marked with this.
-
 ### B715. `===` between literals that cannot be equal is not `false`
 
 **Impact: Low · Complexity: Low**

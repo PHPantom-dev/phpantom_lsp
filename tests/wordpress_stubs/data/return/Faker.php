@@ -60,8 +60,8 @@ assertType("'foo'|int", Faker::union('foo', Faker::int())); // SKIP: a variadic 
 assertType("array{'baz'}|array{foo: 'bar'}", Faker::union(['foo' => 'bar'], ['baz'])); // SKIP: a variadic template parameter binds only the first argument
 
 // Intersections
-assertType('lowercase-string', Faker::intersection(Faker::string(), Faker::lowercaseString())); // SKIP: a type and its own subtype are not collapsed in a union or an intersection
-assertType("'foo'", Faker::intersection(Faker::string(), 'foo')); // SKIP: a type and its own subtype are not collapsed in a union or an intersection
+assertType('lowercase-string', Faker::intersection(Faker::string(), Faker::lowercaseString()));
+assertType("'foo'", Faker::intersection(Faker::string(), 'foo'));
 assertType('lowercase-string&non-falsy-string', Faker::intersection(Faker::lowercaseString(), Faker::nonFalsyString()));
 
 // Other

@@ -13,7 +13,7 @@ if (has_shortcode($content, $tag)) {
     assertType('non-falsy-string', $content);
     assertType('non-empty-string', $tag);
 }
-assertType('string', $content); // SKIP: a type and its own subtype are not collapsed in a union or an intersection
+assertType('string', $content);
 assertType('string', $tag);
 
 // Check that types are not generalized

@@ -722,6 +722,7 @@ impl ResolvedType {
                     && (types[j].is_subset_of(&types[i])
                         || array_snapshot_covered_by(&types[j], &types[i])
                         || intersection_covered_by(&types[j], &types[i])
+                        || runtime_values_covered_by(&types[j], &types[i])
                         || (mixed_absorbs_siblings && object_covers(&types[i], &types[j])))
                 {
                     keep[j] = false;
@@ -1031,6 +1032,18 @@ fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
         return false;
     };
     parts.iter().any(|part| part.is_subset_of(cover))
+}
+
+/// Whether every scalar value `covered` can hold is one `cover` already
+/// holds, e.g. `non-falsy-string` under `string`.
+///
+/// [`PhpType::is_subset_of`] matches alternatives by spelling, so it never
+/// sees a refinement as part of the type it refines.
+fn runtime_values_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
+    covered
+        .union_members()
+        .iter()
+        .all(|member| crate::php_type::is_runtime_value_subtype(member, cover))
 }
 
 /// Whether `cover` holds an `object` alternative that every value of

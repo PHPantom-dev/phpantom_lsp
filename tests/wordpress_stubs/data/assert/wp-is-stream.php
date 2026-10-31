@@ -14,7 +14,7 @@ $path = Faker::string();
 if (wp_is_stream($path)) {
     assertType('non-falsy-string', $path);
 }
-assertType('string', $path); // SKIP: a type and its own subtype are not collapsed in a union or an intersection
+assertType('string', $path);
 
 $path = Faker::lowercaseString();
 if (wp_is_stream($path)) {
@@ -29,7 +29,7 @@ $path = Faker::string();
 if (! wp_is_stream($path)) {
     assertType('string', $path);
 }
-assertType('string', $path); // SKIP: a type and its own subtype are not collapsed in a union or an intersection
+assertType('string', $path);
 
 $path = Faker::lowercaseString();
 if (! wp_is_stream($path)) {

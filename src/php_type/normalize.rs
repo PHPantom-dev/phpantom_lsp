@@ -25,6 +25,7 @@ impl PhpType {
     ///   type collapse to `?T`.
     /// - Scalar refinement absorption: `positive-int | int` → `int`,
     ///   `non-empty-string | string` → `string`, etc.
+    /// - Intersection supertype absorption: `string&'foo'` → `'foo'`.
     /// - Single-member unions/intersections are unwrapped.
     /// - `?T` where `T` is `never` simplifies to `null`.
     /// - Nested unions are flattened (`(A|B)|C` → `A|B|C`).
@@ -88,6 +89,7 @@ impl PhpType {
                 }
 
                 dedup_types(&mut simplified);
+                absorb_intersection_supertypes(&mut simplified);
 
                 if simplified.iter().any(|m| m.is_never()) {
                     return PhpType::never();
@@ -1077,6 +1079,53 @@ pub(crate) fn absorb_subsumed_intersections(types: &mut Vec<PhpType>) {
         })
         .collect();
 
+    crate::util::retain_by_mask(types, &keep);
+}
+
+/// Drop an intersection member that another member already narrows:
+/// `string&lowercase-string` → `lowercase-string`, `string&'foo'` → `'foo'`.
+///
+/// An intersection holds only the values every member holds, so a member
+/// whose values all fall under a sibling's adds no constraint.
+pub(crate) fn absorb_intersection_supertypes(types: &mut Vec<PhpType>) {
+    retain_by_value_containment(types, false);
+}
+
+/// Drop a union member that another member already holds:
+/// `non-falsy-string|non-empty-string` → `non-empty-string`.
+pub(crate) fn absorb_union_value_subtypes(types: &mut Vec<PhpType>) {
+    retain_by_value_containment(types, true);
+}
+
+/// Keep, of each two members where one's values all fall under the
+/// other's, the wider one (`keep_wider`) or the narrower one.
+///
+/// Only value containment takes part (see
+/// [`is_runtime_value_subtype`](super::runtime_join::is_runtime_value_subtype)):
+/// `int` is not dropped beside `float`, and whether one class narrows
+/// another needs the class loader.
+fn retain_by_value_containment(types: &mut Vec<PhpType>, keep_wider: bool) {
+    use super::runtime_join::is_runtime_value_subtype;
+
+    if types.len() < 2 {
+        return;
+    }
+    let contains = |wider: &PhpType, narrower: &PhpType| is_runtime_value_subtype(narrower, wider);
+    let keep: Vec<bool> = (0..types.len())
+        .map(|index| {
+            !(0..types.len()).any(|other| {
+                let (wider, narrower) = if keep_wider {
+                    (&types[other], &types[index])
+                } else {
+                    (&types[index], &types[other])
+                };
+                other != index
+                    && contains(wider, narrower)
+                    // Of two equivalent spellings, the first one stays.
+                    && (other < index || !contains(narrower, wider))
+            })
+        })
+        .collect();
     crate::util::retain_by_mask(types, &keep);
 }
 

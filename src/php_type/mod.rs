@@ -51,6 +51,7 @@ pub(crate) use keywords::*;
 pub use literal::LiteralValue;
 pub(crate) use normalize::*;
 pub(crate) use parse::*;
+pub(crate) use runtime_join::is_runtime_value_subtype;
 pub(crate) use shape_keys::*;
 pub(crate) use subtype::*;
 
