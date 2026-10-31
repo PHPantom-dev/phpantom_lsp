@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Variables an included file defines.** After an `include` or `require`, the variables the included file assigns are no longer reported as undefined. The path is followed through `__DIR__`, `dirname()`, and constants such as WordPress's `ABSPATH`. When the path cannot be worked out, nothing after the include is reported.
 - **`@uses` naming a global or a variable.** A `@uses` tag that names a global or a variable, as WordPress writes it, is no longer reported as an unknown function.
 - **A type beside its own refinement reads as one type.** After an `if` that narrowed a `string` to a `non-falsy-string`, the variable is a `string` again rather than `string|non-falsy-string`, and an intersection such as `string&'foo'` reads as `'foo'`.
 - **Bare `return;` with a `@return void|…` docblock.** A function whose docblock return type includes `void`, such as `@return void|string`, may now return without a value.

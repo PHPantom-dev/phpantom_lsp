@@ -470,24 +470,20 @@ statement of its own, or when the variable is retyped by an assignment
 whose right-hand side has the new type. Found by the WordPress stubs
 fixtures (`return/wp-rest-request.php`).
 
-### B701. Variables a `require`d file defines are reported as undefined
+### B717. Variables a `require`d file defines have no type
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
 ```php
 function core_upgrade(): string {
-    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version
-    return $wp_version;                          // Undefined variable '$wp_version'
+    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version = '6.7'
+    return $wp_version;                          // hover: nothing, want string
 }
 ```
 
-An `include`/`require` runs the file in the current scope, so every
-variable its top level assigns exists afterwards. We report them as
-undefined, even when the path is `__DIR__ . '/version.php'` and the file
-is in the project. Where the path resolves, read the included file's
-top-level assignments into the scope (with their types). Where it does
-not, the scope after the include is open: stop reporting undefined
-variables in it rather than guess. WordPress core gets 47 of these
-(`$wp_version`, `$required_php_version`, the `$messages` an admin screen
-`require`s).
+When an include's path resolves, the variables the included file's top
+level assigns are no longer reported as undefined, but hover,
+completion, and the type checks know nothing about them. Walk the
+included file's top level and carry the types it leaves its variables
+into the including scope at the point the include ends.
 
