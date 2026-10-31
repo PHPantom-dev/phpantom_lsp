@@ -5199,6 +5199,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A <code>@var</code> above a reassignment replaces what calls on the old value returned.</strong> After <code>/** @var Box&lt;string&gt; $box */ $box = make();</code>, a call on <code>$box</code> resolves with the new type even when the same call was passed as an argument before the reassignment.</li>
 <li><strong>Variables an included file defines.</strong> After an <code>include</code> or <code>require</code>, the variables the included file assigns are no longer reported as undefined. The path is followed through <code>__DIR__</code>, <code>dirname()</code>, and constants such as WordPress's <code>ABSPATH</code>. When the path cannot be worked out, nothing after the include is reported.</li>
 <li><strong><code>@uses</code> naming a global or a variable.</strong> A <code>@uses</code> tag that names a global or a variable, as WordPress writes it, is no longer reported as an unknown function.</li>
 <li><strong>A type beside its own refinement reads as one type.</strong> After an <code>if</code> that narrowed a <code>string</code> to a <code>non-falsy-string</code>, the variable is a <code>string</code> again rather than <code>string|non-falsy-string</code>, and an intersection such as <code>string&amp;'foo'</code> reads as <code>'foo'</code>.</li>
