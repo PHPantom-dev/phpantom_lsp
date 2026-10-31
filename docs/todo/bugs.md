@@ -25,27 +25,6 @@ No outstanding items.
 
 ## Type comparison
 
-### B703. A bare `return;` is reported against a docblock `@return void|T`
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-/**
- * @return void|string Void if 'echo' argument is true.
- */
-function wp_list_comments($args = []) {
-    if ($echo) {
-        return;   // Function with return type void|string must not return without a value
-    }
-    return $html;
-}
-```
-
-A docblock that lists `void` in its return union says the function may
-return nothing, so a bare `return;` is exactly what it describes. The
-check treats the union as if `void` were not in it. WordPress core uses
-`void|string` and `void|false` this way (18 reports).
-
 ### B712. A type and its own subtype are not collapsed
 
 **Impact: Low-Medium · Complexity: Medium**

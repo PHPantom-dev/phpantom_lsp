@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Bare `return;` with a `@return void|…` docblock.** A function whose docblock return type includes `void`, such as `@return void|string`, may now return without a value.
 - **WordPress output constants.** In a project with the WordPress stubs installed, `OBJECT`, `OBJECT_K`, `ARRAY_A` and `ARRAY_N` are known constants, so `get_post($id)` is a `WP_Post|null` and `get_post($id, ARRAY_A)` an array, instead of every possible result at once.
 - **Scalar coercion outside `strict_types`.** In a file without `declare(strict_types=1)`, a `bool` passed to a `string`, `int` or `float` parameter, an integer range passed to `string`, and any scalar passed to `bool` are no longer reported, since PHP converts them. The same holds for return values and property assignments. A callback's return value is still checked strictly, because nothing converts it.
 - **`[indexing] exclude` covers Composer's class lists.** A class Composer's classmap or PSR-0 map names no longer resolves from a path you excluded, so excluding a path mid-session and restarting give the same result.
