@@ -304,13 +304,14 @@ fn emit_tag_symbols(tag: &Tag<'_>, docblock: &str, base_offset: u32, sink: &mut 
             // `@coversDefaultClass` only ever names a class, so the plain
             // `@see` shape covers it; the default it establishes was read
             // before the walk started.
-            TagKind::Covers | TagKind::Uses | TagKind::CoversDefaultClass => {
+            kind @ (TagKind::Covers | TagKind::Uses | TagKind::CoversDefaultClass) => {
                 let default_class = sink.found.covers_default_class;
                 emit_covers_tag_symbol(
                     &text.value,
                     docblock,
                     base_offset,
                     default_class,
+                    kind == TagKind::Uses,
                     sink.spans,
                 );
             }
@@ -535,11 +536,18 @@ fn find_covers_default_class(docblock: &str) -> Option<crate::atom::Atom> {
 ///
 /// Like `@see`, these tags reach us as free text, so the reference is the
 /// first whitespace-delimited token.
+///
+/// `@uses` is also phpDocumentor's tag, and WordPress writes a global or a
+/// variable there (`@uses global $wp_meta_boxes`).  So under `@uses` only a
+/// target shaped like a code unit (a class, `Class::member`, `::name` or
+/// `name()`) is held to PHPUnit's standard; a bare lowercase word keeps the
+/// `@see` tolerance for a target that resolves to nothing.
 fn emit_covers_tag_symbol(
     text: &Text<'_>,
     docblock: &str,
     base_offset: u32,
     default_class: Option<crate::atom::Atom>,
+    is_uses: bool,
     spans: &mut Vec<SymbolSpan>,
 ) {
     let start = text.span.start.offset.saturating_sub(base_offset) as usize;
@@ -553,6 +561,10 @@ fn emit_covers_tag_symbol(
     };
 
     let offset = text.span.start.offset + (raw.len() - trimmed.len()) as u32;
+    if is_uses && !is_code_unit_shaped(reference) {
+        emit_see_reference(reference, offset, spans);
+        return;
+    }
     // `@covers Foo` and `@covers Foo::bar()` share their emitter with `@see`,
     // so the class reference comes back tagged as an ordinary one.  Retagging
     // whatever this tag just emitted keeps the coverage-specific knowledge in
@@ -560,6 +572,17 @@ fn emit_covers_tag_symbol(
     let first_new = spans.len();
     emit_covers_reference(reference, offset, default_class, spans);
     retag_as_covers_target(&mut spans[first_new..]);
+}
+
+/// Whether a `@uses` target is spelled like a code unit rather than a word of
+/// prose: it names a member, calls itself a function with `()`, or starts
+/// with an uppercase letter the way a class name does.
+fn is_code_unit_shaped(reference: &str) -> bool {
+    reference.contains("::")
+        || reference.ends_with("()")
+        || reference
+            .trim_start_matches('\\')
+            .starts_with(|c: char| c.is_ascii_uppercase())
 }
 
 /// Mark every reference among `spans` as PHPUnit coverage metadata.
@@ -1333,7 +1356,11 @@ fn emit_see_reference(reference: &str, file_offset: u32, spans: &mut Vec<SymbolS
         // which of the two it is.
         let clean = reference.trim_start_matches('\\');
         let self_like = self_static_parent_kind(clean);
-        if clean.is_empty() || (self_like.is_none() && !is_navigable_type(clean)) {
+        // A `$variable` names neither a class nor a function.
+        if clean.is_empty()
+            || clean.starts_with('$')
+            || (self_like.is_none() && !is_navigable_type(clean))
+        {
             return;
         }
 

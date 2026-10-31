@@ -491,19 +491,3 @@ variables in it rather than guess. WordPress core gets 47 of these
 (`$wp_version`, `$required_php_version`, the `$messages` an admin screen
 `require`s).
 
-### B702. `@uses` with a variable or a description is reported as an unknown function
-
-**Impact: Low · Complexity: Low**
-
-```php
-/**
- * @uses global $wp_meta_boxes Used to retrieve registered meta boxes.
- * @uses $fn_get_css To run the function that gets the CSS.
- */
-```
-
-The first word after `@uses` is checked as a function name, giving
-"Function 'global' not found" and "Function '$fn_get_css' not found".
-`@uses` takes a structural element, and WordPress writes a global or a
-variable there. Only judge a target that is shaped like one (a class, a
-`Class::member`, or a `name()`); leave anything else alone.
