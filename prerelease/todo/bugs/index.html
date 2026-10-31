@@ -1210,21 +1210,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b701-variables-a-required-file-defines-are-reported-as-undefined" class="md-nav__link">
+  <a href="#b717-variables-a-required-file-defines-have-no-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B701. Variables a <code>require</code>d file defines are reported as undefined
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b702-uses-with-a-variable-or-a-description-is-reported-as-an-unknown-function" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B702. <code>@uses</code> with a variable or a description is reported as an unknown function
+        B717. Variables a <code>require</code>d file defines have no type
       </span>
     </span>
   </a>
@@ -2084,21 +2073,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b701-variables-a-required-file-defines-are-reported-as-undefined" class="md-nav__link">
+  <a href="#b717-variables-a-required-file-defines-have-no-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B701. Variables a <code>require</code>d file defines are reported as undefined
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b702-uses-with-a-variable-or-a-description-is-reported-as-an-unknown-function" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B702. <code>@uses</code> with a variable or a description is reported as an unknown function
+        B717. Variables a <code>require</code>d file defines have no type
       </span>
     </span>
   </a>
@@ -2490,34 +2468,18 @@ before the reassignment. It does not happen when the earlier call is a
 statement of its own, or when the variable is retyped by an assignment
 whose right-hand side has the new type. Found by the WordPress stubs
 fixtures (<code>return/wp-rest-request.php</code>).</p>
-<h3 id="b701-variables-a-required-file-defines-are-reported-as-undefined">B701. Variables a <code>require</code>d file defines are reported as undefined<a class="headerlink" href="#b701-variables-a-required-file-defines-are-reported-as-undefined" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<h3 id="b717-variables-a-required-file-defines-have-no-type">B717. Variables a <code>require</code>d file defines have no type<a class="headerlink" href="#b717-variables-a-required-file-defines-have-no-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">function core_upgrade(): string {</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version</span>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="x">    return $wp_version;                          // Undefined variable '$wp_version'</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version = '6.7'</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="x">    return $wp_version;                          // hover: nothing, want string</span>
 <a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">}</span>
 </code></pre></div>
-<p>An <code>include</code>/<code>require</code> runs the file in the current scope, so every
-variable its top level assigns exists afterwards. We report them as
-undefined, even when the path is <code>__DIR__ . '/version.php'</code> and the file
-is in the project. Where the path resolves, read the included file's
-top-level assignments into the scope (with their types). Where it does
-not, the scope after the include is open: stop reporting undefined
-variables in it rather than guess. WordPress core gets 47 of these
-(<code>$wp_version</code>, <code>$required_php_version</code>, the <code>$messages</code> an admin screen
-<code>require</code>s).</p>
-<h3 id="b702-uses-with-a-variable-or-a-description-is-reported-as-an-unknown-function">B702. <code>@uses</code> with a variable or a description is reported as an unknown function<a class="headerlink" href="#b702-uses-with-a-variable-or-a-description-is-reported-as-an-unknown-function" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">/**</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x"> * @uses global $wp_meta_boxes Used to retrieve registered meta boxes.</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="x"> * @uses $fn_get_css To run the function that gets the CSS.</span>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="x"> */</span>
-</code></pre></div>
-<p>The first word after <code>@uses</code> is checked as a function name, giving
-"Function 'global' not found" and "Function '$fn_get_css' not found".
-<code>@uses</code> takes a structural element, and WordPress writes a global or a
-variable there. Only judge a target that is shaped like one (a class, a
-<code>Class::member</code>, or a <code>name()</code>); leave anything else alone.</p>
+<p>When an include's path resolves, the variables the included file's top
+level assigns are no longer reported as undefined, but hover,
+completion, and the type checks know nothing about them. Walk the
+included file's top level and carry the types it leaves its variables
+into the including scope at the point the include ends.</p>
 
 
 
