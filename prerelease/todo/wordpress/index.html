@@ -1257,10 +1257,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#wp2-audit-what-the-wordpress-stubs-declare-against-the-engine" class="md-nav__link">
+  <a href="#wp9-the-argument-types-the-wordpress-stubs-declare" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        WP2. Audit what the WordPress stubs declare against the engine
+        WP9. The argument types the WordPress stubs declare
       </span>
     </span>
   </a>
@@ -1360,9 +1360,12 @@
 
 <h1 id="phpantom-wordpress">PHPantom — WordPress<a class="headerlink" href="#phpantom-wordpress" title="Permanent link">&para;</a></h1>
 <p>Known gaps and missing features in PHPantom's WordPress support. Today
-WordPress gets only the generic engine: there is no WordPress-specific
-code, and core's functions and classes resolve only when the project
-indexes WordPress itself or a stub package for it.</p>
+WordPress gets the generic engine, plus the output constants (<code>OBJECT</code>,
+<code>ARRAY_A</code>, …) its stubs leave out (<code>src/wordpress.rs</code>). Core's functions
+and classes resolve only when the project indexes WordPress itself or a
+stub package for it. The stubs' own type tests run in
+<code>tests/wordpress_stubs/</code>, and what the engine reads wrongly in them is
+filed under "Conditional return types" in <a href="../bugs/">bugs.md</a>.</p>
 <p>Most WordPress typing lives in <code>php-stubs/wordpress-stubs</code>, so the
 external stubs are the foundation for everything here. Installed with
 Composer, the package is a stub source with no configuration, as is
@@ -1417,30 +1420,21 @@ untested and could regress silently.</p>
   this document by what actually breaks.</li>
 </ul>
 <hr />
-<h2 id="wp2-audit-what-the-wordpress-stubs-declare-against-the-engine">WP2. Audit what the WordPress stubs declare against the engine<a class="headerlink" href="#wp2-audit-what-the-wordpress-stubs-declare-against-the-engine" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Complexity: Low</strong></p>
-<p><code>php-stubs/wordpress-stubs</code> carries more than signatures. Recent
-versions declare argument-dependent return types, <code>@phpstan-assert</code>
-narrowing and never-returning functions for a large part of core,
-absorbed from PHPStan's WordPress extension. Examples to check:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$post = get_post($id, ARRAY_A);   // array shape, not WP_Post</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if (is_wp_error($result)) { … }   // narrows $result to WP_Error</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">wp_die();                         // nothing after it is reachable</span>
+<h2 id="wp9-the-argument-types-the-wordpress-stubs-declare">WP9. The argument types the WordPress stubs declare<a class="headerlink" href="#wp9-the-argument-types-the-wordpress-stubs-declare" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">add_menu_page('Acme', 'Acme', 'manage_options', 'acme', 'notACallable');</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">// Parameter #5 $callback of function add_menu_page expects ''|(callable(): mixed), 'notACallable' given.</span>
 </code></pre></div>
-<p>One gap is already known. Core's output constants (<code>OBJECT</code>, <code>ARRAY_A</code>,
-<code>ARRAY_N</code>) are <code>define()</code>d at runtime and are not in <code>wordpress-stubs</code>,
-so a default argument of <code>$output = OBJECT</code> cannot be told apart from the
-other branches, and <code>get_post($id)</code> comes back as
-<code>non-empty-array&lt;string, mixed&gt;|non-empty-array&lt;int, mixed&gt;|WP_Post|null</code>
-instead of <code>WP_Post|null</code>. PHPStan's WordPress extension declares these
-constants in its bootstrap, and <code>php-stubs/wordpress-globals</code> ships them.
-Ship them with the WordPress support (their values are fixed), so the
-conditional return types over <code>$output</code> resolve on the default.</p>
-<p>Go through what the stubs declare, write an assertion fixture for each
-construct, and file every one the engine reads wrongly as a bug in
-<code>bugs.md</code> or <code>type-inference.md</code>. Fixing those fixes them for every
-library that uses the same annotations, not just WordPress. What the
-stubs do not declare at all goes to WP7.</p>
+<p>The stubs narrow many parameters with <code>@phpstan-param</code>: shapes for
+<code>$args</code> arrays, callables with their signatures, literal unions for
+modes. Their own rule tests (<code>tests/data/param/</code> and
+<code>ParameterTypeTest.php</code> of <code>php-stubs/wordpress-stubs</code>, 31 files) list
+the calls each declaration accepts and the errors it must report. The
+stubs' type tests are ported in <code>tests/wordpress_stubs/</code>; port these
+beside them as diagnostics fixtures (as <code>tests/fixtures/phpstan_symfony/</code>
+does for the Symfony extension's rule tests), extending the slice of the
+stubs <code>scripts/extract-wordpress-stubs.php</code> copies, and file every call
+the argument-type check judges differently.</p>
 <hr />
 <h2 id="wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own">WP3. WordPress core for a plugin or theme opened on its own<a class="headerlink" href="#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
@@ -1541,12 +1535,15 @@ problem as Blade and Twig template variables.</p>
 and the Twig template-name support.</p>
 <hr />
 <h2 id="wp7-return-types-the-wordpress-stubs-do-not-declare">WP7. Return types the WordPress stubs do not declare<a class="headerlink" href="#wp7-return-types-the-wordpress-stubs-do-not-declare" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong> (depends on WP2)</p>
-<p>Whatever WP2 finds that PHPStan's WordPress extension types and the
-stubs do not, typically a return type an argument decides:
-<code>get_posts(['fields' =&gt; 'ids'])</code> returning <code>int[]</code>,
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>What PHPStan's WordPress extension types and the stubs do not, typically
+a return type an argument decides: <code>wp_parse_args($args, $defaults)</code> and
+<code>shortcode_atts()</code> returning the merged shape,
 <code>get_post_meta($id, $key, true)</code> returning a single value rather than an
-array, <code>wp_parse_url($url, PHP_URL_HOST)</code>. Roots' Sage theme shows more:
+array, <code>wp_parse_url($url, PHP_URL_HOST)</code>. The extension's own
+<code>assertType()</code> fixtures (<code>tests/data/</code> of <code>szepeviktor/phpstan-wordpress</code>)
+are the checklist, and port into <code>tests/wordpress_stubs/</code> the way the
+stubs' own did. Roots' Sage theme shows more:
 <code>wp_list_comments([..., 'echo' =&gt; false])</code> is declared <code>void|string</code>
 whatever <code>echo</code> says, and <code>get_post_time('c')</code> keeps the <code>int</code> only the
 <code>'U'</code> and <code>'G'</code> formats return. Write each as a conditional

@@ -1347,6 +1347,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t58-newt-is-not-supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T58. <code>new&lt;T&gt;</code> is not supported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t59-tk-on-a-class-template-is-not-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T59. <code>T[K]</code> on a class template is not resolved
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t60-a-float-literal-is-typed-float-not-its-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T60. A float literal is typed <code>float</code>, not its value
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1624,6 +1657,39 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T57. A <code>global</code> variable is untyped unless a <code>@var</code> sits above it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t58-newt-is-not-supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T58. <code>new&lt;T&gt;</code> is not supported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t59-tk-on-a-class-template-is-not-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T59. <code>T[K]</code> on a class template is not resolved
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t60-a-float-literal-is-typed-float-not-its-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T60. A float literal is typed <code>float</code>, not its value
       </span>
     </span>
   </a>
@@ -2215,6 +2281,67 @@ gap is in the generic engine.</p>
 <p><strong>Where to look:</strong> <code>src/type_engine/variable/forward_walk/statements.rs</code>
 (<code>Statement::Global</code>), <code>apply_global_var_docblocks</code> in
 <code>src/type_engine/variable/forward_walk/var_docblocks.rs</code>.</p>
+<hr />
+<h2 id="t58-newt-is-not-supported">T58. <code>new&lt;T&gt;</code> is not supported<a class="headerlink" href="#t58-newt-is-not-supported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">/**</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x"> * @template T of string</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x"> * @param T $class_name</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x"> * @return ($class_name is 'WP_Posts_List_Table'|'WP_Users_List_Table'|… ? new&lt;T&gt; : false)</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x"> */</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">function _get_list_table($class_name, $args = []) { … }</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">_get_list_table('WP_Posts_List_Table');   // want WP_Posts_List_Table, get new&lt;&lt;T&gt;&gt;</span>
+</code></pre></div>
+<p><code>new&lt;T&gt;</code> is PHPStan's type for an instance of the class a string names,
+used where a function instantiates the class it is given by name. We
+leave it unresolved, and hover shows <code>new&lt;&lt;T&gt;&gt;</code>. It should resolve like
+<code>T</code> bound to a <code>class-string&lt;C&gt;</code> gives <code>C</code>: a class-name literal gives
+that class, a <code>class-string&lt;C&gt;</code> gives <code>C</code>, anything else <code>object</code>. 21
+assertions of the WordPress stubs fixtures (<code>tests/wordpress_stubs/</code>)
+are marked with this.</p>
+<hr />
+<h2 id="t59-tk-on-a-class-template-is-not-resolved">T59. <code>T[K]</code> on a class template is not resolved<a class="headerlink" href="#t59-tk-on-a-class-template-is-not-resolved" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/**</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x"> * @template T of array = array&lt;string, mixed&gt;</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x"> * @implements ArrayAccess&lt;key-of&lt;T&gt;, value-of&lt;T&gt;&gt;</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x"> */</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">class WP_REST_Request implements ArrayAccess {</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">    /**</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">     * @template TOffset of key-of&lt;T&gt;</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">     * @param TOffset $key</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x">     * @return T[TOffset]|null</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="x">     */</span>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="x">    public function get_param($key) { … }</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="x">}</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="x">/** @var WP_REST_Request&lt;array{id: int, name: string}&gt; $request */</span>
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="x">$request-&gt;get_param('id');   // want int|null, get array{id: int, name: string}['id']|null</span>
+<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="x">$request['id'];              // want int|null, get array{id: int, name: string}</span>
+</code></pre></div>
+<p>An offset access type over a class template stays as written once the
+template is bound, and array access on the object (through
+<code>ArrayAccess&lt;key-of&lt;T&gt;, value-of&lt;T&gt;&gt;</code>) gives the whole <code>T</code> instead of
+its value type. The offset should read the bound array's value type for
+the key, or the union of its values for a key it does not declare. A REST
+API endpoint that types its request this way gets every parameter wrong.
+8 assertions of the WordPress stubs fixtures.</p>
+<hr />
+<h2 id="t60-a-float-literal-is-typed-float-not-its-value">T60. A float literal is typed <code>float</code>, not its value<a class="headerlink" href="#t60-a-float-literal-is-typed-float-not-its-value" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/**</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x"> * @template T</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x"> * @param T $data</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x"> * @return (T is array|object|string ? string : T)</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x"> */</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">function maybe_serialize($data) { … }</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">maybe_serialize(0.0);   // want 0.0, get float</span>
+</code></pre></div>
+<p>Integer, string and boolean literals keep their value as their type;
+float literals become <code>float</code>. A template bound to one, or a condition
+over one, loses the value. 2 assertions of the WordPress stubs fixtures.</p>
 
 
 

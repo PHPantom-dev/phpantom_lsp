@@ -5199,6 +5199,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>WordPress output constants.</strong> In a project with the WordPress stubs installed, <code>OBJECT</code>, <code>OBJECT_K</code>, <code>ARRAY_A</code> and <code>ARRAY_N</code> are known constants, so <code>get_post($id)</code> is a <code>WP_Post|null</code> and <code>get_post($id, ARRAY_A)</code> an array, instead of every possible result at once.</li>
 <li><strong>Scalar coercion outside <code>strict_types</code>.</strong> In a file without <code>declare(strict_types=1)</code>, a <code>bool</code> passed to a <code>string</code>, <code>int</code> or <code>float</code> parameter, an integer range passed to <code>string</code>, and any scalar passed to <code>bool</code> are no longer reported, since PHP converts them. The same holds for return values and property assignments. A callback's return value is still checked strictly, because nothing converts it.</li>
 <li><strong><code>[indexing] exclude</code> covers Composer's class lists.</strong> A class Composer's classmap or PSR-0 map names no longer resolves from a path you excluded, so excluding a path mid-session and restarting give the same result.</li>
 <li><strong>"Replace with" no longer leaves a stray parenthesis.</strong> Replacing a call to a deprecated function or method now replaces its closing parenthesis too, instead of leaving an extra <code>)</code> behind.</li>
