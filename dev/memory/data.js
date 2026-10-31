@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793469264803,
+  "lastUpdate": 1793474772574,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7809,6 +7809,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 109.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1c36cfc77469d020472fbdf6f889403b772fdd0a",
+          "message": "A `@var` above a reassignment replaces what calls on the old value\nreturned",
+          "timestamp": "2026-10-31T20:07:04+01:00",
+          "tree_id": "e62c0e4145695b641c7610775a02bb4d7c8ae98b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1c36cfc77469d020472fbdf6f889403b772fdd0a"
+        },
+        "date": 1793474760547,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 76.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 105.6,
             "unit": "MiB"
           }
         ]
