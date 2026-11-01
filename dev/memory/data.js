@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793573764360,
+  "lastUpdate": 1793575245781,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8337,6 +8337,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 107.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "27b9ef70d96937d9a459f3b9f256e622343eaae1",
+          "message": "Type guards on an impure call don't narrow the next call",
+          "timestamp": "2026-11-02T00:01:43+01:00",
+          "tree_id": "19919227131b1710ebc00ef4e332341e3270265f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/27b9ef70d96937d9a459f3b9f256e622343eaae1"
+        },
+        "date": 1793575233692,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 100.9,
             "unit": "MiB"
           }
         ]
