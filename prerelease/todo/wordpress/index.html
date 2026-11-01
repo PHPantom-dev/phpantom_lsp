@@ -1333,6 +1333,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#wp10-hook-docblocks-that-do-not-match-the-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        WP10. Hook docblocks that do not match the call
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp11-assertwperror-and-assertnotwperror-narrow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        WP11. <code>assertWPError()</code> and <code>assertNotWPError()</code> narrow
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wp12-constants-wp-configphp-defines-keep-the-value-of-one-install" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        WP12. Constants <code>wp-config.php</code> defines keep the value of one install
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1570,6 +1603,60 @@ return type.</p>
 <code>src/virtual_members/laravel/view_data.rs</code>; Acorn's
 <code>Roots\Acorn\View\Composer</code> and its <code>Composers\Concerns\Extractable</code>
 for exactly which members count.</p>
+<hr />
+<h2 id="wp10-hook-docblocks-that-do-not-match-the-call">WP10. Hook docblocks that do not match the call<a class="headerlink" href="#wp10-hook-docblocks-that-do-not-match-the-call" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong> (depends on WP5)</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/**</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x"> * Filters the order total.</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x"> *</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x"> * @param float $total The total.</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x"> */</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">$total = apply_filters('acme_order_total', $total, $order);   // 2 arguments, 1 @param</span>
+</code></pre></div>
+<p>WP5 reads the docblock above <code>do_action()</code> and <code>apply_filters()</code> as the
+hook's signature, so a docblock that disagrees with the call types every
+callback wrongly. PHPStan's WordPress extension (<code>HookDocsRule</code>) reports
+three mismatches: a <code>@param</code> count that differs from the arguments after
+the hook name, a <code>@param</code> named <code>$this</code> or written with invalid syntax,
+and a <code>@param</code> type the argument passed does not satisfy. Report the
+same, on the docblock, for the plugin and theme authors who document
+their own hooks. Its rule test (<code>tests/data/hook-docs.php</code>) lists the
+cases.</p>
+<hr />
+<h2 id="wp11-assertwperror-and-assertnotwperror-narrow">WP11. <code>assertWPError()</code> and <code>assertNotWPError()</code> narrow<a class="headerlink" href="#wp11-assertwperror-and-assertnotwperror-narrow" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$result = wp_insert_post($data, true);   // int|WP_Error</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$this-&gt;assertNotWPError($result);</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$result + 1;                             // still int|WP_Error</span>
+</code></pre></div>
+<p>WordPress's PHPUnit base class (<code>WP_UnitTestCase_Base</code>) asserts a value
+is or is not a <code>WP_Error</code>, and the test stubs do not say so. PHPStan's
+WordPress extension narrows through both
+(<code>AssertWpErrorTypeSpecifyingExtension</code>, tested in
+<code>tests/data/assert_wp_error.php</code> and <code>assert_not_wp_error.php</code>). Declare
+them with <code>@phpstan-assert WP_Error $actual</code> and
+<code>@phpstan-assert !WP_Error $actual</code> in an override stub
+(<a href="../external-stubs/#e7-stub-based-framework-patches">E7</a>) rather than in
+Rust.</p>
+<hr />
+<h2 id="wp12-constants-wp-configphp-defines-keep-the-value-of-one-install">WP12. Constants <code>wp-config.php</code> defines keep the value of one install<a class="headerlink" href="#wp12-constants-wp-configphp-defines-keep-the-value-of-one-install" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// wp-config.php</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">define('WP_CONTENT_DIR', '/var/www/wp-content');</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">// a plugin</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">if (WP_CONTENT_DIR === '/srv/site/wp-content') { … }   // read as `false`</span>
+</code></pre></div>
+<p>A constant from a <code>define()</code> in <code>wp-config.php</code> is typed as the literal
+it holds on this machine, so a comparison against another install's value
+is decided as <code>false</code>. The
+value differs between installs, so its type is the general one (<code>string</code>,
+<code>bool</code>). PHPStan's WordPress extension lists these
+(<code>dynamicConstantNames</code> in <code>extension.neon</code>: <code>WP_DEBUG</code>, <code>ABSPATH</code>,
+<code>WP_CONTENT_DIR</code>, <code>WP_PLUGIN_DIR</code>, <code>FS_CHMOD_FILE</code>, …). <code>WP_DEBUG</code> and the
+other <code>bool</code> constants already widen to <code>bool</code>; the string and integer
+ones do not. Widen every constant <code>wp-config.php</code> (or
+<code>wp-config-sample.php</code>) defines, rather than keeping a list of names.</p>
 
 
 
