@@ -30,7 +30,7 @@ use crate::types::ClassInfo;
 use super::helpers::{
     FileDiagnosticContext, collect_type_check, template_bounds, template_bounds_in_scope,
 };
-use super::type_errors::is_type_compatible;
+use super::type_errors::{fails_only_on_empty, is_type_compatible};
 
 /// Diagnostic code used for return type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_RETURN_CODE: &str = "type_mismatch_return";
@@ -76,6 +76,10 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
+        let report_possibly_empty = self
+            .config()
+            .diagnostics
+            .possibly_empty_mismatches_enabled();
         out.extend(collect_type_check(
             self,
             &ctx.file,
@@ -136,6 +140,18 @@ impl Backend {
                             ctx.loaders.resolved_class_loader(),
                             ctx.strict_types,
                         ) =>
+                    {
+                        return None;
+                    }
+                    // Only a `null` or `false` fails, which is opt-in.
+                    Some(ty)
+                        if !report_possibly_empty
+                            && fails_only_on_empty(
+                                ty,
+                                &ret.declared_type,
+                                ctx.loaders.resolved_class_loader(),
+                                ctx.strict_types,
+                            ) =>
                     {
                         return None;
                     }

@@ -87,14 +87,15 @@ pub struct DiagnosticsConfig {
     #[serde(rename = "workspace-external")]
     pub workspace_external: Option<bool>,
 
-    /// Downgrade `type_mismatch_argument` to a warning when the only
-    /// reason an argument's type fails to satisfy its parameter is a stray
-    /// `null` (every non-null member of the argument's type is already
-    /// compatible).
+    /// Report a `type_mismatch_argument`, `type_mismatch_return` or
+    /// `type_mismatch_property` whose only failing members are `null` or
+    /// `false`, such as a `string|false` passed to a `string` parameter.
     ///
-    /// Off by default, matching current (error) behaviour.
-    #[serde(rename = "downgrade-nullable-argument-mismatch")]
-    pub downgrade_nullable_argument_mismatch: Option<bool>,
+    /// Off by default: the code only fails if the value turns out empty.
+    /// Matches PHPStan's `checkUnionTypes` and `checkNullables` (levels 7
+    /// and 8).
+    #[serde(rename = "possibly-empty-mismatches")]
+    pub possibly_empty_mismatches: Option<bool>,
 
     /// Rules that suppress matching diagnostics, similar to PHPStan's
     /// `ignoreErrors`.
@@ -187,9 +188,8 @@ impl DiagnosticsConfig {
         self.workspace_external.unwrap_or(true)
     }
 
-    /// Whether a nullability-only argument type mismatch is downgraded
-    /// to a warning.
-    pub fn downgrade_nullable_argument_mismatch_enabled(&self) -> bool {
-        self.downgrade_nullable_argument_mismatch.unwrap_or(false)
+    /// Whether a mismatch that only a `null` or `false` causes is reported.
+    pub fn possibly_empty_mismatches_enabled(&self) -> bool {
+        self.possibly_empty_mismatches.unwrap_or(false)
     }
 }

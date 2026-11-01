@@ -165,8 +165,15 @@ impl WorkspaceEnv {
     }
 
     /// An environment with no global config layer, for tests.
+    ///
+    /// `possibly-empty-mismatches` is on, because tests of the type engine
+    /// observe what a value can hold through the mismatches it causes: with
+    /// the report off, a test that narrowing removed a `null` passes whether
+    /// or not it did. A test of the setting itself overrides this.
     pub(crate) fn new_isolated() -> Self {
-        Self::with_global_config(None)
+        let env = Self::with_global_config(None);
+        env.config.lock().diagnostics.possibly_empty_mismatches = Some(true);
+        env
     }
 
     fn with_global_config(global_config_path: Option<PathBuf>) -> Self {
