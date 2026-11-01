@@ -144,7 +144,7 @@ impl PhpType {
                 condition: map(&c.condition),
                 then_type: map(&c.then_type),
                 else_type: map(&c.else_type),
-                else_when_undecided: c.else_when_undecided,
+                undecided: c.undecided,
             }),
             TypeKind::ClassString(inner) => PhpType::class_string(inner.as_ref().map(map)),
             TypeKind::InterfaceString(inner) => PhpType::interface_string(inner.as_ref().map(map)),

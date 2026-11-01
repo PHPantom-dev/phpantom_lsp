@@ -11,7 +11,10 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::ParameterInfo;
 
 use super::arg_form::condition_result_from_text;
-use super::{decide_nested, this_condition_holds, type_condition_result, union_branch_types};
+use super::{
+    decide_nested, this_condition_holds, type_condition_result, undecided_answer,
+    union_branch_types,
+};
 
 /// Resolve a conditional return type **without** call-site arguments
 /// (text-based path).  Walks the tree taking the "no argument / null
@@ -105,8 +108,7 @@ pub fn resolve_conditional_without_args_and_defaults(
                 return match decided {
                     Some(true) => recurse(then_type),
                     Some(false) => recurse(else_type),
-                    None if cond.else_when_undecided => recurse(else_type),
-                    None => union_branch_types(recurse(then_type), recurse(else_type)),
+                    None => undecided_answer(cond, recurse),
                 };
             }
 
@@ -129,11 +131,7 @@ pub fn resolve_conditional_without_args_and_defaults(
             // condition can be decided against settles the branch.
             let param_info = params.iter().find(|p| p.name == target);
             if param_info.is_none() && target.starts_with('$') {
-                return if cond.else_when_undecided {
-                    recurse(else_type)
-                } else {
-                    union_branch_types(recurse(then_type), recurse(else_type))
-                };
+                return undecided_answer(cond, recurse);
             }
             if let Some(default_text) = param_info.and_then(|p| p.default_value.as_deref())
                 && let Some(matched) = condition_result_from_text(condition, default_text)

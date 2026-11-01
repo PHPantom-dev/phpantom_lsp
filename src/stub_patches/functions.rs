@@ -1,7 +1,7 @@
 //! Patches for the functions phpstorm-stubs declares incompletely.
 
 use crate::atom::atom;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{PhpType, TypeKind, UndecidedReading};
 use crate::types::{CallableInvocation, FunctionInfo};
 
 /// Apply all registered stub patches to a freshly-parsed function.
@@ -523,18 +523,20 @@ fn patch_ini_get(func: &mut FunctionInfo) {
 fn patch_pow(func: &mut FunctionInfo) {
     let numeric = PhpType::union(vec![PhpType::int(), PhpType::float()]);
     let object = PhpType::named(atom("object"));
-    func.conditional_return = Some(PhpType::conditional_defaulting_to_else(
+    func.conditional_return = Some(PhpType::conditional_answering_undecided(
         "$num",
         false,
         object.clone(),
         object.clone(),
-        PhpType::conditional_defaulting_to_else(
+        PhpType::conditional_answering_undecided(
             "$exponent",
             false,
             object.clone(),
             object,
             numeric,
+            UndecidedReading::ElseBranch,
         ),
+        UndecidedReading::ElseBranch,
     ));
 }
 
@@ -852,8 +854,10 @@ fn patch_scanf_family(func: &mut FunctionInfo, assigned: &str, collected: &str) 
 /// the functions whose string branch keeps the `null` error result. An array
 /// subject is answered per element, so no error branch survives there.
 ///
-/// A subject whose type cannot be pinned down at the call site leaves the
-/// declared union, which is all the call can promise.
+/// A subject whose type cannot be pinned down at the call site leaves both
+/// shapes, marked benevolent: the call hands back whatever shape it was
+/// given, so the caller is no worse placed to know it than for the subject
+/// it passed in unchecked.
 fn patch_replace_family(func: &mut FunctionInfo, subject_param: &str, nullable_on_error: bool) {
     // Bail out if the stub does not have the parameter the conditional keys
     // on: without it the subject cannot be identified and the conditional
@@ -872,12 +876,13 @@ fn patch_replace_family(func: &mut FunctionInfo, subject_param: &str, nullable_o
         PhpType::string()
     };
 
-    func.conditional_return = Some(PhpType::conditional(
+    func.conditional_return = Some(PhpType::conditional_answering_undecided(
         subject_param,
         false,
         PhpType::array(),
         replaced_array,
         replaced_string,
+        UndecidedReading::BenevolentBothBranches,
     ));
 }
 

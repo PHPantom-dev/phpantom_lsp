@@ -7,7 +7,7 @@ use std::borrow::Cow;
 
 use crate::atom::atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
-use crate::php_type::{ConditionalType, PhpType, TypeKind};
+use crate::php_type::{ConditionalType, PhpType, TypeKind, UndecidedReading};
 use crate::text_scan::split_top_level_commas;
 use crate::types::ParameterInfo;
 
@@ -15,7 +15,8 @@ use super::arg_form::{condition_result_from_text, literal_condition_result};
 use super::without_args::try_resolve_with_template_default;
 use super::{
     ConditionalClassContext, TemplateContext, VarClassStringResolver, decide_nested,
-    resolve_self_keyword, this_condition_holds, type_condition_result, union_branch_types,
+    resolve_self_keyword, this_condition_holds, type_condition_result, undecided_answer,
+    union_branch_types,
 };
 
 /// Resolve a conditional return type using **textual** arguments extracted
@@ -243,15 +244,9 @@ impl TextArgs<'_> {
 
     /// What the conditional answers when a resolver was consulted and could
     /// not pin the argument down: the call really may take either branch,
-    /// so the answer is their union unless the conditional asked for proof
-    /// and named its else branch as the undecided reading (see
-    /// [`ConditionalType::else_when_undecided`]).
+    /// so the answer is the conditional's [`UndecidedReading`] of them.
     fn undecided(&self, cond: &ConditionalType) -> Option<PhpType> {
-        if cond.else_when_undecided {
-            self.resolve(&cond.else_type)
-        } else {
-            union_branch_types(self.resolve(&cond.then_type), self.resolve(&cond.else_type))
-        }
+        undecided_answer(cond, |branch| self.resolve(branch))
     }
 
     /// Decide an `is null` condition.
@@ -361,7 +356,7 @@ impl TextArgs<'_> {
             TypeKind::Nullable(inner) => vec![inner.clone(), PhpType::null()],
             _ => Vec::new(),
         };
-        if cond.else_when_undecided || members.is_empty() {
+        if cond.undecided == UndecidedReading::ElseBranch || members.is_empty() {
             return self.undecided(cond);
         }
         let verdicts: Vec<Option<bool>> = members
@@ -396,10 +391,22 @@ impl TextArgs<'_> {
         match (reaches(true), reaches(false)) {
             (true, false) => narrowed_branch(true, &cond.then_type),
             (false, true) => narrowed_branch(false, &cond.else_type),
-            _ => union_branch_types(
-                narrowed_branch(true, &cond.then_type),
-                narrowed_branch(false, &cond.else_type),
-            ),
+            _ => {
+                let both = union_branch_types(
+                    narrowed_branch(true, &cond.then_type),
+                    narrowed_branch(false, &cond.else_type),
+                );
+                // A benevolent argument was never pinned to one shape
+                // either, so a conditional that is lenient about an
+                // undecided argument stays lenient about this one.
+                if cond.undecided == UndecidedReading::BenevolentBothBranches
+                    && arg_ty.is_benevolent()
+                {
+                    both.map(PhpType::benevolent)
+                } else {
+                    both
+                }
+            }
         }
     }
 
