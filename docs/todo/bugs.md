@@ -53,7 +53,7 @@ argument (`array<key-of<T>, (value-of<T> is string ? string : …)>`), it
 stays in the type unevaluated, and hover shows its source text. This is
 `get_term_by()`, `get_bookmark()`, `get_category()`, `get_tags()`,
 `get_terms()`, `wp_get_post_terms()` and every other function that adds
-`|\WP_Error` or `|false` to an argument-dependent result. 138
+`|\WP_Error` or `|false` to an argument-dependent result. 144
 assertions.
 
 ### B708. A condition over a refined type is misjudged
@@ -80,14 +80,20 @@ gets these wrong:
 - integer ranges (`int<min, 0>`, `int<min, -1>`) against an integer
   literal or another range;
 - refined strings (`non-empty-string`, `non-falsy-string`,
-  `lowercase-string`, `numeric-string`) against a literal that is one,
-  which is judged not to be, also under `is not`;
+  `lowercase-string`, `numeric-string`, `literal-string`) against a
+  literal or a refined string that is one (a `lowercase-string`
+  parameter against `is lowercase-string`), which is judged not to be,
+  also under `is not`;
+- an array against a refined string, which is left undecided rather
+  than ruled out;
+- `scalar`, which a literal `'a'`, `1` or `true` is judged not to be;
 - `numeric` and `empty`, which match nothing;
 - `resource` and `object`, which are not ruled out of `string`;
 - the key type of `array<K, V>`, which is ignored.
 
-86 assertions, from `absint()`, `has_shortcode()`, `size_format()`,
-`validate_file()`, `WP_Dependencies::query()`, `paginate_links()` and others.
+94 assertions, from `absint()`, `has_shortcode()`, `size_format()`,
+`validate_file()`, `WP_Dependencies::query()`, `paginate_links()`,
+`trailingslashit()` and others.
 
 ### B710. A conditional over a method template ignores its bound and does not narrow it
 

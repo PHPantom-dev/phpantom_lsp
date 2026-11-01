@@ -1,6 +1,8 @@
 # WordPress stubs fixtures
 
 The type tests of [php-stubs/wordpress-stubs](https://github.com/php-stubs/wordpress-stubs),
+and the return-type tests of PHPStan's WordPress extension
+([szepeviktor/phpstan-wordpress](https://github.com/szepeviktor/phpstan-wordpress)),
 ported to run in a project of their own. They check what the stubs declare,
 argument-dependent return types, `@phpstan-assert` narrowing,
 never-returning functions, and purity, against what PHPantom reads from
@@ -10,6 +12,10 @@ them.
   (`assert/`, `impure/`, `pure/`, and `return/`), run by
   `tests/assert_type_runner.rs`. `data/output-constants.php` is
   PHPantom's own, for what upstream's fixtures take for granted.
+- `data/phpstan-wordpress/` holds the extension's `assertType()` fixtures
+  for the return types its dynamic return type extensions compute.
+  `data/return-overrides.php` is PHPantom's own, for the return types
+  `src/wordpress/overrides.php` gives the stubs.
 - `Faker.php` is upstream's `tests/Faker.php`, the class the fixtures take
   values of a given type from.
 - `stubs/wordpress-stubs.php` is the slice of the stubs the fixtures touch,
@@ -42,5 +48,13 @@ php scripts/extract-wordpress-stubs.php target/scratch/wordpress-stubs/wordpress
     tests/wordpress_stubs/stubs/wordpress-stubs.php \
     tests/wordpress_stubs/data tests/wordpress_stubs/Faker.php
 ```
+
+The extension's fixtures are those of its `tests/data/` (at commit
+`44fe496`) that its return type extensions are tested with: `esc-sql.php`, `normalize-whitespace.php`,
+`shortcode-atts.php`, `slashit-functions.php`,
+`stripslashes-from-strings-only.php`, `wp-hash-password.php`,
+`wp-parse-args*.php`, `wp-parse-url.php` and `wp-slash.php`. Copy them
+into `data/phpstan-wordpress/` before running the extraction above, which
+then keeps the declarations they touch too.
 
 Then mark the assertions that fail again.

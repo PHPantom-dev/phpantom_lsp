@@ -2,7 +2,8 @@
 
 Known gaps and missing features in PHPantom's WordPress support. Today
 WordPress gets the generic engine, plus the output constants (`OBJECT`,
-`ARRAY_A`, …) its stubs leave out (`src/wordpress.rs`). Core's functions
+`ARRAY_A`, …) its stubs leave out and the return types an argument
+decides that they declare too wide (`src/wordpress/`). Core's functions
 and classes resolve only when the project indexes WordPress itself or a
 stub package for it. The stubs' own type tests run in
 `tests/wordpress_stubs/`, and what the engine reads wrongly in them is
@@ -205,24 +206,44 @@ and the Twig template-name support.
 
 ---
 
-## WP7. Return types the WordPress stubs do not declare
+## WP13. Return types no conditional `@return` can express
 
 **Impact: Medium · Complexity: Medium**
 
-What PHPStan's WordPress extension types and the stubs do not, typically
-a return type an argument decides: `wp_parse_args($args, $defaults)` and
-`shortcode_atts()` returning the merged shape,
-`get_post_meta($id, $key, true)` returning a single value rather than an
-array, `wp_parse_url($url, PHP_URL_HOST)`. The extension's own
-`assertType()` fixtures (`tests/data/` of `szepeviktor/phpstan-wordpress`)
-are the checklist, and port into `tests/wordpress_stubs/` the way the
-stubs' own did. Roots' Sage theme shows more:
-`wp_list_comments([..., 'echo' => false])` is declared `void|string`
-whatever `echo` says, and `get_post_time('c')` keeps the `int` only the
-`'U'` and `'G'` formats return. Write each as a conditional
-`@return` in an override stub
-([E7](external-stubs.md#e7-stub-based-framework-patches)) rather than in
-Rust, and offer the ones that hold upstream to `php-stubs/wordpress-stubs`.
+```php
+$args = wp_parse_args($args, ['before' => '', 'echo' => true]);
+$args['echo'];   // mixed, want bool
+```
+
+`src/wordpress/overrides.php` gives the WordPress stubs the conditional
+return types an argument decides. What is left of PHPStan's WordPress
+extension needs the engine, since no PHPDoc type can say it. Its
+fixtures are ported in `tests/wordpress_stubs/data/phpstan-wordpress/`,
+each gap marked `// SKIP`:
+
+- **Merged shapes.** `wp_parse_args($args, $defaults)` of an array is
+  `array_merge($defaults, $args)`, which the array function rules
+  (`src/type_engine/variable/array_func_rules.rs`) already type.
+  `shortcode_atts($pairs, $atts)` keeps the keys of `$pairs`, each value
+  its default's type or `string`. 23 assertions.
+- **`esc_sql()` keeps the shape** of the array it escapes, each scalar
+  value a `string` and anything else `''`. 11 assertions.
+- **Calls on literal arguments.** `wp_slash('foo')`,
+  `trailingslashit('foo')`, `normalize_whitespace(' 0 ')`,
+  `stripslashes_from_strings_only('foo')` and
+  `wp_parse_url('http://example.com', PHP_URL_HOST)` give the literal
+  WordPress would return, the way `scalar_fold.rs` folds PHP's own string
+  functions. 33 assertions.
+- **`wp_slash()` of a `lowercase-string` stays one.** A conditional
+  says it, but gives an array argument a stray `lowercase-string` until
+  [B708](bugs.md#b708-a-condition-over-a-refined-type-is-misjudged) is
+  fixed. 1 assertion.
+- **`wp_parse_url()` with a component no `PHP_URL_*` constant names**
+  returns `null`, or `false` for a URL it cannot parse. A
+  `$component is int<0, 7>` condition waits on B708 too. 1 assertion.
+
+The overrides that hold for every WordPress version the stubs cover are
+worth offering to `php-stubs/wordpress-stubs` as well.
 
 ---
 

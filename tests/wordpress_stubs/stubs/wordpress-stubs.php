@@ -6052,6 +6052,48 @@ namespace WpOrg\Requests {
 
 namespace {
     /**
+     * Portable PHP password hashing framework.
+     *
+     * @package phpass
+     * @version 0.5 / WordPress
+     * @link https://www.openwall.com/phpass/
+     * @since 2.5.0
+     */
+    class PasswordHash
+    {
+        var $itoa64;
+        var $iteration_count_log2;
+        var $portable_hashes;
+        var $random_state;
+        function __construct($iteration_count_log2, $portable_hashes)
+        {
+        }
+        function PasswordHash($iteration_count_log2, $portable_hashes)
+        {
+        }
+        function get_random_bytes($count)
+        {
+        }
+        function encode64($input, $count)
+        {
+        }
+        function gensalt_private($input)
+        {
+        }
+        function crypt_private($password, $setting)
+        {
+        }
+        function gensalt_blowfish($input)
+        {
+        }
+        function HashPassword($password)
+        {
+        }
+        function CheckPassword($password, $stored_hash)
+        {
+        }
+    }
+    /**
      * Requests for PHP
      *
      * Inspired by Requests for Python.
@@ -20167,6 +20209,95 @@ namespace {
     {
     }
     /**
+     * Displays a list of comments.
+     *
+     * Used in the comments.php template to list comments for a particular post.
+     *
+     * @since 2.7.0
+     *
+     * @see WP_Query::$comments
+     *
+     * @global WP_Query $wp_query           WordPress Query object.
+     * @global int      $comment_alt
+     * @global int      $comment_depth
+     * @global int      $comment_thread_alt
+     * @global bool     $overridden_cpage
+     * @global bool     $in_comment_loop
+     *
+     * @param string|array $args {
+     *     Optional. Formatting options.
+     *
+     *     @type object   $walker            Instance of a Walker class to list comments. Default null.
+     *     @type int      $max_depth         The maximum comments depth. Default empty.
+     *     @type string   $style             The style of list ordering. Accepts 'ul', 'ol', or 'div'.
+     *                                       'div' will result in no additional list markup. Default 'ul'.
+     *     @type callable $callback          Callback function to use. Default null.
+     *     @type callable $end-callback      Callback function to use at the end. Default null.
+     *     @type string   $type              Type of comments to list. Accepts 'all', 'comment',
+     *                                       'pingback', 'trackback', 'pings'. Default 'all'.
+     *     @type int      $page              Page ID to list comments for. Default empty.
+     *     @type int      $per_page          Number of comments to list per page. Default empty.
+     *     @type int      $avatar_size       Height and width dimensions of the avatar size. Default 32.
+     *     @type bool     $reverse_top_level Ordering of the listed comments. If true, will display
+     *                                       newest comments first. Default null.
+     *     @type bool     $reverse_children  Whether to reverse child comments in the list. Default null.
+     *     @type string   $format            How to format the comments list. Accepts 'html5', 'xhtml'.
+     *                                       Default 'html5' if the theme supports it.
+     *     @type bool     $short_ping        Whether to output short pings. Default false.
+     *     @type bool     $echo              Whether to echo the output or return it. Default true.
+     * }
+     * @param WP_Comment[] $comments Optional. Array of WP_Comment objects. Default null.
+     * @return void|string Void if 'echo' argument is true, or no comments to list.
+     *                     Otherwise, HTML list of comments.
+     * @phpstan-param array{
+     *   walker?: object,
+     *   max_depth?: int,
+     *   style?: string,
+     *   callback?: callable,
+     *   end-callback?: callable,
+     *   type?: string,
+     *   page?: int,
+     *   per_page?: int,
+     *   avatar_size?: int,
+     *   reverse_top_level?: bool,
+     *   reverse_children?: bool,
+     *   format?: string,
+     *   short_ping?: bool,
+     *   echo?: bool,
+     * } $args
+     */
+    function wp_list_comments($args = array(), $comments = \null)
+    {
+    }
+    /**
+     * Retrieves comment meta field for a comment.
+     *
+     * @since 2.9.0
+     *
+     * @link https://developer.wordpress.org/reference/functions/get_comment_meta/
+     *
+     * @param int    $comment_id Comment ID.
+     * @param string $key        Optional. The meta key to retrieve. By default,
+     *                           returns data for all keys. Default empty string.
+     * @param bool   $single     Optional. Whether to return a single value.
+     *                           This parameter has no effect if `$key` is not specified.
+     *                           Default false.
+     * @return mixed An array of values if `$single` is false.
+     *               The value of meta data field if `$single` is true.
+     *               False for an invalid `$comment_id` (non-numeric, zero, or negative value).
+     *               An empty array if a valid but non-existing comment ID is passed and `$single` is false.
+     *               An empty string if a valid but non-existing comment ID is passed and `$single` is true.
+     *               Note: Non-serialized values are returned as strings:
+     *               - false values are returned as empty strings ('')
+     *               - true values are returned as '1'
+     *               - numbers are returned as strings
+     *               Arrays and objects retain their original type.
+     * @phpstan-param int|numeric-string $comment_id
+     */
+    function get_comment_meta($comment_id, $key = '', $single = \false)
+    {
+    }
+    /**
      * Retrieves the status of a comment by comment ID.
      *
      * @since 1.0.0
@@ -20616,6 +20747,28 @@ namespace {
     {
     }
     /**
+     * Escapes data for use in a MySQL query.
+     *
+     * Usually you should prepare queries using wpdb::prepare().
+     * Sometimes, spot-escaping is required or useful. One example
+     * is preparing an array for use in an IN clause.
+     *
+     * NOTE: Since 4.8.3, '%' characters will be replaced with a placeholder string,
+     * this prevents certain SQLi attacks from taking place. This change in behavior
+     * may cause issues for code that expects the return value of esc_sql() to be usable
+     * for other purposes.
+     *
+     * @since 2.8.0
+     *
+     * @global wpdb $wpdb WordPress database abstraction object.
+     *
+     * @param string|array $data Unescaped data.
+     * @return string|array Escaped data, in the same type as supplied.
+     */
+    function esc_sql($data)
+    {
+    }
+    /**
      * Escapes single quotes, `"`, `<`, `>`, `&`, and fixes line endings.
      *
      * Escapes text strings for echoing in JS. It is intended to be used for inline JS
@@ -20650,6 +20803,17 @@ namespace {
      * @return string Escaped text.
      */
     function esc_attr($text)
+    {
+    }
+    /**
+     * Normalizes EOL characters and strips duplicate whitespace.
+     *
+     * @since 2.7.0
+     *
+     * @param string $str The string to normalize.
+     * @return string The normalized string.
+     */
+    function normalize_whitespace($str)
     {
     }
     /**
@@ -20992,6 +21156,23 @@ namespace {
      * @phpstan-return ($args is array{exit: false, ...} ? void : never)
      */
     function wp_die($message = '', $title = '', $args = array())
+    {
+    }
+    /**
+     * Merges user defined arguments into defaults array.
+     *
+     * This function is used throughout WordPress to allow for both string or array
+     * to be merged into another array.
+     *
+     * @since 2.2.0
+     * @since 2.3.0 `$args` can now also be an object.
+     *
+     * @param string|array|object $args     Value to merge with $defaults.
+     * @param array               $defaults Optional. Array that serves as the defaults.
+     *                                      Default empty array.
+     * @return array Merged user defined values with defaults.
+     */
+    function wp_parse_args($args, $defaults = array())
     {
     }
     /**
@@ -21587,6 +21768,21 @@ namespace {
     {
     }
     /**
+     * Retrieves the date of the post.
+     *
+     * Unlike the_date() this function will always return the date.
+     * Modify output with the {@see 'get_the_date'} filter.
+     *
+     * @since 3.0.0
+     *
+     * @param string           $format Optional. PHP date format. Defaults to the 'date_format' option.
+     * @param int|WP_Post|null $post   Optional. Post ID or WP_Post object. Default current post.
+     * @return string|int|false Date the current post was written. False on failure.
+     */
+    function get_the_date($format = '', $post = \null)
+    {
+    }
+    /**
      * Displays the date on which the post was last modified.
      *
      * @since 2.1.0
@@ -21599,6 +21795,81 @@ namespace {
      * @phpstan-return ($display is true ? void : string)
      */
     function the_modified_date($format = '', $before = '', $after = '', $display = \true)
+    {
+    }
+    /**
+     * Retrieves the date on which the post was last modified.
+     *
+     * @since 2.1.0
+     * @since 4.6.0 Added the `$post` parameter.
+     *
+     * @param string           $format Optional. PHP date format. Defaults to the 'date_format' option.
+     * @param int|WP_Post|null $post   Optional. Post ID or WP_Post object. Default current post.
+     * @return string|int|false Date the current post was modified. False on failure.
+     */
+    function get_the_modified_date($format = '', $post = \null)
+    {
+    }
+    /**
+     * Retrieves the time of the post.
+     *
+     * @since 1.5.0
+     *
+     * @param string           $format Optional. Format to use for retrieving the time the post
+     *                                 was written. Accepts 'G', 'U', or PHP date format.
+     *                                 Defaults to the 'time_format' option.
+     * @param int|WP_Post|null $post   Post ID or post object. Default is global `$post` object.
+     * @return string|int|false Formatted date string or Unix timestamp if `$format` is 'U' or 'G'.
+     *                          False on failure.
+     */
+    function get_the_time($format = '', $post = \null)
+    {
+    }
+    /**
+     * Retrieves the localized time of the post.
+     *
+     * @since 2.0.0
+     *
+     * @param string           $format    Optional. Format to use for retrieving the time the post
+     *                                    was written. Accepts 'G', 'U', or PHP date format. Default 'U'.
+     * @param bool             $gmt       Optional. Whether to retrieve the GMT time. Default false.
+     * @param int|WP_Post|null $post      Post ID or post object. Default is global `$post` object.
+     * @param bool             $translate Whether to translate the time string. Default false.
+     * @return string|int|false Formatted date string or Unix timestamp if `$format` is 'U' or 'G'.
+     *                          False on failure.
+     */
+    function get_post_time($format = 'U', $gmt = \false, $post = \null, $translate = \false)
+    {
+    }
+    /**
+     * Retrieves the time at which the post was last modified.
+     *
+     * @since 2.0.0
+     * @since 4.6.0 Added the `$post` parameter.
+     *
+     * @param string           $format Optional. Format to use for retrieving the time the post
+     *                                 was modified. Accepts 'G', 'U', or PHP date format.
+     *                                 Defaults to the 'time_format' option.
+     * @param int|WP_Post|null $post   Optional. Post ID or WP_Post object. Default current post.
+     * @return string|int|false Formatted date string or Unix timestamp. False on failure.
+     */
+    function get_the_modified_time($format = '', $post = \null)
+    {
+    }
+    /**
+     * Retrieves the time at which the post was last modified.
+     *
+     * @since 2.0.0
+     *
+     * @param string           $format    Optional. Format to use for retrieving the time the post
+     *                                    was modified. Accepts 'G', 'U', or PHP date format. Default 'U'.
+     * @param bool             $gmt       Optional. Whether to retrieve the GMT time. Default false.
+     * @param int|WP_Post|null $post      Post ID or post object. Default is global `$post` object.
+     * @param bool             $translate Whether to translate the time string. Default false.
+     * @return string|int|false Formatted date string or Unix timestamp if `$format` is 'U' or 'G'.
+     *                          False on failure.
+     */
+    function get_post_modified_time($format = 'U', $gmt = \false, $post = \null, $translate = \false)
     {
     }
     /**
@@ -21767,6 +22038,50 @@ namespace {
      * @phpstan-return (TUrl is numeric|'' ? false : TUrl|false)
      */
     function wp_http_validate_url($url)
+    {
+    }
+    /**
+     * A wrapper for PHP's parse_url() function that handles consistency in the return values
+     * across PHP versions.
+     *
+     * Across various PHP versions, schemeless URLs containing a ":" in the query
+     * are being handled inconsistently. This function works around those differences.
+     *
+     * @since 4.4.0
+     * @since 4.7.0 The `$component` parameter was added for parity with PHP's `parse_url()`.
+     *
+     * @link https://www.php.net/manual/en/function.parse-url.php
+     *
+     * @param string $url       The URL to parse.
+     * @param int    $component The specific component to retrieve. Use one of the PHP
+     *                          predefined constants to specify which one.
+     *                          Defaults to -1 (= return all parts as an array).
+     * @return mixed False on parse failure; Array of URL components on success;
+     *               When a specific component has been requested: null if the component
+     *               doesn't exist in the given URL; a string or - in the case of
+     *               PHP_URL_PORT - integer when it does. See parse_url()'s return values.
+     *
+     * @phpstan-param int<-1, 7> $component
+     * @phpstan-return (
+     *     $component is -1
+     *         ? false|array{
+     *               scheme?: string,
+     *               host?: string,
+     *               port?: int<0, 65535>,
+     *               user?: string,
+     *               pass?: string,
+     *               path?: string,
+     *               query?: string,
+     *               fragment?: string,
+     *           }
+     *         : (
+     *             $component is 2
+     *                 ? int<0, 65535>|null
+     *                 : string|null
+     *         )
+     * )
+     */
+    function wp_parse_url($url, $component = -1)
     {
     }
     /**
@@ -22048,6 +22363,43 @@ namespace {
     {
     }
     /**
+     * Retrieves the value of a metadata field for the specified object type and ID.
+     *
+     * If the meta field exists, a single value is returned if `$single` is true,
+     * or an array of values if it's false.
+     *
+     * If the meta field does not exist, the result depends on get_metadata_default().
+     * By default, an empty string is returned if `$single` is true, or an empty array
+     * if it's false.
+     *
+     * @since 2.9.0
+     *
+     * @see get_metadata_raw()
+     * @see get_metadata_default()
+     *
+     * @param string $meta_type Type of object metadata is for. Accepts 'blog', 'post', 'comment', 'term',
+     *                          'user', or any other object type with an associated meta table.
+     * @param int    $object_id ID of the object metadata is for.
+     * @param string $meta_key  Optional. Metadata key. If not specified, retrieve all metadata for
+     *                          the specified object. Default empty string.
+     * @param bool   $single    Optional. If true, return only the first value of the specified `$meta_key`.
+     *                          This parameter has no effect if `$meta_key` is not specified. Default false.
+     * @return mixed An array of values if `$single` is false.
+     *               The value of the meta field if `$single` is true.
+     *               False for an invalid `$object_id` (non-numeric, zero, or negative value),
+     *               or if `$meta_type` is not specified.
+     *               An empty array if a valid but non-existing object ID is passed and `$single` is false.
+     *               An empty string if a valid but non-existing object ID is passed and `$single` is true.
+     *               Note: Non-serialized values are returned as strings:
+     *               - false values are returned as empty strings ('')
+     *               - true values are returned as '1'
+     *               - numbers (both integer and float) are returned as strings
+     *               Arrays and objects retain their original type.
+     */
+    function get_metadata($meta_type, $object_id, $meta_key = '', $single = \false)
+    {
+    }
+    /**
      * Retrieves a list of sites matching requested arguments.
      *
      * @since 4.6.0
@@ -22103,6 +22455,31 @@ namespace {
      * @phpstan-return ($args is array{count: true, ...} ? int : ($args is array{fields: 'ids', ...} ? array<int, int> : array<int, \WP_Site>))
      */
     function get_sites($args = array())
+    {
+    }
+    /**
+     * Retrieves metadata for a site.
+     *
+     * @since 5.1.0
+     *
+     * @param int    $site_id Site ID.
+     * @param string $key     Optional. The meta key to retrieve. By default,
+     *                        returns data for all keys. Default empty.
+     * @param bool   $single  Optional. Whether to return a single value.
+     *                        This parameter has no effect if `$key` is not specified.
+     *                        Default false.
+     * @return mixed An array of values if `$single` is false.
+     *               The value of meta data field if `$single` is true.
+     *               False for an invalid `$site_id` (non-numeric, zero, or negative value).
+     *               An empty array if a valid but non-existing site ID is passed and `$single` is false.
+     *               An empty string if a valid but non-existing site ID is passed and `$single` is true.
+     *               Note: Non-serialized values are returned as strings:
+     *               - false values are returned as empty strings ('')
+     *               - true values are returned as '1'
+     *               - numbers (both integer and float) are returned as strings
+     *               Arrays and objects retain their original type.
+     */
+    function get_site_meta($site_id, $key = '', $single = \false)
     {
     }
     /**
@@ -22220,6 +22597,26 @@ namespace {
      * @phpstan-return lowercase-string&non-falsy-string
      */
     function wp_hash($data, $scheme = 'auth', $algo = 'md5')
+    {
+    }
+    /**
+     * Creates a hash of a plain text password.
+     *
+     * For integration with other applications, this function can be overwritten to
+     * instead use the other package password hashing algorithm.
+     *
+     * @since 2.5.0
+     * @since 6.8.0 The password is now hashed using bcrypt by default instead of phpass.
+     *
+     * @global PasswordHash $wp_hasher phpass object.
+     *
+     * @param string $password Plain text user password to hash.
+     * @return string The hash string of the password.
+     */
+    function wp_hash_password(
+        #[\SensitiveParameter]
+        $password
+    )
     {
     }
     /**
@@ -22652,6 +23049,31 @@ namespace {
      * @phpstan-return ($args is array{fields: 'id=>parent'|'ids', ...} ? array<int, int> : array<int, \WP_Post>)
      */
     function get_posts($args = \null)
+    {
+    }
+    /**
+     * Retrieves a post meta field for the given post ID.
+     *
+     * @since 1.5.0
+     *
+     * @param int    $post_id Post ID.
+     * @param string $key     Optional. The meta key to retrieve. By default,
+     *                        returns data for all keys. Default empty.
+     * @param bool   $single  Optional. Whether to return a single value.
+     *                        This parameter has no effect if `$key` is not specified.
+     *                        Default false.
+     * @return mixed An array of values if `$single` is false.
+     *               The value of the meta field if `$single` is true.
+     *               False for an invalid `$post_id` (non-numeric, zero, or negative value).
+     *               An empty array if a valid but non-existing post ID is passed and `$single` is false.
+     *               An empty string if a valid but non-existing post ID is passed and `$single` is true.
+     *               Note: Non-serialized values are returned as strings:
+     *               - false values are returned as empty strings ('')
+     *               - true values are returned as '1'
+     *               - numbers (both integer and float) are returned as strings
+     *               Arrays and objects retain their original type.
+     */
+    function get_post_meta($post_id, $key = '', $single = \false)
     {
     }
     /**
@@ -23406,6 +23828,26 @@ namespace {
     {
     }
     /**
+     * Combines user attributes with known attributes and fill in defaults when needed.
+     *
+     * The pairs should be considered to be all of the attributes which are
+     * supported by the caller and given as a list. The returned attributes will
+     * only contain the attributes in the $pairs list.
+     *
+     * If the $atts list has unsupported attributes, then they will be ignored and
+     * removed from the final returned list.
+     *
+     * @since 2.5.0
+     *
+     * @param array  $pairs     Entire list of supported attributes and their defaults.
+     * @param array  $atts      User defined attributes in shortcode tag.
+     * @param string $shortcode Optional. The name of the shortcode, provided for context to enable filtering
+     * @return array Combined and filtered attribute list.
+     */
+    function shortcode_atts($pairs, $atts, $shortcode = '')
+    {
+    }
+    /**
      * Retrieves a list of registered taxonomy names or objects.
      *
      * @since 3.0.0
@@ -23660,6 +24102,31 @@ namespace {
     {
     }
     /**
+     * Retrieves metadata for a term.
+     *
+     * @since 4.4.0
+     *
+     * @param int    $term_id Term ID.
+     * @param string $key     Optional. The meta key to retrieve. By default,
+     *                        returns data for all keys. Default empty.
+     * @param bool   $single  Optional. Whether to return a single value.
+     *                        This parameter has no effect if `$key` is not specified.
+     *                        Default false.
+     * @return mixed An array of values if `$single` is false.
+     *               The value of the meta field if `$single` is true.
+     *               False for an invalid `$term_id` (non-numeric, zero, or negative value).
+     *               An empty array if a valid but non-existing term ID is passed and `$single` is false.
+     *               An empty string if a valid but non-existing term ID is passed and `$single` is true.
+     *               Note: Non-serialized values are returned as strings:
+     *               - false values are returned as empty strings ('')
+     *               - true values are returned as '1'
+     *               - numbers are returned as strings
+     *               Arrays and objects retain their original type.
+     */
+    function get_term_meta($term_id, $key = '', $single = \false)
+    {
+    }
+    /**
      * Determines whether a taxonomy term exists.
      *
      * Formerly is_term(), introduced in 2.3.0.
@@ -23868,6 +24335,33 @@ namespace {
      * @phpstan-return ($user_id is int<min, 0> ? false : \WP_User|false)
      */
     function get_user($user_id)
+    {
+    }
+    /**
+     * Retrieves user meta field for a user.
+     *
+     * @since 3.0.0
+     *
+     * @link https://developer.wordpress.org/reference/functions/get_user_meta/
+     *
+     * @param int    $user_id User ID.
+     * @param string $key     Optional. The meta key to retrieve. By default,
+     *                        returns data for all keys.
+     * @param bool   $single  Optional. Whether to return a single value.
+     *                        This parameter has no effect if `$key` is not specified.
+     *                        Default false.
+     * @return mixed An array of values if `$single` is false.
+     *               The value of meta data field if `$single` is true.
+     *               False for an invalid `$user_id` (non-numeric, zero, or negative value).
+     *               An empty array if a valid but non-existing user ID is passed and `$single` is false.
+     *               An empty string if a valid but non-existing user ID is passed and `$single` is true.
+     *               Note: Non-serialized values are returned as strings:
+     *               - false values are returned as empty strings ('')
+     *               - true values are returned as '1'
+     *               - numbers (both integer and float) are returned as strings
+     *               Arrays and objects retain their original type.
+     */
+    function get_user_meta($user_id, $key = '', $single = \false)
     {
     }
     /**
