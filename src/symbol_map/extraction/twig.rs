@@ -281,7 +281,7 @@ fn class_named(class: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbol_map::SymbolMap;
+    use crate::symbol_map::{KeyFramework, SymbolMap};
 
     fn map_of(php: &str) -> SymbolMap {
         let arena = mago_allocator::LocalArena::new();
@@ -361,7 +361,8 @@ final class AppExtension extends AbstractExtension {
             .filter(|span| {
                 matches!(
                     &span.kind,
-                    SymbolKind::StringKey { kind, is_write: true, .. } if kind.is_twig()
+                    SymbolKind::StringKey { kind, is_write: true, .. }
+                        if kind.framework() == KeyFramework::Twig
                 )
             })
             .count();

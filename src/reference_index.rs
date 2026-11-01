@@ -18,7 +18,7 @@ use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
 use crate::backend::file_access::namespace_in_spans;
 use crate::names::resolve_to_fqn;
-use crate::symbol_map::{SelfStaticParentKind, StringKeyKind, SymbolKind, SymbolMap};
+use crate::symbol_map::{KeyFramework, SelfStaticParentKind, StringKeyKind, SymbolKind, SymbolMap};
 use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, short_name, strip_fqn_prefix};
 
@@ -742,16 +742,12 @@ impl Backend {
         let is_symfony = self.is_symfony_project();
         let is_twig = self.is_twig_project();
         let is_yii = self.is_yii_project();
-        let enabled = |kind: StringKeyKind| {
-            if kind.is_twig() {
-                is_twig
-            } else if kind.is_yii() {
-                is_yii
-            } else if kind.is_symfony() {
-                is_symfony
-            } else {
-                is_laravel
-            }
+        let enabled = |kind: StringKeyKind| match kind.framework() {
+            KeyFramework::Laravel => is_laravel,
+            KeyFramework::ServiceContainer | KeyFramework::Symfony => is_symfony,
+            KeyFramework::Twig => is_twig,
+            KeyFramework::Yii => is_yii,
+            KeyFramework::WordPress => false,
         };
         for site in &symbol_map.typed_receiver_sites {
             if !site.receiver.names_any(enabled) {

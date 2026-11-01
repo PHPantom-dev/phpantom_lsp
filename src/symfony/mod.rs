@@ -48,7 +48,7 @@ use parking_lot::RwLock;
 use tower_lsp_server::gen_lsp_types::{Location, Range};
 
 use crate::Backend;
-use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap, SymbolSpan};
+use crate::symbol_map::{KeyFramework, StringKeyKind, SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::LineIndex;
 
 /// The two formats Symfony's configuration is read from as text.
@@ -135,8 +135,12 @@ pub(crate) struct SymfonyState {
 /// counted whether it has a name or not, for the arguments its handler
 /// reads from its path.
 fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> bool) -> bool {
-    let counts = |kind: StringKeyKind| {
-        (kind.is_symfony() || kind.is_yii() || kind.is_twig()) && enabled(kind)
+    let counts = |kind: StringKeyKind| match kind.framework() {
+        KeyFramework::ServiceContainer
+        | KeyFramework::Symfony
+        | KeyFramework::Twig
+        | KeyFramework::Yii => enabled(kind),
+        KeyFramework::Laravel | KeyFramework::WordPress => false,
     };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
@@ -174,19 +178,15 @@ impl Backend {
     /// Whether the framework a string key of `kind` belongs to is the one
     /// this project uses.
     pub(crate) fn string_key_kind_enabled(&self, kind: StringKeyKind) -> bool {
-        if kind.is_twig() {
-            self.is_twig_project()
-        } else if kind.is_wordpress() {
+        match kind.framework() {
+            KeyFramework::Laravel => self.resolved_class_cache.read().laravel().is_enabled(),
+            KeyFramework::ServiceContainer | KeyFramework::Symfony => self.is_symfony_project(),
+            KeyFramework::Twig => self.is_twig_project(),
+            KeyFramework::Yii => self.is_yii_project(),
             // The hook functions' names are WordPress's own, and a project
             // that calls them is a WordPress one whatever its
             // `composer.json` says, or whether it has one at all.
-            true
-        } else if kind.is_yii() {
-            self.is_yii_project()
-        } else if kind.is_symfony() {
-            self.is_symfony_project()
-        } else {
-            self.resolved_class_cache.read().laravel().is_enabled()
+            KeyFramework::WordPress => true,
         }
     }
 

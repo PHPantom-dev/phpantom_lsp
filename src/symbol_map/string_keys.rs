@@ -9,7 +9,7 @@ use super::{LaravelConfigResource, SymbolKind, SymbolMap, SymbolSpan};
 ///
 /// One flat list for every framework: each variant names what its key
 /// resolves against, so a framework's kinds sit beside the others rather
-/// than behind a per-framework wrapper. [`Self::is_symfony`] says which
+/// than behind a per-framework wrapper. [`Self::framework`] says which
 /// framework a variant belongs to.
 ///
 /// Adding a new string-key navigation feature only requires adding a variant
@@ -168,45 +168,40 @@ impl StringKeyKind {
         matches!(self, Self::SymfonyTranslation | Self::TranslationDomain)
     }
 
-    /// Whether this key belongs to Symfony rather than to Laravel.
-    pub(crate) const fn is_symfony(self) -> bool {
-        matches!(
-            self,
-            Self::ServiceId
-                | Self::ContainerParameter
-                | Self::SymfonyRoute
-                | Self::SymfonyTranslation
-                | Self::TranslationDomain
-                | Self::TwigTemplate
-                | Self::SymfonyConfigKey
-                | Self::SymfonyEvent
-                | Self::MessengerBus
-        )
-    }
-
-    /// Whether this key belongs to Twig, whatever the framework around it.
-    pub(crate) const fn is_twig(self) -> bool {
-        matches!(
-            self,
+    /// The framework whose declarations this key resolves against.
+    ///
+    /// Exhaustive on purpose: a new kind has to say which framework turns
+    /// it on.
+    pub(crate) const fn framework(self) -> KeyFramework {
+        match self {
+            Self::Config
+            | Self::ConfigResource(_)
+            | Self::View
+            | Self::Route
+            | Self::Trans
+            | Self::Command
+            | Self::MorphAlias
+            | Self::Section
+            | Self::Stack
+            | Self::GateAbility
+            | Self::ContainerBinding
+            | Self::Middleware
+            | Self::Env => KeyFramework::Laravel,
+            Self::ServiceId | Self::ContainerParameter => KeyFramework::ServiceContainer,
+            Self::SymfonyRoute
+            | Self::SymfonyTranslation
+            | Self::TranslationDomain
+            | Self::SymfonyConfigKey
+            | Self::SymfonyEvent
+            | Self::MessengerBus => KeyFramework::Symfony,
             Self::TwigTemplate
-                | Self::TwigBlock
-                | Self::TwigFilter
-                | Self::TwigFunction
-                | Self::TwigVariable
-        )
-    }
-
-    /// Whether this key belongs to Yii.
-    pub(crate) const fn is_yii(self) -> bool {
-        matches!(
-            self,
-            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument
-        )
-    }
-
-    /// Whether this key belongs to WordPress.
-    pub(crate) const fn is_wordpress(self) -> bool {
-        matches!(self, Self::WordPressHook)
+            | Self::TwigBlock
+            | Self::TwigFilter
+            | Self::TwigFunction
+            | Self::TwigVariable => KeyFramework::Twig,
+            Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument => KeyFramework::Yii,
+            Self::WordPressHook => KeyFramework::WordPress,
+        }
     }
 
     /// The bit a [`LookupGuards`] mask holds this kind under: the kinds a
@@ -297,6 +292,25 @@ pub(crate) fn declares_another_name(kept: &SymbolSpan, next: &SymbolSpan) -> boo
             },
         ) if kept_kind == next_kind && kept_key != next_key
     )
+}
+
+/// The framework a [`StringKeyKind`] belongs to, which is what decides
+/// whether a project reads keys of that kind at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyFramework {
+    Laravel,
+    /// Symfony's service IDs and container parameters, which any project
+    /// that builds a Symfony service container declares.
+    ServiceContainer,
+    /// The rest of Symfony: routes, translations, bundle configuration,
+    /// events, and Messenger.
+    Symfony,
+    /// Twig's template, block, filter, function, and variable names,
+    /// read in any project that uses Twig.
+    Twig,
+    Yii,
+    /// WordPress's hook names, read wherever the hook functions are called.
+    WordPress,
 }
 
 /// A workspace symbol whose presence suppresses an otherwise-valid framework

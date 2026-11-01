@@ -21,8 +21,8 @@
 
 use super::*;
 use crate::symbol_map::{
-    ContainerValue, ContainerValueSite, MessengerHandlerSite, ReceiverClass, RouteImport,
-    SYMFONY_CONTAINER_CONFIGURATOR_NS, SYMFONY_ROUTING_CONFIGURATOR, StringKeyKind,
+    ContainerValue, ContainerValueSite, KeyFramework, MessengerHandlerSite, ReceiverClass,
+    RouteImport, SYMFONY_CONTAINER_CONFIGURATOR_NS, SYMFONY_ROUTING_CONFIGURATOR, StringKeyKind,
 };
 use crate::symfony::translations::{DEFAULT_DOMAIN, is_domain_name, translation_key};
 use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_literal_at_range};
@@ -188,14 +188,11 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         };
         // Outside Symfony, only the calls of the framework the project uses
         // are left: Twig's own `render()`, or Yii's URL generator.
-        let records = |kind: StringKeyKind| {
-            if kind.is_twig() {
-                ctx.twig
-            } else if kind.is_yii() {
-                ctx.yii
-            } else {
-                ctx.symfony
-            }
+        let records = |kind: StringKeyKind| match kind.framework() {
+            KeyFramework::ServiceContainer | KeyFramework::Symfony => ctx.symfony,
+            KeyFramework::Twig => ctx.twig,
+            KeyFramework::Yii => ctx.yii,
+            KeyFramework::Laravel | KeyFramework::WordPress => false,
         };
         if !receiver.names_any(records) {
             continue;
