@@ -1977,6 +1977,11 @@ organized by framework:</p>
 loaded into the stub index at a priority above vendor stubs but below
 user <code>.phpantom.toml</code> paths. Framework detection (already done for
 Laravel via <code>composer.json</code> inspection) controls which set is loaded.</p>
+<p>WordPress has a narrower form of this already: <code>src/wordpress/overrides.php</code>
+declares return types for functions of <code>php-stubs/wordpress-stubs</code>, and
+they replace the return type of the stubs' own declaration, which keeps
+everything else. It applies only to the stub file that declares <code>wpdb</code>,
+so any other stub file the user lists keeps its own declarations.</p>
 <h3 id="user-provided-override-stubs">User-provided override stubs<a class="headerlink" href="#user-provided-override-stubs" title="Permanent link">&para;</a></h3>
 <p>Users can already place their own stubs in a <code>.phpantom.toml</code>
 <code>[stubs] paths</code> directory. Since user paths have the highest priority,

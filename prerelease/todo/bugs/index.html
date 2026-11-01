@@ -1976,7 +1976,7 @@ argument (<code>array&lt;key-of&lt;T&gt;, (value-of&lt;T&gt; is string ? string 
 stays in the type unevaluated, and hover shows its source text. This is
 <code>get_term_by()</code>, <code>get_bookmark()</code>, <code>get_category()</code>, <code>get_tags()</code>,
 <code>get_terms()</code>, <code>wp_get_post_terms()</code> and every other function that adds
-<code>|\WP_Error</code> or <code>|false</code> to an argument-dependent result. 138
+<code>|\WP_Error</code> or <code>|false</code> to an argument-dependent result. 144
 assertions.</p>
 <h3 id="b708-a-condition-over-a-refined-type-is-misjudged">B708. A condition over a refined type is misjudged<a class="headerlink" href="#b708-a-condition-over-a-refined-type-is-misjudged" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
@@ -1998,14 +1998,20 @@ gets these wrong:</p>
 <li>integer ranges (<code>int&lt;min, 0&gt;</code>, <code>int&lt;min, -1&gt;</code>) against an integer
   literal or another range;</li>
 <li>refined strings (<code>non-empty-string</code>, <code>non-falsy-string</code>,
-  <code>lowercase-string</code>, <code>numeric-string</code>) against a literal that is one,
-  which is judged not to be, also under <code>is not</code>;</li>
+  <code>lowercase-string</code>, <code>numeric-string</code>, <code>literal-string</code>) against a
+  literal or a refined string that is one (a <code>lowercase-string</code>
+  parameter against <code>is lowercase-string</code>), which is judged not to be,
+  also under <code>is not</code>;</li>
+<li>an array against a refined string, which is left undecided rather
+  than ruled out;</li>
+<li><code>scalar</code>, which a literal <code>'a'</code>, <code>1</code> or <code>true</code> is judged not to be;</li>
 <li><code>numeric</code> and <code>empty</code>, which match nothing;</li>
 <li><code>resource</code> and <code>object</code>, which are not ruled out of <code>string</code>;</li>
 <li>the key type of <code>array&lt;K, V&gt;</code>, which is ignored.</li>
 </ul>
-<p>86 assertions, from <code>absint()</code>, <code>has_shortcode()</code>, <code>size_format()</code>,
-<code>validate_file()</code>, <code>WP_Dependencies::query()</code>, <code>paginate_links()</code> and others.</p>
+<p>94 assertions, from <code>absint()</code>, <code>has_shortcode()</code>, <code>size_format()</code>,
+<code>validate_file()</code>, <code>WP_Dependencies::query()</code>, <code>paginate_links()</code>,
+<code>trailingslashit()</code> and others.</p>
 <h3 id="b710-a-conditional-over-a-method-template-ignores-its-bound-and-does-not-narrow-it">B710. A conditional over a method template ignores its bound and does not narrow it<a class="headerlink" href="#b710-a-conditional-over-a-method-template-ignores-its-bound-and-does-not-narrow-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/**</span>
