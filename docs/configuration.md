@@ -70,7 +70,7 @@ The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/php
 | `extra-arguments`          | bool   | `false` | Report calls that pass more arguments than the function accepts. |
 | `report-magic-properties`  | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |
 | `partial-union-members`    | bool   | `false` | Report a member access on a union when only some of its classes declare the member. Matches PHPStan's `checkUnionTypes`. |
-| `downgrade-nullable-argument-mismatch` | bool | `false` | Downgrade `type_mismatch_argument` to a warning when the only reason an argument fails to satisfy the parameter is a stray `null` (every non-null member of the argument's type is already compatible). |
+| `possibly-empty-mismatches` | bool | `false` | Report a type mismatch on an argument, return value or property assignment when the only members that fail are `null` or `false`, such as a `string|false` passed to a `string` parameter. Matches PHPStan's `checkUnionTypes` and `checkNullables`. |
 | `workspace`                | bool   | `false` | Compute diagnostics for the whole workspace in the background after startup, so problems appear for files you have not opened. Costs a project-wide sweep every session. Requires the default `full` indexing strategy. |
 | `workspace-external`       | bool   | `true`  | Run configured external tools (PHPStan, PHPCS, PHPMD, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when `workspace` is enabled. |
 

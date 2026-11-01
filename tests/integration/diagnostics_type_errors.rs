@@ -4704,149 +4704,202 @@ function test(array $params): void {
     );
 }
 
-// ─── Nullability-only argument mismatches (downgrade-nullable-argument-mismatch) ───
+// ─── Mismatches only a `null` or `false` causes (possibly-empty-mismatches) ───
 
-#[test]
-fn negated_and_guard_leaves_null_reachable_as_an_error_by_default() {
-    let php = r#"<?php
-function takes_string(string $s): void {}
-
-function test(mixed $password): void {
-    if ($password !== null && ! is_string($password)) {
-        throw new \Exception('bad');
-    }
-    takes_string($password);
-}
-"#;
-    let diags = collect(php);
-    let messages = messages_with_code(&diags, "type_mismatch_argument");
-    assert_eq!(messages.len(), 1, "got {diags:?}");
-    assert!(
-        messages[0].contains("null does not satisfy string"),
-        "expected a nullability-only mismatch, got: {messages:?}"
-    );
-    let type_error = diags
-        .iter()
-        .find(|d| has_type_error(std::slice::from_ref(d)))
-        .unwrap();
-    assert_eq!(
-        type_error.severity,
-        Some(DiagnosticSeverity::Error),
-        "default severity must stay ERROR so existing projects see no change"
-    );
-}
-
-#[test]
-fn nullability_only_mismatch_can_be_downgraded_to_a_warning() {
+/// Every kind of type mismatch in `php`, with the setting as given; `None`
+/// leaves it unset, which is what a project without the key gets.
+fn type_mismatches(php: &str, possibly_empty_mismatches: Option<bool>) -> Vec<Diagnostic> {
     let backend = create_test_backend();
-    let uri = "file:///nullable_downgrade.php";
-    let php = r#"<?php
-function takes_string(string $s): void {}
-
-function test(mixed $password): void {
-    if ($password !== null && ! is_string($password)) {
-        throw new \Exception('bad');
-    }
-    takes_string($password);
-}
-"#;
-    {
-        let mut cfg = backend.config();
-        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
-        backend.set_config(cfg);
-    }
+    let uri = "file:///possibly_empty.php";
+    let mut cfg = backend.config();
+    cfg.diagnostics.possibly_empty_mismatches = possibly_empty_mismatches;
+    backend.set_config(cfg);
     backend.update_ast(uri, php);
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(uri, php, &mut diags);
-    let type_errors: Vec<&Diagnostic> = diags
-        .iter()
-        .filter(|d| has_type_error(std::slice::from_ref(d)))
-        .collect();
-    assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Warning));
+    backend.collect_return_type_diagnostics(uri, php, &mut diags);
+    backend.collect_property_type_diagnostics(uri, php, &mut diags);
+    diags
+}
+
+const POSSIBLY_EMPTY: &str = r#"<?php
+declare(strict_types=1);
+function takes_string(string $s): void {}
+
+class Holder {
+    public string $name = '';
+
+    public function run(
+        ?string $a,
+        string|null $b,
+        string|false $c,
+        string|false|null $d,
+        ?string $e,
+        string|false $f,
+        string|false $g,
+    ): string {
+        takes_string($a);
+        takes_string($b);
+        takes_string($c);
+        takes_string($d);
+        $this->name = $e;
+        $this->name = $f;
+        return $g;
+    }
+}
+"#;
+
+#[test]
+fn a_mismatch_only_null_or_false_causes_is_not_reported_by_default() {
+    let diags = type_mismatches(POSSIBLY_EMPTY, None);
+    assert!(diags.is_empty(), "got {diags:?}");
 }
 
 #[test]
-fn a_declared_nullable_argument_is_the_same_gap_as_the_union_spelling() {
-    let backend = create_test_backend();
-    let uri = "file:///nullable_downgrade_declared.php";
-    let php = r#"<?php
-function takes_string(string $s): void {}
-
-function test(?string $a, string|null $b, ?array $c): void {
-    takes_string($a);
-    takes_string($b);
-    takes_string($c);
+fn switching_the_report_off_is_the_same_as_the_default() {
+    let diags = type_mismatches(POSSIBLY_EMPTY, Some(false));
+    assert!(diags.is_empty(), "got {diags:?}");
 }
-"#;
-    {
-        let mut cfg = backend.config();
-        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
-        backend.set_config(cfg);
-    }
-    backend.update_ast(uri, php);
-    let mut diags = Vec::new();
-    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
-    let severities: Vec<Option<DiagnosticSeverity>> = diags
+
+#[test]
+fn opting_in_reports_arguments_returns_and_properties_as_errors() {
+    let diags = type_mismatches(POSSIBLY_EMPTY, Some(true));
+    let codes: Vec<_> = diags
         .iter()
-        .filter(|d| has_type_error(std::slice::from_ref(d)))
-        .map(|d| d.severity)
+        .map(|d| match &d.code {
+            Some(Code::String(code)) => code.as_str(),
+            other => panic!("unexpected code {other:?}"),
+        })
         .collect();
     assert_eq!(
-        severities,
+        codes,
         vec![
-            Some(DiagnosticSeverity::Warning),
-            Some(DiagnosticSeverity::Warning),
-            // `?array` fails on more than its nullability.
-            Some(DiagnosticSeverity::Error),
+            "type_mismatch_argument",
+            "type_mismatch_argument",
+            "type_mismatch_argument",
+            "type_mismatch_argument",
+            "type_mismatch_return",
+            "type_mismatch_property",
+            "type_mismatch_property",
         ],
+        "got {diags:?}"
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::Error)),
         "got {diags:?}"
     );
 }
 
 #[test]
-fn a_declared_nullable_argument_stays_an_error_by_default() {
+fn opting_in_names_the_member_that_fails() {
     let php = r#"<?php
 function takes_string(string $s): void {}
 
-function test(?string $a): void {
+function test(mixed $password): void {
+    if ($password !== null && ! is_string($password)) {
+        throw new \Exception('bad');
+    }
+    takes_string($password);
+}
+"#;
+    let diags = type_mismatches(php, Some(true));
+    assert_eq!(diags.len(), 1, "got {diags:?}");
+    let message = message_text(&diags[0].message);
+    assert!(
+        message.contains("null does not satisfy string"),
+        "{message}"
+    );
+}
+
+/// Another member failing makes the code wrong for a value that is not
+/// empty, so the setting has no say in it.
+#[test]
+fn a_mismatch_some_other_member_causes_is_always_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+function takes_string(string $s): void {}
+
+class Holder {
+    public string $name = '';
+
+    public function run(
+        ?array $a,
+        array|string $b,
+        array|string|null $c,
+        array|false $d,
+        array|string|null $e,
+        array|string $f,
+    ): string {
+        takes_string($a);
+        takes_string($b);
+        takes_string($c);
+        takes_string($d);
+        $this->name = $e;
+        return $f;
+    }
+}
+"#;
+    assert_eq!(type_mismatches(php, None).len(), 6);
+    assert_eq!(type_mismatches(php, Some(true)).len(), 6);
+}
+
+/// With nothing else in the value, there is no case in which it fits.
+#[test]
+fn a_value_that_can_only_be_empty_is_always_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+function takes_string(string $s): void {}
+
+/** @param null|false $empty */
+function test($empty): void {
+    takes_string(null);
+    takes_string(false);
+    takes_string($empty);
+}
+"#;
+    let diags = type_mismatches(php, None);
+    assert_eq!(diags.len(), 3, "got {diags:?}");
+}
+
+/// `bool` also holds `true`, which is not an empty value, so it is judged
+/// like any other member.
+#[test]
+fn a_bool_member_is_not_an_empty_one() {
+    let php = r#"<?php
+declare(strict_types=1);
+function takes_string(string $s): void {}
+
+function test(string|bool $a): void {
     takes_string($a);
 }
 "#;
-    let diags = collect(php);
-    let type_errors: Vec<&Diagnostic> = diags
-        .iter()
-        .filter(|d| has_type_error(std::slice::from_ref(d)))
-        .collect();
-    assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Error));
+    let diags = type_mismatches(php, None);
+    assert_eq!(diags.len(), 1, "got {diags:?}");
 }
 
+/// A value passed where the parameter takes the empty member too is fine
+/// on that count, whichever way the setting points.
 #[test]
-fn a_genuine_type_mismatch_stays_an_error_even_when_downgrade_is_enabled() {
-    let backend = create_test_backend();
-    let uri = "file:///nullable_downgrade_control.php";
+fn the_failing_member_is_the_one_judged_not_every_empty_one() {
     let php = r#"<?php
-function takes_string(string $s): void {}
+declare(strict_types=1);
+function takes_nullable(?string $s): void {}
 
-function test(array|string $val): void {
-    takes_string($val);
+function test(string|false|null $a): void {
+    takes_nullable($a);
+}
+function test_two(?array $b): void {
+    takes_nullable($b);
 }
 "#;
-    {
-        let mut cfg = backend.config();
-        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
-        backend.set_config(cfg);
-    }
-    backend.update_ast(uri, php);
-    let mut diags = Vec::new();
-    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
-    let type_errors: Vec<&Diagnostic> = diags
-        .iter()
-        .filter(|d| has_type_error(std::slice::from_ref(d)))
-        .collect();
-    assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Error));
+    let diags = type_mismatches(php, None);
+    assert_eq!(diags.len(), 1, "got {diags:?}");
+    assert!(
+        message_text(&diags[0].message).contains("?array"),
+        "{diags:?}"
+    );
 }
 
 #[test]

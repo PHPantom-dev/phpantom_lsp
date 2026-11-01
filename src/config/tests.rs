@@ -182,33 +182,21 @@ fn partial_union_members_defaults_to_false() {
 }
 
 #[test]
-fn parses_downgrade_nullable_argument_mismatch() {
+fn parses_possibly_empty_mismatches() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(CONFIG_FILE_NAME);
-    std::fs::write(
-        &path,
-        "[diagnostics]\ndowngrade-nullable-argument-mismatch = true\n",
-    )
-    .unwrap();
+    std::fs::write(&path, "[diagnostics]\npossibly-empty-mismatches = true\n").unwrap();
     let config = load_config(dir.path()).unwrap();
-    assert!(
-        config
-            .diagnostics
-            .downgrade_nullable_argument_mismatch_enabled()
-    );
+    assert!(config.diagnostics.possibly_empty_mismatches_enabled());
 }
 
 #[test]
-fn downgrade_nullable_argument_mismatch_defaults_to_false() {
+fn possibly_empty_mismatches_defaults_to_false() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(CONFIG_FILE_NAME);
     std::fs::write(&path, "[diagnostics]\n").unwrap();
     let config = load_config(dir.path()).unwrap();
-    assert!(
-        !config
-            .diagnostics
-            .downgrade_nullable_argument_mismatch_enabled()
-    );
+    assert!(!config.diagnostics.possibly_empty_mismatches_enabled());
 }
 
 #[test]

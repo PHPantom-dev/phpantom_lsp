@@ -36,7 +36,7 @@ use crate::types::{AccessKind, ClassInfo};
 use crate::virtual_members::resolve_class_fully_cached;
 
 use super::helpers::{FileDiagnosticContext, TypeCheckCtx, collect_type_check};
-use super::type_errors::is_type_compatible;
+use super::type_errors::{fails_only_on_empty, is_type_compatible};
 
 /// Diagnostic code used for property type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_PROPERTY_CODE: &str = "type_mismatch_property";
@@ -350,6 +350,10 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
+        let report_possibly_empty = self
+            .config()
+            .diagnostics
+            .possibly_empty_mismatches_enabled();
         out.extend(collect_type_check(
             self,
             &ctx.file,
@@ -387,6 +391,16 @@ impl Backend {
                     ctx.loaders.resolved_class_loader(),
                     ctx.strict_types,
                 ) {
+                    return None;
+                }
+                if !report_possibly_empty
+                    && fails_only_on_empty(
+                        &assignment.rhs_type,
+                        &assignment.declared_type,
+                        ctx.loaders.resolved_class_loader(),
+                        ctx.strict_types,
+                    )
+                {
                     return None;
                 }
                 Some((
