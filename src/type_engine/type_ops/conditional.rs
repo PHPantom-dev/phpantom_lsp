@@ -433,7 +433,7 @@ pub(crate) fn bind_callable_condition_templates(
             condition: condition.unwrap_or_else(|| c.condition.clone()),
             then_type: then_type.unwrap_or_else(|| c.then_type.clone()),
             else_type: else_type.unwrap_or_else(|| c.else_type.clone()),
-            else_when_undecided: c.else_when_undecided,
+            undecided: c.undecided,
         },
     ))
 }
@@ -556,6 +556,25 @@ fn decide_nested(ty: &PhpType, decide: &dyn Fn(&PhpType) -> Option<PhpType>) -> 
     }
     ty.map_children(&|child| decide(child).unwrap_or_else(|| child.conditionals_as_branch_unions()))
         .simplified()
+}
+
+/// What `cond` answers when its condition cannot be decided, with each
+/// branch it names resolved by `resolve`.
+fn undecided_answer(
+    cond: &crate::php_type::ConditionalType,
+    resolve: impl Fn(&PhpType) -> Option<PhpType>,
+) -> Option<PhpType> {
+    use crate::php_type::UndecidedReading;
+    match cond.undecided {
+        UndecidedReading::ElseBranch => resolve(&cond.else_type),
+        UndecidedReading::BothBranches => {
+            union_branch_types(resolve(&cond.then_type), resolve(&cond.else_type))
+        }
+        UndecidedReading::BenevolentBothBranches => {
+            union_branch_types(resolve(&cond.then_type), resolve(&cond.else_type))
+                .map(PhpType::benevolent)
+        }
+    }
 }
 
 /// Union two optional branch types produced by an undecidable conditional,

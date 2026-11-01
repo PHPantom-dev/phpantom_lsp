@@ -13184,6 +13184,49 @@ function test(array $lines): void {
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
+/// A subject whose type is unknown comes back as whatever shape it was, so
+/// the result is not checked against the string or array the next call
+/// expects, nor against the subject of a replace it is fed back into.
+#[test]
+fn a_replace_on_a_subject_of_unknown_type_is_not_enforced() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+function test($untyped, mixed $anything, $row): void {
+    $collapsed = trim(preg_replace('/[\r\n]+/', ' ', $untyped));
+    $twice = preg_replace('/\s+/', ' ', preg_replace('/[\r\n]+/', ' ', $untyped));
+    useString($twice);
+    $once = preg_replace('/[\r\n]+/', ' ', $untyped);
+    $again = preg_replace('/\s+/', ' ', $once);
+    useString($again);
+    useString(str_replace('a', 'b', $anything));
+    useString(substr_replace($row->name, 'b', 0, 1));
+    useString(preg_replace_callback('/a/', fn (array $m): string => 'b', $anything));
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A string subject still reports the `null` that `preg_replace` returns on
+/// a PCRE error: only a subject of unknown type relaxes the check.
+#[test]
+fn a_preg_replace_on_a_string_subject_keeps_its_error_branch() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+function test(string $text): void {
+    useString(preg_replace('/a/', 'b', $text));
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("null does not satisfy string"),
+        "got {messages:?}"
+    );
+}
+
 /// `json_encode()` is declared `string|false`, but `JSON_THROW_ON_ERROR`
 /// raises a `JsonException` instead of returning `false`, so the result
 /// satisfies a `string` parameter.
