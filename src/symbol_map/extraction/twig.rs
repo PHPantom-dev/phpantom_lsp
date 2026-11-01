@@ -290,7 +290,16 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = crate::names::OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         crate::symbol_map::extract_symbol_map_for_index(
-            program, php, &names, false, false, true, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: false,
+                twig: true,
+            },
+            None,
         )
     }
 

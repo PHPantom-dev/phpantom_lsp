@@ -34,18 +34,42 @@ impl Backend {
         composer_package: Option<composer::ComposerPackage>,
         progress: Option<&crate::progress::ScanProgress>,
     ) {
+        let was_drupal = self.is_drupal_project();
         if composer_package.is_some() {
             self.init_single_project(root, php_version, composer_package, progress)
                 .await;
-            return;
-        }
-
-        let subprojects = composer::discover_subproject_roots(root);
-        if subprojects.is_empty() {
-            self.init_no_composer(root, php_version, progress).await;
         } else {
-            self.init_monorepo(root, &subprojects, php_version, progress)
-                .await;
+            let subprojects = composer::discover_subproject_roots(root);
+            if subprojects.is_empty() {
+                self.init_no_composer(root, php_version, progress).await;
+            } else {
+                self.init_monorepo(root, &subprojects, php_version, progress)
+                    .await;
+            }
+        }
+        // The editor opens files while the walk runs, and a file read
+        // before the walk found a Drupal site was read without Drupal's
+        // names in it.
+        if !was_drupal && self.is_drupal_project() {
+            self.reparse_open_files();
+        }
+    }
+
+    /// Read every open file again from its buffer, as opening it does.
+    fn reparse_open_files(&self) {
+        let open: Vec<(String, std::sync::Arc<String>)> = self
+            .open_files
+            .read()
+            .iter()
+            .map(|(uri, text)| (uri.clone(), std::sync::Arc::clone(text)))
+            .collect();
+        for (uri, text) in open {
+            if self.is_resource_uri(&uri) {
+                self.update_resource_symbol_index(&uri, &text);
+            } else {
+                self.update_ast(&uri, &text);
+            }
+            self.schedule_diagnostics(uri);
         }
     }
 

@@ -26,6 +26,10 @@ const STUBS: &[(&str, &str)] = &[
         "<?php\nnamespace Symfony\\Component\\DependencyInjection;\ninterface ContainerInterface extends \\Psr\\Container\\ContainerInterface {}\n",
     ),
     (
+        "web/core/lib/Drupal.php",
+        "<?php\nclass Drupal {\n    public static function service(string $id): object {}\n    public static function hasService(string $id): bool {}\n}\n",
+    ),
+    (
         "web/modules/custom/acme/src/Greeter.php",
         "<?php\nnamespace Drupal\\acme;\nclass Greeter {\n    public function greet(): string { return ''; }\n}\n",
     ),
@@ -273,4 +277,146 @@ async fn core_services_are_read_and_test_modules_are_not() {
         found.iter().all(|(uri, _)| *uri == php),
         "a test module's services file was read: {found:?}"
     );
+}
+
+const STATIC_CONSUMER: &str = r#"<?php
+namespace Drupal\acme;
+
+final class StaticConsumer {
+    public function run(): void {
+        $greeter = \Drupal::service('acme.greeter');
+        $greeter;
+        \Drupal::hasService('acme.greeter');
+    }
+}
+"#;
+
+const STATIC_CONSUMER_PATH: &str = "web/modules/custom/acme/src/StaticConsumer.php";
+
+/// The definitions of the name at `position`.
+async fn definitions_at(backend: &Backend, uri: &Uri, position: Position) -> Vec<Location> {
+    let response = backend
+        .goto_definition(DefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+    match response {
+        None => Vec::new(),
+        Some(DefinitionResponse::Definition(Definition::Location(location))) => vec![location],
+        Some(DefinitionResponse::Definition(Definition::LocationList(locations))) => locations,
+        Some(DefinitionResponse::DefinitionLinkList(_)) => panic!("unexpected location links"),
+    }
+}
+
+#[tokio::test]
+async fn drupal_service_is_typed_and_navigates_like_a_container_lookup() {
+    let (backend, dir) = workspace(&[
+        (SERVICES_PATH, SERVICES),
+        (STATIC_CONSUMER_PATH, STATIC_CONSUMER),
+    ])
+    .await;
+    let php = uri_for(&dir, STATIC_CONSUMER_PATH);
+
+    let position = position_in(STATIC_CONSUMER, "$greeter;", 2);
+    let hover = hover_text_at(&backend, &php, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(hover.contains("Greeter"), "{hover}");
+
+    for needle in ["service('acme.greeter')", "hasService('acme.greeter')"] {
+        let inside = needle.find('\'').unwrap() + 2;
+        let found =
+            definitions_at(&backend, &php, position_in(STATIC_CONSUMER, needle, inside)).await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!(found[0].uri, uri_for(&dir, SERVICES_PATH));
+    }
+}
+
+/// A file the editor opens before the workspace walk finds the Drupal site
+/// is read again once it does.
+#[tokio::test]
+async fn a_file_opened_before_the_walk_ends_reads_drupal_names() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("composer.json"), COMPOSER).unwrap();
+    for (path, content) in STUBS.iter().chain(&[
+        (SERVICES_PATH, SERVICES),
+        (STATIC_CONSUMER_PATH, STATIC_CONSUMER),
+    ]) {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let backend = Backend::new_test();
+    #[allow(deprecated)] // `root_uri` is what this generation of clients sends
+    let params = InitializeParams {
+        root_uri: Some(Uri::from_file_path(dir.path()).unwrap()),
+        ..Default::default()
+    };
+    backend.initialize(params).await.unwrap();
+    let php = uri_for(&dir, STATIC_CONSUMER_PATH);
+    open_document(&backend, &php, "php", STATIC_CONSUMER).await;
+    backend.initialized(InitializedParams {}).await;
+    // A test backend runs no background index, which would read it.
+    open_document(&backend, &uri_for(&dir, SERVICES_PATH), "yaml", SERVICES).await;
+
+    let found = definitions_at(
+        &backend,
+        &php,
+        position_in(STATIC_CONSUMER, "service('acme.greeter')", 10),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].uri, uri_for(&dir, SERVICES_PATH));
+}
+
+#[tokio::test]
+async fn drupal_service_ids_complete() {
+    let consumer = STATIC_CONSUMER.replace("service('acme.greeter')", "service('acme.')");
+    let (backend, dir) = workspace(&[
+        (SERVICES_PATH, SERVICES),
+        (STATIC_CONSUMER_PATH, consumer.as_str()),
+    ])
+    .await;
+    let position = position_in(&consumer, "service('acme.')", 9);
+    let labels = response_labels(
+        completion_response(
+            &backend,
+            &uri_for(&dir, STATIC_CONSUMER_PATH),
+            position.line,
+            position.character,
+            None,
+        )
+        .await,
+    );
+    assert!(labels.contains(&"acme.greeter".to_string()), "{labels:?}");
+}
+
+#[tokio::test]
+async fn a_drupal_class_in_another_namespace_names_no_service() {
+    let consumer = r#"<?php
+namespace Other;
+
+class Drupal {
+    public static function service(string $id): object {}
+}
+
+function run(): void {
+    Drupal::service('acme.greeter');
+}
+"#;
+    let path = "web/modules/custom/acme/src/Other.php";
+    let (backend, dir) = workspace(&[(SERVICES_PATH, SERVICES), (path, consumer)]).await;
+    let found = definitions_at(
+        &backend,
+        &uri_for(&dir, path),
+        position_in(consumer, "service('acme.greeter')", 10),
+    )
+    .await;
+    assert!(found.is_empty(), "{found:?}");
 }

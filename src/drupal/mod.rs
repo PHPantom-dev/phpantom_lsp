@@ -35,6 +35,14 @@ fn is_services_file_name(path: &str) -> bool {
     name == "services.yml" || name.ends_with(".services.yml")
 }
 
+/// Whether a static call of `method` on `class`, a resolved class name,
+/// looks a service up by its ID: `\Drupal::service()` or
+/// `\Drupal::hasService()`.  Only the global `Drupal` class counts.
+pub(crate) fn is_service_lookup(class: &str, method: &str) -> bool {
+    class.strip_prefix('\\').unwrap_or(class) == "Drupal"
+        && (method.eq_ignore_ascii_case("service") || method.eq_ignore_ascii_case("hasService"))
+}
+
 /// Whether `path` is a file Drupal reads declarations from.
 pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
     path.file_name()

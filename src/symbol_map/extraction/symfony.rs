@@ -2528,7 +2528,16 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, true, true, true, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: true,
+                service_container: true,
+                drupal: false,
+                twig: true,
+            },
+            None,
         )
     }
 
@@ -3152,7 +3161,16 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, false, false, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: false,
+                twig: false,
+            },
+            None,
         );
         assert!(map.typed_receiver_sites.is_empty());
     }
@@ -3166,7 +3184,16 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, true, true, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: false,
+                twig: true,
+            },
+            None,
         );
         assert_eq!(
             receivers(&map),
@@ -3186,7 +3213,16 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, false, true, None,
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: false,
+                drupal: false,
+                twig: true,
+            },
+            None,
         );
         assert_eq!(
             receivers(&map),

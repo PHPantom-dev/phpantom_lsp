@@ -203,7 +203,16 @@ fn read_routing_file(path: &Path, content: &str) -> Option<SymbolMap> {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = crate::names::OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extract_symbol_map_for_index(
-            program, content, &names, true, true, false, None,
+            program,
+            content,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: true,
+                service_container: true,
+                drupal: false,
+                twig: false,
+            },
+            None,
         );
         let mut spans: Vec<_> = map
             .spans
