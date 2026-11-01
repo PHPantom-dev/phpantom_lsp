@@ -213,6 +213,9 @@ impl<'b> ExprWalk<'b> {
             },
             Expression::Array(array) => self.elements(array.elements.iter(), scope, ctx),
             Expression::LegacyArray(array) => self.elements(array.elements.iter(), scope, ctx),
+            Expression::Construct(construct) if let Some(path) = include_path_expr(construct) => {
+                self.include(expr, path, scope, ctx)
+            }
             _ => ExprResult::default(),
         };
         self.done(expr, result);
@@ -577,6 +580,29 @@ impl<'b> ExprWalk<'b> {
         }
         *scope = after;
         ExprResult { wrote }
+    }
+
+    /// An `include`/`require`: the path is evaluated, then the included
+    /// file's top level runs in this scope and leaves its variables here.
+    #[inline(never)]
+    fn include(
+        &mut self,
+        expr: &'b Expression<'b>,
+        path: &'b Expression<'b>,
+        scope: &mut ScopeState,
+        ctx: &ForwardWalkCtx<'_>,
+    ) -> ExprResult {
+        let evaluated = self.expr(path, scope, ctx);
+        let Some(locals) = include_locals(path, ctx).filter(|locals| !locals.is_empty()) else {
+            return evaluated;
+        };
+        // The include's own value, and the path it read, came from the
+        // scope before the included file changed anything.
+        self.done(expr, ExprResult::default());
+        self.flush(scope, ctx);
+        apply_include_locals(&locals, scope);
+        record_scope_snapshot(expr.span().end.offset, scope);
+        ExprResult { wrote: true }
     }
 
     /// The arguments of a `?->` call run only when the receiver is not

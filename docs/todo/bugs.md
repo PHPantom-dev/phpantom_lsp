@@ -313,20 +313,23 @@ widened (`object{key: string}&stdClass`). Read the cast's operand
 through the shared resolver, and keep the literal values the way an
 array literal does. 1 assertion, from `stripslashes_from_strings_only()`.
 
-### B717. Variables a `require`d file defines have no type
+### B721. An included file does not see the including scope's variables
 
 **Impact: Low · Complexity: Medium**
 
 ```php
-function core_upgrade(): string {
-    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version = '6.7'
-    return $wp_version;                          // hover: nothing, want string
+// main.php
+function render(User $user): void {
+    require __DIR__ . '/header.php';
+    $title;            // want User, get nothing
 }
+
+// header.php
+$title = $user;
 ```
 
-When an include's path resolves, the variables the included file's top
-level assigns are no longer reported as undefined, but hover,
-completion, and the type checks know nothing about them. Walk the
-included file's top level and carry the types it leaves its variables
-into the including scope at the point the include ends.
-
+The variables an included file leaves are worked out by walking its top
+level on a scope of its own, once per file, so a value it reads from
+the including scope is unknown there. Seed that walk with the variables
+the including scope holds at the include, keyed on their types so a file
+included from many places with the same scope is still walked once.

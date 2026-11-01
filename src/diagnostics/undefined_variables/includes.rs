@@ -2,11 +2,9 @@
 //!
 //! The included file runs in the scope of the statement that includes it,
 //! so every variable its top level assigns exists once the include has
-//! run. Where the path can be worked out statically (string literals,
-//! `__DIR__`, `__FILE__`, `dirname()`, concatenation, and global
-//! constants whose `define()` value is itself one of those), the included
-//! file's top-level writes are read and treated as writes at the end of
-//! the include. Where it cannot, or the included file defines variables
+//! run. Where the path can be worked out statically (see
+//! [`Backend::resolve_include_path`]), the included file's top-level
+//! writes are read and treated as writes at the end of the include. Where it cannot, or the included file defines variables
 //! no static reading can name (`extract()`, `$$name`, an include of its
 //! own that does not resolve), the scope is open from the include on and
 //! the include stands for a write of every name ([`ANY_VARIABLE`]).
@@ -23,7 +21,6 @@ use mago_syntax::walker::Walker;
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
-use crate::resolution::DefineSearch;
 use crate::scope_collector::{AccessKind, ScopeBody, collect_scope};
 
 use super::feature_guards::{has_dynamic_variables, has_extract_call};
@@ -33,8 +30,7 @@ use super::is_in_nested_frame;
 /// variable after it counts as having a prior write.
 pub(super) const ANY_VARIABLE: &str = "*";
 
-/// How deep includes of includes, and constants defined in terms of
-/// other constants, are followed before giving up.
+/// How deep includes of includes are followed before giving up.
 const MAX_DEPTH: u8 = 8;
 
 /// What the top level of an included file leaves defined.
@@ -93,7 +89,10 @@ impl<'a> IncludeResolver<'a> {
         writes: &mut Vec<(String, u32)>,
     ) {
         let included = file
-            .and_then(|file| self.resolve_path(value, file, namespace, depth))
+            .and_then(|file| {
+                self.backend
+                    .resolve_include_path(value, file, namespace.as_deref())
+            })
             .map(|path| self.included_vars(&path, depth))
             .unwrap_or_else(|| Rc::new(IncludedVars::Open));
         match &*included {
@@ -102,126 +101,6 @@ impl<'a> IncludeResolver<'a> {
             }
             IncludedVars::Open => writes.push((ANY_VARIABLE.to_string(), end)),
         }
-    }
-
-    /// The file an include's path expression names, when it can be worked
-    /// out and exists.
-    fn resolve_path(
-        &self,
-        value: &Expression<'_>,
-        file: &Path,
-        namespace: &Option<String>,
-        depth: u8,
-    ) -> Option<PathBuf> {
-        let path = PathBuf::from(self.evaluate(value, file, namespace, depth)?);
-        let path = if path.is_absolute() {
-            path
-        } else {
-            file.parent()?.join(path)
-        };
-        let path = crate::document_links::normalize_path(&path);
-        path.is_file().then_some(path)
-    }
-
-    /// The string an include path expression evaluates to.
-    fn evaluate(
-        &self,
-        expr: &Expression<'_>,
-        file: &Path,
-        namespace: &Option<String>,
-        depth: u8,
-    ) -> Option<String> {
-        match expr {
-            Expression::Literal(Literal::String(s)) => {
-                Some(bytes_to_str(s.value?).to_string()).filter(|v| !v.is_empty())
-            }
-            Expression::MagicConstant(MagicConstant::Directory(_)) => {
-                Some(file.parent()?.to_string_lossy().into_owned())
-            }
-            Expression::MagicConstant(MagicConstant::File(_)) => {
-                Some(file.to_string_lossy().into_owned())
-            }
-            Expression::Binary(binary) if binary.operator.is_concatenation() => {
-                let mut lhs = self.evaluate(binary.lhs, file, namespace, depth)?;
-                lhs.push_str(&self.evaluate(binary.rhs, file, namespace, depth)?);
-                Some(lhs)
-            }
-            Expression::Parenthesized(p) => self.evaluate(p.expression, file, namespace, depth),
-            Expression::ConstantAccess(access) => {
-                self.constant_value(bytes_to_str(access.name.value()), namespace, depth)
-            }
-            Expression::Call(Call::Function(call)) => {
-                self.evaluate_dirname(call, file, namespace, depth)
-            }
-            _ => None,
-        }
-    }
-
-    /// `dirname($path)` or `dirname($path, $levels)`.
-    fn evaluate_dirname(
-        &self,
-        call: &FunctionCall<'_>,
-        file: &Path,
-        namespace: &Option<String>,
-        depth: u8,
-    ) -> Option<String> {
-        let Expression::Identifier(ident) = call.function else {
-            return None;
-        };
-        let name = bytes_to_str(ident.value());
-        if !name
-            .trim_start_matches('\\')
-            .eq_ignore_ascii_case("dirname")
-        {
-            return None;
-        }
-        let mut args = call.argument_list.arguments.iter();
-        let path = self.evaluate(args.next()?.value(), file, namespace, depth)?;
-        let levels = match args.next().map(|arg| arg.value()) {
-            None => 1,
-            Some(Expression::Literal(Literal::Integer(int))) => int.value? as usize,
-            Some(_) => return None,
-        };
-        let mut path = Path::new(&path);
-        for _ in 0..levels {
-            path = path.parent()?;
-        }
-        Some(path.to_string_lossy().into_owned())
-    }
-
-    /// The value of a global constant whose `define()` initializer is
-    /// itself a path expression, evaluated in the file that defines it.
-    fn constant_value(&self, name: &str, namespace: &Option<String>, depth: u8) -> Option<String> {
-        if depth >= MAX_DEPTH {
-            return None;
-        }
-        let qualified;
-        let mut candidates: Vec<&str> = Vec::with_capacity(2);
-        match name.strip_prefix('\\') {
-            Some(absolute) => candidates.push(absolute),
-            None => {
-                if let Some(ns) = namespace
-                    && !name.contains('\\')
-                {
-                    qualified = format!("{ns}\\{name}");
-                    candidates.push(&qualified);
-                }
-                candidates.push(name);
-            }
-        }
-        let (uri, value) =
-            self.backend
-                .find_or_load_define(&candidates, DefineSearch::Indexed, |info| {
-                    Some((info.file_uri.clone(), info.value.clone()?))
-                })??;
-        let defining_file = crate::util::uri_to_path(&uri)?;
-        let source = format!("<?php {value};");
-        with_parsed_program(&source, "include_constant", |program, _| {
-            let Some(Statement::Expression(stmt)) = program.statements.iter().nth(1) else {
-                return None;
-            };
-            self.evaluate(stmt.expression, &defining_file, &None, depth + 1)
-        })
     }
 
     /// The variables the top level of the file at `path` leaves defined.

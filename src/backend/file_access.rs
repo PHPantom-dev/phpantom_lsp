@@ -207,6 +207,7 @@ impl Backend {
             return FileContext {
                 classes,
                 pest_uses: self.pest_uses_for(uri),
+                uri: Some(Arc::from(uri)),
                 ..FileContext::default()
             };
         };
@@ -219,6 +220,7 @@ impl Backend {
             namespace_spans,
             resolved_names: state.resolved_names.clone(),
             pest_uses: self.pest_uses_for(uri),
+            uri: Some(Arc::from(uri)),
         }
     }
 

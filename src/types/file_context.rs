@@ -43,6 +43,8 @@ pub(crate) struct FileContext {
     /// is a Pest test, which decide what `$this` is inside its test
     /// closures.  `None` for every other file.
     pub pest_uses: Option<Arc<[String]>>,
+    /// The file's URI, `None` for a context built without one.
+    pub uri: Option<Arc<str>>,
 }
 
 /// A class loader per `namespace` block of a file (see
@@ -210,6 +212,7 @@ impl FileContext {
             namespace_spans: self.namespace_spans.clone(),
             resolved_names: self.resolved_names.clone(),
             pest_uses: self.pest_uses.clone(),
+            uri: self.uri.clone(),
         }
     }
 
@@ -224,6 +227,7 @@ impl FileContext {
             namespace_spans: self.namespace_spans.clone(),
             resolved_names: self.resolved_names.clone(),
             pest_uses: self.pest_uses.clone(),
+            uri: self.uri.clone(),
         }
     }
 

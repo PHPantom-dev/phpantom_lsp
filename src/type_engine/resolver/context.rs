@@ -349,6 +349,10 @@ pub(crate) struct FileCtx<'a> {
     /// and unit tests), in which case those answers are unavailable —
     /// not wrong.
     pub backend: Option<&'a Backend>,
+    /// The file's URI, which a relative `include` path, `__DIR__` and
+    /// `__FILE__` resolve against.  `None` where it is not known, in which
+    /// case no include is followed.
+    pub uri: Option<&'a str>,
 }
 
 impl<'a> FileCtx<'a> {
@@ -366,6 +370,7 @@ impl<'a> FileCtx<'a> {
             source_class_loader,
             source_imports: None,
             backend: None,
+            uri: None,
         }
     }
 
@@ -380,6 +385,11 @@ impl<'a> FileCtx<'a> {
     /// The same file with `backend` as the server state.
     pub(crate) fn with_backend(self, backend: Option<&'a Backend>) -> Self {
         Self { backend, ..self }
+    }
+
+    /// The same file with `uri` as its URI.
+    pub(crate) fn with_uri(self, uri: Option<&'a str>) -> Self {
+        Self { uri, ..self }
     }
 
     /// The same file with another source text and set of classes, as when

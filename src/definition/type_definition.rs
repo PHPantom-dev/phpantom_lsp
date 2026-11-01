@@ -313,7 +313,8 @@ fn resolve_variable_type_names(
             name,
             FileCtx::new(content, &ctx.classes, class_loader, source_class_loader)
                 .with_imports(Some(&ctx.use_map))
-                .with_backend(backend),
+                .with_backend(backend)
+                .with_uri(ctx.uri.as_deref()),
             current_class,
             cursor_offset,
         )

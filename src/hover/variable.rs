@@ -134,7 +134,8 @@ impl Backend {
                     &var_name,
                     FileCtx::new(content, &ctx.classes, &resolved_class_loader, &class_loader)
                         .with_imports(Some(&ctx.use_map))
-                        .with_backend(Some(self)),
+                        .with_backend(Some(self))
+                        .with_uri(ctx.uri.as_deref()),
                     current_class,
                     cursor_offset,
                 )

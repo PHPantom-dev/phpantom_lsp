@@ -345,6 +345,7 @@ impl Backend {
                         &source_class_loaders,
                         &file_ctx.block_imports(),
                         Some(self),
+                        file_ctx.uri.as_deref(),
                         loaders,
                         Some(&self.resolved_class_cache),
                         &scope_offsets,
@@ -360,6 +361,7 @@ impl Backend {
                         &source_class_loaders,
                         &file_ctx.block_imports(),
                         Some(self),
+                        file_ctx.uri.as_deref(),
                         loaders,
                         Some(&self.resolved_class_cache),
                     );

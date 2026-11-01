@@ -134,6 +134,7 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
                                 &source_class_loaders.as_dyn(),
                                 &file_ctx.block_imports(),
                                 Some(backend),
+                                Some(uri),
                                 owned_loaders.loaders(),
                                 Some(&backend.resolved_class_cache),
                             );

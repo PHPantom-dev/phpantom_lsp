@@ -283,7 +283,8 @@ fn resolve_return_and_push(
                         class_loader,
                     )
                     .with_imports(Some(file_ctx.use_map_at(start as u32)))
-                    .with_backend(Some(backend)),
+                    .with_backend(Some(backend))
+                    .with_uri(file_ctx.uri.as_deref()),
                     current_class,
                     start as u32,
                 )

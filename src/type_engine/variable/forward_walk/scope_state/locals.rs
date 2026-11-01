@@ -93,6 +93,11 @@ impl Locals {
         self.map.keys()
     }
 
+    /// The entries for bare variable names.
+    pub fn variables(&self) -> impl Iterator<Item = (&Atom, &Vec<ResolvedType>)> {
+        self.map.iter().filter(|(key, _)| !is_compound(key))
+    }
+
     /// Whether any key holds a different entry here than in `other`.
     ///
     /// Entries are compared by identity, so this is cheap between a scope

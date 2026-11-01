@@ -758,7 +758,8 @@ impl Backend {
                     &class_loader,
                 )
                 .with_imports(Some(&file_ctx.use_map))
-                .with_backend(Some(self)),
+                .with_backend(Some(self))
+                .with_uri(file_ctx.uri.as_deref()),
                 crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset),
                 offset,
             )

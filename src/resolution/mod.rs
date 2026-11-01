@@ -73,6 +73,7 @@ mod classes;
 mod constants;
 mod external_stubs;
 mod functions;
+mod include_paths;
 mod inflight;
 mod lazy_parse;
 mod loaders;
