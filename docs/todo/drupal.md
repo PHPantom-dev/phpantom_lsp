@@ -28,35 +28,6 @@ within the same impact tier.
 
 ---
 
-## DR1. Drupal demo project and a real-world baseline
-
-**Impact: High · Complexity: Low-Medium**
-
-Every other Drupal item is measured against this one. Without a demo
-project and a baseline from real code, Drupal support would be built
-untested and could regress silently.
-
-- **`examples/drupal/`**: a `drupal/recommended-project` site with one
-  custom module and one theme, in the same shape as `examples/laravel/`
-  and `examples/symfony/`, with "Try:" comments at each site and a
-  README listing what to try. The module declares a service, a route,
-  a content entity type, a hook implementation (procedural and
-  `#[Hook]`), and a render array with a theme hook.
-- **Runtime assertions**: an `assertions.php` that checks the demo's
-  claims against real Drupal. Decide whether that bootstraps a kernel
-  (core supports SQLite, so no server is needed) or only checks what
-  can be read without booting.
-- **A real-world baseline**: run `analyze` on an actively maintained
-  contrib module and a site build, bucket the diagnostics by cause, and
-  file what Drupal-specific gaps they show. That ranks the rest of this
-  document by what actually breaks.
-- **What already works**: the Symfony support reads some of the same
-  shapes Drupal uses (event subscribers' `getSubscribedEvents()` maps,
-  `Class::method` strings in YAML). Check each against the demo and note
-  it in the README, so the items below only build what is missing.
-
----
-
 ## DR2. Service IDs from `*.services.yml`
 
 **Impact: High · Complexity: Medium**

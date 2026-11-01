@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| DR1 | [Drupal demo project and a real-world baseline](todo/drupal.md#dr1-drupal-demo-project-and-a-real-world-baseline) | High        | Low-Medium  |
 | DR9 | [Drupal directories outside `contrib` and `custom`](todo/drupal.md#dr9-drupal-directories-outside-contrib-and-custom) | Medium-High | Low-Medium |
 | DR2 | [Service IDs from `*.services.yml`](todo/drupal.md#dr2-service-ids-from-servicesyml) | High        | Medium      |
 | DR5 | [Route names](todo/drupal.md#dr5-route-names) | Medium-High | Medium      |
@@ -124,7 +123,6 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| DR1 | [Drupal demo project and a real-world baseline](todo/drupal.md#dr1-drupal-demo-project-and-a-real-world-baseline) | High        | Low-Medium  |
 | F59 | [Send Twig, YAML, and XML documents to the server from Zed](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed) (Zed PR) | Medium | Low |
 | DR9 | [Drupal directories outside `contrib` and `custom`](todo/drupal.md#dr9-drupal-directories-outside-contrib-and-custom) | Medium-High | Low-Medium |
 | DR11 | [Form and render callbacks](todo/drupal.md#dr11-form-and-render-callbacks) | Low-Medium | Low-Medium |
