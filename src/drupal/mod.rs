@@ -35,6 +35,16 @@ fn is_services_file_name(path: &str) -> bool {
     name == "services.yml" || name.ends_with(".services.yml")
 }
 
+/// The folders of a web root that Composer installs and overwrites: core,
+/// and the contributed extensions and libraries.
+const READ_ONLY_DIRS: [&str; 5] = [
+    "core",
+    "modules/contrib",
+    "themes/contrib",
+    "profiles/contrib",
+    "libraries",
+];
+
 /// Whether a static call of `method` on `class`, a resolved class name,
 /// looks a service up by its ID: `\Drupal::service()` or
 /// `\Drupal::hasService()`.  Only the global `Drupal` class counts.
@@ -99,6 +109,23 @@ impl Backend {
         if !roots.iter().any(|root| root == web_root) {
             roots.push(web_root.to_path_buf());
         }
+    }
+
+    /// Whether `uri` is a file of Drupal core or of a contributed extension,
+    /// which Composer overwrites on its next update: read for what it
+    /// declares, but never edited.
+    pub(crate) fn is_drupal_read_only_uri(&self, uri: &str) -> bool {
+        if !self.is_drupal_project() {
+            return false;
+        }
+        let Some(path) = crate::util::uri_to_path(uri) else {
+            return false;
+        };
+        self.drupal.web_roots.read().iter().any(|root| {
+            READ_ONLY_DIRS
+                .iter()
+                .any(|dir| path.starts_with(root.join(dir)))
+        })
     }
 
     /// Whether `uri` is a file a Drupal project loads services from: a

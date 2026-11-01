@@ -149,3 +149,25 @@ fn a_test_modules_services_are_read_only_while_it_is_open() {
         vec!["fixture.thing".to_string()]
     );
 }
+
+#[test]
+fn core_and_contrib_are_read_only_and_custom_code_is_not() {
+    let (backend, dir) = drupal_backend(&[]);
+    for (path, read_only) in [
+        ("web/core/lib/Drupal.php", true),
+        ("web/modules/contrib/token/token.services.yml", true),
+        ("web/themes/contrib/gin/gin.theme", true),
+        ("web/profiles/contrib/demo/demo.profile", true),
+        ("web/libraries/chart/chart.php", true),
+        ("web/modules/custom/acme/acme.services.yml", false),
+        ("web/themes/custom/acme_theme/acme_theme.theme", false),
+        ("web/sites/default/services.yml", false),
+        ("tools/core/script.php", false),
+    ] {
+        assert_eq!(
+            backend.is_drupal_read_only_uri(&uri(dir.path(), path)),
+            read_only,
+            "{path}"
+        );
+    }
+}

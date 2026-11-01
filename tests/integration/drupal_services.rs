@@ -420,3 +420,49 @@ function run(): void {
     .await;
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[tokio::test]
+async fn rename_leaves_core_alone() {
+    let consumer = r#"<?php
+namespace Drupal\acme;
+
+final class Renamed {
+    public function run(): Greeter {
+        \Drupal::service('config.factory');
+        return new Greeter();
+    }
+}
+"#;
+    let core_services =
+        "services:\n  config.factory:\n    class: Drupal\\Core\\Config\\ConfigFactory\n";
+    let path = "web/modules/custom/acme/src/Renamed.php";
+    let (backend, dir) = workspace(&[
+        ("web/core/core.services.yml", core_services),
+        (SERVICES_PATH, SERVICES),
+        (path, consumer),
+    ])
+    .await;
+    let php = uri_for(&dir, path);
+
+    let core_class = position_in(consumer, "Drupal::service", 2);
+    assert!(
+        crate::common::prepare_rename(&backend, &php, core_class.line, core_class.character)
+            .await
+            .is_none(),
+        "the core class \\Drupal was offered for rename"
+    );
+    let core_service = position_in(consumer, "config.factory", 2);
+    assert!(
+        crate::common::prepare_rename(&backend, &php, core_service.line, core_service.character)
+            .await
+            .is_none(),
+        "a core service ID was offered for rename"
+    );
+    let custom_class = position_in(consumer, "new Greeter", 5);
+    assert!(
+        crate::common::prepare_rename(&backend, &php, custom_class.line, custom_class.character)
+            .await
+            .is_some(),
+        "a custom class could not be renamed"
+    );
+}

@@ -735,15 +735,17 @@ impl Backend {
     }
 
     /// Check whether the symbol under the cursor is defined in a vendor
-    /// file.
+    /// file, or in Drupal core or a contributed extension, which Composer
+    /// installs into the web root instead.
     ///
     /// We check this by resolving the definition location.  If the
     /// definition URI starts with the vendor prefix, the rename is
     /// rejected.
     fn is_vendor_symbol(&self, uri: &str, content: &str, position: Position) -> bool {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
+        let is_drupal = self.is_drupal_project();
 
-        if vendor_prefixes.is_empty() {
+        if vendor_prefixes.is_empty() && !is_drupal {
             return false;
         }
 
@@ -752,6 +754,7 @@ impl Backend {
             if vendor_prefixes
                 .iter()
                 .any(|p| def_uri.starts_with(p.as_str()))
+                || (is_drupal && self.is_drupal_read_only_uri(&def_uri))
             {
                 return true;
             }
