@@ -934,45 +934,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b695-a-primitive-cast-on-a-nullable-column-drops-the-null" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B695. A primitive cast on a nullable column drops the <code>null</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b696-a-relation-whose-related-class-comes-from-config-is-typed-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B696. A relation whose related class comes from <code>config()</code> is typed <code>Model</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b697-analyze-and-the-editor-disagree-on-a-nullable-updated_at" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B697. <code>analyze</code> and the editor disagree on a nullable <code>updated_at</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1619,45 +1580,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b695-a-primitive-cast-on-a-nullable-column-drops-the-null" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B695. A primitive cast on a nullable column drops the <code>null</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b696-a-relation-whose-related-class-comes-from-config-is-typed-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B696. A relation whose related class comes from <code>config()</code> is typed <code>Model</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b697-analyze-and-the-editor-disagree-on-a-nullable-updated_at" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B697. <code>analyze</code> and the editor disagree on a nullable <code>updated_at</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1806,51 +1728,7 @@ seconds a rate-limit message names.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h3 id="b695-a-primitive-cast-on-a-nullable-column-drops-the-null">B695. A primitive cast on a nullable column drops the <code>null</code><a class="headerlink" href="#b695-a-primitive-cast-on-a-nullable-column-drops-the-null" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// schema: `is_franchise` tinyint(1) DEFAULT NULL</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">class AdminUser extends Model</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">{</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    protected $casts = ['is_franchise' =&gt; 'boolean'];</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">}</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">$user-&gt;is_franchise;   // want bool|null, get bool</span>
-</code></pre></div>
-<p><code>Model::castAttribute()</code> returns a <code>null</code> value untouched for every
-primitive cast type (<code>bool</code>, <code>int</code>, <code>float</code>, <code>string</code>, <code>array</code>, dates, …),
-so a nullable column keeps its <code>null</code> through the cast. We take the cast's
-type and drop the column's nullability, so a null check on the property
-reads as redundant and the <code>null</code> case is never offered. Laravel Idea gets
-this right from the same schema.</p>
-<p>Found on a Laravel project's admin user model, whose schema dump marks
-the column nullable.</p>
-<h3 id="b696-a-relation-whose-related-class-comes-from-config-is-typed-model">B696. A relation whose related class comes from <code>config()</code> is typed <code>Model</code><a class="headerlink" href="#b696-a-relation-whose-related-class-comes-from-config-is-typed-model" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// spatie/laravel-permission's HasRoles</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">public function roles(): BelongsToMany</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">{</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    return $this-&gt;morphToMany(config('permission.models.role'), 'model', …);</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">}</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">$user-&gt;roles;   // want Collection&lt;int, Role&gt;, get Collection&lt;int, Model&gt;</span>
-</code></pre></div>
-<p>The related class is a <code>config()</code> value, and <code>config/permission.php</code> holds
-a literal <code>Role::class</code> under that key. We already type config values, but
-relationship body inference does not take a class from one, so every
-relation declared this way (spatie/laravel-permission's <code>roles</code> and
-<code>permissions</code> are the common case) falls back to the base <code>Model</code>. Laravel
-Idea resolves both to the configured classes.</p>
-<h3 id="b697-analyze-and-the-editor-disagree-on-a-nullable-updated_at">B697. <code>analyze</code> and the editor disagree on a nullable <code>updated_at</code><a class="headerlink" href="#b697-analyze-and-the-editor-disagree-on-a-nullable-updated_at" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>On a model whose schema dump declares <code>updated_at timestamp NULL</code>, the
-same binary reports <code>$model-&gt;updated_at</code> as <code>Illuminate\Support\Carbon</code>
-from <code>analyze</code> and as <code>null|Illuminate\Support\Carbon</code> in the editor
-(the schema is right, so the editor is). <code>created_at</code> (<code>NOT NULL</code>) is
-<code>Carbon</code> in both. Some part of the model's column sources is loaded
-differently, or in a different order, between the CLI and the language
-server. Find which, and make both read the schema the same way.</p>
-<p>Found on a Laravel project's admin user model by probing the same file
-both ways.</p>
+<p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
@@ -1858,13 +1736,13 @@ both ways.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first">B704. A function declared in two files resolves to whichever is found first<a class="headerlink" href="#b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function __() {}</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function __() {}</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
 </code></pre></div>
 <p>WordPress core declares nineteen of its functions a second time as
 no-ops for its script loader. Calls across the project resolve to the
