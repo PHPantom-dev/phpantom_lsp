@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::php_type::ShapeEntry;
+use crate::type_engine::type_ops::conditional::refinements::is_value_refinement;
 
 /// Extract the `(array, key, negated)` expressions of an
 /// `array_key_exists($k, $arr)` check, unwrapping parentheses and a
@@ -462,6 +463,17 @@ pub(super) fn apply_assertion_to_key(
                         Some(member.clone())
                     } else if member.is_mixed() || asserted_type.is_subtype_of(member) {
                         Some(asserted_type.clone())
+                    } else if is_value_refinement(member) && is_value_refinement(asserted_type) {
+                        // Neither refinement implies the other, but they
+                        // overlap: a `lowercase-string` asserted
+                        // `non-falsy-string` is both.
+                        let parts = member
+                            .intersection_members()
+                            .into_iter()
+                            .chain(asserted_type.intersection_members())
+                            .cloned()
+                            .collect();
+                        Some(PhpType::intersection(parts).simplified())
                     } else {
                         None
                     }

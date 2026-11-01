@@ -817,6 +817,18 @@ fn template_argument_at_call(
         Argument::Named(named) => named.value,
     };
 
+    // `@param T $value` binds the template to the argument's own type, not
+    // to a class the argument names.
+    if parameters[param_idx]
+        .type_hint
+        .as_ref()
+        .is_some_and(|hint| matches!(hint.kind(), TypeKind::Named(n) if n == tpl_name))
+    {
+        let resolved =
+            crate::type_engine::variable::rhs_resolution::resolve_rhs_expression(arg_expr, ctx);
+        return (!resolved.is_empty()).then(|| crate::types::ResolvedType::types_joined(&resolved));
+    }
+
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
         let fqn = ctx.written_names().resolve_class(&class_name);

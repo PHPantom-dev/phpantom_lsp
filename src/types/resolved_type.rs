@@ -1023,15 +1023,18 @@ fn holds_only_mixed(ty: &PhpType) -> bool {
 /// carries `?Base`, and `Base&Verbose` is still one of the values that
 /// describes.
 ///
-/// Only a part named verbatim by the covering type counts.  Widening a
-/// part to its parent would need the class loader, and the case that
-/// matters (a branch narrowing the very type the sibling path carries)
-/// names it exactly.
+/// A class part only counts when the covering type names it verbatim.
+/// Widening a part to its parent would need the class loader, and the case
+/// that matters (a branch narrowing the very type the sibling path carries)
+/// names it exactly.  A scalar refinement is covered by the scalar it
+/// refines: `lowercase-string&non-falsy-string` under `string`.
 fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
     let TypeKind::Intersection(parts) = covered.kind() else {
         return false;
     };
-    parts.iter().any(|part| part.is_subset_of(cover))
+    parts
+        .iter()
+        .any(|part| part.is_subset_of(cover) || runtime_values_covered_by(part, cover))
 }
 
 /// Whether every scalar value `covered` can hold is one `cover` already

@@ -35,7 +35,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::ParameterInfo;
 
 mod arg_form;
-mod refinements;
+pub(in crate::type_engine) mod refinements;
 mod text_args;
 mod without_args;
 

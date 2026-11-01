@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Type assertions on refined strings.** A `@phpstan-assert` that refines a string the value already refines another way, such as `non-falsy-string` on a `lowercase-string`, now narrows to both instead of `never`. A template the assertion names takes the type of the argument it was bound to, so `wp_is_uuid('foo')` keeps `'foo'`, and the refinement is dropped again after the `if`.
 - **Type guards on an impure call don't narrow the next call.** After `if (is_wp_error(get_password_reset_key($user)))`, a second call to a function marked `@phpstan-impure` keeps its full return type.
 - **`!empty()` on a property proves the property exists.** `!empty($x->prop)`, or returning early on `empty($x->prop)`, now allows `$x->prop` on every member of a union, the same way `isset($x->prop)` does.
 - **Object casts keep the array's shape.** `(object) ['key' => 'value']` is typed `object{key: 'value'}&stdClass` when written straight into a call's arguments too, so a template or conditional return type sees its properties, and the shape keeps the values the array was written with.

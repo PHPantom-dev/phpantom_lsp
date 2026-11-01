@@ -65,30 +65,6 @@ matches PHP 8 throwing a `ValueError` on a negative.
 Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.
 
-### B713. `@phpstan-assert` narrowing intersects refined string types wrongly
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/**
- * @template TUuid of string
- * @param TUuid $uuid
- * @phpstan-assert-if-true =TUuid&lowercase-string&non-falsy-string $uuid
- */
-function wp_is_uuid($uuid, $version = null) { … }
-
-$uuid = 'foo';
-if (wp_is_uuid($uuid)) {
-    $uuid;   // want 'foo', get never
-}
-```
-
-Narrowing a `lowercase-string` by `=non-falsy-string`, or the literal
-`'foo'` by `lowercase-string&non-falsy-string`, gives `never`, though
-`'foo'` is both; and a template in the asserted type (`TUuid` above) is
-left in the narrowed type instead of being replaced by what it was bound
-to. 6 assertions.
-
 ## Array types
 
 No outstanding items.

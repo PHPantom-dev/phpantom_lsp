@@ -137,7 +137,10 @@ pub(super) fn int_condition_result(arg: &PhpType, condition: &PhpType) -> Option
 ///
 /// `class-string` and `callable-string` are not among them, since whether a
 /// literal names a class or a function depends on the code base.
-fn is_value_refinement(ty: &PhpType) -> bool {
+///
+/// Any two of them share a value (`'1'` is every one), so their
+/// intersection is never empty.
+pub(in crate::type_engine) fn is_value_refinement(ty: &PhpType) -> bool {
     match ty.kind() {
         TypeKind::Named(name) => matches!(
             name.to_ascii_lowercase().as_str(),
