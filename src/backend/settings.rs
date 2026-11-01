@@ -22,6 +22,18 @@ impl Backend {
         self.workspace.config.lock().diagnostics.enabled()
     }
 
+    /// Whether a type mismatch that only a `null` or `false` causes is
+    /// reported; see
+    /// [`DiagnosticsConfig::possibly_empty_mismatches_enabled`](config::DiagnosticsConfig::possibly_empty_mismatches_enabled).
+    /// Reads the one flag without cloning the whole config.
+    pub(crate) fn possibly_empty_mismatches_enabled(&self) -> bool {
+        self.workspace
+            .config
+            .lock()
+            .diagnostics
+            .possibly_empty_mismatches_enabled()
+    }
+
     /// The directory symlinks the workspace walks have indexed through.
     ///
     /// Walks report into it as they discover links; the watcher

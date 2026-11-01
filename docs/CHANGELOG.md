@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **A value that may only be `null` or `false` is no longer reported by default.** Passing a `string|false` to a `string` parameter, returning it from a `string` function or assigning it to a `string` property only fails if the value turns out empty. Set `possibly-empty-mismatches = true` under `[diagnostics]` to report these as errors. It replaces `downgrade-nullable-argument-mismatch`, which is gone. A mismatch where some other member fails is still reported. Contributed by @stubbedev.
+- **A type mismatch that only a possible `null` or `false` causes is no longer reported by default.** Passing a `string|false` to a `string` parameter, returning it from a `string` function or assigning it to a `string` property only fails if the value turns out empty. Set `possibly-empty-mismatches = true` under `[diagnostics]` to report these as errors. It replaces `downgrade-nullable-argument-mismatch`, which is gone. A mismatch where some other member fails is still reported. Contributed by @stubbedev.
 - **Faster analysis of Laravel projects.** Classes the project's Laravel setup adds to, such as the auth guard, the `Storage` facade, and classes with macros or pivot accessors, are no longer rebuilt every time they are looked up. Analysing a large Laravel application takes about an eighth less CPU time.
 - **Faster diagnostics after each edit.** The diagnostics for an edited file reuse the parse the edit already made, instead of parsing the file twice more.
 - **Faster diagnostics in Blade templates.** A template is parsed once per diagnostic pass instead of once per check.

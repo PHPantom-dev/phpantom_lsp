@@ -350,10 +350,7 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
-        let report_possibly_empty = self
-            .config()
-            .diagnostics
-            .possibly_empty_mismatches_enabled();
+        let report_possibly_empty = self.possibly_empty_mismatches_enabled();
         out.extend(collect_type_check(
             self,
             &ctx.file,

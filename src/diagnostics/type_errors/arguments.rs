@@ -312,12 +312,9 @@ impl Backend {
             content,
             class_loader: loaders.resolved_class_loader(),
             strict_types,
-            // Read once for the whole file: `config()` clones the config
-            // behind a lock, and the flag cannot change mid-pass.
-            report_possibly_empty: self
-                .config()
-                .diagnostics
-                .possibly_empty_mismatches_enabled(),
+            // Read once for the whole file, so the flag cannot change
+            // mid-pass.
+            report_possibly_empty: self.possibly_empty_mismatches_enabled(),
         };
 
         // Call-expression resolution cache: avoids re-resolving the
