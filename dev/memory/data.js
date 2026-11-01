@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793504443270,
+  "lastUpdate": 1793518067572,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -7941,6 +7941,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 98.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "44d6925a863aceb9258661e54d0709c9375da65a",
+          "message": "The last of repeated `@phpstan-return` and `@phpstan-param` tags wins",
+          "timestamp": "2026-11-01T08:09:07+01:00",
+          "tree_id": "e10c9ad8b0eb9e9910b9d15385d64568b8194ef0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/44d6925a863aceb9258661e54d0709c9375da65a"
+        },
+        "date": 1793518055529,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 87.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 75.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 96.6,
             "unit": "MiB"
           }
         ]
