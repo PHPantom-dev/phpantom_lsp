@@ -155,7 +155,11 @@ pub fn resolve_conditional_without_args_and_defaults(
                 recurse(else_type)
             }
         }
-        _ => Some(decide_nested(conditional, &recurse)),
+        _ => Some(decide_nested(
+            conditional,
+            &recurse,
+            this_ctx.map_or(&|_| None, |ctx| ctx.class_loader),
+        )),
     }
 }
 

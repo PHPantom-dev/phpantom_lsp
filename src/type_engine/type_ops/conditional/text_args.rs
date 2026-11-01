@@ -88,7 +88,11 @@ impl TextArgs<'_> {
             ..
         } = *self;
         let TypeKind::Conditional(cond) = conditional.kind() else {
-            return Some(decide_nested(conditional, &|c| self.resolve(c)));
+            return Some(decide_nested(
+                conditional,
+                &|c| self.resolve(c),
+                class_loader,
+            ));
         };
         let target = cond.param.as_str();
 

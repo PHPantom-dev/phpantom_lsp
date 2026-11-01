@@ -550,12 +550,90 @@ fn class_condition_result(
 /// then branch is `void|null`, and an intersection's decided members absorb
 /// their supertypes. A conditional `decide` cannot settle reads as the
 /// union of its branches.
-fn decide_nested(ty: &PhpType, decide: &dyn Fn(&PhpType) -> Option<PhpType>) -> PhpType {
+fn decide_nested(
+    ty: &PhpType,
+    decide: &dyn Fn(&PhpType) -> Option<PhpType>,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> PhpType {
     if !ty.contains_conditional() {
         return ty.clone();
     }
-    ty.map_children(&|child| decide(child).unwrap_or_else(|| child.conditionals_as_branch_unions()))
-        .simplified()
+    let decided = ty.map_children(&|child| {
+        decide(child).unwrap_or_else(|| child.conditionals_as_branch_unions())
+    });
+    meet_intersected_unions(&decided, class_loader).simplified()
+}
+
+/// `ty` with every intersection that has a union among its members
+/// distributed over it, and each combination met.
+///
+/// Two decided conditionals intersected (`(array|\WP_Term) &
+/// (\WP_Term|\WP_Error|null)`) leave an intersection of unions, and only
+/// the values both sides share remain: `WP_Term&WP_Term` is `WP_Term`, and
+/// a pair no value satisfies (`array&WP_Term`, `WP_Term&null`, two classes
+/// neither of which extends the other) drops out.
+fn meet_intersected_unions(ty: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> PhpType {
+    let ty = ty.map_children(&|child| meet_intersected_unions(child, class_loader));
+    let TypeKind::Intersection(members) = ty.kind() else {
+        return ty;
+    };
+    if !members
+        .iter()
+        .any(|m| matches!(m.kind(), TypeKind::Union(_) | TypeKind::Nullable(_)))
+    {
+        return ty;
+    }
+    let mut met = vec![PhpType::mixed()];
+    let null = PhpType::null();
+    for member in members {
+        let alternatives = match member.kind() {
+            TypeKind::Nullable(inner) => vec![inner, &null],
+            _ => member.union_members(),
+        };
+        met = met
+            .iter()
+            .flat_map(|a| alternatives.iter().filter_map(|b| meet(a, b, class_loader)))
+            .collect();
+    }
+    match met.len() {
+        0 => PhpType::never(),
+        1 => met.pop().unwrap(),
+        _ => PhpType::union(met),
+    }
+}
+
+/// The values `a` and `b` share: the narrower of the two when one holds the
+/// other, `None` when they share none, and `a&b` when that is unknown.
+fn meet(a: &PhpType, b: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> Option<PhpType> {
+    if a.is_mixed() {
+        return Some(b.clone());
+    }
+    if b.is_mixed() {
+        return Some(a.clone());
+    }
+    if a.is_untyped() || b.is_untyped() {
+        return Some(PhpType::intersection(vec![a.clone(), b.clone()]));
+    }
+    let a_in_b = type_condition_result(a, b, class_loader);
+    if a_in_b == Some(true) {
+        return Some(a.clone());
+    }
+    let b_in_a = type_condition_result(b, a, class_loader);
+    if b_in_a == Some(true) {
+        return Some(b.clone());
+    }
+    // A name no class answers to may be a template parameter still unbound,
+    // which may stand for a scalar as well as an instance.
+    let unknown_class = |t: &PhpType| {
+        !t.is_object()
+            && type_category(t) == Some("object")
+            && t.base_name()
+                .is_some_and(|name| class_loader(Fqn::new(name)).is_none())
+    };
+    if (a_in_b == Some(false) || b_in_a == Some(false)) && !unknown_class(a) && !unknown_class(b) {
+        return None;
+    }
+    Some(PhpType::intersection(vec![a.clone(), b.clone()]))
 }
 
 /// What `cond` answers when its condition cannot be decided, with each

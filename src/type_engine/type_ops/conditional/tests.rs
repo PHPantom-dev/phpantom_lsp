@@ -1286,3 +1286,56 @@ fn array_condition_compares_keys_and_values() {
     );
     assert_eq!(shape_condition("list<int>", "array<int>"), Some(true));
 }
+
+/// Resolve `return_type` against `text_args` with [`eloquent_loader`]
+/// answering for the classes it names.
+fn resolve_with_classes(return_type: &str, text_args: &str) -> Option<String> {
+    let ty = PhpType::parse(return_type);
+    let params = [param("$id"), param_with_default("$output", "'OBJECT'")];
+    let loader: &ResolvedClassLoader<'_> = &eloquent_loader;
+    let tpl = TemplateContext::with_params(&[]);
+    resolve_conditional_with_text_args_and_defaults(
+        &ty,
+        &params,
+        text_args,
+        None,
+        ConditionalClassContext::default(),
+        loader,
+        &tpl,
+    )
+    .map(|t| t.to_string())
+}
+
+/// Two decided conditionals intersected keep only the values both sides
+/// share: equal members meet in themselves, a narrower member in itself,
+/// and a pair no value satisfies drops out.
+#[test]
+fn intersection_of_decided_unions_is_met() {
+    let ty = "($id is int ? array<array-key, mixed>|Order : array<array-key, mixed>|Order|Model|null) \
+              & ($output is 'ARRAY_A' ? array<string, mixed>|Model|null : Order|Model|null)";
+    assert_eq!(resolve_with_classes(ty, "1").as_deref(), Some("Order"));
+    assert_eq!(
+        resolve_with_classes(ty, "1, 'ARRAY_A'").as_deref(),
+        Some("array<string, mixed>|Order")
+    );
+    assert_eq!(
+        resolve_with_classes(ty, "'x'").as_deref(),
+        Some("Order|Model|null")
+    );
+    // `Collection` and `Model` are unrelated classes, so no value is both.
+    assert_eq!(
+        resolve_with_classes(
+            "($output is 'OBJECT' ? Collection|string : int) & (Model|string)",
+            "1"
+        )
+        .as_deref(),
+        Some("string")
+    );
+    // A name no class answers to may be an unbound template, so it is not
+    // ruled out beside a scalar.
+    assert_eq!(
+        resolve_with_classes("($output is 'OBJECT' ? T|null : int) & (string|null)", "1")
+            .as_deref(),
+        Some("T&string|null")
+    );
+}

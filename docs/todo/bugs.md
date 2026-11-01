@@ -63,24 +63,6 @@ bool|string|int`) is not clamped to the bound; and the branch a condition
 picks does not narrow the template it tested (`T` is
 `non-falsy-string` inside the true branch above). 23 assertions.
 
-### B718. An intersection of unions is not reduced to the members they share
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @phpstan-return ($category is object ? array<array-key, mixed>|\WP_Term : array<array-key, mixed>|\WP_Term|\WP_Error|null) & ($output is 'ARRAY_A' ? array<string, mixed>|\WP_Error|null : ($output is 'ARRAY_N' ? array<int, mixed>|\WP_Error|null : \WP_Term|\WP_Error|null)) */
-function get_category($category, $output = OBJECT, $filter = 'raw') { … }
-
-get_category($object);   // want WP_Term, get (array<array-key, mixed>|WP_Term|WP_Error|null)&(WP_Term|WP_Error|null)
-```
-
-Both conditionals are decided, but the intersection of the two unions they
-leave stays as written. It has to be distributed over its members and each
-pair met: `WP_Term&WP_Term` is `WP_Term`, `array<array-key, mixed>&array<string,
-mixed>` is `array<string, mixed>`, and a pair no value can satisfy
-(`WP_Term&null`, two unrelated classes) drops out. 8 assertions, from
-`get_category()`.
-
 ### B719. A condition on `value-of<T>` or `key-of<T>` is judged against the argument itself
 
 **Impact: Low-Medium · Complexity: Low-Medium**
