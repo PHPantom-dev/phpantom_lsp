@@ -296,23 +296,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B720. An `(object)` cast written as an argument is typed `object`
-
-**Impact: Low · Complexity: Low**
-
-```php
-stripslashes_from_strings_only((object) ['key' => 'value']);
-// want object{key: 'value'}&stdClass, get object
-```
-
-The argument's type is read off its text (`arg_text_types.rs`), which
-answers a cast by its keyword alone, so the shape `(object)` gives an
-array is lost. Assigned to a variable first, the same expression goes
-through the shared resolver and keeps it, though with its values
-widened (`object{key: string}&stdClass`). Read the cast's operand
-through the shared resolver, and keep the literal values the way an
-array literal does. 1 assertion, from `stripslashes_from_strings_only()`.
-
 ### B721. An included file does not see the including scope's variables
 
 **Impact: Low · Complexity: Medium**

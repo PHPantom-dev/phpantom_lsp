@@ -148,8 +148,9 @@ namespace PsalmTest_return_type_8 {
 
     // PHPantom is more precise than Psalm here: an object cast always
     // instantiates stdClass, so the result keeps that class identity
-    // alongside the shape.
-    assertType('object{a: int}&stdClass', $obj);
+    // alongside the shape, and, like PHPStan, it keeps the shape's
+    // literal values.
+    assertType('object{a: 1}&stdClass', $obj);
 }
 
 // Test: arrayCombine

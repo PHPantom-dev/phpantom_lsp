@@ -15609,7 +15609,7 @@ fn hover_object_cast_of_a_non_empty_array_keeps_stdclass() {
     let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $obj");
     let text = hover_text(&hover);
     assert!(
-        text.contains("object{foo: int}") && text.contains("stdClass"),
+        text.contains("object{foo: 1}") && text.contains("stdClass"),
         "a non-empty array cast to object should keep stdClass alongside the shape, got: {text}"
     );
 }

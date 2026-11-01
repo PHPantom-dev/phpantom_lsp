@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Object casts keep the array's shape.** `(object) ['key' => 'value']` is typed `object{key: 'value'}&stdClass` when written straight into a call's arguments too, so a template or conditional return type sees its properties, and the shape keeps the values the array was written with.
 - **Intersected conditional return types.** A return type that intersects two conditionals now gives only the types both of them allow, so `get_category($term)` returns `WP_Term` and `get_category($term, ARRAY_A)` an `array<string, mixed>` instead of the intersection as written.
 - **Conditions over refined types.** A conditional return type whose condition is a refined type, such as `int<min, 0>`, `non-falsy-string`, `array<int, mixed>` or `empty`, now picks the branch the argument really takes. WordPress functions such as `get_user()`, `absint()`, `has_shortcode()`, `size_format()` and `wp_unique_id()` now return what their arguments ask for.
 - **Conditional return types inside a union, an intersection or a generic.** A return type such as `false|($output is 'ARRAY_A' ? array : WP_Term)` or `($display is true ? void : string)|null` is now decided by the call's arguments like one that is a conditional throughout, instead of showing its source text. WordPress functions such as `get_term_by()`, `get_terms()`, `wp_get_post_terms()` and `edit_term_link()` now return what their arguments ask for.

@@ -45,7 +45,7 @@ use laravel::{
 };
 pub(crate) use literals::literal_arg_type;
 pub(super) use literals::{resolve_literal_type, resolve_operator_type};
-pub(super) use operands::resolve_cast_type;
+pub(super) use operands::{resolve_cast_type, split_cast};
 
 /// Bundled parameters for [`Backend::resolve_method_return_types_with_args`].
 ///
