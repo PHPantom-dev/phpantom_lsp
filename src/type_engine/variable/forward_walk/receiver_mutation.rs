@@ -229,6 +229,11 @@ pub(crate) fn forget_impure_call_results(
             forget_impure_call_results(bin.rhs, scope, ctx);
         }
         Expression::Call(call) => {
+            // A type guard narrows its argument: `is_wp_error(impure())`
+            // proves no more about the next `impure()` than a comparison.
+            for arg in call.get_argument_list().arguments.iter() {
+                forget_impure_call_results(arg.value(), scope, ctx);
+            }
             let Some(key) = condition_facts::expr_to_subject_key(condition) else {
                 return;
             };

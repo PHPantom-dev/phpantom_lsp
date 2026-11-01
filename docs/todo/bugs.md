@@ -89,26 +89,6 @@ Narrowing a `lowercase-string` by `=non-falsy-string`, or the literal
 left in the narrowed type instead of being replaced by what it was bound
 to. 6 assertions.
 
-### B714. An `@phpstan-impure` call is narrowed by an earlier check of the same call
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-/**
- * @return string|WP_Error
- * @phpstan-impure
- */
-function get_password_reset_key($user) { … }
-
-if (is_wp_error(get_password_reset_key($user))) {
-    get_password_reset_key($user);   // want string|WP_Error, get WP_Error
-}
-```
-
-A call to a function marked `@phpstan-impure` returns something new each
-time, so a check on one call says nothing about the next. We narrow the
-second call as if it were the first. 4 assertions.
-
 ## Array types
 
 No outstanding items.
