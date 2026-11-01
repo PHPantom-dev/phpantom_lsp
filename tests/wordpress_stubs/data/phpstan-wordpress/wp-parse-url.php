@@ -38,7 +38,7 @@ $value = wp_parse_url('http://def.abc#this-is-fragment', 9999);
 assertType('null', $value); // SKIP: a call on literal arguments is not evaluated
 
 $value = wp_parse_url($string, 9999);
-assertType('false|null', $value); // SKIP: a component no `PHP_URL_*` constant names is not told apart
+assertType('false|null', $value);
 
 $value = wp_parse_url($string, PHP_URL_PORT);
 assertType('int<0, 65535>|false|null', $value);

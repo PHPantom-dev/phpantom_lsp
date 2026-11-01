@@ -190,6 +190,17 @@ impl TextArgs<'_> {
         let constant_values = condition_constants_as_values(&cond.condition, class_loader, tpl);
         let condition = constant_values.as_ref().unwrap_or(&cond.condition);
 
+        // A condition naming a template no argument binds (`$status is
+        // TStatus`) asks about a type the call never pins down, so either
+        // branch may be taken. Read as a class name it would refute every
+        // argument.
+        if let TypeKind::Named(name) = condition.kind()
+            && tpl.params.contains(name)
+            && !tpl.bindings.iter().any(|(template, _)| template == name)
+        {
+            return self.undecided(cond);
+        }
+
         if matches!(condition.kind(), TypeKind::ClassString(_)) {
             let variadic_args = is_variadic.then(|| args.get(param_idx..).unwrap_or_default());
             self.class_string_condition(cond, condition, param_idx, variadic_args, arg_text)

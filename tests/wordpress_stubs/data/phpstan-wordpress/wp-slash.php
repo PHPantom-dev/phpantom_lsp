@@ -15,7 +15,7 @@ assertType("'foo\\\\\'s bar'", wp_slash("foo's bar")); // SKIP: a call on litera
 assertType('string', wp_slash($value));
 
 /** @var lowercase-string $value */
-assertType('lowercase-string', wp_slash($value)); // SKIP: `wp_slash()` does not keep a `lowercase-string`
+assertType('lowercase-string', wp_slash($value));
 
 assertType("'baz'|'foo\\\\\'s bar'", wp_slash(rand(0, 1) === 1 ? 'baz' : "foo's bar")); // SKIP: a call on literal arguments is not evaluated
 

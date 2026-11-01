@@ -8,8 +8,8 @@ use function wp_http_validate_url;
 use function PHPStan\Testing\assertType;
 
 assertType('false', wp_http_validate_url(''));
-assertType('false', wp_http_validate_url('1')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('false', wp_http_validate_url(Faker::numericString())); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('false', wp_http_validate_url('1'));
+assertType('false', wp_http_validate_url(Faker::numericString()));
 
 assertType("'url'|false", wp_http_validate_url('url'));
 

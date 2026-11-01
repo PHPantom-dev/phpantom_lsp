@@ -15,12 +15,12 @@ assertType('lowercase-string&non-empty-string&numeric-string', zeroise(Faker::in
 
 // $threshold > 0
 assertType('lowercase-string&non-empty-string', zeroise(-1, 5));
-assertType('lowercase-string&non-empty-string&numeric-string', zeroise(0, 5)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('lowercase-string&non-empty-string&numeric-string', zeroise(1, 5)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('lowercase-string&non-empty-string&numeric-string', zeroise(0, 5));
+assertType('lowercase-string&non-empty-string&numeric-string', zeroise(1, 5));
 assertType('lowercase-string&non-empty-string', zeroise(Faker::int(), 5));
 
 // $threshold is unknown
 assertType('lowercase-string&non-empty-string', zeroise(-1, Faker::nonNegativeInt()));
-assertType('lowercase-string&non-empty-string&numeric-string', zeroise(0, Faker::nonNegativeInt())); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('lowercase-string&non-empty-string&numeric-string', zeroise(1, Faker::nonNegativeInt())); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('lowercase-string&non-empty-string&numeric-string', zeroise(0, Faker::nonNegativeInt()));
+assertType('lowercase-string&non-empty-string&numeric-string', zeroise(1, Faker::nonNegativeInt()));
 assertType('lowercase-string&non-empty-string', zeroise(Faker::int(), Faker::nonNegativeInt()));

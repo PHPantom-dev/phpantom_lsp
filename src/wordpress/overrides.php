@@ -83,7 +83,7 @@ function wp_list_comments($args = array(), $comments = null) {}
 
 /**
  * A URL `parse_url()` cannot parse gives `false` whichever component is
- * asked for.
+ * asked for, and a component no `PHP_URL_*` constant names gives `null`.
  *
  * @phpstan-return (
  *     $component is -1
@@ -98,13 +98,21 @@ function wp_list_comments($args = array(), $comments = null) {}
  *               fragment?: string,
  *           }
  *         : (
- *             $component is 2
- *                 ? int<0, 65535>|false|null
- *                 : string|false|null
+ *             $component is int<0, 7>
+ *                 ? ($component is 2 ? int<0, 65535>|false|null : string|false|null)
+ *                 : false|null
  *         )
  * )
  */
 function wp_parse_url($url, $component = -1) {}
+
+/**
+ * Slashing adds backslashes and nothing else, so a lowercase string stays
+ * one.
+ *
+ * @phpstan-return (T is lowercase-string ? lowercase-string : (T is string ? string : (T is array ? array<key-of<T>, (value-of<T> is string ? string : value-of<T>)> : T)))
+ */
+function wp_slash($value) {}
 
 /**
  * Escapes each value of an array, nested arrays included, and gives `''`
@@ -140,6 +148,6 @@ function backslashit($value) {}
  * Collapses runs of whitespace and trims the ends, so a non-empty string
  * may come back empty.
  *
- * @phpstan-return ($str is lowercase-string&literal-string ? lowercase-string&literal-string : ($str is lowercase-string ? lowercase-string : ($str is literal-string ? literal-string : string)))
+ * @phpstan-return ($str is literal-string ? ($str is lowercase-string ? lowercase-string&literal-string : literal-string) : ($str is lowercase-string ? lowercase-string : string))
  */
 function normalize_whitespace($str) {}

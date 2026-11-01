@@ -12,9 +12,9 @@ $plugins = Faker::array();
 assertType('bool|WP_Error|null', delete_plugins($plugins));
 
 if ($plugins !== []) {
-    assertType('WP_Error|true|null', delete_plugins($plugins)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+    assertType('WP_Error|true|null', delete_plugins($plugins));
 }
 
 if ($plugins === []) {
-    assertType('false', delete_plugins($plugins)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+    assertType('false', delete_plugins($plugins));
 }

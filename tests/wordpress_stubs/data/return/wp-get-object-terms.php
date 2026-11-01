@@ -15,20 +15,20 @@ assertType('array<int, WP_Term>|WP_Error', wp_get_object_terms($objectIDs, $taxo
 assertType('array<int, WP_Term>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, []));
 
 // Empty $object_ids or $taxonomies
-assertType('array{}', wp_get_object_terms(0, $taxonomies, ['fields' => 'count'])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('array{}', wp_get_object_terms([], $taxonomies)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('array{}', wp_get_object_terms($objectIDs, '')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('array{}', wp_get_object_terms($objectIDs, [])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('array{}', wp_get_object_terms(0, $taxonomies, ['fields' => 'count']));
+assertType('array{}', wp_get_object_terms([], $taxonomies));
+assertType('array{}', wp_get_object_terms($objectIDs, ''));
+assertType('array{}', wp_get_object_terms($objectIDs, []));
 
 // Requesting names or slugs
-assertType('list<string>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'names'])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('list<string>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'slugs'])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('list<string>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'names']));
+assertType('list<string>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'slugs']));
 assertType('array<int, string>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'id=>name']));
 assertType('array<int, string>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'id=>slug']));
 
 // Requesting IDs
-assertType('list<int>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'ids'])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('list<int>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'tt_ids'])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('list<int>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'ids']));
+assertType('list<int>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'tt_ids']));
 
 // Requesting parent IDs
 assertType('array<int, int>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'id=>parent']));
@@ -39,7 +39,7 @@ assertType('array<int, WP_Term>|WP_Error', wp_get_object_terms($objectIDs, $taxo
 assertType('array<int, WP_Term>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'foo']));
 
 // Requesting a count
-assertType('numeric-string|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'count'])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('numeric-string|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => 'count']));
 
 // Unknown fields value
-assertType('array<int, int|string|WP_Term>|numeric-string|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => Faker::string()])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('list<string>|array<int, string>|array<int, int>|list<int>|numeric-string|array<int, WP_Term>|WP_Error', wp_get_object_terms($objectIDs, $taxonomies, ['fields' => Faker::string()])); // PHPantom keeps the array types apart where PHPStan merges them

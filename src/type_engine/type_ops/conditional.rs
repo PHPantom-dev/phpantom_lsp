@@ -35,6 +35,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::ParameterInfo;
 
 mod arg_form;
+mod refinements;
 mod text_args;
 mod without_args;
 
@@ -264,6 +265,9 @@ fn type_condition_result(
     if condition.shape_parts().is_some() && type_category(arg_ty) == Some("array") {
         return shape_condition_result(arg_ty, condition, class_loader);
     }
+    if let Some(keyword) = refinements::cross_category_keyword(condition) {
+        return refinements::keyword_condition_result(arg_ty, keyword);
+    }
     match (type_category(arg_ty), condition_category(condition)) {
         // `is non-empty-array` asks about the entries, which every array
         // type shares the category of: only a type that promises an entry
@@ -277,6 +281,12 @@ fn type_condition_result(
                 None
             }
         }
+        (Some("array"), Some("array")) => {
+            refinements::array_condition_result(arg_ty, condition, class_loader)
+                .unwrap_or(Some(true))
+        }
+        (Some("int"), Some("int")) => refinements::int_condition_result(arg_ty, condition),
+        (Some("string"), Some("string")) => refinements::string_condition_result(arg_ty, condition),
         (Some(arg_cat), Some(cond_cat)) => Some(arg_cat == cond_cat),
         // A condition that names no scalar category names a class, which the
         // class hierarchy decides (`$id is Arrayable`).

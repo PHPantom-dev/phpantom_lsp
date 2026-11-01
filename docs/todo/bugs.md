@@ -35,46 +35,6 @@ gets. The WordPress stubs use them on some 150 functions, and their own
 type tests are ported in `tests/wordpress_stubs/`: each entry below names how many of
 those assertions it accounts for.
 
-### B708. A condition over a refined type is misjudged
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @phpstan-return ($value is int<min, 0> ? false : WP_User|false) */
-function get_user($value) { … }
-get_user(0);           // want false, get WP_User|false
-
-/** @phpstan-return ($path is non-falsy-string ? bool : false) */
-function path_is_absolute($path) { … }
-path_is_absolute('foo');   // want bool, get false
-
-/** @phpstan-return ($data is array<int, mixed> ? true : false) */
-function wp_is_numeric_array($data) { … }
-wp_is_numeric_array(['key' => 'value']);   // want false, get true
-```
-
-The check that decides a condition handles plain types and literals, and
-gets these wrong:
-
-- integer ranges (`int<min, 0>`, `int<min, -1>`) against an integer
-  literal or another range;
-- refined strings (`non-empty-string`, `non-falsy-string`,
-  `lowercase-string`, `numeric-string`, `literal-string`) against a
-  literal or a refined string that is one (a `lowercase-string`
-  parameter against `is lowercase-string`), which is judged not to be,
-  also under `is not`;
-- an array against a refined string, which is left undecided rather
-  than ruled out;
-- `scalar`, which a literal `'a'`, `1` or `true` is judged not to be;
-- `numeric` and `empty`, which match nothing;
-- `resource` and `object`, which are not ruled out of `string`;
-- the key type of `array<K, V>`, which is ignored.
-
-126 assertions, from `absint()`, `has_shortcode()`, `size_format()`,
-`validate_file()`, `WP_Dependencies::query()`, `paginate_links()`,
-`trailingslashit()`, `wp_unique_id()`, `wp_get_object_terms()` and
-others.
-
 ### B710. A conditional over a method template ignores its bound and does not narrow it
 
 **Impact: Medium · Complexity: Medium**
@@ -353,6 +313,23 @@ for hover and go-to-definition, and offer the others alongside.
 No outstanding items.
 
 ## Miscellaneous
+
+### B720. An `(object)` cast written as an argument is typed `object`
+
+**Impact: Low · Complexity: Low**
+
+```php
+stripslashes_from_strings_only((object) ['key' => 'value']);
+// want object{key: 'value'}&stdClass, get object
+```
+
+The argument's type is read off its text (`arg_text_types.rs`), which
+answers a cast by its keyword alone, so the shape `(object)` gives an
+array is lost. Assigned to a variable first, the same expression goes
+through the shared resolver and keeps it, though with its values
+widened (`object{key: string}&stdClass`). Read the cast's operand
+through the shared resolver, and keep the literal values the way an
+array literal does. 1 assertion, from `stripslashes_from_strings_only()`.
 
 ### B717. Variables a `require`d file defines have no type
 

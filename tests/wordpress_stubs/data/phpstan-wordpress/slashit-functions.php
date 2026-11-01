@@ -27,7 +27,7 @@ assertType('non-falsy-string', trailingslashit($nonEmptyString));
 assertType('non-falsy-string', trailingslashit($nonFalsyString));
 
 /** @var lowercase-string&non-empty-string $lowercaseNonEmptyString */
-assertType('lowercase-string&non-falsy-string', trailingslashit($lowercaseNonEmptyString)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('lowercase-string&non-falsy-string', trailingslashit($lowercaseNonEmptyString));
 
 /*
  * untrailingslashit()
@@ -47,7 +47,7 @@ assertType('string', untrailingslashit($nonEmptyString));
 assertType('string', untrailingslashit($nonFalsyString));
 
 /** @var lowercase-string&non-empty-string $lowercaseNonEmptyString */
-assertType('lowercase-string', untrailingslashit($lowercaseNonEmptyString)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('lowercase-string', untrailingslashit($lowercaseNonEmptyString));
 
 /*
  * backslashit()
@@ -58,16 +58,16 @@ assertType('literal-string&lowercase-string&non-falsy-string&uppercase-string', 
 assertType('literal-string&lowercase-string&non-falsy-string', backslashit('foo')); // SKIP: a call on literal arguments is not evaluated
 
 /** @var non-empty-string $nonEmptyString */
-assertType('non-falsy-string', backslashit($nonEmptyString)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('non-falsy-string', backslashit($nonEmptyString));
 
 /** @var non-falsy-string $nonFalsyString */
-assertType('non-falsy-string', backslashit($nonFalsyString)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('non-falsy-string', backslashit($nonFalsyString));
 
 /** @var lowercase-string&non-empty-string $lowercaseNonEmptyString */
-assertType('lowercase-string&non-falsy-string', backslashit($lowercaseNonEmptyString)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('lowercase-string&non-falsy-string', backslashit($lowercaseNonEmptyString));
 
 /** @var numeric-string $numericString */
-assertType('non-falsy-string', backslashit($numericString)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('non-falsy-string', backslashit($numericString));
 
 /** @var string $aString */
 assertType('string', backslashit($aString));

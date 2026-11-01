@@ -20,7 +20,7 @@ assertType('string', stripslashes_from_strings_only('value'));
 assertType('string', stripslashes_from_strings_only(Faker::string()));
 assertType("array{key: 'value'}", stripslashes_from_strings_only(['key' => 'value']));
 assertType('array<array-key, mixed>', stripslashes_from_strings_only(Faker::array())); // PHPantom spells `array<mixed>` with its key type
-assertType('resource', stripslashes_from_strings_only(Faker::resource())); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType("object{key: 'value'}&stdClass", stripslashes_from_strings_only((object)['key' => 'value'])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('resource', stripslashes_from_strings_only(Faker::resource()));
+assertType("object{key: 'value'}&stdClass", stripslashes_from_strings_only((object)['key' => 'value'])); // SKIP: an `(object)` cast written as an argument is typed `object`
 assertType('WP_Post', stripslashes_from_strings_only(Faker::wpPost()));
-assertType('object', stripslashes_from_strings_only(Faker::object())); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('object', stripslashes_from_strings_only(Faker::object()));

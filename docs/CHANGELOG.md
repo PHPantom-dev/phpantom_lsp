@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Conditions over refined types.** A conditional return type whose condition is a refined type, such as `int<min, 0>`, `non-falsy-string`, `array<int, mixed>` or `empty`, now picks the branch the argument really takes. WordPress functions such as `get_user()`, `absint()`, `has_shortcode()`, `size_format()` and `wp_unique_id()` now return what their arguments ask for.
 - **Conditional return types inside a union, an intersection or a generic.** A return type such as `false|($output is 'ARRAY_A' ? array : WP_Term)` or `($display is true ? void : string)|null` is now decided by the call's arguments like one that is a conditional throughout, instead of showing its source text. WordPress functions such as `get_term_by()`, `get_terms()`, `wp_get_post_terms()` and `edit_term_link()` now return what their arguments ask for.
 - **`array_intersect_key()` keeps the array's type.** The result of `array_intersect_key()` now has the element type of the array it filters, like `array_diff_key()` and the other intersect functions, instead of a bare `array`.
 - **`void` returns read as `null`.** A call whose conditional return type picks `void`, or whose return type is a union with `void` in it, now gives `null` to the variable it is assigned to, so WordPress functions such as `the_title()` and `wp_list_pages()` return `null` when they echo and `string|null` when it depends on the arguments.

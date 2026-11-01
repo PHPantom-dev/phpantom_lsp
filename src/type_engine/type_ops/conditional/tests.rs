@@ -1181,3 +1181,108 @@ fn conditional_inside_intersection_and_generic_is_decided() {
         Some("array<int, string>")
     );
 }
+
+/// An integer condition is decided by the ranges the argument and the
+/// condition cover.
+#[test]
+fn int_range_condition_compares_ranges() {
+    let cond = "int<min, 0>";
+    assert_eq!(shape_condition("0", cond), Some(true));
+    assert_eq!(shape_condition("-1", cond), Some(true));
+    assert_eq!(shape_condition("non-positive-int", cond), Some(true));
+    assert_eq!(shape_condition("int<-5, -1>", cond), Some(true));
+    assert_eq!(shape_condition("1", cond), Some(false));
+    assert_eq!(shape_condition("positive-int", cond), Some(false));
+    assert_eq!(shape_condition("int<0, max>", cond), None);
+    assert_eq!(shape_condition("int", cond), None);
+    // A value condition is refuted by a range that leaves the value out.
+    assert_eq!(shape_condition("int<1, max>", "0"), Some(false));
+    assert_eq!(shape_condition("int<0, max>", "0"), None);
+}
+
+/// A refined string condition is checked against a literal's value, and
+/// holds for a refined argument whose refinements imply it.
+#[test]
+fn refined_string_condition() {
+    assert_eq!(shape_condition("'foo'", "non-falsy-string"), Some(true));
+    assert_eq!(shape_condition("'0'", "non-falsy-string"), Some(false));
+    assert_eq!(shape_condition("''", "non-empty-string"), Some(false));
+    assert_eq!(shape_condition("'Foo'", "lowercase-string"), Some(false));
+    assert_eq!(shape_condition("''", "lowercase-string"), Some(true));
+    assert_eq!(shape_condition("'12'", "numeric-string"), Some(true));
+    assert_eq!(
+        shape_condition("lowercase-string", "lowercase-string"),
+        Some(true)
+    );
+    assert_eq!(
+        shape_condition("lowercase-string&non-falsy-string", "non-empty-string"),
+        Some(true)
+    );
+    assert_eq!(
+        shape_condition("numeric-string", "non-empty-string"),
+        Some(true)
+    );
+    assert_eq!(shape_condition("string", "non-falsy-string"), None);
+    assert_eq!(
+        shape_condition("non-empty-string", "non-falsy-string"),
+        None
+    );
+    // A string refinement that leaves a value out refutes it.
+    assert_eq!(shape_condition("non-empty-string", "''"), Some(false));
+    // Another category entirely is ruled out.
+    assert_eq!(shape_condition("array", "non-empty-string"), Some(false));
+    assert_eq!(shape_condition("resource", "string"), Some(false));
+    assert_eq!(shape_condition("object", "string"), Some(false));
+}
+
+/// `scalar`, `numeric` and `empty` take values from several categories.
+#[test]
+fn cross_category_keyword_conditions() {
+    assert_eq!(shape_condition("'a'", "scalar"), Some(true));
+    assert_eq!(shape_condition("1", "scalar"), Some(true));
+    assert_eq!(shape_condition("true", "scalar"), Some(true));
+    assert_eq!(shape_condition("array", "scalar"), Some(false));
+    assert_eq!(shape_condition("null", "scalar"), Some(false));
+
+    assert_eq!(shape_condition("int", "numeric"), Some(true));
+    assert_eq!(shape_condition("'1.5'", "numeric"), Some(true));
+    assert_eq!(shape_condition("numeric-string", "numeric"), Some(true));
+    assert_eq!(shape_condition("'abc'", "numeric"), Some(false));
+    assert_eq!(shape_condition("string", "numeric"), None);
+    assert_eq!(shape_condition("bool", "numeric"), Some(false));
+
+    assert_eq!(shape_condition("''", "empty"), Some(true));
+    assert_eq!(shape_condition("'0'", "empty"), Some(true));
+    assert_eq!(shape_condition("0", "empty"), Some(true));
+    assert_eq!(shape_condition("null", "empty"), Some(true));
+    assert_eq!(shape_condition("array{}", "empty"), Some(true));
+    assert_eq!(shape_condition("'a'", "empty"), Some(false));
+    assert_eq!(shape_condition("positive-int", "empty"), Some(false));
+    assert_eq!(shape_condition("non-falsy-string", "empty"), Some(false));
+    assert_eq!(
+        shape_condition("lowercase-string&non-falsy-string", "empty"),
+        Some(false)
+    );
+    assert_eq!(shape_condition("resource", "empty"), Some(false));
+    assert_eq!(shape_condition("string", "empty"), None);
+    assert_eq!(shape_condition("int<0, max>", "empty"), None);
+    assert_eq!(shape_condition("array", "empty"), None);
+}
+
+/// `array<K, V>` asks about the array's key and value types as well.
+#[test]
+fn array_condition_compares_keys_and_values() {
+    let cond = "array<int, mixed>";
+    assert_eq!(shape_condition("list<string>", cond), Some(true));
+    assert_eq!(shape_condition("array{'a', 'b'}", cond), Some(true));
+    assert_eq!(shape_condition("array{}", cond), Some(true));
+    assert_eq!(shape_condition("array<string, string>", cond), Some(false));
+    assert_eq!(shape_condition("array{key: 'value'}", cond), Some(false));
+    assert_eq!(shape_condition("array{0: 'a', key: 'b'}", cond), None);
+    assert_eq!(shape_condition("array", cond), None);
+    assert_eq!(
+        shape_condition("array<int, string>", "array<int, int>"),
+        Some(false)
+    );
+    assert_eq!(shape_condition("list<int>", "array<int>"), Some(true));
+}

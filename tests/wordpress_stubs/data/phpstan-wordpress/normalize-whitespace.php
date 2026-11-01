@@ -23,7 +23,7 @@ assertType('string', normalize_whitespace($nonEmptyString));
 assertType('string', normalize_whitespace($nonFalsyString));
 
 /** @var lowercase-string&non-falsy-string $nonFalsyLowercaseString */
-assertType('lowercase-string', normalize_whitespace($nonFalsyLowercaseString)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('lowercase-string', normalize_whitespace($nonFalsyLowercaseString));
 
 /** @var literal-string $literalString */
-assertType('literal-string', normalize_whitespace($literalString)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('literal-string', normalize_whitespace($literalString));

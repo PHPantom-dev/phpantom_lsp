@@ -27,5 +27,5 @@ assertType('true', rest_sanitize_boolean('foo'));
 assertType('false', rest_sanitize_boolean(0));
 assertType('true', rest_sanitize_boolean(123));
 assertType('bool', rest_sanitize_boolean(Faker::int()));
-assertType('true', rest_sanitize_boolean(Faker::positiveInt())); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('true', rest_sanitize_boolean(Faker::positiveInt()));
 assertType('bool', rest_sanitize_boolean(Faker::nonNegativeInt()));

@@ -237,13 +237,6 @@ each gap marked `// SKIP`:
   `wp_parse_url('http://example.com', PHP_URL_HOST)` give the literal
   WordPress would return, the way `scalar_fold.rs` folds PHP's own string
   functions. 33 assertions.
-- **`wp_slash()` of a `lowercase-string` stays one.** A conditional
-  says it, but gives an array argument a stray `lowercase-string` until
-  [B708](bugs.md#b708-a-condition-over-a-refined-type-is-misjudged) is
-  fixed. 1 assertion.
-- **`wp_parse_url()` with a component no `PHP_URL_*` constant names**
-  returns `null`, or `false` for a URL it cannot parse. A
-  `$component is int<0, 7>` condition waits on B708 too. 1 assertion.
 
 The overrides that hold for every WordPress version the stubs cover are
 worth offering to `php-stubs/wordpress-stubs` as well.
