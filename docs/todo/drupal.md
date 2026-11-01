@@ -1,10 +1,10 @@
 # PHPantom — Drupal
 
-Known gaps and missing features in PHPantom's Drupal support. Today
-Drupal support is project discovery only: the web root is detected, and
-core, contrib, and the Drupal file extensions (`.module`, `.install`,
-`.theme`, …) are indexed past `.gitignore`. Nothing reads Drupal's own
-declarations: services, entity types, fields, routes, or hooks.
+Known gaps and missing features in PHPantom's Drupal support. The web
+root is detected, core, contrib, and the Drupal file extensions
+(`.module`, `.install`, `.theme`, …) are indexed past `.gitignore`, and
+the services the `*.services.yml` files declare are read. Nothing reads
+Drupal's other declarations yet: entity types, fields, routes, or hooks.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -25,46 +25,6 @@ within the same impact tier.
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
-
----
-
-## DR2. Service IDs from `*.services.yml`
-
-**Impact: High · Complexity: Medium**
-
-```php
-$manager = \Drupal::service('acme.order_manager');
-
-public static function create(ContainerInterface $container): static {
-    return new static($container->get('entity_type.manager'));
-}
-```
-
-A module declares its services in `<module>.services.yml`, in Symfony's
-service format. Type `\Drupal::service()` and `$container->get()` by the
-class the declaration names, and complete and navigate the service IDs,
-including `@service_id` arguments in the YAML. Newer code registers a
-service under its interface and fetches it with
-`\Drupal::service(OrderManagerInterface::class)`; that ID is a class
-name and types as that class without any lookup.
-
-The Symfony container reading already parses this format and follows
-aliases and parameter placeholders. Start by checking what it picks up from a
-Drupal module unchanged, then teach it where Drupal keeps the files
-(every enabled module's and core's `*.services.yml`) instead of
-`config/services.yaml`.
-
-Most of Drupal's navigation depends on this. On Drupal core, Find
-References on `EntityStorageInterface::load()` misses about 240 calls
-of the shape
-`$this->container->get('entity_type.manager')->getStorage('node')->load(1)`.
-They are the bulk of what a tool that types service lookups finds and
-we don't.
-
-**Where to look:** `src/symfony/container.rs`, `src/symfony/resources.rs`,
-PHPStan's Drupal extension (its service map), and PHPlumb
-(`crates/phplumb-index/src/frameworks/drupal/services.rs`, MIT), which
-reads the same files.
 
 ---
 
@@ -370,6 +330,22 @@ but only in a Symfony project, and a Drupal site's `composer.json`
 requires none of the packages that make it one. Read the map in a
 Drupal site too, so the listener methods navigate and are checked, and
 the event names complete where Drupal's event dispatcher takes one.
+
+---
+
+## DR17. Warn on unknown service IDs
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$manager = \Drupal::service('acme.order_manger');
+```
+
+A service ID no `*.services.yml` declares is a typo or a module the site
+lacks, and the container throws for it at run time. Report one where
+`\Drupal::service()` and `$container->get()` take it. A module's
+`ServiceProvider` class can register services in PHP, which no YAML file
+lists, so an ID such a provider may register must not warn.
 
 ---
 

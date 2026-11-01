@@ -17,7 +17,12 @@ function acme_help(string $route_name, RouteMatchInterface $route_match): ?strin
     // Try: complete after `$route_match->`. The methods come from core's
     // RouteMatchInterface.
     if ($route_name === 'help.page.acme' && $route_match->getParameter('name') === 'acme') {
-        return '<p>Greets the name in the path, for example /acme/greeting/Ada.</p>';
+        // Try: hover `$greeter`, typed by the class acme.services.yml
+        // declares, or go to the definition of 'acme.greeter'. Complete a
+        // service ID inside `\Drupal::service('')`.
+        $greeter = \Drupal::service('acme.greeter');
+
+        return '<p>' . $greeter->greet('Ada') . '</p>';
     }
 
     return null;

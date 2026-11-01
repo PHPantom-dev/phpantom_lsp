@@ -21,6 +21,15 @@ Run `composer install` here first. Composer puts core and contrib into
   definition, so the chain keeps completing.
 - In `web/modules/custom/acme/acme.module`, complete after `$route_match->`
   inside the procedural `acme_help()` hook.
+- Service IDs and container parameters navigate between the services files
+  and the code that looks them up, core's included. In
+  `web/modules/custom/acme/acme.module`, hover `$greeter`, typed by the class
+  `acme.services.yml` declares for `acme.greeter`, or go to the definition of
+  `'acme.greeter'`. In `web/modules/custom/acme/src/NoteCounter.php`, go to
+  the definition of `'entity_type.manager'`, which lands in core's
+  `core.services.yml`. Complete an ID inside `\Drupal::service('')`,
+  `$container->get('')`, or after `@` in `acme.services.yml`, and find the
+  references of a service from its declaration.
 
 ## What the Symfony support already reads
 

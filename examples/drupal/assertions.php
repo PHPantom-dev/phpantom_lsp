@@ -17,13 +17,16 @@ use Drupal\acme\Controller\GreetingController;
 use Drupal\acme\Entity\Note;
 use Drupal\acme\Greeter;
 use Drupal\acme\Hook\AcmeHooks;
+use Drupal\acme\NoteCounter;
 use Drupal\Component\FileCache\FileCacheFactory;
 use Drupal\Component\Serialization\Yaml;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
+use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\DependencyInjection\YamlFileLoader;
 use Drupal\Core\Entity\Attribute\ContentEntityType;
 use Drupal\Core\Entity\ContentEntityBase;
+use Drupal\Core\Entity\EntityTypeManager;
 use Drupal\Core\Extension\InfoParser;
 use Drupal\Core\Hook\Attribute\Hook;
 
@@ -91,6 +94,17 @@ check('acme.greeter is built from Greeter', $container->getDefinition('acme.gree
 check('The class acme.services.yml names exists', class_exists((string) $container->getDefinition('acme.greeter')->getClass()));
 check('The Greeter class name is an alias of acme.greeter', $container->hasAlias(Greeter::class) && (string) $container->getAlias(Greeter::class) === 'acme.greeter');
 check("acme.greeter receives core's config.factory", (string) $container->getDefinition('acme.greeter')->getArgument(0) === 'config.factory');
+check('acme.greeter receives the acme.greeting_format parameter', $container->getDefinition('acme.greeter')->getArgument(1) === '%acme.greeting_format%');
+check('acme.greeting_format is a parameter declared in acme.services.yml', is_string($container->getParameter('acme.greeting_format')));
+check('Greeter takes the format as its second argument', (new ReflectionMethod(Greeter::class, '__construct'))->getParameters()[1]->getType()?->getName() === 'string');
+
+// Core declares the services the module looks up by ID.
+$core = new ContainerBuilder();
+(new YamlFileLoader($core))->load("$web/core/core.services.yml");
+check('core.services.yml declares config.factory', $core->hasDefinition('config.factory'));
+check('entity_type.manager, which NoteCounter::create() looks up, is built from EntityTypeManager', $core->getDefinition('entity_type.manager')->getClass() === EntityTypeManager::class);
+check('NoteCounter takes what entity_type.manager is', is_subclass_of(EntityTypeManager::class, (string) (new ReflectionMethod(NoteCounter::class, '__construct'))->getParameters()[0]->getType()));
+check('NoteCounter is built from the container', is_subclass_of(NoteCounter::class, ContainerInjectionInterface::class));
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
 
@@ -120,6 +134,7 @@ require_once "$theme/acme_theme.theme";
 $themeHook = new ReflectionMethod(AcmeHooks::class, 'theme');
 $themeHooks = (new AcmeHooks())->theme();
 check('acme_help() implements hook_help procedurally', function_exists('acme_help'));
+check("acme_help() looks up acme.greeter, which acme.services.yml declares", str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('acme.greeter')") && $container->hasDefinition('acme.greeter'));
 check("AcmeHooks::theme() implements hook_theme through #[Hook('theme')]", attributeArguments($themeHook, Hook::class) === ['theme']);
 check('hook_theme declares the acme_greeting theme hook', isset($themeHooks['acme_greeting']));
 check('acme_greeting declares the variables the controller passes', array_keys($themeHooks['acme_greeting']['variables'] ?? []) === ['name', 'greeting']);
