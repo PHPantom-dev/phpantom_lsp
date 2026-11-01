@@ -20,7 +20,7 @@ pub(crate) fn service_classes(
     class_loader: &ResolvedClassLoader<'_>,
 ) -> Option<Vec<Arc<ClassInfo>>> {
     if !method_name.eq_ignore_ascii_case("service")
-        || !super::is_service_lookup(class, method_name)
+        || class.strip_prefix('\\').unwrap_or(class) != "Drupal"
         || !backend.is_drupal_project()
     {
         return None;

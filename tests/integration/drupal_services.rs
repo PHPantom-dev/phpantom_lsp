@@ -485,3 +485,25 @@ async fn a_chained_drupal_service_call_is_typed() {
         uri_for(&dir, "web/modules/custom/acme/src/Greeter.php")
     );
 }
+
+/// `\Drupal::service(id: 'x')` names the same service as the positional
+/// form, assigned or chained.
+#[tokio::test]
+async fn a_named_service_id_is_typed() {
+    let named = STATIC_CONSUMER.replace("service('acme.greeter')", "service(id: 'acme.greeter')");
+    let (backend, dir) = workspace(&[
+        (SERVICES_PATH, SERVICES),
+        (STATIC_CONSUMER_PATH, named.as_str()),
+    ])
+    .await;
+    let position = position_in(&named, "$greeter;", 2);
+    let hover = hover_text_at(
+        &backend,
+        &uri_for(&dir, STATIC_CONSUMER_PATH),
+        position.line,
+        position.character,
+    )
+    .await
+    .unwrap_or_default();
+    assert!(hover.contains("Greeter"), "{hover}");
+}

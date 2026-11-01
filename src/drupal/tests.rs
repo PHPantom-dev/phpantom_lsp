@@ -184,3 +184,64 @@ fn core_and_contrib_are_read_only_and_custom_code_is_not() {
         );
     }
 }
+
+#[test]
+fn moves_and_namespace_renames_leave_contrib_alone() {
+    let (backend, dir) = drupal_backend(&[]);
+    let contrib = uri(dir.path(), "web/modules/contrib/token/src/Token.php");
+    backend.update_ast(
+        &contrib,
+        "<?php\nnamespace Drupal\\token;\nclass Token {}\n",
+    );
+    let custom = uri(dir.path(), "web/modules/custom/acme/src/Acme.php");
+    backend.update_ast(&custom, "<?php\nnamespace Drupal\\acme;\nclass Acme {}\n");
+
+    let namespace = backend.plan_namespace_move("Drupal\\token", "Drupal\\tok");
+    assert!(
+        namespace
+            .as_ref()
+            .is_err_and(|message| message.contains("installed")),
+        "{namespace:?}"
+    );
+    let class = backend.plan_class_move("Drupal\\token\\Token", "Drupal\\tok\\Token");
+    assert!(
+        class
+            .as_ref()
+            .is_err_and(|message| message.contains("installed")),
+        "{class:?}"
+    );
+    assert!(
+        backend
+            .plan_namespace_move("Drupal\\acme", "Drupal\\acme2")
+            .is_ok()
+    );
+}
+
+/// Outside a Drupal site, a namespace a vendor package shares is renamed on
+/// the project's side, and the vendor files are left as they are.
+#[test]
+fn a_namespace_a_vendor_package_shares_is_renamed_outside_drupal() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = crate::Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+    *backend.workspace.vendor_uri_prefixes.lock() = vec![uri(dir.path(), "vendor/")];
+    for (path, content) in [
+        (
+            "vendor/acme/lib/src/Shared/Thing.php",
+            "<?php\nnamespace App\\Shared;\nclass Thing {}\n",
+        ),
+        (
+            "src/Shared/Mine.php",
+            "<?php\nnamespace App\\Shared;\nclass Mine {}\n",
+        ),
+    ] {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+        backend.update_ast(&uri(dir.path(), path), content);
+    }
+
+    let plan = backend.plan_namespace_move("App\\Shared", "App\\Common");
+    let edit = format!("{:?}", plan.as_ref().expect("the rename is planned"));
+    assert!(edit.contains("src/Shared/Mine.php"), "{edit}");
+    assert!(!edit.contains("vendor/acme"), "{edit}");
+}

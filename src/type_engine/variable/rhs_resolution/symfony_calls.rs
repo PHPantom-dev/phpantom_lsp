@@ -79,12 +79,13 @@ pub(super) fn try_resolve_drupal_service_type(
     argument_list: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    let backend = ctx.file.backend?;
-    let Some(Argument::Positional(argument)) = argument_list.arguments.first() else {
+    if !method_name.eq_ignore_ascii_case("service") {
         return None;
-    };
+    }
+    let backend = ctx.file.backend?;
+    let argument = crate::call_args::first_param_arg(argument_list, "id")?;
     let (key, _, _) = crate::virtual_members::laravel::helpers::resolved_string_literal(
-        argument.value,
+        argument.value(),
         ctx.file.content,
     )?;
     let classes = crate::drupal::types::service_classes(

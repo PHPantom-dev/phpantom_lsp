@@ -318,9 +318,11 @@ impl Backend {
 
         // `\Drupal::service('id')` is typed by the class the ID is built
         // from (see `crate::drupal::types`).
-        if let Some(ref owner) = owner_class
+        if method_name.eq_ignore_ascii_case("service")
+            && let Some(ref owner) = owner_class
             && let Some(backend) = ctx.file.backend
-            && let Some(id) = first_literal_text_arg(text_args)
+            && backend.is_drupal_project()
+            && let Some(id) = first_literal_text_arg(text_args, "id")
             && let Some(classes) = crate::drupal::types::service_classes(
                 backend,
                 &owner.fqn(),
@@ -1107,9 +1109,10 @@ fn method_call_return_hint(
     )
 }
 
-/// The value of a call's first argument, when it is a plain string
-/// literal.
-fn first_literal_text_arg(text_args: &str) -> Option<&str> {
-    let first = split_top_level_commas(text_args).first().copied()?;
-    crate::text_scan::unquote_php_string(crate::call_args::text_arg_value(first).trim())
+/// The value of the argument that binds a call's first parameter, named
+/// `name`, when it is a plain string literal.
+fn first_literal_text_arg<'t>(text_args: &'t str, name: &str) -> Option<&'t str> {
+    let args = split_top_level_commas(text_args);
+    let first = crate::call_args::first_param_text_arg(&args, name)?;
+    crate::text_scan::unquote_php_string(first.trim())
 }
