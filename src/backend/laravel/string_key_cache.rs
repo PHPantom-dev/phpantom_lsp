@@ -172,7 +172,7 @@ impl LaravelStringKeyCache {
 
 /// Check only registration call tokens: `extends` occurs in nearly
 /// every form request, where body edits must retain the workspace catalog.
-fn has_validation_registration(content: &str) -> bool {
+pub(crate) fn has_validation_registration(content: &str) -> bool {
     let bytes = content.as_bytes();
     memchr::memmem::find_iter(bytes, b"::")
         .chain(memchr::memmem::find_iter(bytes, b"->"))

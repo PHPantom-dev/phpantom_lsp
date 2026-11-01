@@ -139,11 +139,18 @@ pub(crate) fn discover(backend: &Backend) -> RuleCatalog {
     let mut candidates: Vec<_> = candidates.into_iter().collect();
     candidates.sort_unstable();
     for uri in candidates {
-        catalog.sources.insert(uri.clone());
-        let Some(content) = backend.get_file_content(&uri) else {
+        let Some(content) = backend.get_file_content_arc(&uri) else {
+            catalog.sources.insert(uri);
             catalog.complete = false;
             continue;
         };
+        // Without a reference index (the `analyze` CLI) every user file is a
+        // candidate. A file without a registration call contributes nothing,
+        // and an edit that adds one invalidates the catalog on its own.
+        if !crate::backend::laravel::has_validation_registration(&content) {
+            continue;
+        }
+        catalog.sources.insert(uri.clone());
         let registration = source_registrations(backend, &uri, &content);
         catalog.complete &= !registration.dynamic;
         catalog.dependent_rules.extend(registration.dependent);
@@ -305,13 +312,19 @@ fn source_registrations(backend: &Backend, uri: &str, content: &str) -> Registra
             let span = receiver.span();
             let subject = &content[span.start.offset as usize..span.end.offset as usize];
             let rctx = loaders.resolution_ctx_at(content, span.start.offset);
-            resolve_target_classes(subject, AccessKind::Arrow, &rctx)
+            let classes = resolve_target_classes(subject, AccessKind::Arrow, &rctx);
+            // A receiver nothing types, such as the untyped `$validator` of a
+            // `callAfterResolving('validator', ...)` callback, may still be the
+            // factory.
+            let mut classes = classes
                 .iter()
                 .filter_map(|ty| ty.class_info.as_deref())
-                .any(|class| {
-                    is_subtype_of(class, FACTORY, resolved)
-                        || is_subtype_of(class, FACTORY_CONTRACT, resolved)
-                })
+                .peekable();
+            classes.peek()?;
+            Some(classes.any(|class| {
+                is_subtype_of(class, FACTORY, resolved)
+                    || is_subtype_of(class, FACTORY_CONTRACT, resolved)
+            }))
         },
         |resolver| {
             let rctx = loaders.var_ctx_at(content, resolver.span().start.offset);
@@ -323,18 +336,10 @@ fn source_registrations(backend: &Backend, uri: &str, content: &str) -> Registra
 fn registrations(
     uri: &str,
     content: &str,
-    instance_is_factory: impl Fn(&Expression<'_>) -> bool,
+    instance_is_factory: impl Fn(&Expression<'_>) -> Option<bool>,
     resolver_validator: impl Fn(&Expression<'_>) -> Option<Arc<ClassInfo>>,
 ) -> Registrations {
-    if !content
-        .as_bytes()
-        .windows(6)
-        .any(|part| part.eq_ignore_ascii_case(b"extend"))
-        && !content
-            .as_bytes()
-            .windows(8)
-            .any(|part| part.eq_ignore_ascii_case(b"resolver"))
-    {
+    if !crate::backend::laravel::has_validation_registration(content) {
         return Registrations::default();
     }
     crate::parser::with_parsed_program(content, "validation_registrations", |program, _| {
@@ -366,16 +371,28 @@ fn registrations(
                 return ControlFlow::Continue(());
             }
             let is_factory = if is_static {
-                matches!(receiver, Expression::Identifier(identifier) if names
+                Some(
+                    matches!(receiver, Expression::Identifier(identifier) if names
                     .get(identifier.span().start.offset)
-                    .is_some_and(|name| name.eq_ignore_ascii_case(FACADE)))
+                    .is_some_and(|name| name.eq_ignore_ascii_case(FACADE))),
+                )
             } else {
                 instance_is_factory(receiver)
             };
-            if !is_factory {
-                return ControlFlow::Continue(());
-            }
+            // An untyped receiver counts only for a literal rule name: the
+            // registration costs at most a spare suggestion, where skipping it
+            // reports every use of the rule as unknown. Anything else on it
+            // (Socialite's `$socialite->extend($driver, ...)`) is not taken
+            // as a sign of rules the catalog cannot see.
+            let receiver_known = match is_factory {
+                Some(false) => return ControlFlow::Continue(()),
+                Some(true) => true,
+                None => false,
+            };
             if method.eq_ignore_ascii_case("resolver") {
+                if !receiver_known {
+                    return ControlFlow::Continue(());
+                }
                 if let Some(validator) = crate::call_args::first_param_arg(arguments, "resolver")
                     .and_then(|argument| resolver_validator(argument.value()))
                 {
@@ -393,7 +410,7 @@ fn registrations(
                     )
                 })
             else {
-                out.dynamic = true;
+                out.dynamic |= receiver_known;
                 return ControlFlow::Continue(());
             };
             if name.is_empty() {

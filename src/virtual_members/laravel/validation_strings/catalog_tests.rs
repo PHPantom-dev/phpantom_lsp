@@ -3,7 +3,7 @@ use super::*;
 const URI: &str = "file:///app/Rules.php";
 
 fn registrations(uri: &str, content: &str) -> Registrations {
-    super::registrations(uri, content, |_| false, |_| None)
+    super::registrations(uri, content, |_| Some(false), |_| None)
 }
 
 #[test]
@@ -226,7 +226,11 @@ $factory->$method('unknown', fn () => true);
     let found = super::registrations(
         URI,
         source,
-        |receiver| matches!(receiver, Expression::Variable(Variable::Direct(variable)) if variable.name == b"$factory"),
+        |receiver| {
+            Some(
+                matches!(receiver, Expression::Variable(Variable::Direct(variable)) if variable.name == b"$factory"),
+            )
+        },
         |_| None,
     );
     assert_eq!(
@@ -250,7 +254,12 @@ $factory->resolver(resolver: fn () => new AppValidator);
 Unrelated::resolver(fn () => new OtherValidator);
 "#;
     let validator = Arc::new(ClassInfo::default());
-    let found = super::registrations(URI, source, |_| true, |_| Some(Arc::clone(&validator)));
+    let found = super::registrations(
+        URI,
+        source,
+        |_| Some(true),
+        |_| Some(Arc::clone(&validator)),
+    );
     assert_eq!(found.validators.len(), 2);
     assert!(
         found
@@ -431,4 +440,37 @@ namespace App\Providers {
     );
     assert!(!found.dynamic);
     assert!(lookup_diagnostic_scope("$factory", offset).is_some_and(|types| types.is_empty()));
+}
+
+#[test]
+fn validation_catalog_counts_registrations_on_untyped_receivers() {
+    let source = r#"<?php
+namespace Vendor\Phone {
+    class PhoneServiceProvider {
+        public function register(): void {
+            $this->callAfterResolving('validator', function ($validator) {
+                $validator->extendDependent('phone', fn () => true);
+            });
+        }
+        public function socialite($socialite, string $driver): void {
+            $socialite->extend($driver, fn () => null);
+            $socialite->resolver(fn () => null);
+        }
+    }
+}
+"#;
+    let backend = Backend::new_test();
+    backend.update_ast(URI, source);
+
+    let found = source_registrations(&backend, URI, source);
+    assert_eq!(
+        found
+            .rules
+            .iter()
+            .map(|rule| rule.name.as_str())
+            .collect::<Vec<_>>(),
+        ["phone"]
+    );
+    assert_eq!(found.dependent, ["phone"]);
+    assert!(!found.dynamic);
 }
