@@ -20,7 +20,7 @@ use crate::type_engine::resolver::LendsLoaders;
 use crate::virtual_members::with_active_resolved_class_cache;
 
 use super::output::progress_bar;
-use super::{FileDiagnostic, SeverityFilter};
+use super::{CodeFilter, FileDiagnostic, SeverityFilter};
 
 /// Everything one diagnostic pass works on.
 pub(super) struct DiagnosticPass<'a> {
@@ -37,6 +37,8 @@ pub(super) struct DiagnosticPass<'a> {
     pub(super) ignore_rules: &'a [CompiledIgnoreRule],
     /// Minimum severity to keep.
     pub(super) severity_filter: SeverityFilter,
+    /// Which diagnostic codes to keep.
+    pub(super) code_filter: &'a CodeFilter,
     /// Name every file as it starts and finishes.
     pub(super) debug: bool,
     /// Verbosity level: 0 = normal, 1 = -v, 2 = -vv, 3+ = -vvv.
@@ -60,6 +62,7 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
         file_data,
         ignore_rules,
         severity_filter,
+        code_filter,
         debug,
         verbosity,
         show_progress,
@@ -280,9 +283,13 @@ pub(super) fn collect_diagnostics(pass: DiagnosticPass<'_>) -> Vec<(String, Vec<
                                     return None;
                                 }
                                 let identifier = match &d.code {
-                                    Some(Code::String(s)) => Some(s.clone()),
+                                    Some(Code::String(s)) => Some(s.as_str()),
                                     _ => None,
                                 };
+                                if !code_filter.passes(identifier) {
+                                    return None;
+                                }
+                                let identifier = identifier.map(str::to_owned);
                                 Some(FileDiagnostic {
                                     line: d.range.start.line + 1,
                                     column: d.range.start.character,

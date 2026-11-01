@@ -1,5 +1,6 @@
 mod common;
 
+mod analyze_code_filter;
 mod analyze_composer_layout;
 mod analyze_laravel_schema;
 mod array_func_generics;

@@ -81,6 +81,43 @@ pub enum SeverityFilter {
     Error,
 }
 
+/// Which diagnostic codes the analyse output keeps.
+///
+/// The default keeps every diagnostic.
+#[derive(Debug, Default)]
+pub struct CodeFilter {
+    only: Vec<String>,
+    excluded: Vec<String>,
+}
+
+impl CodeFilter {
+    /// Keep the codes in `only` (every code when it is empty), minus the
+    /// codes in `excluded`.
+    pub fn new(only: Vec<String>, excluded: Vec<String>) -> Self {
+        Self { only, excluded }
+    }
+
+    /// Whether a diagnostic with `code` is kept. A diagnostic without a code
+    /// matches no name, so it is only kept when `only` is empty.
+    fn passes(&self, code: Option<&str>) -> bool {
+        let names = |list: &[String]| code.is_some_and(|code| list.iter().any(|c| c == code));
+        (self.only.is_empty() || names(&self.only)) && !names(&self.excluded)
+    }
+
+    /// The codes `only` asks for that none of the `reported` codes match.
+    ///
+    /// A misspelled code filters out everything and reads as a clean run, so
+    /// these are worth pointing out. A misspelled exclusion needs no such
+    /// note: what it failed to exclude is still in the report.
+    fn unmatched<'a>(&'a self, reported: impl Iterator<Item = &'a str>) -> Vec<&'a str> {
+        let mut unmatched: Vec<&str> = self.only.iter().map(String::as_str).collect();
+        for code in reported {
+            unmatched.retain(|wanted| *wanted != code);
+        }
+        unmatched
+    }
+}
+
 /// Output format for CLI commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
@@ -106,6 +143,8 @@ pub struct AnalyseOptions {
     pub path_filters: Vec<PathBuf>,
     /// Minimum severity to report.
     pub severity_filter: SeverityFilter,
+    /// Which diagnostic codes to report.
+    pub code_filter: CodeFilter,
     /// Whether to output with ANSI colours.
     pub use_colour: bool,
     /// Output format.
@@ -138,4 +177,61 @@ struct FileDiagnostic {
     identifier: Option<String>,
     /// The diagnostic severity.
     severity: DiagnosticSeverity,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CodeFilter;
+
+    fn filter(only: &[&str], excluded: &[&str]) -> CodeFilter {
+        let owned = |codes: &[&str]| codes.iter().map(ToString::to_string).collect();
+        CodeFilter::new(owned(only), owned(excluded))
+    }
+
+    #[test]
+    fn the_default_keeps_everything() {
+        let filter = CodeFilter::default();
+        assert!(filter.passes(Some("unused_import")));
+        assert!(filter.passes(None));
+    }
+
+    #[test]
+    fn only_keeps_the_named_codes() {
+        let filter = filter(&["unused_import", "deprecated"], &[]);
+        assert!(filter.passes(Some("unused_import")));
+        assert!(filter.passes(Some("deprecated")));
+        assert!(!filter.passes(Some("unknown_class")));
+    }
+
+    #[test]
+    fn a_diagnostic_without_a_code_only_survives_when_nothing_is_asked_for_by_name() {
+        assert!(!filter(&["unused_import"], &[]).passes(None));
+        assert!(filter(&[], &["unused_import"]).passes(None));
+    }
+
+    #[test]
+    fn excluded_wins_over_only() {
+        let filter = filter(&["unused_import"], &["unused_import"]);
+        assert!(!filter.passes(Some("unused_import")));
+    }
+
+    #[test]
+    fn codes_match_exactly() {
+        let filter = filter(&["unused_import"], &[]);
+        assert!(!filter.passes(Some("unused")));
+        assert!(!filter.passes(Some("UNUSED_IMPORT")));
+    }
+
+    #[test]
+    fn unmatched_names_the_requested_codes_nothing_reported() {
+        let filter = filter(&["unused_import", "unused_imprt", "deprecated"], &["x"]);
+        let reported = ["deprecated", "unused_import", "deprecated"];
+        assert_eq!(filter.unmatched(reported.into_iter()), vec!["unused_imprt"]);
+    }
+
+    #[test]
+    fn unmatched_ignores_exclusions() {
+        let filter = filter(&[], &["unused_imprt"]);
+        assert!(filter.unmatched(std::iter::empty()).is_empty());
+    }
 }

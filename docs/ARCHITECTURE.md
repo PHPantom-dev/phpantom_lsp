@@ -1371,7 +1371,7 @@ The batch pipeline runs in two parallel phases:
 
 2. **Diagnose phase.** Run all seven diagnostic collectors on every file in parallel (`std::thread::scope` with one chunk per CPU core). Because Phase 1 already indexed all user classes, the diagnostic phase never triggers lazy `parse_and_cache_file` for other user files, eliminating write-lock contention.
 
-Output uses PHPStan's table format (with progress bar and coloured output) so the results are familiar to teams already using PHPStan. Severity filtering (`--severity error|warning|all`) and path scoping let users focus on specific areas.
+Output uses PHPStan's table format (with progress bar and coloured output) so the results are familiar to teams already using PHPStan. Severity filtering (`--severity error|warning|all`), code filtering (`--code`, `--exclude-code`) and path scoping let users focus on specific areas.
 
 ## Diagnostic Worker Architecture
 
