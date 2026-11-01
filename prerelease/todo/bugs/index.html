@@ -1121,10 +1121,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b717-variables-a-required-file-defines-have-no-type" class="md-nav__link">
+  <a href="#b721-an-included-file-does-not-see-the-including-scopes-variables" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B717. Variables a <code>require</code>d file defines have no type
+        B721. An included file does not see the including scope's variables
       </span>
     </span>
   </a>
@@ -1895,10 +1895,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b717-variables-a-required-file-defines-have-no-type" class="md-nav__link">
+  <a href="#b721-an-included-file-does-not-see-the-including-scopes-variables" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B717. Variables a <code>require</code>d file defines have no type
+        B721. An included file does not see the including scope's variables
       </span>
     </span>
   </a>
@@ -2167,18 +2167,22 @@ through the shared resolver and keeps it, though with its values
 widened (<code>object{key: string}&amp;stdClass</code>). Read the cast's operand
 through the shared resolver, and keep the literal values the way an
 array literal does. 1 assertion, from <code>stripslashes_from_strings_only()</code>.</p>
-<h3 id="b717-variables-a-required-file-defines-have-no-type">B717. Variables a <code>require</code>d file defines have no type<a class="headerlink" href="#b717-variables-a-required-file-defines-have-no-type" title="Permanent link">&para;</a></h3>
+<h3 id="b721-an-included-file-does-not-see-the-including-scopes-variables">B721. An included file does not see the including scope's variables<a class="headerlink" href="#b721-an-included-file-does-not-see-the-including-scopes-variables" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">function core_upgrade(): string {</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version = '6.7'</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    return $wp_version;                          // hover: nothing, want string</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">// main.php</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">function render(User $user): void {</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    require __DIR__ . '/header.php';</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    $title;            // want User, get nothing</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">// header.php</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">$title = $user;</span>
 </code></pre></div>
-<p>When an include's path resolves, the variables the included file's top
-level assigns are no longer reported as undefined, but hover,
-completion, and the type checks know nothing about them. Walk the
-included file's top level and carry the types it leaves its variables
-into the including scope at the point the include ends.</p>
+<p>The variables an included file leaves are worked out by walking its top
+level on a scope of its own, once per file, so a value it reads from
+the including scope is unknown there. Seed that walk with the variables
+the including scope holds at the include, keyed on their types so a file
+included from many places with the same scope is still walked once.</p>
 
 
 
