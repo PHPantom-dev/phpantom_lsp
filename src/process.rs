@@ -264,6 +264,14 @@ where
     }
 }
 
+/// The end column of a [`full_line_range`].
+///
+/// LSP's `uinteger` stops at 2^31 - 1, and clients that validate positions
+/// reject anything above it, so `u32::MAX` is not a usable "end of line".
+/// The specification has a column past the end of a line default back to
+/// the line's length, which makes this largest legal value mean just that.
+pub(crate) const LINE_END_CHARACTER: u32 = i32::MAX as u32;
+
 /// The whole of a single line, as external tools report positions.
 ///
 /// PHPStan and PHPCS both report a line and an ambiguous (or absent)
@@ -275,7 +283,7 @@ pub fn full_line_range(line: u32) -> tower_lsp_server::gen_lsp_types::Range {
         start: tower_lsp_server::gen_lsp_types::Position { line, character: 0 },
         end: tower_lsp_server::gen_lsp_types::Position {
             line,
-            character: u32::MAX,
+            character: LINE_END_CHARACTER,
         },
     }
 }
@@ -283,6 +291,20 @@ pub fn full_line_range(line: u32) -> tower_lsp_server::gen_lsp_types::Range {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── full_line_range ─────────────────────────────────────────────
+
+    #[test]
+    fn full_line_range_stays_within_the_lsp_uinteger_range() {
+        let range = serde_json::to_value(full_line_range(21)).unwrap();
+        assert_eq!(
+            range,
+            serde_json::json!({
+                "start": { "line": 21, "character": 0 },
+                "end": { "line": 21, "character": 2_147_483_647 },
+            })
+        );
+    }
 
     // ── paths_match ─────────────────────────────────────────────────
 
