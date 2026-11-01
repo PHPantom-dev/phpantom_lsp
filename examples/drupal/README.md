@@ -30,6 +30,12 @@ Run `composer install` here first. Composer puts core and contrib into
   `core.services.yml`. Complete an ID inside `\Drupal::service('')`,
   `$container->get('')`, or after `@` in `acme.services.yml`, and find the
   references of a service from its declaration.
+- Entity type IDs navigate between the entity class that declares them and
+  the code that asks the entity type manager for them, and type what that
+  code gets back. In `web/modules/custom/acme/src/NoteCounter.php`, hover
+  `load()` in `first()`, typed as `Note`, or go to the definition of
+  `'acme_note'`, which lands on the `id` in `Note`'s attribute. Complete an
+  ID inside `getStorage('')`; core's entity types are offered too.
 
 ## What the Symfony support already reads
 

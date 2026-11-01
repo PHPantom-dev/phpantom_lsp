@@ -27,6 +27,7 @@ use Drupal\Core\DependencyInjection\YamlFileLoader;
 use Drupal\Core\Entity\Attribute\ContentEntityType;
 use Drupal\Core\Entity\ContentEntityBase;
 use Drupal\Core\Entity\EntityTypeManager;
+use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
 use Drupal\Core\Hook\Attribute\Hook;
 
@@ -125,6 +126,13 @@ check('Note declares the acme_note entity type by attribute', ($noteType['id'] ?
 check("acme_note's label key is the title base field", ($noteType['entity_keys']['label'] ?? null) === 'title');
 check('Note is a content entity', $note->isSubclassOf(ContentEntityBase::class));
 check('Note declares its own base fields', $note->getMethod('baseFieldDefinitions')->getDeclaringClass()->getName() === Note::class);
+// Attribute discovery tells the attribute which class it is on.
+$noteAttribute = $note->getAttributes(ContentEntityType::class)[0]->newInstance();
+$noteAttribute->setClass(Note::class);
+$noteDefinition = $noteAttribute->get();
+check("acme_note's storage, which NoteCounter::first() loads from, is core's SQL storage", $noteDefinition->getStorageClass() === SqlContentEntityStorage::class);
+check('acme_note loads Note', $noteDefinition->getClass() === Note::class);
+check('NoteCounter::first() asks for acme_note', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "getStorage('acme_note')->load(1)"));
 
 // ─── Hooks and theme hooks ──────────────────────────────────────────────────
 

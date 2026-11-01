@@ -3,8 +3,9 @@
 Known gaps and missing features in PHPantom's Drupal support. The web
 root is detected, core, contrib, and the Drupal file extensions
 (`.module`, `.install`, `.theme`, …) are indexed past `.gitignore`, and
-the services the `*.services.yml` files declare are read. Nothing reads
-Drupal's other declarations yet: entity types, fields, routes, or hooks.
+the services the `*.services.yml` files declare and the entity types
+entity classes declare are read. Nothing reads Drupal's other
+declarations yet: fields, routes, or hooks.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -55,7 +56,7 @@ repository and the storage return-type extensions).
 
 ## DR4. Entity field access
 
-**Impact: Medium-High · Complexity: High** (depends on DR3)
+**Impact: Medium-High · Complexity: High**
 
 ```php
 $tags = $node->field_tags;          // FieldItemListInterface

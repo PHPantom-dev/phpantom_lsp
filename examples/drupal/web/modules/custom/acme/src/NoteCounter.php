@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\acme;
 
+use Drupal\acme\Entity\Note;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -23,6 +24,15 @@ final class NoteCounter implements ContainerInjectionInterface
         // core's core.services.yml. Complete a service ID inside
         // `$container->get('')`.
         return new static($container->get('entity_type.manager'));
+    }
+
+    public function first(): ?Note
+    {
+        // Try: hover `load()`, typed as `Note`, the class that declares the
+        // acme_note entity type, or go to the definition of 'acme_note',
+        // which lands on the `id` in Note's attribute. Complete an entity
+        // type ID inside `getStorage('')`.
+        return $this->entityTypeManager->getStorage('acme_note')->load(1);
     }
 
     public function count(): int
