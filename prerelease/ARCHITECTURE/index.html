@@ -4743,7 +4743,7 @@ intersection members above branch-only members or add an explicit marker.</p>
 <p><strong>Diagnose phase.</strong> Run all seven diagnostic collectors on every file in parallel (<code>std::thread::scope</code> with one chunk per CPU core). Because Phase 1 already indexed all user classes, the diagnostic phase never triggers lazy <code>parse_and_cache_file</code> for other user files, eliminating write-lock contention.</p>
 </li>
 </ol>
-<p>Output uses PHPStan's table format (with progress bar and coloured output) so the results are familiar to teams already using PHPStan. Severity filtering (<code>--severity error|warning|all</code>) and path scoping let users focus on specific areas.</p>
+<p>Output uses PHPStan's table format (with progress bar and coloured output) so the results are familiar to teams already using PHPStan. Severity filtering (<code>--severity error|warning|all</code>), code filtering (<code>--code</code>, <code>--exclude-code</code>) and path scoping let users focus on specific areas.</p>
 <h2 id="diagnostic-worker-architecture">Diagnostic Worker Architecture<a class="headerlink" href="#diagnostic-worker-architecture" title="Permanent link">&para;</a></h2>
 <p>Diagnostics run in three independent background <code>tokio::spawn</code> tasks so they never block completion, hover, or signature help:</p>
 <ol>

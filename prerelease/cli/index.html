@@ -2337,9 +2337,11 @@ fewer with each release. If you hit one, please
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>app/<span class="w"> </span>lib/Helper.php<span class="w">         </span><span class="c1"># scan several paths at once</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w">          </span><span class="c1"># errors and warnings only</span>
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>error<span class="w">            </span><span class="c1"># errors only</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w"> </span><span class="c1"># explicit project root</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--no-colour<span class="w">                 </span><span class="c1"># plain text output</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--debug<span class="w"> </span>-vv<span class="w">                 </span><span class="c1"># trace file-by-file progress</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--code<span class="w"> </span>unused_import<span class="w">        </span><span class="c1"># one diagnostic code only</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--exclude-code<span class="w"> </span>unused_import<span class="w"> </span><span class="c1"># everything but one code</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w"> </span><span class="c1"># explicit project root</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--no-colour<span class="w">                 </span><span class="c1"># plain text output</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--debug<span class="w"> </span>-vv<span class="w">                 </span><span class="c1"># trace file-by-file progress</span>
 </code></pre></div>
 <h3 id="options_2">Options<a class="headerlink" href="#options_2" title="Permanent link">&para;</a></h3>
 <table>
@@ -2357,6 +2359,14 @@ fewer with each release. If you hit one, please
 <tr>
 <td><code>--severity &lt;LEVEL&gt;</code></td>
 <td>Minimum severity: <code>all</code> (default), <code>warning</code>, or <code>error</code>.</td>
+</tr>
+<tr>
+<td><code>--code &lt;CODE&gt;</code></td>
+<td>Only report diagnostics with this code. Repeatable. A code nothing reported gets a note on stderr, since a misspelled one would otherwise read as a clean run.</td>
+</tr>
+<tr>
+<td><code>--exclude-code &lt;CODE&gt;</code></td>
+<td>Leave out diagnostics with this code. Repeatable. Wins over <code>--code</code>.</td>
 </tr>
 <tr>
 <td><code>--project-root &lt;DIR&gt;</code></td>
@@ -2415,7 +2425,8 @@ fewer with each release. If you hit one, please
 </code></pre></div>
 <h3 id="reported-diagnostics">Reported diagnostics<a class="headerlink" href="#reported-diagnostics" title="Permanent link">&para;</a></h3>
 <p>The analyze command reports the same diagnostics you see in your editor.
-Each has a rule identifier shown below the message.</p>
+Each has a rule identifier shown below the message, which is what <code>--code</code>
+and <code>--exclude-code</code> take. The most common ones are:</p>
 <table>
 <thead>
 <tr>
@@ -2451,12 +2462,12 @@ Each has a rule identifier shown below the message.</p>
 <td>Function call not resolvable</td>
 </tr>
 <tr>
-<td><code>argument_count</code></td>
+<td><code>argument_count_mismatch</code></td>
 <td>Error</td>
 <td>Wrong number of arguments to a function or method</td>
 </tr>
 <tr>
-<td><code>implementation_error</code></td>
+<td><code>missing_implementation</code></td>
 <td>Error</td>
 <td>Missing required interface or abstract methods</td>
 </tr>
@@ -2481,7 +2492,7 @@ Each has a rule identifier shown below the message.</p>
 <td>Statements after a <code>return</code>, <code>throw</code>, <code>exit</code>, or <code>break</code></td>
 </tr>
 <tr>
-<td><code>deprecated</code></td>
+<td><code>deprecated_usage</code></td>
 <td>Hint</td>
 <td>Reference to a <code>@deprecated</code> symbol</td>
 </tr>
