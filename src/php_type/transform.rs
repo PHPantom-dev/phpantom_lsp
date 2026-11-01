@@ -817,24 +817,39 @@ impl PhpType {
 
             // Substitution can put a union inside a union (and an
             // intersection inside an intersection); both flatten back out.
+            //
+            // A bound template can also land beside a type it refines or
+            // is refined by (`T|non-empty-string` with `T` bound to
+            // `non-falsy-string`), where the union is the wider of the two
+            // and the intersection the narrower.
             TypeKind::Union(types) => {
                 let mut flat = Vec::with_capacity(types.len());
-                for t in types.iter().map(|t| t.substitute(subs)) {
+                let mut substituted = false;
+                for (original, t) in types.iter().map(|t| (t, t.substitute(subs))) {
+                    substituted |= t != *original;
                     match t.kind() {
                         TypeKind::Union(inner) => flat.extend(inner.iter().cloned()),
                         _ => flat.push(t),
                     }
+                }
+                if substituted {
+                    absorb_union_value_subtypes(&mut flat);
                 }
                 PhpType::union(flat)
             }
 
             TypeKind::Intersection(types) => {
                 let mut flat = Vec::with_capacity(types.len());
-                for t in types.iter().map(|t| t.substitute(subs)) {
+                let mut substituted = false;
+                for (original, t) in types.iter().map(|t| (t, t.substitute(subs))) {
+                    substituted |= t != *original;
                     match t.kind() {
                         TypeKind::Intersection(inner) => flat.extend(inner.iter().cloned()),
                         _ => flat.push(t),
                     }
+                }
+                if substituted {
+                    absorb_intersection_supertypes(&mut flat);
                 }
                 match flat.len() {
                     1 => flat.into_iter().next().expect("checked length"),

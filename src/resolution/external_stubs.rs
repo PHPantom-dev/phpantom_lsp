@@ -41,17 +41,16 @@ impl Backend {
         if !self.has_external_stubs() {
             return None;
         }
-        let (name, path) = {
-            let stubs = self.external_stubs.read();
-            candidates.iter().find_map(|&name| {
-                stubs
-                    .functions
-                    .get_key_value(name)
-                    .map(|(name, path)| (name.to_owned(), path.clone()))
-            })?
-        };
-        let uri = self.parse_external_stub_globals(&path)?;
-        self.function_declared_by(&name, &uri)
+        let stubs = self.external_stubs();
+        let (name, path) = candidates
+            .iter()
+            .find_map(|&name| stubs.functions.get_key_value(name))?;
+        let uri = self.parse_external_stub_globals(path)?;
+        let mut function = self.function_declared_by(name, &uri)?;
+        if let Some(wordpress) = &stubs.wordpress {
+            wordpress.apply(path, &mut function);
+        }
+        Some(function)
     }
 
     /// What `read` takes from the constant the first of `candidates` a

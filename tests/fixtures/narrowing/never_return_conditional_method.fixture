@@ -1,0 +1,27 @@
+// test: guard calling a method whose conditional return type picks never
+// feature: completion
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+class Aborter {
+    /** @return ($exit is true ? never : void) */
+    public function stop(bool $exit = true) {}
+}
+
+function test(Foo|Bar $x, Aborter $aborter): void {
+    if (!$x instanceof Foo) {
+        $aborter->stop();
+    }
+
+    $x-><>
+}

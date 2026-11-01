@@ -28,9 +28,8 @@ use super::{resolve_rhs_expression, resolved_type_with_lookup};
 /// `$this` replaced (via the `replace_self` closure, which differs between the
 /// instance and static call paths), and any conditionals nested inside the
 /// winning branch collapsed.  Returns `None` when the method has no
-/// conditional return type, the condition cannot be decided from the
-/// arguments, or the winning branch is uninformative (a bare `mixed`/`array`
-/// else-branch) — in which case the caller falls back to the native return
+/// conditional return type or the condition cannot be decided from the
+/// arguments, in which case the caller falls back to the native return
 /// type so the full union (including scalar/`array` members) is preserved.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_conditional_return_for_call(
@@ -112,11 +111,7 @@ pub(super) fn resolve_conditional_return_for_call(
     } else {
         substituted
     };
-    if collapsed.is_void() {
-        None
-    } else {
-        Some(collapsed)
-    }
+    Some(collapsed)
 }
 
 /// The types the call site's arguments resolve to, indexed by the

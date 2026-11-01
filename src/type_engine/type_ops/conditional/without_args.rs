@@ -157,14 +157,7 @@ pub fn resolve_conditional_without_args_and_defaults(
                 recurse(else_type)
             }
         }
-        _ => {
-            // See the matching early return in `TextArgs::resolve`: `never`
-            // must propagate as informative, only `void` falls back.
-            if conditional.is_void() {
-                return None;
-            }
-            Some(conditional.clone())
-        }
+        _ => Some(conditional.clone()),
     }
 }
 
@@ -211,7 +204,7 @@ pub(super) fn try_resolve_with_template_default(
                 return union_branch_types(Some(then_type.clone()), Some(else_type.clone()));
             }
         };
-        return (!branch.is_void()).then(|| branch.clone());
+        return Some(branch.clone());
     }
 
     // Determine whether the default value matches the condition.
@@ -266,9 +259,6 @@ pub(super) fn try_resolve_with_template_default(
     } else {
         else_type
     };
-    if branch.is_void() {
-        return None;
-    }
     Some(branch.clone())
 }
 
@@ -281,7 +271,7 @@ pub(super) fn try_resolve_with_template_default(
 /// evaluated and the conditional replaced by the winning branch.
 ///
 /// Returns `None` when the conditional's subject is a runtime parameter,
-/// is absent from `values`, or the winning branch is uninformative.
+/// or is absent from `values`.
 pub fn resolve_conditional_from_values(
     conditional: &PhpType,
     values: &HashMap<String, PhpType>,

@@ -224,6 +224,25 @@ pub(crate) fn bind_text_args_to_params(
     bound
 }
 
+/// The positional arguments a variadic parameter collects after the first,
+/// which [`bind_text_args_to_params`] leaves out: for `f($a, ...$rest)`
+/// called as `f(1, 2, 3, 4)`, `["3", "4"]`.
+pub(crate) fn variadic_tail_text_args<'a>(
+    params: &[ParameterInfo],
+    text_args: &[&'a str],
+) -> Vec<&'a str> {
+    let Some(variadic_idx) = params.iter().position(|p| p.is_variadic) else {
+        return Vec::new();
+    };
+    text_args
+        .iter()
+        .map(|arg| split_named_text_arg(arg))
+        .filter(|(name, _)| name.is_none())
+        .skip(variadic_idx + 1)
+        .map(|(_, value)| value)
+        .collect()
+}
+
 /// One argument written in a partial application: a bound value (named or
 /// positional), a `?` or `name: ?` placeholder, or the `...` placeholder.
 enum PartialArg<N, V> {

@@ -286,6 +286,12 @@ loaded into the stub index at a priority above vendor stubs but below
 user `.phpantom.toml` paths. Framework detection (already done for
 Laravel via `composer.json` inspection) controls which set is loaded.
 
+WordPress has a narrower form of this already: `src/wordpress/overrides.php`
+declares return types for functions of `php-stubs/wordpress-stubs`, and
+they replace the return type of the stubs' own declaration, which keeps
+everything else. It applies only to the stub file that declares `wpdb`,
+so any other stub file the user lists keeps its own declarations.
+
 ### User-provided override stubs
 
 Users can already place their own stubs in a `.phpantom.toml`

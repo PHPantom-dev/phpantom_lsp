@@ -1,9 +1,13 @@
 # PHPantom — WordPress
 
 Known gaps and missing features in PHPantom's WordPress support. Today
-WordPress gets only the generic engine: there is no WordPress-specific
-code, and core's functions and classes resolve only when the project
-indexes WordPress itself or a stub package for it.
+WordPress gets the generic engine, plus the output constants (`OBJECT`,
+`ARRAY_A`, …) its stubs leave out and the return types an argument
+decides that they declare too wide (`src/wordpress/`). Core's functions
+and classes resolve only when the project indexes WordPress itself or a
+stub package for it. The stubs' own type tests run in
+`tests/wordpress_stubs/`, and what the engine reads wrongly in them is
+filed under "Conditional return types" in [bugs.md](bugs.md).
 
 Most WordPress typing lives in `php-stubs/wordpress-stubs`, so the
 external stubs are the foundation for everything here. Installed with
@@ -52,36 +56,25 @@ untested and could regress silently.
 
 ---
 
-## WP2. Audit what the WordPress stubs declare against the engine
+## WP9. The argument types the WordPress stubs declare
 
-**Impact: High · Complexity: Low**
-
-`php-stubs/wordpress-stubs` carries more than signatures. Recent
-versions declare argument-dependent return types, `@phpstan-assert`
-narrowing and never-returning functions for a large part of core,
-absorbed from PHPStan's WordPress extension. Examples to check:
+**Impact: Medium · Complexity: Low-Medium**
 
 ```php
-$post = get_post($id, ARRAY_A);   // array shape, not WP_Post
-if (is_wp_error($result)) { … }   // narrows $result to WP_Error
-wp_die();                         // nothing after it is reachable
+add_menu_page('Acme', 'Acme', 'manage_options', 'acme', 'notACallable');
+// Parameter #5 $callback of function add_menu_page expects ''|(callable(): mixed), 'notACallable' given.
 ```
 
-One gap is already known. Core's output constants (`OBJECT`, `ARRAY_A`,
-`ARRAY_N`) are `define()`d at runtime and are not in `wordpress-stubs`,
-so a default argument of `$output = OBJECT` cannot be told apart from the
-other branches, and `get_post($id)` comes back as
-`non-empty-array<string, mixed>|non-empty-array<int, mixed>|WP_Post|null`
-instead of `WP_Post|null`. PHPStan's WordPress extension declares these
-constants in its bootstrap, and `php-stubs/wordpress-globals` ships them.
-Ship them with the WordPress support (their values are fixed), so the
-conditional return types over `$output` resolve on the default.
-
-Go through what the stubs declare, write an assertion fixture for each
-construct, and file every one the engine reads wrongly as a bug in
-`bugs.md` or `type-inference.md`. Fixing those fixes them for every
-library that uses the same annotations, not just WordPress. What the
-stubs do not declare at all goes to WP7.
+The stubs narrow many parameters with `@phpstan-param`: shapes for
+`$args` arrays, callables with their signatures, literal unions for
+modes. Their own rule tests (`tests/data/param/` and
+`ParameterTypeTest.php` of `php-stubs/wordpress-stubs`, 31 files) list
+the calls each declaration accepts and the errors it must report. The
+stubs' type tests are ported in `tests/wordpress_stubs/`; port these
+beside them as diagnostics fixtures (as `tests/fixtures/phpstan_symfony/`
+does for the Symfony extension's rule tests), extending the slice of the
+stubs `scripts/extract-wordpress-stubs.php` copies, and file every call
+the argument-type check judges differently.
 
 ---
 
@@ -213,21 +206,44 @@ and the Twig template-name support.
 
 ---
 
-## WP7. Return types the WordPress stubs do not declare
+## WP13. Return types no conditional `@return` can express
 
-**Impact: Medium · Complexity: Medium** (depends on WP2)
+**Impact: Medium · Complexity: Medium**
 
-Whatever WP2 finds that PHPStan's WordPress extension types and the
-stubs do not, typically a return type an argument decides:
-`get_posts(['fields' => 'ids'])` returning `int[]`,
-`get_post_meta($id, $key, true)` returning a single value rather than an
-array, `wp_parse_url($url, PHP_URL_HOST)`. Roots' Sage theme shows more:
-`wp_list_comments([..., 'echo' => false])` is declared `void|string`
-whatever `echo` says, and `get_post_time('c')` keeps the `int` only the
-`'U'` and `'G'` formats return. Write each as a conditional
-`@return` in an override stub
-([E7](external-stubs.md#e7-stub-based-framework-patches)) rather than in
-Rust, and offer the ones that hold upstream to `php-stubs/wordpress-stubs`.
+```php
+$args = wp_parse_args($args, ['before' => '', 'echo' => true]);
+$args['echo'];   // mixed, want bool
+```
+
+`src/wordpress/overrides.php` gives the WordPress stubs the conditional
+return types an argument decides. What is left of PHPStan's WordPress
+extension needs the engine, since no PHPDoc type can say it. Its
+fixtures are ported in `tests/wordpress_stubs/data/phpstan-wordpress/`,
+each gap marked `// SKIP`:
+
+- **Merged shapes.** `wp_parse_args($args, $defaults)` of an array is
+  `array_merge($defaults, $args)`, which the array function rules
+  (`src/type_engine/variable/array_func_rules.rs`) already type.
+  `shortcode_atts($pairs, $atts)` keeps the keys of `$pairs`, each value
+  its default's type or `string`. 23 assertions.
+- **`esc_sql()` keeps the shape** of the array it escapes, each scalar
+  value a `string` and anything else `''`. 11 assertions.
+- **Calls on literal arguments.** `wp_slash('foo')`,
+  `trailingslashit('foo')`, `normalize_whitespace(' 0 ')`,
+  `stripslashes_from_strings_only('foo')` and
+  `wp_parse_url('http://example.com', PHP_URL_HOST)` give the literal
+  WordPress would return, the way `scalar_fold.rs` folds PHP's own string
+  functions. 33 assertions.
+- **`wp_slash()` of a `lowercase-string` stays one.** A conditional
+  says it, but gives an array argument a stray `lowercase-string` until
+  [B708](bugs.md#b708-a-condition-over-a-refined-type-is-misjudged) is
+  fixed. 1 assertion.
+- **`wp_parse_url()` with a component no `PHP_URL_*` constant names**
+  returns `null`, or `false` for a URL it cannot parse. A
+  `$component is int<0, 7>` condition waits on B708 too. 1 assertion.
+
+The overrides that hold for every WordPress version the stubs cover are
+worth offering to `php-stubs/wordpress-stubs` as well.
 
 ---
 
@@ -254,3 +270,75 @@ return type.
 `src/virtual_members/laravel/view_data.rs`; Acorn's
 `Roots\Acorn\View\Composer` and its `Composers\Concerns\Extractable`
 for exactly which members count.
+
+---
+
+## WP10. Hook docblocks that do not match the call
+
+**Impact: Low-Medium · Complexity: Medium** (depends on WP5)
+
+```php
+/**
+ * Filters the order total.
+ *
+ * @param float $total The total.
+ */
+$total = apply_filters('acme_order_total', $total, $order);   // 2 arguments, 1 @param
+```
+
+WP5 reads the docblock above `do_action()` and `apply_filters()` as the
+hook's signature, so a docblock that disagrees with the call types every
+callback wrongly. PHPStan's WordPress extension (`HookDocsRule`) reports
+three mismatches: a `@param` count that differs from the arguments after
+the hook name, a `@param` named `$this` or written with invalid syntax,
+and a `@param` type the argument passed does not satisfy. Report the
+same, on the docblock, for the plugin and theme authors who document
+their own hooks. Its rule test (`tests/data/hook-docs.php`) lists the
+cases.
+
+---
+
+## WP11. `assertWPError()` and `assertNotWPError()` narrow
+
+**Impact: Low · Complexity: Low**
+
+```php
+$result = wp_insert_post($data, true);   // int|WP_Error
+$this->assertNotWPError($result);
+$result + 1;                             // still int|WP_Error
+```
+
+WordPress's PHPUnit base class (`WP_UnitTestCase_Base`) asserts a value
+is or is not a `WP_Error`, and the test stubs do not say so. PHPStan's
+WordPress extension narrows through both
+(`AssertWpErrorTypeSpecifyingExtension`, tested in
+`tests/data/assert_wp_error.php` and `assert_not_wp_error.php`). Declare
+them with `@phpstan-assert WP_Error $actual` and
+`@phpstan-assert !WP_Error $actual` in an override stub
+([E7](external-stubs.md#e7-stub-based-framework-patches)) rather than in
+Rust.
+
+---
+
+## WP12. Constants `wp-config.php` defines keep the value of one install
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+// wp-config.php
+define('WP_CONTENT_DIR', '/var/www/wp-content');
+
+// a plugin
+if (WP_CONTENT_DIR === '/srv/site/wp-content') { … }   // read as `false`
+```
+
+A constant from a `define()` in `wp-config.php` is typed as the literal
+it holds on this machine, so a comparison against another install's value
+is decided as `false`. The
+value differs between installs, so its type is the general one (`string`,
+`bool`). PHPStan's WordPress extension lists these
+(`dynamicConstantNames` in `extension.neon`: `WP_DEBUG`, `ABSPATH`,
+`WP_CONTENT_DIR`, `WP_PLUGIN_DIR`, `FS_CHMOD_FILE`, …). `WP_DEBUG` and the
+other `bool` constants already widen to `bool`; the string and integer
+ones do not. Widen every constant `wp-config.php` (or
+`wp-config-sample.php`) defines, rather than keeping a list of names.

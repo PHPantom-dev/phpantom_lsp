@@ -561,19 +561,25 @@ pub(crate) fn parse_var_docblock_pairs(doc_text: &str) -> Vec<(String, PhpType)>
     let Some(info) = crate::docblock::parse_docblock_for_tags(doc_text) else {
         return vec![];
     };
-    let mut results: Vec<(String, PhpType)> = Vec::new();
+    // Precedence picks each variable's tag; the result lists them in the
+    // order they are written.
+    let mut results: Vec<(u32, String, PhpType)> = Vec::new();
     for tag in info.tags_by_kind_vendor_first(crate::docblock::TagKind::Var) {
         let (Some(var_name), Some(type_text)) = (tag.variable(), tag.type_text()) else {
             continue;
         };
-        if results.iter().any(|(seen, _)| *seen == var_name) {
+        if results.iter().any(|(_, seen, _)| *seen == var_name) {
             continue;
         }
         if let Some(php_type) = crate::docblock::sanitise_and_parse_docblock_type(&type_text) {
-            results.push((var_name.into_owned(), php_type));
+            results.push((tag.span.start.offset, var_name.into_owned(), php_type));
         }
     }
+    results.sort_by_key(|(offset, _, _)| *offset);
     results
+        .into_iter()
+        .map(|(_, name, php_type)| (name, php_type))
+        .collect()
 }
 
 /// Parse `/** @var Type */` (without variable name) and return the PhpType.

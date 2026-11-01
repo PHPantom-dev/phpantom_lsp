@@ -1,0 +1,26 @@
+// test: guard calling a function whose conditional return type picks void
+// feature: completion
+// The arguments select the branch that returns, so the guard falls through
+// expect: fooMethod(
+// expect: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+/** @return ($args is array{exit: false} ? void : never) */
+function stop(array $args = []) {}
+
+function test(Foo|Bar $x): void {
+    if (!$x instanceof Foo) {
+        stop(['exit' => false]);
+    }
+
+    $x-><>
+}

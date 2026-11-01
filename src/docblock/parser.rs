@@ -326,16 +326,20 @@ impl DocblockInfo {
 
     /// Returns tags of `kind` ordered by vendor precedence rather than by
     /// position: `@phpstan-…` first, then `@psalm-…`, then any other vendor
-    /// prefix, then the unprefixed form.  Within each group the source order
-    /// is preserved.
+    /// prefix, then the unprefixed form.  Within each group the last tag in
+    /// the docblock comes first.
     ///
     /// PHPStan and Psalm both let a vendor-prefixed tag override the plain
     /// one on the same symbol, so a docblock carrying both `@param` and
-    /// `@phpstan-param` for one parameter must resolve to the latter.
+    /// `@phpstan-param` for one parameter must resolve to the latter.  A
+    /// repeated tag of the same spelling overrides the one above it, which
+    /// is how stubs refine a declaration without deleting the old one.
     pub fn tags_by_kind_vendor_first(&self, kind: TagKind) -> impl Iterator<Item = &TagInfo> {
         (0..=VENDOR_RANKS).flat_map(move |rank| {
-            self.tags_by_kind(kind)
-                .filter(move |t| vendor_rank(t) == rank)
+            self.tags
+                .iter()
+                .rev()
+                .filter(move |t| t.kind == kind && vendor_rank(t) == rank)
         })
     }
 
@@ -1034,6 +1038,25 @@ mod tests {
             .first_tag_by_kind_vendor_first(TagKind::Return)
             .expect("should have return");
         assert_eq!(tag.description, "literal-string");
+    }
+
+    #[test]
+    fn repeated_tag_of_one_spelling_reads_the_last() {
+        let doc = r#"/**
+         * @return string
+         * @phpstan-return non-empty-string
+         * @phpstan-return literal-string
+         * @return int
+         */"#;
+        let info = parse_docblock_for_tags(doc).expect("should parse");
+        let order: Vec<_> = info
+            .tags_by_kind_vendor_first(TagKind::Return)
+            .map(|t| t.description.as_str())
+            .collect();
+        assert_eq!(
+            order,
+            ["literal-string", "non-empty-string", "int", "string"]
+        );
     }
 
     // ── Structured tag values ───────────────────────────────────────

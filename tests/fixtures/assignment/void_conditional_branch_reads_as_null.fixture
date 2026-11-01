@@ -1,0 +1,15 @@
+// test: a call whose conditional return type picks `void` holds null
+// feature: hover
+// expect: null
+// expect_absent: void
+// expect_absent: string
+---
+<?php
+
+/** @return ($display is true ? void : string) */
+function the_title($before = '', $after = '', $display = true) {}
+
+function test(): void {
+    $title = the_title('', '', true);
+    echo $<>title;
+}

@@ -2690,6 +2690,51 @@ fn substitute_intersection() {
 }
 
 #[test]
+fn substitute_intersection_keeps_the_narrower_scalar() {
+    let ty = PhpType::parse("TFirst&TSecond");
+    let subs = make_subs(&[("TFirst", "string"), ("TSecond", "lowercase-string")]);
+    assert_eq!(ty.substitute(&subs).to_string(), "lowercase-string");
+    let subs = make_subs(&[("TFirst", "string"), ("TSecond", "'foo'")]);
+    assert_eq!(ty.substitute(&subs).to_string(), "'foo'");
+    let subs = make_subs(&[
+        ("TFirst", "lowercase-string"),
+        ("TSecond", "non-falsy-string"),
+    ]);
+    assert_eq!(
+        ty.substitute(&subs).to_string(),
+        "lowercase-string&non-falsy-string"
+    );
+}
+
+#[test]
+fn substitute_union_keeps_the_wider_scalar() {
+    let ty = PhpType::parse("T|non-empty-string");
+    let subs = make_subs(&[("T", "non-falsy-string")]);
+    assert_eq!(ty.substitute(&subs).to_string(), "non-empty-string");
+    let subs = make_subs(&[("T", "int")]);
+    assert_eq!(ty.substitute(&subs).to_string(), "int|non-empty-string");
+    let ty = PhpType::parse("C|object");
+    let subs = make_subs(&[("C", "Svc")]);
+    assert_eq!(ty.substitute(&subs).to_string(), "Svc|object");
+}
+
+#[test]
+fn simplified_intersection_drops_a_member_another_narrows() {
+    let ty = PhpType::parse("string&'foo'");
+    assert_eq!(ty.simplified().to_string(), "'foo'");
+    let ty = PhpType::parse("Countable&Iterator");
+    assert_eq!(ty.simplified().to_string(), "Countable&Iterator");
+}
+
+#[test]
+fn intersection_is_subtype_of_an_intersection_of_fewer_members() {
+    let narrower = PhpType::parse("lowercase-string&non-empty-string&numeric-string");
+    let wider = PhpType::parse("lowercase-string&non-empty-string");
+    assert!(narrower.is_subtype_of(&wider));
+    assert!(!wider.is_subtype_of(&narrower));
+}
+
+#[test]
 fn substitute_nullable() {
     let ty = PhpType::parse("?TValue");
     let subs = make_subs(&[("TValue", "User")]);

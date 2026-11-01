@@ -44,7 +44,8 @@ mod tests;
 pub(crate) use build::{
     ScopeBody, build_scope_map_for_offset, collect_function_scope,
     collect_function_scope_with_kind, collect_function_scope_with_kind_and_resolver,
-    collect_function_scope_with_resolver, collect_hook_scope_with_resolver, hook_body_span,
+    collect_function_scope_with_resolver, collect_hook_scope_with_resolver, collect_scope,
+    hook_body_span,
 };
 pub(crate) use scope_map::{
     AccessKind, AccessRole, ByRefCallKind, ByRefResolver, ClosureUseList, Frame, FrameKind,

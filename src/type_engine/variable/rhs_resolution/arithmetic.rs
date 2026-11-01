@@ -63,6 +63,15 @@ pub(super) fn resolve_binary_result_type<'b>(
         return Some(vec![ResolvedType::from_type_string(folded)]);
     }
 
+    if let Some(result) = fold_identity_comparison(binary, ctx) {
+        let folded = if result {
+            PhpType::true_()
+        } else {
+            PhpType::false_()
+        };
+        return Some(vec![ResolvedType::from_type_string(folded)]);
+    }
+
     // instanceof, comparison, logical: always bool.
     if binary.operator.is_instanceof()
         || binary.operator.is_comparison()
@@ -762,6 +771,72 @@ fn fold_literal_comparison(
         BinaryOperator::NotIdentical(_) => !same_kind || ordering != Ordering::Equal,
         _ => return None,
     })
+}
+
+/// `===` or `!==` between two operands that each hold only known scalars,
+/// or `None` when the answer depends on the value. Two such operands with
+/// no value in common are never identical, which is how
+/// `$protocol === 'HTTP/1'` is seen to be `false` when `$protocol` is one
+/// of `'HTTP/1.0'|'HTTP/1.1'`. One side must be cheap to resolve, and is
+/// resolved first, so a comparison of two calls, or of a call with a value
+/// that is not a known scalar, resolves at most one call.
+fn fold_identity_comparison<'b>(
+    binary: &'b Binary<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<bool> {
+    let identical = match binary.operator {
+        BinaryOperator::Identical(_) => true,
+        BinaryOperator::NotIdentical(_) => false,
+        _ => return None,
+    };
+    let (cheap, other) = if scalar_fold::is_cheap_scalar_operand(binary.rhs) {
+        (binary.rhs, binary.lhs)
+    } else if scalar_fold::is_cheap_scalar_operand(binary.lhs) {
+        (binary.lhs, binary.rhs)
+    } else {
+        return None;
+    };
+    let cheap_values = known_scalars(&resolve_rhs_expression(cheap, ctx))?;
+    let other_values = known_scalars(&resolve_rhs_expression(other, ctx))?;
+    let equal = if cheap_values
+        .iter()
+        .all(|value| !other_values.contains(value))
+    {
+        false
+    } else if let ([a], [b]) = (cheap_values.as_slice(), other_values.as_slice())
+        && a == b
+    {
+        true
+    } else {
+        return None;
+    };
+    Some(equal == identical)
+}
+
+/// Every value a resolved operand can hold, when each is one known scalar.
+/// `None` for an operand that admits any other value, or is unresolved.
+fn known_scalars(types: &[ResolvedType]) -> Option<Vec<scalar_fold::Scalar>> {
+    fn collect(ty: &PhpType, out: &mut Vec<scalar_fold::Scalar>) -> Option<()> {
+        match ty.kind() {
+            TypeKind::Union(members) => members.iter().try_for_each(|member| collect(member, out)),
+            TypeKind::Nullable(inner) => {
+                out.push(scalar_fold::Scalar::Null);
+                collect(inner, out)
+            }
+            _ => {
+                out.push(scalar_fold::Scalar::from_type(ty)?);
+                Some(())
+            }
+        }
+    }
+    if types.is_empty() {
+        return None;
+    }
+    let mut values = Vec::new();
+    for resolved in types {
+        collect(&resolved.type_string, &mut values)?;
+    }
+    Some(values)
 }
 
 fn literal_int(value: i64) -> PhpType {

@@ -200,14 +200,16 @@ impl PhpType {
             return Some(members.iter().any(|m| self.is_subtype_of(m)));
         }
 
+        // ── Intersection supertype: all members required ────────────
+        // Checked before the subtype side so that `A&B&C <: A&B` can meet
+        // each required member through a different member of its own.
+        if let TypeKind::Intersection(members) = supertype.kind() {
+            return Some(members.iter().all(|m| self.is_subtype_of(m)));
+        }
+
         // ── Intersection subtype: at least one member suffices ──────
         if let TypeKind::Intersection(members) = self.kind() {
             return Some(members.iter().any(|m| m.is_subtype_of(supertype)));
-        }
-
-        // ── Intersection supertype: all members required ────────────
-        if let TypeKind::Intersection(members) = supertype.kind() {
-            return Some(members.iter().all(|m| self.is_subtype_of(m)));
         }
         None
     }

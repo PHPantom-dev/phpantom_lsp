@@ -2537,3 +2537,208 @@ function test(): void {
     );
     assert!(message_text(&diags[0].message).contains("$missing"));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// include / require
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Write `files` into a temp directory, parse every one of them, and
+/// collect undefined-variable diagnostics for the first.
+fn undefined_var_diagnostics_in_project(files: &[(&str, &str)]) -> Vec<Diagnostic> {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let mut uris = Vec::new();
+    for (rel_path, content) in files {
+        let full = dir.path().join(rel_path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+        uris.push(format!("file://{}", full.display()));
+    }
+    let backend = create_test_backend();
+    for (uri, (_, content)) in uris.iter().zip(files) {
+        backend.update_ast(uri, content);
+    }
+    let mut out = Vec::new();
+    backend.collect_undefined_variable_diagnostics(&uris[0], files[0].1, &mut out);
+    out
+}
+
+fn flagged_names(diags: &[Diagnostic]) -> Vec<String> {
+    diags
+        .iter()
+        .map(|d| message_text(&d.message).to_string())
+        .collect()
+}
+
+#[test]
+fn require_defines_the_included_files_top_level_variables() {
+    let diags = undefined_var_diagnostics_in_project(&[
+        (
+            "main.php",
+            r#"<?php
+function core_upgrade(): string {
+    require __DIR__ . '/version.php';
+    return $wp_version . $wp_db_version . $missing;
+}
+"#,
+        ),
+        (
+            "version.php",
+            r#"<?php
+$wp_version = '6.7';
+if (true) {
+    $wp_db_version = 1;
+}
+function helper() {
+    $inner = 1;
+}
+"#,
+        ),
+    ]);
+    assert_eq!(
+        flagged_names(&diags),
+        vec!["Undefined variable '$missing'".to_string()]
+    );
+}
+
+#[test]
+fn variable_read_before_the_require_is_still_undefined() {
+    let diags = undefined_var_diagnostics_in_project(&[
+        (
+            "main.php",
+            r#"<?php
+function test(): void {
+    echo $wp_version;
+    require_once __DIR__ . '/version.php';
+}
+"#,
+        ),
+        ("version.php", "<?php\n$wp_version = '6.7';\n"),
+    ]);
+    assert_eq!(diags.len(), 1);
+    assert!(message_text(&diags[0].message).contains("$wp_version"));
+}
+
+#[test]
+fn variable_defined_in_a_function_of_the_included_file_stays_undefined() {
+    let diags = undefined_var_diagnostics_in_project(&[
+        (
+            "main.php",
+            r#"<?php
+function test(): void {
+    include 'lib.php';
+    echo $inner;
+}
+"#,
+        ),
+        ("lib.php", "<?php\nfunction helper() { $inner = 1; }\n"),
+    ]);
+    assert_eq!(diags.len(), 1);
+    assert!(message_text(&diags[0].message).contains("$inner"));
+}
+
+#[test]
+fn include_path_built_from_constants_resolves() {
+    let diags = undefined_var_diagnostics_in_project(&[
+        (
+            "wp-admin/includes/update-core.php",
+            r#"<?php
+function core_upgrade(): string {
+    require ABSPATH . WPINC . '/version.php';
+    return $wp_version . $missing;
+}
+"#,
+        ),
+        (
+            "wp-load.php",
+            r#"<?php
+if (!defined('ABSPATH')) {
+    define('ABSPATH', __DIR__ . '/');
+}
+define('WPINC', 'wp-includes');
+"#,
+        ),
+        ("wp-includes/version.php", "<?php\n$wp_version = '6.7';\n"),
+    ]);
+    assert_eq!(
+        flagged_names(&diags),
+        vec!["Undefined variable '$missing'".to_string()]
+    );
+}
+
+#[test]
+fn includes_of_the_included_file_are_followed() {
+    let diags = undefined_var_diagnostics_in_project(&[
+        (
+            "main.php",
+            r#"<?php
+function test(): void {
+    require dirname(__FILE__) . '/sub/outer.php';
+    echo $outer, $inner, $missing;
+}
+"#,
+        ),
+        (
+            "sub/outer.php",
+            "<?php\n$outer = 1;\nrequire __DIR__ . '/inner.php';\n",
+        ),
+        ("sub/inner.php", "<?php\n$inner = 2;\nrequire __FILE__;\n"),
+    ]);
+    assert_eq!(
+        flagged_names(&diags),
+        vec!["Undefined variable '$missing'".to_string()]
+    );
+}
+
+#[test]
+fn unresolved_include_opens_the_scope_after_it() {
+    let diags = undefined_var_diagnostics_in_project(&[(
+        "main.php",
+        r#"<?php
+function test(string $file): void {
+    echo $before;
+    require $file;
+    echo $after;
+}
+"#,
+    )]);
+    assert_eq!(diags.len(), 1);
+    assert!(message_text(&diags[0].message).contains("$before"));
+}
+
+#[test]
+fn included_file_using_extract_opens_the_scope() {
+    let diags = undefined_var_diagnostics_in_project(&[
+        (
+            "main.php",
+            r#"<?php
+function test(): void {
+    require __DIR__ . '/vars.php';
+    echo $anything;
+}
+"#,
+        ),
+        ("vars.php", "<?php\nextract(['anything' => 1]);\n"),
+    ]);
+    assert!(diags.is_empty(), "got {:?}", flagged_names(&diags));
+}
+
+#[test]
+fn include_inside_a_closure_does_not_define_variables_outside_it() {
+    let diags = undefined_var_diagnostics_in_project(&[
+        (
+            "main.php",
+            r#"<?php
+function test(): void {
+    $load = function () {
+        require __DIR__ . '/version.php';
+        echo $wp_version;
+    };
+    echo $wp_version;
+}
+"#,
+        ),
+        ("version.php", "<?php\n$wp_version = '6.7';\n"),
+    ]);
+    assert_eq!(diags.len(), 1);
+    assert_eq!(diags[0].range.start.line, 6);
+}

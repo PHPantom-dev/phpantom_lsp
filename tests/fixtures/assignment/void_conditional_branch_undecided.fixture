@@ -1,0 +1,14 @@
+// test: an undecided conditional return type keeps its `void` branch as null
+// feature: hover
+// expect: null|string
+// expect_absent: void
+---
+<?php
+
+/** @return ($display is true ? void : string) */
+function the_title($before = '', $after = '', $display = true) {}
+
+function test(bool $echo): void {
+    $title = the_title('', '', $echo);
+    echo $<>title;
+}

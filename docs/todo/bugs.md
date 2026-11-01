@@ -25,50 +25,103 @@ No outstanding items.
 
 ## Type comparison
 
-### B703. A bare `return;` is reported against a docblock `@return void|T`
+No outstanding items.
 
-**Impact: Low-Medium · Complexity: Low**
+## Conditional return types
+
+PHPStan-style conditional return types (`@phpstan-return ($x is T ? A :
+B)`) are how library stubs say what a call returns for the arguments it
+gets. The WordPress stubs use them on some 150 functions, and their own
+type tests are ported in `tests/wordpress_stubs/`: each entry below names how many of
+those assertions it accounts for.
+
+### B707. A conditional type inside a union, an intersection or a generic argument is not evaluated
+
+**Impact: Medium-High · Complexity: Medium**
+
+```php
+/** @phpstan-return ($display is true ? void : string)|null */
+function edit_term_link($link = '', $before = '', $after = '', $term = null, $display = true) { … }
+
+/** @phpstan-return ($prefix is '' ? numeric-string : string)&non-falsy-string */
+function wp_unique_id($prefix = '') { … }
+```
+
+A conditional is evaluated only when it is the whole return type. Inside
+a union (`false|(…)`, `(…)|\WP_Error`), an intersection, or a generic
+argument (`array<key-of<T>, (value-of<T> is string ? string : …)>`), it
+stays in the type unevaluated, and hover shows its source text. This is
+`get_term_by()`, `get_bookmark()`, `get_category()`, `get_tags()`,
+`get_terms()`, `wp_get_post_terms()` and every other function that adds
+`|\WP_Error` or `|false` to an argument-dependent result. 144
+assertions.
+
+### B708. A condition over a refined type is misjudged
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @phpstan-return ($value is int<min, 0> ? false : WP_User|false) */
+function get_user($value) { … }
+get_user(0);           // want false, get WP_User|false
+
+/** @phpstan-return ($path is non-falsy-string ? bool : false) */
+function path_is_absolute($path) { … }
+path_is_absolute('foo');   // want bool, get false
+
+/** @phpstan-return ($data is array<int, mixed> ? true : false) */
+function wp_is_numeric_array($data) { … }
+wp_is_numeric_array(['key' => 'value']);   // want false, get true
+```
+
+The check that decides a condition handles plain types and literals, and
+gets these wrong:
+
+- integer ranges (`int<min, 0>`, `int<min, -1>`) against an integer
+  literal or another range;
+- refined strings (`non-empty-string`, `non-falsy-string`,
+  `lowercase-string`, `numeric-string`, `literal-string`) against a
+  literal or a refined string that is one (a `lowercase-string`
+  parameter against `is lowercase-string`), which is judged not to be,
+  also under `is not`;
+- an array against a refined string, which is left undecided rather
+  than ruled out;
+- `scalar`, which a literal `'a'`, `1` or `true` is judged not to be;
+- `numeric` and `empty`, which match nothing;
+- `resource` and `object`, which are not ruled out of `string`;
+- the key type of `array<K, V>`, which is ignored.
+
+94 assertions, from `absint()`, `has_shortcode()`, `size_format()`,
+`validate_file()`, `WP_Dependencies::query()`, `paginate_links()`,
+`trailingslashit()` and others.
+
+### B710. A conditional over a method template ignores its bound and does not narrow it
+
+**Impact: Medium · Complexity: Medium**
 
 ```php
 /**
- * @return void|string Void if 'echo' argument is true.
+ * @template T of int<0, max>
+ * @param T|int<min, -1>|scalar|null $maybeint
+ * @return ($maybeint is T ? T : …)
  */
-function wp_list_comments($args = []) {
-    if ($echo) {
-        return;   // Function with return type void|string must not return without a value
-    }
-    return $html;
-}
-```
+function absint($maybeint) { … }
+absint(5);   // want 5, get int<0, max>
 
-A docblock that lists `void` in its return union says the function may
-return nothing, so a bare `return;` is exactly what it describes. The
-check treats the union as if `void` were not in it. WordPress core uses
-`void|string` and `void|false` this way (18 reports).
-
-### B699. A conditional return over an array shape matches arrays without the key
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
 /**
- * @phpstan-return ($args is array{ fields: 'ids', ... } ? int[] : WP_Post[])
+ * @template T of string
+ * @return (T is non-falsy-string ? T|false : false)
  */
-function get_posts($args = null) { … }
-
-get_posts(['post_type' => 'post']);   // want WP_Post[], get int[]
+function sanitize_sql_orderby($orderby) { … }
+sanitize_sql_orderby($string);   // want non-falsy-string|false, get string|false
 ```
 
-The argument has no `fields` key, so it cannot be `array{fields: 'ids',
-...}`, yet the condition is taken as true. Every `get_posts()` and
-`WP_Query::query()` call without `fields` then iterates as `int`, and
-each `$post->post_title` in the loop is reported as property access on
-an `int` (22 of WordPress core's `scalar_member_access` reports).
-`get_comments()` has the same shape (`$args is array{ count: true, ... }
-? non-negative-int : …`), so its result is taken for an `int` too. A
-required key the argument's shape lacks must make the check false; an
-optional key (`fields?:`) or an argument whose keys are unknown keeps it
-undecided.
+Three gaps in how a template meets a condition: `$x is T` is never true,
+even for an argument that is what `T` was bound to; a template bound to
+an argument wider than its `of` bound (`mixed` passed for `T of
+bool|string|int`) is not clamped to the bound; and the branch a condition
+picks does not narrow the template it tested (`T` is
+`non-falsy-string` inside the true branch above). 23 assertions.
 
 ## Standard-library return types
 
@@ -101,7 +154,9 @@ if (! empty($result->name)) {
 union members: here `WP_Error`, which declares no `name` and has no
 `__get`/`__isset`, and the `array`. The `isset` form already does this;
 the `empty` form leaves the union whole. Found in WordPress core's plugin
-installer screen. `(int)` of a `ctype_digit()`-checked string is not non-negative
+installer screen.
+
+### B692. `(int)` of a `ctype_digit()`-checked string is not non-negative
 
 **Impact: Low · Complexity: Low-Medium**
 
@@ -124,6 +179,50 @@ matches PHP 8 throwing a `ValueError` on a negative.
 
 Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.
+
+### B713. `@phpstan-assert` narrowing intersects refined string types wrongly
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+/**
+ * @template TUuid of string
+ * @param TUuid $uuid
+ * @phpstan-assert-if-true =TUuid&lowercase-string&non-falsy-string $uuid
+ */
+function wp_is_uuid($uuid, $version = null) { … }
+
+$uuid = 'foo';
+if (wp_is_uuid($uuid)) {
+    $uuid;   // want 'foo', get never
+}
+```
+
+Narrowing a `lowercase-string` by `=non-falsy-string`, or the literal
+`'foo'` by `lowercase-string&non-falsy-string`, gives `never`, though
+`'foo'` is both; and a template in the asserted type (`TUuid` above) is
+left in the narrowed type instead of being replaced by what it was bound
+to. 6 assertions.
+
+### B714. An `@phpstan-impure` call is narrowed by an earlier check of the same call
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+/**
+ * @return string|WP_Error
+ * @phpstan-impure
+ */
+function get_password_reset_key($user) { … }
+
+if (is_wp_error(get_password_reset_key($user))) {
+    get_password_reset_key($user);   // want string|WP_Error, get WP_Error
+}
+```
+
+A call to a function marked `@phpstan-impure` returns something new each
+time, so a check on one call says nothing about the next. We narrow the
+second call as if it were the first. 4 assertions.
 
 ## Array types
 
@@ -235,40 +334,20 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B701. Variables a `require`d file defines are reported as undefined
+### B717. Variables a `require`d file defines have no type
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
 ```php
 function core_upgrade(): string {
-    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version
-    return $wp_version;                          // Undefined variable '$wp_version'
+    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version = '6.7'
+    return $wp_version;                          // hover: nothing, want string
 }
 ```
 
-An `include`/`require` runs the file in the current scope, so every
-variable its top level assigns exists afterwards. We report them as
-undefined, even when the path is `__DIR__ . '/version.php'` and the file
-is in the project. Where the path resolves, read the included file's
-top-level assignments into the scope (with their types). Where it does
-not, the scope after the include is open: stop reporting undefined
-variables in it rather than guess. WordPress core gets 47 of these
-(`$wp_version`, `$required_php_version`, the `$messages` an admin screen
-`require`s).
+When an include's path resolves, the variables the included file's top
+level assigns are no longer reported as undefined, but hover,
+completion, and the type checks know nothing about them. Walk the
+included file's top level and carry the types it leaves its variables
+into the including scope at the point the include ends.
 
-### B702. `@uses` with a variable or a description is reported as an unknown function
-
-**Impact: Low · Complexity: Low**
-
-```php
-/**
- * @uses global $wp_meta_boxes Used to retrieve registered meta boxes.
- * @uses $fn_get_css To run the function that gets the CSS.
- */
-```
-
-The first word after `@uses` is checked as a function name, giving
-"Function 'global' not found" and "Function '$fn_get_css' not found".
-`@uses` takes a structural element, and WordPress writes a global or a
-variable there. Only judge a target that is shaped like one (a class, a
-`Class::member`, or a `name()`); leave anything else alone.

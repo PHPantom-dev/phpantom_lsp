@@ -812,6 +812,12 @@ pub(in crate::type_engine) fn extract_arg_texts_from_ast(
                     let name = crate::atom::bytes_to_str(named.name.value);
                     format!("{name}: {value}")
                 }
+                // A spread keeps its `...`, as it is written in the source the
+                // text-driven caller splits, so a variadic parameter takes the
+                // array's elements rather than the array.
+                mago_syntax::cst::argument::Argument::Positional(pos) if pos.ellipsis.is_some() => {
+                    format!("...{value}")
+                }
                 mago_syntax::cst::argument::Argument::Positional(_) => value.to_string(),
             }
         })

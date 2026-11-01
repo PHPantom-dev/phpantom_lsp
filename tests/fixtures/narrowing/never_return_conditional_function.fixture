@@ -1,0 +1,25 @@
+// test: guard calling a function whose conditional return type picks never
+// feature: completion
+// expect: fooMethod(
+// expect_absent: barMethod(
+---
+<?php
+
+class Foo {
+    public function fooMethod(): void {}
+}
+
+class Bar {
+    public function barMethod(): void {}
+}
+
+/** @return ($args is array{exit: false} ? void : never) */
+function stop(array $args = []) {}
+
+function test(Foo|Bar $x): void {
+    if (!$x instanceof Foo) {
+        stop();
+    }
+
+    $x-><>
+}

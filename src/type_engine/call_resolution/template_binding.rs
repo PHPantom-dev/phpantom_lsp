@@ -84,6 +84,7 @@ pub(crate) fn bind_template_args(
     // bind after every argument that was written.
     let ordered = callable_bindings_last(callee.template_bindings, callee.parameters);
     let (written, omitted): (Vec<&(Atom, Atom)>, Vec<_>) = ordered.partition(is_written);
+    let mut variadic_tail: Option<Vec<&str>> = None;
 
     for (tpl_name, param_name) in written.into_iter().chain(omitted) {
         let Some(param_idx) = param_index(param_name) else {
@@ -112,30 +113,55 @@ pub(crate) fn bind_template_args(
                 None => continue,
             },
         };
+        // A variadic parameter binds its template from every argument it
+        // collects, so `@param T ...$values` takes their union.
+        let tail = if param.is_variadic {
+            variadic_tail.get_or_insert_with(|| {
+                crate::call_args::variadic_tail_text_args(callee.parameters, arg_texts)
+            })
+        } else {
+            &[][..]
+        };
 
-        if let Some(literal) = type_operator_bound_literal(tpl_bound, arg_text) {
-            insert_or_union(&mut subs, tpl_name.to_string(), literal);
-            continue;
-        }
+        for arg_text in std::iter::once(arg_text).chain(tail.iter().copied()) {
+            // `...$items` hands a variadic parameter each element of
+            // `$items`, so an element is what the hint is matched against.
+            if param.is_variadic
+                && let Some(spread) = arg_text.trim_start().strip_prefix("...")
+            {
+                let from_walker = || walker_types.and_then(|lookup| lookup(spread));
+                if let Some(bound) = bind_array_element(spread.trim(), ctx, from_walker)
+                    .zip(param_hint)
+                    .and_then(|(element, hint)| unify_template(hint, &element, tpl_name))
+                {
+                    insert_or_union(&mut subs, tpl_name.to_string(), bound);
+                }
+                continue;
+            }
+            if let Some(literal) = type_operator_bound_literal(tpl_bound, arg_text) {
+                insert_or_union(&mut subs, tpl_name.to_string(), literal);
+                continue;
+            }
 
-        // A union `@param` names one binding site per alternative
-        // (`Collection<TKey, TValue>|array<TKey, TValue>`), and the one the
-        // argument's own shape matches is the one that should bind. Try
-        // them in order and stop at the first that resolves; a non-union
-        // hint yields a single mode, which is the path every other
-        // parameter takes.
-        for mode in candidate_binding_modes(tpl_name, param_hint) {
-            if apply_binding_mode(
-                &mut subs,
-                &mode,
-                tpl_name,
-                arg_text,
-                param_hint,
-                callee.template_bindings,
-                walker_types,
-                ctx,
-            ) {
-                break;
+            // A union `@param` names one binding site per alternative
+            // (`Collection<TKey, TValue>|array<TKey, TValue>`), and the one the
+            // argument's own shape matches is the one that should bind. Try
+            // them in order and stop at the first that resolves; a non-union
+            // hint yields a single mode, which is the path every other
+            // parameter takes.
+            for mode in candidate_binding_modes(tpl_name, param_hint) {
+                if apply_binding_mode(
+                    &mut subs,
+                    &mode,
+                    tpl_name,
+                    arg_text,
+                    param_hint,
+                    callee.template_bindings,
+                    walker_types,
+                    ctx,
+                ) {
+                    break;
+                }
             }
         }
     }
@@ -305,8 +331,7 @@ fn bind_direct(
     ctx: &ResolutionCtx<'_>,
     from_walker: impl FnOnce() -> Option<PhpType>,
 ) -> Option<PhpType> {
-    let bare_template =
-        param_hint.is_some_and(|h| matches!(h.kind(), TypeKind::Named(n) if &**n == tpl_name));
+    let bare_template = param_hint.is_some_and(|h| is_bare_template_hint(h, tpl_name));
     if bare_template && let Some(literal) = literal_arg_type(arg_text.trim()) {
         return Some(literal);
     }
@@ -349,6 +374,23 @@ fn bind_direct(
         unify_template(h, &resolved_type, tpl_name)
     });
     Some(unified.or(literal_shape).unwrap_or(resolved_type))
+}
+
+/// Whether `hint` takes the argument as `T` itself: `T`, or a union such as
+/// `T|string` whose other members do not name `T`, so the argument binds
+/// whole rather than being unified against a wrapping type.
+fn is_bare_template_hint(hint: &PhpType, tpl_name: &str) -> bool {
+    match hint.kind() {
+        TypeKind::Named(n) => &**n == tpl_name,
+        TypeKind::Union(members) => {
+            let tpl = [atom(tpl_name)];
+            members.iter().any(|m| m.is_named(tpl_name))
+                && members
+                    .iter()
+                    .all(|m| m.is_named(tpl_name) || !m.references_any_name(&tpl))
+        }
+        _ => false,
+    }
 }
 
 /// Whether `arg_text` is an array literal, `[…]` or `array(…)`.

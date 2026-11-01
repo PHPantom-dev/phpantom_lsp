@@ -774,18 +774,22 @@ pub fn extract_all_param_tags_from_info(info: &DocblockInfo) -> Vec<(String, Php
 
     // Iterate in vendor precedence order so that when both `@param` and
     // `@psalm-param` document the same parameter, the more specific
-    // variant wins.
+    // variant wins, then list the winners in the order they are written.
     for tag in info.tags_by_kind_vendor_first(TagKind::Param) {
         if let Some(name) = tag.variable()
             && let Some(type_text) = tag.type_text()
             && seen_params.insert(name.to_string())
             && let Some(parsed) = sanitise_and_parse_docblock_type(&type_text)
         {
-            results.push((name.into_owned(), parsed));
+            results.push((tag.span.start.offset, name.into_owned(), parsed));
         }
     }
+    results.sort_by_key(|(offset, _, _)| *offset);
 
     results
+        .into_iter()
+        .map(|(_, name, parsed)| (name, parsed))
+        .collect()
 }
 
 /// Extract `@param` type strings in order of appearance, including

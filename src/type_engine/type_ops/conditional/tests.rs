@@ -277,6 +277,55 @@ fn boolean_literal_arguments_decide_is_true_conditions() {
     assert_eq!(resolve(is_bool, "$value, false").as_deref(), Some("Then"));
 }
 
+/// `\true`, `\false` and `\null`, the way stub generators write defaults,
+/// are the same values as the bare keywords.
+#[test]
+fn fully_qualified_keyword_defaults_decide_conditions() {
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
+    let tpl = TemplateContext::with_params(&[]);
+    let resolve = |cond: &str, default: &str, text_args: &str| {
+        let params = [param("$value"), param_with_default("$flag", default)];
+        resolve_conditional_with_text_args_and_defaults(
+            &PhpType::parse(cond),
+            &params,
+            text_args,
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
+        )
+        .map(|t| t.to_string())
+    };
+
+    let is_true = "($flag is true ? Then : Else)";
+    assert_eq!(
+        resolve(is_true, "\\true", "$value").as_deref(),
+        Some("Then")
+    );
+    assert_eq!(
+        resolve(is_true, "\\false", "$value").as_deref(),
+        Some("Else")
+    );
+    assert_eq!(
+        resolve(is_true, "\\TRUE", "$value").as_deref(),
+        Some("Then")
+    );
+    assert_eq!(
+        resolve(is_true, "true", "$value, \\false").as_deref(),
+        Some("Else")
+    );
+
+    let is_null = "($flag is null ? Then : Else)";
+    assert_eq!(
+        resolve(is_null, "\\null", "$value").as_deref(),
+        Some("Then")
+    );
+    assert_eq!(
+        resolve(is_null, "\\false", "$value").as_deref(),
+        Some("Else")
+    );
+}
+
 /// A resolved `bool` cannot settle `is true`: the argument really may be
 /// either value. A resolved `true`/`false` can.
 #[test]
@@ -864,4 +913,204 @@ fn template_subject_is_decided_through_its_parameter_binding() {
     };
     assert_eq!(resolve("$id").as_deref(), Some("Sync"));
     assert_eq!(resolve("$id, false").as_deref(), Some("Async"));
+}
+
+/// Decide `$args is <condition>` for an argument of type `arg`.
+fn shape_condition(arg: &str, condition: &str) -> Option<bool> {
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
+    type_condition_result(&PhpType::parse(arg), &PhpType::parse(condition), loader)
+}
+
+/// An array-shape condition is decided key by key: a key the argument holds
+/// with another value, or lacks while the condition requires it, refutes it.
+#[test]
+fn array_shape_condition_compares_the_keys_it_names() {
+    let cond = "array{fields: 'count', ...}";
+    assert_eq!(shape_condition("array{fields: 'count'}", cond), Some(true));
+    assert_eq!(
+        shape_condition("array{fields: 'count', number: 5}", cond),
+        Some(true)
+    );
+    assert_eq!(shape_condition("array{fields: 'names'}", cond), Some(false));
+    assert_eq!(shape_condition("array{number: 5}", cond), Some(false));
+    assert_eq!(shape_condition("array{}", cond), Some(false));
+    assert_eq!(shape_condition("string", cond), Some(false));
+}
+
+/// A key the argument may lack, a value it does not pin down, or an array
+/// whose keys are not known one by one leaves the condition open.
+#[test]
+fn array_shape_condition_stays_open_without_proof() {
+    let cond = "array{fields: 'count', ...}";
+    assert_eq!(shape_condition("array{fields?: 'count'}", cond), None);
+    assert_eq!(shape_condition("array{fields: string}", cond), None);
+    assert_eq!(shape_condition("array{number: 5, ...}", cond), None);
+    assert_eq!(shape_condition("array<string, mixed>", cond), None);
+    assert_eq!(shape_condition("array", cond), None);
+    // A value outside the condition's refutes it whether or not the key
+    // turns out to be there.
+    assert_eq!(
+        shape_condition("array{fields?: 'names'}", cond),
+        Some(false)
+    );
+}
+
+/// A condition's optional key only constrains the value when the key is
+/// there, and a sealed condition admits no key it does not list.
+#[test]
+fn array_shape_condition_optional_and_sealed_keys() {
+    assert_eq!(
+        shape_condition("array{}", "array{echo?: false, ...}"),
+        Some(true)
+    );
+    assert_eq!(
+        shape_condition("array{echo: true}", "array{echo?: false, ...}"),
+        Some(false)
+    );
+    assert_eq!(
+        shape_condition("array{echo?: true}", "array{echo?: false, ...}"),
+        None
+    );
+    assert_eq!(
+        shape_condition("array{exit: false, code: 1}", "array{exit: false}"),
+        Some(false)
+    );
+    assert_eq!(
+        shape_condition("array{exit: false, code?: 1}", "array{exit: false}"),
+        None
+    );
+    assert_eq!(
+        shape_condition("array{echo: true}", "array{echo: false|0, ...}"),
+        Some(false)
+    );
+    assert_eq!(
+        shape_condition("array{echo: 0}", "array{echo: false|0, ...}"),
+        Some(true)
+    );
+}
+
+/// An array literal argument is judged by the keys it holds, and an omitted
+/// one by its declared default.
+#[test]
+fn array_shape_condition_from_argument_text() {
+    let resolve = |text_args: &str, arg_ty: Option<&str>| {
+        let cond = PhpType::parse("($args is array{fields: 'count', ...} ? int : string)");
+        let params = [param_with_default("$args", "''")];
+        let loader: &ResolvedClassLoader<'_> = &|_| None;
+        let resolver = |_: &str| arg_ty.map(PhpType::parse);
+        let tpl = TemplateContext {
+            defaults: None,
+            params: &[],
+            bindings: &[],
+            arg_type_resolver: Some(&resolver),
+            this_type: None,
+        };
+        resolve_conditional_with_text_args_and_defaults(
+            &cond,
+            &params,
+            text_args,
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
+        )
+        .map(|t| t.to_string())
+    };
+    assert_eq!(
+        resolve("['fields' => 'names']", Some("array{fields: 'names'}")).as_deref(),
+        Some("string")
+    );
+    assert_eq!(
+        resolve("['fields' => 'count']", Some("array{fields: 'count'}")).as_deref(),
+        Some("int")
+    );
+    assert_eq!(resolve("[]", None).as_deref(), Some("string"));
+    assert_eq!(resolve("array()", None).as_deref(), Some("string"));
+    assert_eq!(resolve("", None).as_deref(), Some("string"));
+    assert_eq!(
+        resolve("$args", Some("array")).as_deref(),
+        Some("int|string")
+    );
+}
+
+/// An undecided call between a `void` branch and a `never` branch may still
+/// return, so it is read as `void` rather than `never`.
+#[test]
+fn undecided_void_or_never_is_not_never() {
+    let cond = PhpType::parse("($args is array{exit: false, ...} ? void : never)");
+    let params = [param_with_default("$args", "array()")];
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
+    let resolver = |_: &str| Some(PhpType::parse("array"));
+    let tpl = TemplateContext {
+        defaults: None,
+        params: &[],
+        bindings: &[],
+        arg_type_resolver: Some(&resolver),
+        this_type: None,
+    };
+    let resolve = |text_args: &str| {
+        resolve_conditional_with_text_args_and_defaults(
+            &cond,
+            &params,
+            text_args,
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
+        )
+        .map(|t| t.to_string())
+    };
+    assert_eq!(resolve("$args").as_deref(), Some("void"));
+    assert_eq!(resolve("").as_deref(), Some("never"));
+}
+
+/// A `void` branch is the call's type like any other, decided or beside the
+/// other branch when the condition is open.
+#[test]
+fn void_branch_is_kept() {
+    let cond = PhpType::parse("($display is true ? void : string)");
+    let params = [param_with_default("$display", "true")];
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
+    let resolver = |text: &str| (text == "$echo").then(|| PhpType::parse("bool"));
+    let tpl = TemplateContext {
+        defaults: None,
+        params: &[],
+        bindings: &[],
+        arg_type_resolver: Some(&resolver),
+        this_type: None,
+    };
+    let resolve = |text_args: &str| {
+        resolve_conditional_with_text_args_and_defaults(
+            &cond,
+            &params,
+            text_args,
+            None,
+            ConditionalClassContext::default(),
+            loader,
+            &tpl,
+        )
+        .map(|t| t.to_string())
+    };
+    assert_eq!(resolve("").as_deref(), Some("void"));
+    assert_eq!(resolve("true").as_deref(), Some("void"));
+    assert_eq!(resolve("false").as_deref(), Some("string"));
+    assert_eq!(resolve("$echo").as_deref(), Some("void|string"));
+    assert_eq!(
+        resolve_conditional_without_args(&cond, &params).map(|t| t.to_string()),
+        Some("void".to_string())
+    );
+}
+
+/// A union argument is judged member by member against the whole of a union
+/// condition, so each member may satisfy a different one of its members.
+#[test]
+fn union_argument_against_union_condition() {
+    assert_eq!(shape_condition("''|null", "null|''"), Some(true));
+    assert_eq!(shape_condition("?string", "string|null"), Some(true));
+    assert_eq!(shape_condition("int|null", "string|null"), None);
+    assert_eq!(shape_condition("int|float", "string|null"), Some(false));
+    assert_eq!(
+        shape_condition("array{id: ''|null}", "array{id: null|'', ...}"),
+        Some(true)
+    );
 }

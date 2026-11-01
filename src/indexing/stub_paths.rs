@@ -40,6 +40,8 @@ pub(crate) struct ExternalStubIndex {
     pub(crate) functions: CiMap<PathBuf>,
     /// Keyed by name as declared: constants are case-sensitive.
     pub(crate) constants: HashMap<String, PathBuf>,
+    /// The stub file that declares WordPress, when one does.
+    pub(crate) wordpress: Option<crate::wordpress::WordPressStubs>,
 }
 
 impl ExternalStubIndex {
@@ -76,6 +78,7 @@ impl ExternalStubIndex {
             classes,
             functions,
             constants: scan.constant_index.clone(),
+            wordpress: None,
         }
     }
 
@@ -184,7 +187,8 @@ impl Backend {
 
         let filters = self.index_filters();
         let scan = classmap_scanner::scan_stub_paths(&roots, &filters, self.php_version());
-        let index = ExternalStubIndex::new(roots, &scan);
+        let mut index = ExternalStubIndex::new(roots, &scan);
+        index.wordpress = self.wordpress_stubs(&index.classes);
         let symbol_count = index.classes.len() + index.functions.len() + index.constants.len();
 
         let trees: Vec<PathBuf> = previous.trees.iter().chain(&index.trees).cloned().collect();
@@ -212,8 +216,10 @@ impl Backend {
             index.roots.len()
         );
         let active = !index.is_empty();
+        let declares_wordpress = index.wordpress.is_some();
         *self.external_stubs.write() = Arc::new(index);
         self.has_external_stubs.store(active, Ordering::Release);
+        self.sync_wordpress_constants(declares_wordpress);
 
         self.clear_not_found_caches();
         self.clear_resolved_class_cache();

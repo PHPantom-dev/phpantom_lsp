@@ -109,8 +109,16 @@ impl Backend {
             },
             |ret, ctx| {
                 let message = match &ret.ty {
-                    // Bare `return;` in a void function — OK.
-                    None if ret.declared_type.is_void() => return None,
+                    // Bare `return;` where the declared type allows `void`,
+                    // including a docblock union such as `void|string` — OK.
+                    None if ret
+                        .declared_type
+                        .union_members()
+                        .iter()
+                        .any(|member| member.is_void()) =>
+                    {
+                        return None;
+                    }
                     // Bare `return;` in a non-void function — error.
                     None => format!(
                         "Function with return type {} must not return without a value",

@@ -132,6 +132,26 @@ function do_nothing(): void {
     );
 }
 
+#[test]
+fn no_diagnostic_for_bare_return_in_docblock_void_union() {
+    let php = r#"<?php
+/**
+ * @return void|string
+ */
+function maybe_render(bool $echo) {
+    if ($echo) {
+        return;
+    }
+    return 'html';
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Should not flag bare return when the docblock allows void, got: {diags:?}"
+    );
+}
+
 // ─── Bare return in non-void function — error ──────────────────────────────
 
 #[test]
