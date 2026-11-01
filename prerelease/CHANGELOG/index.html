@@ -5199,6 +5199,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The last of repeated <code>@phpstan-return</code> and <code>@phpstan-param</code> tags wins.</strong> A docblock that repeats one of these tags now uses the one written last, as PHPStan does, so stubs that refine an older declaration below it, like the WordPress stubs for <code>get_posts()</code>, resolve through the newer one.</li>
 <li><strong>Identity checks that can never hold are <code>false</code>.</strong> <code>$protocol === 'HTTP/1'</code> is <code>false</code>, and <code>!==</code> is <code>true</code>, when <code>$protocol</code> can only be values other than <code>'HTTP/1'</code>, such as <code>'HTTP/1.0'|'HTTP/1.1'</code>, so a typo in the compared string no longer hides behind a <code>bool</code>.</li>
 <li><strong>Variadic template parameters take every argument.</strong> A function declaring <code>@param T ...$values</code> with <code>@return T</code> now returns the union of everything passed to it, not just the first argument's type.</li>
 <li><strong>Static calls with a conditional return type, passed as an argument.</strong> <code>wrap(Factory::make($x))</code> now sees the branch of <code>make()</code>'s conditional <code>@return</code> that <code>$x</code> selects, instead of its native return type.</li>
