@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793557636254,
+  "lastUpdate": 1793560897403,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8205,6 +8205,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 103.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2c02cce2388e26a46a2f4c55a98f1b21c8ba1d13",
+          "message": "Conditional return types inside a union, an intersection or a generic",
+          "timestamp": "2026-11-01T20:05:17+01:00",
+          "tree_id": "e8b0062a977b7400a1c96112c4131b022db92728",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2c02cce2388e26a46a2f4c55a98f1b21c8ba1d13"
+        },
+        "date": 1793560885688,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 85.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 104.9,
             "unit": "MiB"
           }
         ]
