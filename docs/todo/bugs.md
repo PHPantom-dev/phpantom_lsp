@@ -41,29 +41,6 @@ No outstanding items.
 
 ## Narrowing
 
-### B700. `!empty($x->prop)` does not narrow the way `isset($x->prop)` does
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @return object|array|WP_Error */
-function plugins_api() { … }
-
-$result = plugins_api();
-if (isset($result->slug)) {
-    echo $result->slug;   // fine
-}
-if (! empty($result->name)) {
-    echo $result->name;   // Property 'name' not found on class 'WP_Error'
-}
-```
-
-`!empty($x->prop)` implies `isset($x->prop)`, so it must remove the same
-union members: here `WP_Error`, which declares no `name` and has no
-`__get`/`__isset`, and the `array`. The `isset` form already does this;
-the `empty` form leaves the union whole. Found in WordPress core's plugin
-installer screen.
-
 ### B692. `(int)` of a `ctype_digit()`-checked string is not non-negative
 
 **Impact: Low · Complexity: Low-Medium**

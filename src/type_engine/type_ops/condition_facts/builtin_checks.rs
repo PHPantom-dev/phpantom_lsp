@@ -107,6 +107,7 @@ pub(in crate::type_engine) fn try_extract_class_string_guard(
 ///   - `isset($var->name)` — proves `$var` has a property called `name`
 ///     (and that it is non-null) in the branch where the guard is true.
 ///     PHPStan treats this as an existence proof for the guarded access.
+///   - `!empty($var->name)` — the same proof as `isset($var->name)`.
 ///
 /// Only literal member names are recognised — a dynamic name proves the
 /// existence of *some* member but not which one, so nothing can be added
@@ -146,6 +147,23 @@ pub(in crate::type_engine) fn try_extract_member_exists_guard(
                 }
             }
             None
+        }
+        // `empty($var->name)` is `!isset($var->name) || !$var->name`, so
+        // the bare form proves nothing and `!empty($var->name)` proves what
+        // `isset($var->name)` does: report it as a negated guard.
+        Expression::Construct(Construct::Empty(empty)) => {
+            let (object, property) = match empty.value {
+                Expression::Access(Access::Property(pa)) => (pa.object, &pa.property),
+                Expression::Access(Access::NullSafeProperty(pa)) => (pa.object, &pa.property),
+                _ => return None,
+            };
+            if expr_to_subject_key(object).as_deref() != Some(var_name) {
+                return None;
+            }
+            let ClassLikeMemberSelector::Identifier(ident) = property else {
+                return None;
+            };
+            Some((bytes_to_str(ident.value).to_string(), false, true))
         }
         Expression::Call(Call::Function(func_call)) => {
             let Expression::Identifier(ident) = func_call.function else {

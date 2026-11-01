@@ -79,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`!empty()` on a property proves the property exists.** `!empty($x->prop)`, or returning early on `empty($x->prop)`, now allows `$x->prop` on every member of a union, the same way `isset($x->prop)` does.
 - **Object casts keep the array's shape.** `(object) ['key' => 'value']` is typed `object{key: 'value'}&stdClass` when written straight into a call's arguments too, so a template or conditional return type sees its properties, and the shape keeps the values the array was written with.
 - **Conditional return types over templates.** A condition on a template is judged by what the call bound it to, held to the template's bound, and the branch it picks narrows the template, so `absint(5)` returns `5` and `sanitize_sql_orderby($string)` returns `non-falsy-string|false`. A condition on `key-of<T>` or `value-of<T>` is judged on the keys or values of the array passed, so slashing an array of strings with `wp_slash()` gives strings.
 - **Intersected conditional return types.** A return type that intersects two conditionals now gives only the types both of them allow, so `get_category($term)` returns `WP_Term` and `get_category($term, ARRAY_A)` an `array<string, mixed>` instead of the intersection as written.

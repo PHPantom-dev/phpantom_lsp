@@ -7758,6 +7758,52 @@ function probeIsset(CanApply $item): int {
     );
 }
 
+/// `!empty($obj->prop)` implies `isset($obj->prop)`, so it proves the
+/// property on every union member, as does the guard clause
+/// `if (empty($obj->prop)) return;`.  A bare `empty()` proves nothing.
+#[test]
+fn not_empty_property_guard_allows_property_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class ApiError {
+    public function message(): string { return ''; }
+}
+/** @return object|array|ApiError */
+function fetchInfo() { return new stdClass(); }
+function probeNotEmpty(): void {
+    $result = fetchInfo();
+    if (!empty($result->name)) {
+        echo $result->name;
+    }
+    if (empty($result->slug)) {
+        return;
+    }
+    echo $result->slug;
+}
+function probeEmpty(): void {
+    $result = fetchInfo();
+    if (empty($result->version)) {
+        echo $result->version;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| {
+            let msg = message_text(&d.message);
+            msg.contains("'name'") || msg.contains("'slug'")
+        }),
+        "!empty($result->prop) must allow the guarded property, got: {diags:?}"
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'version'")),
+        "a bare empty() must not prove the property, got: {diags:?}"
+    );
+}
+
 /// `isset($obj->prop)` in a ternary condition proves the property inside
 /// the then-branch.
 #[test]
