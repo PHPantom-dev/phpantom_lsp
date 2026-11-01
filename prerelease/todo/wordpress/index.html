@@ -1586,6 +1586,9 @@ each gap marked <code>// SKIP</code>:</p>
   its default's type or <code>string</code>. 23 assertions.</li>
 <li><strong><code>esc_sql()</code> keeps the shape</strong> of the array it escapes, each scalar
   value a <code>string</code> and anything else <code>''</code>. 11 assertions.</li>
+<li><strong><code>wp_slash()</code> keeps the shape</strong> of the array it slashes, each string
+  value slashed. The stubs' conditional gives <code>array&lt;key-of&lt;T&gt;, …&gt;</code>, which
+  loses the keys each value belongs to. 6 assertions.</li>
 <li><strong>Calls on literal arguments.</strong> <code>wp_slash('foo')</code>,
   <code>trailingslashit('foo')</code>, <code>normalize_whitespace(' 0 ')</code>,
   <code>stripslashes_from_strings_only('foo')</code> and
