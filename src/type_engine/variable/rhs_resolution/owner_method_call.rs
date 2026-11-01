@@ -69,6 +69,7 @@ pub(super) fn resolve_conditional_return_for_call(
         bindings: method.template_bindings(),
         arg_type_resolver,
         this_type: Some(&this_type),
+        subs: None,
     };
     let resolved =
         crate::type_engine::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
@@ -98,6 +99,7 @@ pub(super) fn resolve_conditional_return_for_call(
             bindings: method.template_bindings(),
             arg_type_resolver,
             this_type: Some(&this_type),
+            subs: None,
         };
         crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
             &substituted,
@@ -375,6 +377,7 @@ pub(super) fn resolve_owner_method_call(
                 bindings: method_ref.map(|m| m.template_bindings()).unwrap_or(&[]),
                 arg_type_resolver: Some(&arg_ty_resolver),
                 this_type: None,
+                subs: None,
             };
             crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
                 &ty,

@@ -498,12 +498,28 @@ impl Backend {
                         if text_args.is_empty() {
                             return resolve_conditional_without_args(cond, &func_info.parameters);
                         }
+                        // A condition over a template is judged by what the
+                        // arguments bound it to.
+                        let subs = (!func_info.template_bindings.is_empty()).then(|| {
+                            let arg_texts: Vec<String> = split_top_level_commas(text_args)
+                                .into_iter()
+                                .map(str::to_string)
+                                .collect();
+                            crate::type_engine::conditional_resolution::template_subs_within_bounds(
+                                crate::type_engine::variable::rhs_resolution::build_function_template_subs(
+                                    &func_info, &arg_texts, None, ctx,
+                                ),
+                                &func_info.template_param_bounds,
+                                ctx.file.class_loader,
+                            )
+                        });
                         let tpl = TemplateContext {
                             defaults: None,
                             params: &func_info.template_params,
                             bindings: &func_info.template_bindings,
                             arg_type_resolver: Some(&arg_ty_resolver),
                             this_type: None,
+                            subs: subs.as_ref(),
                         };
                         resolve_conditional_with_text_args_and_defaults(
                             cond,
@@ -1041,6 +1057,7 @@ fn method_call_return_hint(
         bindings: m.template_bindings(),
         arg_type_resolver: Some(&arg_ty_resolver),
         this_type: None,
+        subs: None,
     };
     Some(
         crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(

@@ -710,8 +710,10 @@ fn expand_array_key(ty: &str) -> String {
 
 /// Drop the parentheses PHPStan puts around a union nested inside another
 /// type (a shape value, a generic argument), `array{a:(float|int)}`, which
-/// PHPantom prints bare. Only a `(` in a type position is a grouping one;
-/// the one opening a callable's parameter list follows its name.
+/// PHPantom prints bare, and the ones around an intersection in a union,
+/// `(A&B)|false`, which `&` binding tighter makes redundant. Only a `(` in a
+/// type position is a grouping one; the one opening a callable's parameter
+/// list follows its name.
 fn strip_nested_grouping_parens(ty: &str) -> String {
     let mut out = String::with_capacity(ty.len());
     let mut grouping: Vec<bool> = Vec::new();
@@ -734,7 +736,7 @@ fn strip_nested_grouping_parens(ty: &str) -> String {
                     .trim_end()
                     .chars()
                     .last()
-                    .is_some_and(|prev| matches!(prev, ':' | '<' | ',' | '{' | '|' | '&'));
+                    .is_none_or(|prev| matches!(prev, ':' | '<' | ',' | '{' | '|' | '&'));
                 grouping.push(is_grouping);
                 if !is_grouping {
                     out.push(ch);

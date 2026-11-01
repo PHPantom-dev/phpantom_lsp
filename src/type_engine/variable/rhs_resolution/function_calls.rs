@@ -270,12 +270,23 @@ fn named_function_call<'b>(
         let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         let text_args = arg_texts.join(", ");
         let resolved_type = func_info.conditional_return.as_ref().and_then(|cond| {
+            // A condition over a template is judged by what the arguments
+            // bound it to, so the bindings are read before it is decided.
+            let subs = (!func_info.template_bindings.is_empty()).then(|| {
+                let walker_types = walker_arg_types(argument_list, ctx);
+                crate::type_engine::conditional_resolution::template_subs_within_bounds(
+                    build_function_template_subs(&func_info, &arg_texts, Some(&walker_types), &rctx),
+                    &func_info.template_param_bounds,
+                    ctx.file.class_loader,
+                )
+            });
             let tpl = crate::type_engine::type_ops::conditional::TemplateContext {
                 defaults: None,
                 params: &func_info.template_params,
                 bindings: &func_info.template_bindings,
                 arg_type_resolver: Some(&arg_ty_resolver),
                 this_type: None,
+                subs: subs.as_ref(),
             };
             crate::type_engine::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
                 cond,

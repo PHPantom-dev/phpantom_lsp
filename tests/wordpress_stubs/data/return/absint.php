@@ -10,10 +10,10 @@ use function PHPStan\Testing\assertType;
 assertType('int<0, max>', absint(Faker::int()));
 
 // Returns input for non-negative integers
-assertType('0', absint(0)); // SKIP: a conditional over a method template ignores its bound and does not narrow it
-assertType('1', absint(1)); // SKIP: a conditional over a method template ignores its bound and does not narrow it
-assertType('10', absint(10)); // SKIP: a conditional over a method template ignores its bound and does not narrow it
-assertType('int<1, max>', absint(Faker::positiveInt())); // SKIP: a conditional over a method template ignores its bound and does not narrow it
+assertType('0', absint(0));
+assertType('1', absint(1));
+assertType('10', absint(10));
+assertType('int<1, max>', absint(Faker::positiveInt()));
 assertType('int<0, max>', absint(Faker::nonNegativeInt()));
 
 // Returns 0 for "empty" input
@@ -42,6 +42,6 @@ assertType('int<0, max>', absint(1.0));
 assertType('int<0, max>', absint(Faker::float()));
 assertType('int<0, max>', absint('-10'));
 assertType('int<0, max>', absint(Faker::numericString()));
-assertType('int<0, max>', absint(Faker::resource())); // SKIP: a conditional over a method template ignores its bound and does not narrow it
+assertType('int<0, max>', absint(Faker::resource()));
 // and any other type that is not a subtype of `$maybeint`
-assertType('int<0, max>', absint(Faker::stdClass())); // SKIP: a conditional over a method template ignores its bound and does not narrow it
+assertType('int<0, max>', absint(Faker::stdClass()));

@@ -9,11 +9,11 @@ use function PHPStan\Testing\assertType;
 
 assertType('false', sanitize_sql_orderby(''));
 assertType("'orderby'|false", sanitize_sql_orderby('orderby'));
-assertType('non-falsy-string|false', sanitize_sql_orderby(Faker::string())); // SKIP: a conditional over a method template ignores its bound and does not narrow it
-assertType('(lowercase-string&non-falsy-string)|false', sanitize_sql_orderby(Faker::lowercaseString())); // SKIP: a conditional over a method template ignores its bound and does not narrow it
-assertType('non-falsy-string|false', sanitize_sql_orderby(Faker::nonEmptyString())); // SKIP: a conditional over a method template ignores its bound and does not narrow it
+assertType('non-falsy-string|false', sanitize_sql_orderby(Faker::string()));
+assertType('(lowercase-string&non-falsy-string)|false', sanitize_sql_orderby(Faker::lowercaseString()));
+assertType('non-falsy-string|false', sanitize_sql_orderby(Faker::nonEmptyString()));
 assertType('non-falsy-string|false', sanitize_sql_orderby(Faker::nonFalsyString()));
 
-assertType("'Orderby'|(lowercase-string&non-falsy-string)|false", sanitize_sql_orderby(Faker::union('Orderby', Faker::lowercaseString()))); // SKIP: a conditional over a method template ignores its bound and does not narrow it
+assertType("'Orderby'|(lowercase-string&non-falsy-string)|false", sanitize_sql_orderby(Faker::union('Orderby', Faker::lowercaseString())));
 
-assertType('(lowercase-string&non-falsy-string)|false', sanitize_sql_orderby(Faker::intersection(Faker::lowercaseString(), Faker::nonFalsyString()))); // SKIP: a conditional over a method template ignores its bound and does not narrow it
+assertType('(lowercase-string&non-falsy-string)|false', sanitize_sql_orderby(Faker::intersection(Faker::lowercaseString(), Faker::nonFalsyString())));

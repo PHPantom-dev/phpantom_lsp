@@ -87,6 +87,15 @@ pub struct TemplateContext<'a> {
     /// and this is where the condition's subject comes from instead.
     /// `None` leaves such a condition undecided.
     pub this_type: Option<&'a PhpType>,
+    /// What the call's arguments bound its `@template` parameters to, each
+    /// already held to its `of` bound.
+    ///
+    /// A condition naming a template (`$maybeint is T`, `T is
+    /// non-falsy-string`) is judged against this rather than against the
+    /// template's name, and the branch it picks narrows the template to the
+    /// part of its binding that reaches it. `None` leaves such a condition
+    /// to be decided by the argument behind the template alone.
+    pub subs: Option<&'a HashMap<String, PhpType>>,
 }
 
 /// Callback that resolves an argument's source text (e.g. `"$obj->toHtml()"`)
@@ -101,6 +110,7 @@ impl<'a> TemplateContext<'a> {
             bindings: &[],
             arg_type_resolver: None,
             this_type: None,
+            subs: None,
         }
     }
 }
@@ -634,6 +644,159 @@ fn meet(a: &PhpType, b: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> Opt
         return None;
     }
     Some(PhpType::intersection(vec![a.clone(), b.clone()]))
+}
+
+/// `subs` with every binding its template's `of` bound does not admit
+/// replaced, the way PHPStan infers a bounded template: a binding the bound
+/// holds stands, a union keeps the alternatives the bound holds, and
+/// anything else (`mixed` for `T of bool|string|int`, `stdClass` for `T of
+/// int<0, max>`) leaves the template its bound.
+pub(crate) fn template_subs_within_bounds(
+    mut subs: HashMap<String, PhpType>,
+    bounds: &crate::atom::AtomMap<PhpType>,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> HashMap<String, PhpType> {
+    let templates: Vec<crate::atom::Atom> = bounds.keys().copied().collect();
+    for (name, bound) in bounds {
+        // `mixed` admits every binding, and a bound over another template
+        // (`T of array<K>`) is not known until that one is, so the binding
+        // stands.
+        if bound.is_mixed() || bound.references_any_name(&templates) {
+            continue;
+        }
+        let Some(bound_to) = subs.get_mut(name.as_str()) else {
+            continue;
+        };
+        let within = |ty: &PhpType| type_condition_result(ty, bound, class_loader) == Some(true);
+        if within(bound_to) {
+            continue;
+        }
+        let kept: Vec<PhpType> = bound_to
+            .union_members()
+            .into_iter()
+            .filter(|member| within(member))
+            .cloned()
+            .collect();
+        *bound_to = if kept.is_empty() {
+            bound.clone()
+        } else {
+            PhpType::union(kept)
+        };
+    }
+    subs
+}
+
+/// The values of `ty` that satisfy `condition`, for a `ty` the condition
+/// leaves open: `string` tested by `non-falsy-string` is `non-falsy-string`,
+/// and `mixed` tested by `int` is `int`. `None` when they share none.
+fn meet_condition(
+    ty: &PhpType,
+    condition: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<PhpType> {
+    let met: Vec<PhpType> = condition
+        .union_members()
+        .into_iter()
+        .filter_map(|member| {
+            meet_arrays(ty, member, class_loader).unwrap_or_else(|| meet(ty, member, class_loader))
+        })
+        .collect();
+    (!met.is_empty()).then(|| absorb_held_alternatives(&met, class_loader))
+}
+
+/// The union of `members` without the alternatives another one already
+/// holds: `list<int>|array<int>` is `array<int>`.
+pub(super) fn absorb_held_alternatives(
+    members: &[PhpType],
+    class_loader: &ResolvedClassLoader<'_>,
+) -> PhpType {
+    let held = |a: &PhpType, b: &PhpType| type_condition_result(a, b, class_loader) == Some(true);
+    let kept: Vec<PhpType> = members
+        .iter()
+        .enumerate()
+        .filter(|(i, member)| {
+            // Of two alternatives that hold each other, the first stays.
+            !members.iter().enumerate().any(|(j, other)| {
+                *i != j && held(member, other) && (j < *i || !held(other, member))
+            })
+        })
+        .map(|(_, member)| member.clone())
+        .collect();
+    PhpType::union(kept).simplified()
+}
+
+/// The values two array types share, entry by entry: `list<mixed>` and
+/// `array<int<0, max>>` share `list<int<0, max>>`.
+///
+/// The outer `None` means the rule does not apply (either side is not an
+/// array, or is a shape, whose entries [`meet`] judges as a whole); the
+/// inner `None` means they share no array.
+fn meet_arrays(
+    a: &PhpType,
+    b: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<Option<PhpType>> {
+    let is_plain_array =
+        |t: &PhpType| type_category(t) == Some("array") && t.shape_parts().is_none();
+    if !is_plain_array(a) || !is_plain_array(b) {
+        return None;
+    }
+    let is_list = |t: &PhpType| match t.kind() {
+        TypeKind::Named(name) => crate::php_type::is_list_name(name),
+        TypeKind::Generic(generic) => crate::php_type::is_list_name(&generic.name),
+        _ => false,
+    };
+    let part = |x: Option<PhpType>, y: Option<PhpType>| -> Option<PhpType> {
+        let (x, y) = (
+            x.unwrap_or_else(PhpType::mixed),
+            y.unwrap_or_else(PhpType::mixed),
+        );
+        meet(&x, &y, class_loader)
+    };
+    let Some(value) = part(a.iterable_element_type(), b.iterable_element_type()) else {
+        return Some(None);
+    };
+    let array = if is_list(a) || is_list(b) {
+        PhpType::list(value)
+    } else {
+        let Some(key) = part(a.iterable_key_type(), b.iterable_key_type()) else {
+            return Some(None);
+        };
+        PhpType::generic_array(key, value)
+    };
+    Some(Some(
+        if a.is_provably_non_empty() || b.is_provably_non_empty() {
+            array.non_empty_array_form()
+        } else {
+            array
+        },
+    ))
+}
+
+/// The values of `ty` left once those satisfying `condition` are taken out,
+/// for a `ty` the condition leaves open.
+///
+/// Only a value that changes how the rest is spelled is taken out: `''`
+/// leaves a `string` a `non-empty-string`. Anything else keeps `ty` whole,
+/// which is never wrong, only less precise.
+fn exclude_condition(
+    ty: &PhpType,
+    condition: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> PhpType {
+    let excludes_empty_string = condition.union_members().into_iter().any(|member| {
+        member
+            .as_literal()
+            .and_then(crate::php_type::LiteralValue::string_content)
+            .is_some_and(|content| content.is_empty())
+    });
+    if excludes_empty_string
+        && type_category(ty) == Some("string")
+        && let Some(non_empty) = meet(ty, &PhpType::non_empty_string(), class_loader)
+    {
+        return non_empty;
+    }
+    ty.clone()
 }
 
 /// What `cond` answers when its condition cannot be decided, with each

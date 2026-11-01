@@ -29,61 +29,7 @@ No outstanding items.
 
 ## Conditional return types
 
-PHPStan-style conditional return types (`@phpstan-return ($x is T ? A :
-B)`) are how library stubs say what a call returns for the arguments it
-gets. The WordPress stubs use them on some 150 functions, and their own
-type tests are ported in `tests/wordpress_stubs/`: each entry below names how many of
-those assertions it accounts for.
-
-### B710. A conditional over a method template ignores its bound and does not narrow it
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/**
- * @template T of int<0, max>
- * @param T|int<min, -1>|scalar|null $maybeint
- * @return ($maybeint is T ? T : …)
- */
-function absint($maybeint) { … }
-absint(5);   // want 5, get int<0, max>
-
-/**
- * @template T of string
- * @return (T is non-falsy-string ? T|false : false)
- */
-function sanitize_sql_orderby($orderby) { … }
-sanitize_sql_orderby($string);   // want non-falsy-string|false, get string|false
-```
-
-Three gaps in how a template meets a condition: `$x is T` is never true,
-even for an argument that is what `T` was bound to; a template bound to
-an argument wider than its `of` bound (`mixed` passed for `T of
-bool|string|int`) is not clamped to the bound; and the branch a condition
-picks does not narrow the template it tested (`T` is
-`non-falsy-string` inside the true branch above). 23 assertions.
-
-### B719. A condition on `value-of<T>` or `key-of<T>` is judged against the argument itself
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-/**
- * @template T
- * @param T $value
- * @return (value-of<T> is string ? 'strings' : 'other')
- */
-function f($value) { … }
-
-f(['a' => 'x']);   // want 'strings', get 'other'
-f('x');            // want 'other' (a string has no values), get 'strings'
-```
-
-A condition whose subject is a type operator over a template does not look
-through the operator: the argument bound to `T` is judged as a whole. The
-WordPress stubs' `wp_slash()` declares `array<key-of<T>, (value-of<T> is
-string ? string : value-of<T>)>`, so slashing an array of strings is typed as
-keeping each literal value rather than becoming `string`.
+No outstanding items.
 
 ## Standard-library return types
 

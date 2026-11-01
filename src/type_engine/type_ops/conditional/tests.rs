@@ -115,6 +115,7 @@ fn nested_condition_sees_argument_narrowed_by_outer_condition() {
             bindings: &[],
             arg_type_resolver: Some(&resolver),
             this_type: None,
+            subs: None,
         };
         resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -155,6 +156,7 @@ fn resolve_pathinfo(text_args: &str) -> Option<String> {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -221,6 +223,7 @@ fn omitted_default_self_const_resolves_against_declaring_class() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     // The call sits in an unrelated class; only the declaring class
     // resolves the default's `self` to the constant the resolver knows.
@@ -340,6 +343,7 @@ fn is_true_condition_needs_a_resolved_boolean_value() {
             bindings: &[],
             arg_type_resolver: Some(&resolver),
             this_type: None,
+            subs: None,
         };
         resolve_conditional_with_text_args_and_defaults(
             &PhpType::parse("($flag is true ? Then : Else)"),
@@ -506,6 +510,7 @@ fn is_string_condition_uses_resolved_arg_type() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolved = resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -539,6 +544,7 @@ fn scalar_conditions_classify_resolved_int_and_float_literals() {
             bindings: &[],
             arg_type_resolver: Some(&resolver),
             this_type: None,
+            subs: None,
         };
         let resolved = resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -573,6 +579,7 @@ fn undecidable_is_string_condition_unions_branches() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolved = resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -603,6 +610,7 @@ fn closure_arg_refutes_array_or_string_condition() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolved = resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -695,6 +703,7 @@ fn nested_template_default_conditional_collapses_fully() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let evaluated = evaluate_nested_conditionals_text(
         &ty,
@@ -747,6 +756,7 @@ fn resolve_find(arg_type: Option<PhpType>) -> Option<String> {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -799,6 +809,7 @@ fn resolve_is_null(text_args: &str, arg_type: Option<PhpType>) -> Option<String>
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -867,6 +878,7 @@ fn value_condition_is_refuted_by_another_kind_of_argument() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolve = |text_args: &str| {
         resolve_conditional_with_text_args_and_defaults(
@@ -898,6 +910,7 @@ fn template_subject_is_decided_through_its_parameter_binding() {
         bindings: &bindings,
         arg_type_resolver: None,
         this_type: None,
+        subs: None,
     };
     let resolve = |text_args: &str| {
         resolve_conditional_with_text_args_and_defaults(
@@ -1004,6 +1017,7 @@ fn array_shape_condition_from_argument_text() {
             bindings: &[],
             arg_type_resolver: Some(&resolver),
             this_type: None,
+            subs: None,
         };
         resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -1047,6 +1061,7 @@ fn undecided_void_or_never_is_not_never() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolve = |text_args: &str| {
         resolve_conditional_with_text_args_and_defaults(
@@ -1078,6 +1093,7 @@ fn void_branch_is_kept() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolve = |text_args: &str| {
         resolve_conditional_with_text_args_and_defaults(
@@ -1337,5 +1353,112 @@ fn intersection_of_decided_unions_is_met() {
         resolve_with_classes("($output is 'OBJECT' ? T|null : int) & (string|null)", "1")
             .as_deref(),
         Some("T&string|null")
+    );
+}
+
+/// Resolve `conditional` for a call binding the template `T` (from
+/// `$value`) to `bound_to`, held to `of` bound `bound` when given.
+fn resolve_over_template(conditional: &str, bound_to: &str, bound: Option<&str>) -> Option<String> {
+    let cond = PhpType::parse(conditional);
+    let params = [param("$value")];
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
+    let template = [crate::atom::atom("T")];
+    let bindings = [(crate::atom::atom("T"), crate::atom::atom("$value"))];
+    let mut bounds = crate::atom::AtomMap::default();
+    if let Some(bound) = bound {
+        bounds.insert(crate::atom::atom("T"), PhpType::parse(bound));
+    }
+    let subs = template_subs_within_bounds(
+        HashMap::from([("T".to_string(), PhpType::parse(bound_to))]),
+        &bounds,
+        loader,
+    );
+    let resolver = |_: &str| Some(PhpType::parse(bound_to));
+    let tpl = TemplateContext {
+        defaults: None,
+        params: &template,
+        bindings: &bindings,
+        arg_type_resolver: Some(&resolver),
+        this_type: None,
+        subs: Some(&subs),
+    };
+    resolve_conditional_with_text_args_and_defaults(
+        &cond,
+        &params,
+        "$value",
+        None,
+        ConditionalClassContext::default(),
+        loader,
+        &tpl,
+    )
+    .map(|t| t.to_string())
+}
+
+/// The branch a condition on a template picks narrows the template: a
+/// `string` that is a `non-falsy-string` in the then branch is that there,
+/// and one that is not `''` in the else branch is a `non-empty-string`.
+#[test]
+fn condition_on_template_narrows_it_in_each_branch() {
+    assert_eq!(
+        resolve_over_template("(T is non-falsy-string ? T|false : false)", "string", None)
+            .as_deref(),
+        Some("non-falsy-string|false")
+    );
+    assert_eq!(
+        resolve_over_template("(T is numeric|'' ? false : T|false)", "string", None).as_deref(),
+        Some("false|non-empty-string")
+    );
+}
+
+/// A binding its bound does not admit leaves the template its bound, so a
+/// `mixed` argument for `T of bool|string|int` is judged as that union.
+#[test]
+fn template_bound_to_a_wider_argument_is_held_to_its_bound() {
+    assert_eq!(
+        resolve_over_template(
+            "(T is bool ? T : (T is ''|'0'|0 ? false : true))",
+            "mixed",
+            Some("bool|string|int"),
+        )
+        .as_deref(),
+        Some("bool")
+    );
+}
+
+/// `$value is T` holds for an argument that is what `T` was bound to.
+#[test]
+fn argument_tested_against_its_own_template_holds() {
+    assert_eq!(
+        resolve_over_template(
+            "($value is T ? T : int<0, max>)",
+            "int<1, max>",
+            Some("int<0, max>")
+        )
+        .as_deref(),
+        Some("int<1, max>")
+    );
+}
+
+/// A condition on `value-of<T>` or `key-of<T>` is judged against the values
+/// or keys of what `T` was bound to, and a value that is no array has none.
+#[test]
+fn condition_on_type_operator_looks_through_it() {
+    let values = "(value-of<T> is string ? 'strings' : 'other')";
+    assert_eq!(
+        resolve_over_template(values, "array{a: 'x'}", None).as_deref(),
+        Some("'strings'")
+    );
+    assert_eq!(
+        resolve_over_template(values, "'x'", None).as_deref(),
+        Some("'other'")
+    );
+    assert_eq!(
+        resolve_over_template(
+            "(key-of<T> is int ? 'ints' : 'other')",
+            "list<string>",
+            None
+        )
+        .as_deref(),
+        Some("'ints'")
     );
 }

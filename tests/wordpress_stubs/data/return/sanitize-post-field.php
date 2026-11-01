@@ -10,23 +10,23 @@ use function PHPStan\Testing\assertType;
 $postId = Faker::int();
 
 // Int fields => int - regardless of (non-constant) $value
-assertType('int', sanitize_post_field('ID', Faker::mixed(), $postId, 'raw')); // SKIP: a conditional over a method template ignores its bound and does not narrow it
-assertType('int', sanitize_post_field('post_parent', Faker::mixed(), $postId, 'raw')); // SKIP: a conditional over a method template ignores its bound and does not narrow it
-assertType('int', sanitize_post_field('menu_order', Faker::mixed(), $postId, 'raw')); // SKIP: a conditional over a method template ignores its bound and does not narrow it
+assertType('int', sanitize_post_field('ID', Faker::mixed(), $postId, 'raw'));
+assertType('int', sanitize_post_field('post_parent', Faker::mixed(), $postId, 'raw'));
+assertType('int', sanitize_post_field('menu_order', Faker::mixed(), $postId, 'raw'));
 // Also in any other context
-assertType('int', sanitize_post_field('ID', Faker::mixed(), $postId, Faker::string())); // SKIP: a conditional over a method template ignores its bound and does not narrow it
+assertType('int', sanitize_post_field('ID', Faker::mixed(), $postId, Faker::string()));
 // But as-is if $value is int or int range
 assertType('123', sanitize_post_field('ID', 123, $postId, 'raw'));
 assertType('int<1, max>', sanitize_post_field('ID', Faker::positiveInt(), $postId, 'raw'));
 assertType('123', sanitize_post_field('ID', 123, $postId, Faker::string()));
 
 // Int array fields => array<int<0, max>> - regardless of (non-constant) $value and $context
-assertType('array<int<0, max>>', sanitize_post_field('ancestors', Faker::mixed(), $postId, Faker::string())); // SKIP: a conditional over a method template ignores its bound and does not narrow it
+assertType('array<int<0, max>>', sanitize_post_field('ancestors', Faker::mixed(), $postId, Faker::string()));
 // But as-is if $value is array<int<0, max>> or list<int<0, max>> - regardless of $context
 assertType('array{41, 42, 43}', sanitize_post_field('ancestors', [41, 42, 43], $postId, Faker::string()));
 assertType('array{foo: 42}', sanitize_post_field('ancestors', ['foo' => 42], $postId, Faker::string()));
 // And retain list type - regardless of $context
-assertType('array<int<0, max>, int<0, max>>', sanitize_post_field('ancestors', Faker::list(), $postId, Faker::string())); // SKIP: a conditional over a method template ignores its bound and does not narrow it
+assertType('list<int<0, max>>', sanitize_post_field('ancestors', Faker::list(), $postId, Faker::string()));
 
 // All other constant fields:
 
