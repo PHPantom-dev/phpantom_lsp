@@ -6,11 +6,14 @@
 
 use std::path::{Path, PathBuf};
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
+use mago_syntax::walker::Walker;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
+use crate::scope_collector::ScopeBody;
 
 use super::DefineSearch;
 
@@ -142,5 +145,60 @@ impl Backend {
             };
             self.evaluate_include_path(stmt.expression, &defining_file, None, depth + 1)
         })
+    }
+}
+
+/// Each `include`/`include_once`/`require`/`require_once` path
+/// expression in `body`, with the offset its construct ends at.
+///
+/// Closures and arrow functions are walked, since they run in a frame of
+/// the body's own. Named functions and class bodies are not: their
+/// includes run in a scope of their own.
+pub(crate) fn include_sites<'ast, 'arena>(
+    body: ScopeBody<'ast, 'arena>,
+) -> IncludeSites<'ast, 'arena> {
+    let mut sites = Vec::new();
+    body.walk_with(&IncludeWalker, &mut sites);
+    sites
+}
+
+pub(crate) type IncludeSites<'ast, 'arena> = Vec<(&'ast Expression<'arena>, u32)>;
+
+/// Collects [`include_sites`].
+struct IncludeWalker;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, IncludeSites<'ast, 'arena>> for IncludeWalker {
+    fn walk_function(
+        &self,
+        _node: &'ast Function<'arena>,
+        _context: &mut IncludeSites<'ast, 'arena>,
+    ) {
+    }
+    fn walk_class(&self, _node: &'ast Class<'arena>, _context: &mut IncludeSites<'ast, 'arena>) {}
+    fn walk_trait(&self, _node: &'ast Trait<'arena>, _context: &mut IncludeSites<'ast, 'arena>) {}
+    fn walk_enum(&self, _node: &'ast Enum<'arena>, _context: &mut IncludeSites<'ast, 'arena>) {}
+    fn walk_anonymous_class(
+        &self,
+        node: &'ast AnonymousClass<'arena>,
+        context: &mut IncludeSites<'ast, 'arena>,
+    ) {
+        if let Some(argument_list) = &node.argument_list {
+            self.walk_partial_argument_list(argument_list, context);
+        }
+    }
+
+    fn walk_in_construct(
+        &self,
+        node: &'ast Construct<'arena>,
+        context: &mut IncludeSites<'ast, 'arena>,
+    ) {
+        let value = match node {
+            Construct::Include(c) => c.value,
+            Construct::IncludeOnce(c) => c.value,
+            Construct::Require(c) => c.value,
+            Construct::RequireOnce(c) => c.value,
+            _ => return,
+        };
+        context.push((value, node.span().end.offset));
     }
 }

@@ -98,6 +98,25 @@ impl Locals {
         self.map.iter().filter(|(key, _)| !is_compound(key))
     }
 
+    /// The bare variables holding a different entry here than in
+    /// `other`, compared by identity as in [`Self::differs_from`].  A
+    /// variable `other` has and this map lacks is not one of them.
+    pub fn variables_changed_from<'a>(
+        &'a self,
+        other: &'a Locals,
+    ) -> Vec<(&'a Atom, &'a Vec<ResolvedType>)> {
+        let mut changed = Vec::new();
+        let _ = self.diff::<()>(other, |key, here, _| {
+            if let Some(types) = here
+                && !is_compound(key)
+            {
+                changed.push((key, types));
+            }
+            ControlFlow::Continue(())
+        });
+        changed
+    }
+
     /// Whether any key holds a different entry here than in `other`.
     ///
     /// Entries are compared by identity, so this is cheap between a scope

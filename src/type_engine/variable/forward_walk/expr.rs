@@ -593,7 +593,8 @@ impl<'b> ExprWalk<'b> {
         ctx: &ForwardWalkCtx<'_>,
     ) -> ExprResult {
         let evaluated = self.expr(path, scope, ctx);
-        let Some(locals) = include_locals(path, ctx).filter(|locals| !locals.is_empty()) else {
+        let Some(locals) = include_locals(path, scope, ctx).filter(|locals| !locals.is_empty())
+        else {
             return evaluated;
         };
         // The include's own value, and the path it read, came from the

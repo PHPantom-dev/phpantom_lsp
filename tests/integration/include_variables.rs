@@ -189,3 +189,90 @@ $app = new Application();
     let text = format!("{response:?}");
     assert!(text.contains("bootstrap.php"), "got: {text}");
 }
+
+const MODELS_PHP: &str = r#"<?php
+class User {
+    public function userName(): string { return ''; }
+}
+class Post {
+    public function postTitle(): string { return ''; }
+}
+"#;
+
+#[test]
+fn an_included_file_reads_the_including_scopes_variables() {
+    let main = r#"<?php
+function render(User $user): void {
+    require __DIR__ . '/header.php';
+    $title;
+}
+"#;
+    let hover = hover_in_project(
+        &[
+            ("main.php", main),
+            ("header.php", "<?php\n$title = $user;\n"),
+            ("models.php", MODELS_PHP),
+        ],
+        3,
+        5,
+    )
+    .expect("hover on $title");
+    assert!(hover.contains("User"), "got: {hover}");
+}
+
+#[test]
+fn an_included_file_reads_the_including_scopes_variables_through_a_nested_include() {
+    let main = r#"<?php
+function render(User $user): void {
+    require __DIR__ . '/layout.php';
+    $title;
+}
+"#;
+    let hover = hover_in_project(
+        &[
+            ("main.php", main),
+            ("layout.php", "<?php\nrequire __DIR__ . '/header.php';\n"),
+            ("header.php", "<?php\n$title = $user;\n"),
+            ("models.php", MODELS_PHP),
+        ],
+        3,
+        5,
+    )
+    .expect("hover on $title");
+    assert!(hover.contains("User"), "got: {hover}");
+}
+
+#[test]
+fn each_include_site_hands_the_included_file_its_own_types() {
+    let main = r#"<?php
+function showUser(User $item): void {
+    require __DIR__ . '/header.php';
+    $title->userName();
+    $title->postTitle();
+}
+function showPost(Post $item): void {
+    require __DIR__ . '/header.php';
+    $title->postTitle();
+    $title->userName();
+}
+"#;
+    let (_dir, backend, uris) = project(&[
+        ("main.php", main),
+        ("header.php", "<?php\n$title = $item;\n"),
+        ("models.php", MODELS_PHP),
+    ]);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(&uris[0], main, &mut diags);
+    let lines: Vec<(u32, &str)> = diags
+        .iter()
+        .map(|d| (d.range.start.line, message_text(&d.message)))
+        .collect();
+    let flagged =
+        |line: u32, method: &str| lines.iter().any(|(l, m)| *l == line && m.contains(method));
+    assert!(flagged(4, "postTitle"), "got: {lines:?}");
+    assert!(flagged(9, "userName"), "got: {lines:?}");
+    assert!(
+        !flagged(3, "userName") && !flagged(8, "postTitle"),
+        "got: {lines:?}"
+    );
+}

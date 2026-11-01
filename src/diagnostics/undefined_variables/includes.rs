@@ -14,13 +14,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use mago_span::HasSpan;
 use mago_syntax::cst::*;
-use mago_syntax::walker::Walker;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
+use crate::resolution::include_sites;
 use crate::scope_collector::{AccessKind, ScopeBody, collect_scope};
 
 use super::feature_guards::{has_dynamic_variables, has_extract_call};
@@ -70,8 +69,7 @@ impl<'a> IncludeResolver<'a> {
         body: ScopeBody<'_, '_>,
         namespace: &Option<String>,
     ) -> Vec<(String, u32)> {
-        let mut includes = Vec::new();
-        body.walk_with(&IncludeWalker, &mut includes);
+        let includes = include_sites(body);
         let mut writes = Vec::new();
         for (value, end) in includes {
             self.push_include_writes(value, end, self.file.as_deref(), namespace, 0, &mut writes);
@@ -158,8 +156,7 @@ impl<'a> IncludeResolver<'a> {
             .map(|access| access.name.clone())
             .collect();
 
-        let mut includes = Vec::new();
-        body.walk_with(&IncludeWalker, &mut includes);
+        let includes = include_sites(body);
         let mut nested = Vec::new();
         let namespace = top_level_namespace(statements);
         for (value, end) in includes.into_iter().filter(|(_, end)| at_top_level(*end)) {
@@ -187,51 +184,4 @@ fn top_level_namespace(statements: &[Statement<'_>]) -> Option<String> {
             .map(|n| bytes_to_str(n.value()).to_string()),
         _ => None,
     })
-}
-
-type IncludeSites<'ast, 'arena> = Vec<(&'ast Expression<'arena>, u32)>;
-
-/// Collects each `include`/`include_once`/`require`/`require_once` path
-/// expression with the offset its construct ends at.
-///
-/// Closures and arrow functions are walked, since the scope map has a
-/// frame for each to attribute their includes to. Named functions and
-/// class bodies are not: they have no frame there, and their includes
-/// run in a scope of their own.
-struct IncludeWalker;
-
-impl<'ast, 'arena> Walker<'ast, 'arena, IncludeSites<'ast, 'arena>> for IncludeWalker {
-    fn walk_function(
-        &self,
-        _node: &'ast Function<'arena>,
-        _context: &mut IncludeSites<'ast, 'arena>,
-    ) {
-    }
-    fn walk_class(&self, _node: &'ast Class<'arena>, _context: &mut IncludeSites<'ast, 'arena>) {}
-    fn walk_trait(&self, _node: &'ast Trait<'arena>, _context: &mut IncludeSites<'ast, 'arena>) {}
-    fn walk_enum(&self, _node: &'ast Enum<'arena>, _context: &mut IncludeSites<'ast, 'arena>) {}
-    fn walk_anonymous_class(
-        &self,
-        node: &'ast AnonymousClass<'arena>,
-        context: &mut IncludeSites<'ast, 'arena>,
-    ) {
-        if let Some(argument_list) = &node.argument_list {
-            self.walk_partial_argument_list(argument_list, context);
-        }
-    }
-
-    fn walk_in_construct(
-        &self,
-        node: &'ast Construct<'arena>,
-        context: &mut IncludeSites<'ast, 'arena>,
-    ) {
-        let value = match node {
-            Construct::Include(c) => c.value,
-            Construct::IncludeOnce(c) => c.value,
-            Construct::Require(c) => c.value,
-            Construct::RequireOnce(c) => c.value,
-            _ => return,
-        };
-        context.push((value, node.span().end.offset));
-    }
 }
