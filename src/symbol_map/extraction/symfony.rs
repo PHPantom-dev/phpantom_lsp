@@ -187,8 +187,12 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             continue;
         };
         // Outside Symfony, only the calls of the framework the project uses
-        // are left: Twig's own `render()`, or Yii's URL generator.
+        // are left: Twig's own `render()`, Yii's URL generator, or a Drupal
+        // container lookup.  Only Symfony declares services and parameters
+        // in PHP; in Drupal a `setParameter()` is far more often a
+        // validator's or a query's than the container's.
         let records = |kind: StringKeyKind| match kind.framework() {
+            KeyFramework::ServiceContainer if is_write => ctx.symfony,
             KeyFramework::ServiceContainer => ctx.service_container,
             KeyFramework::Symfony => ctx.symfony,
             KeyFramework::Twig => ctx.twig,
@@ -3151,6 +3155,26 @@ mod tests {
             program, php, &names, false, false, false, None,
         );
         assert!(map.typed_receiver_sites.is_empty());
+    }
+
+    #[test]
+    fn a_drupal_project_records_container_reads_but_no_declarations() {
+        let php = "<?php\nfunction f($container, $violation) {\n    $container->get('acme.greeter');\n    $container->getParameter('acme.limit');\n    $violation->setParameter('@value', $value);\n}\n";
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program, php, &names, false, true, true, None,
+        );
+        assert_eq!(
+            receivers(&map),
+            vec![
+                ("acme.greeter", ReceiverClass::ContainerLookup, false),
+                ("acme.limit", ReceiverClass::ParameterHolder, false),
+            ]
+        );
     }
 
     #[test]
