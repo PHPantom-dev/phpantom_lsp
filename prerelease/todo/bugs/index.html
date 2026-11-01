@@ -888,17 +888,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b699-an-array-shape-condition-matches-any-array" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B699. An array-shape condition matches any array
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b708-a-condition-over-a-refined-type-is-misjudged" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -955,6 +944,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Reachability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b718-a-call-whose-conditional-return-type-resolves-to-never-does-not-end-the-code-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B718. A call whose conditional return type resolves to <code>never</code> does not end the code path
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1695,17 +1701,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b699-an-array-shape-condition-matches-any-array" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B699. An array-shape condition matches any array
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b708-a-condition-over-a-refined-type-is-misjudged" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1762,6 +1757,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Reachability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b718-a-call-whose-conditional-return-type-resolves-to-never-does-not-end-the-code-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B718. A call whose conditional return type resolves to <code>never</code> does not end the code path
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2059,41 +2071,19 @@ stays in the type unevaluated, and hover shows its source text. This is
 <code>get_terms()</code>, <code>wp_get_post_terms()</code> and every other function that adds
 <code>|\WP_Error</code> or <code>|false</code> to an argument-dependent result. 138
 assertions.</p>
-<h3 id="b699-an-array-shape-condition-matches-any-array">B699. An array-shape condition matches any array<a class="headerlink" href="#b699-an-array-shape-condition-matches-any-array" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @phpstan-return ($args is array{fields: 'count', ...} ? int : string) */</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function get_categories($args = '') { … }</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">get_categories(['fields' =&gt; 'names']);   // want string, get int</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">get_categories([]);                      // want string, get int</span>
-</code></pre></div>
-<p><code>$args is array{fields: 'count', ...}</code> is taken as true for every array,
-whatever keys it has and whatever they hold, and for an omitted
-argument whose default is <code>''</code>. A key the condition requires and the
-argument lacks, or holds with a value outside the condition's, must make
-the check false; an optional key or an argument whose keys are unknown
-keeps it undecided.</p>
-<p>Every WordPress function that takes an <code>$args</code> array decides its result
-this way: <code>get_posts()</code> and <code>WP_Query::query()</code> without <code>fields</code> iterate
-as <code>int</code> (22 of WordPress core's <code>scalar_member_access</code> reports),
-<code>wp_list_pages(['echo' =&gt; false])</code> and the other echoing functions take
-the first branch whatever <code>echo</code> says, and <code>wp_die()</code> with its default
-arguments matches <code>array{exit: false}</code> and is read as returning, so code
-after it stays reachable. 107 assertions, and one of PHPantom's own in
-<code>output-constants.php</code>.</p>
 <h3 id="b708-a-condition-over-a-refined-type-is-misjudged">B708. A condition over a refined type is misjudged<a class="headerlink" href="#b708-a-condition-over-a-refined-type-is-misjudged" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @phpstan-return ($value is int&lt;min, 0&gt; ? false : WP_User|false) */</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function get_user($value) { … }</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">get_user(0);           // want false, get WP_User|false</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">/** @phpstan-return ($path is non-falsy-string ? bool : false) */</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">function path_is_absolute($path) { … }</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">path_is_absolute('foo');   // want bool, get false</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">/** @phpstan-return ($data is array&lt;int, mixed&gt; ? true : false) */</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">function wp_is_numeric_array($data) { … }</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">wp_is_numeric_array(['key' =&gt; 'value']);   // want false, get true</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @phpstan-return ($value is int&lt;min, 0&gt; ? false : WP_User|false) */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function get_user($value) { … }</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">get_user(0);           // want false, get WP_User|false</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">/** @phpstan-return ($path is non-falsy-string ? bool : false) */</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">function path_is_absolute($path) { … }</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">path_is_absolute('foo');   // want bool, get false</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">/** @phpstan-return ($data is array&lt;int, mixed&gt; ? true : false) */</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">function wp_is_numeric_array($data) { … }</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">wp_is_numeric_array(['key' =&gt; 'value']);   // want false, get true</span>
 </code></pre></div>
 <p>The check that decides a condition handles plain types and literals, and
 gets these wrong:</p>
@@ -2107,37 +2097,37 @@ gets these wrong:</p>
 <li><code>resource</code> and <code>object</code>, which are not ruled out of <code>string</code>;</li>
 <li>the key type of <code>array&lt;K, V&gt;</code>, which is ignored.</li>
 </ul>
-<p>83 assertions, from <code>absint()</code>, <code>has_shortcode()</code>, <code>size_format()</code>,
-<code>validate_file()</code>, <code>WP_Dependencies::query()</code> and others.</p>
+<p>86 assertions, from <code>absint()</code>, <code>has_shortcode()</code>, <code>size_format()</code>,
+<code>validate_file()</code>, <code>WP_Dependencies::query()</code>, <code>paginate_links()</code> and others.</p>
 <h3 id="b709-void-from-a-conditional-return-type-is-not-read-as-null">B709. <code>void</code> from a conditional return type is not read as <code>null</code><a class="headerlink" href="#b709-void-from-a-conditional-return-type-is-not-read-as-null" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @phpstan-return ($display is true ? void : string) */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function the_title($before = '', $after = '', $display = true) { … }</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">$title = the_title('', '', true);    // want null, get no type</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">$title = the_title('', '', $echo);   // want string|null, get string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @phpstan-return ($display is true ? void : string) */</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function the_title($before = '', $after = '', $display = true) { … }</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$title = the_title('', '', true);    // want null, get no type</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">$title = the_title('', '', $echo);   // want string|null, get string</span>
 </code></pre></div>
 <p>A function declared <code>@return void</code> gives <code>null</code> to a variable assigned
 from it. When <code>void</code> comes from a branch of a conditional instead, the
 result has no type at all, a union with it drops it, and a union written
 in the stub (<code>string|void</code>) keeps <code>void</code>. The value of a call is <code>null</code>
-in all three. 54 assertions.</p>
+in all three. 89 assertions.</p>
 <h3 id="b710-a-conditional-over-a-method-template-ignores-its-bound-and-does-not-narrow-it">B710. A conditional over a method template ignores its bound and does not narrow it<a class="headerlink" href="#b710-a-conditional-over-a-method-template-ignores-its-bound-and-does-not-narrow-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/**</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x"> * @template T of int&lt;0, max&gt;</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x"> * @param T|int&lt;min, -1&gt;|scalar|null $maybeint</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x"> * @return ($maybeint is T ? T : …)</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x"> */</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">function absint($maybeint) { … }</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">absint(5);   // want 5, get int&lt;0, max&gt;</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">/**</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x"> * @template T of string</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x"> * @return (T is non-falsy-string ? T|false : false)</span>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="x"> */</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="x">function sanitize_sql_orderby($orderby) { … }</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="x">sanitize_sql_orderby($string);   // want non-falsy-string|false, get string|false</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/**</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x"> * @template T of int&lt;0, max&gt;</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x"> * @param T|int&lt;min, -1&gt;|scalar|null $maybeint</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x"> * @return ($maybeint is T ? T : …)</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x"> */</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">function absint($maybeint) { … }</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">absint(5);   // want 5, get int&lt;0, max&gt;</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">/**</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x"> * @template T of string</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="x"> * @return (T is non-falsy-string ? T|false : false)</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="x"> */</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="x">function sanitize_sql_orderby($orderby) { … }</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="x">sanitize_sql_orderby($string);   // want non-falsy-string|false, get string|false</span>
 </code></pre></div>
 <p>Three gaps in how a template meets a condition: <code>$x is T</code> is never true,
 even for an argument that is what <code>T</code> was bound to; a template bound to
@@ -2148,7 +2138,21 @@ picks does not narrow the template it tested (<code>T</code> is
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b718-a-call-whose-conditional-return-type-resolves-to-never-does-not-end-the-code-path">B718. A call whose conditional return type resolves to <code>never</code> does not end the code path<a class="headerlink" href="#b718-a-call-whose-conditional-return-type-resolves-to-never-does-not-end-the-code-path" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @phpstan-return ($args is array{exit: false, ...} ? void : never) */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">function wp_die($message = '', $title = '', $args = array()) { … }</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">if ($post === null) {</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    wp_die();</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">}</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">$post;   // want WP_Post, get WP_Post|null</span>
+</code></pre></div>
+<p>The call itself resolves to <code>never</code>, but the check that decides whether
+a statement ends the code path reads only the declared return type, so
+a <code>never</code> that comes from a conditional leaves the code after the call
+reachable and nothing narrowed by it. One assertion, PHPantom's own in
+<code>output-constants.php</code>.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b700-emptyx-prop-does-not-narrow-the-way-issetx-prop-does">B700. <code>!empty($x-&gt;prop)</code> does not narrow the way <code>isset($x-&gt;prop)</code> does<a class="headerlink" href="#b700-emptyx-prop-does-not-narrow-the-way-issetx-prop-does" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
