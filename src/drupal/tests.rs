@@ -126,3 +126,26 @@ fn nothing_is_read_outside_a_drupal_project() {
             .is_empty()
     );
 }
+
+#[test]
+fn a_test_modules_services_are_read_only_while_it_is_open() {
+    let path = "web/core/modules/system/tests/modules/fixture/fixture.services.yml";
+    let content = "services:\n  fixture.thing: ~\n";
+    let (backend, dir) = drupal_backend(&[(path, content)]);
+    assert!(
+        backend
+            .symfony_declared_names(StringKeyKind::ServiceId)
+            .is_empty()
+    );
+
+    let uri = uri(dir.path(), path);
+    backend
+        .open_files
+        .write()
+        .insert(uri.clone(), std::sync::Arc::new(content.to_string()));
+    backend.update_resource_symbol_index(&uri, content);
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::ServiceId),
+        vec!["fixture.thing".to_string()]
+    );
+}

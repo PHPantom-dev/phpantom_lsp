@@ -355,8 +355,9 @@ impl Backend {
             if let Some(p) = progress {
                 p.set_scope(at(55), at(59), "Scanning Drupal directories");
             }
-            let drupal_result =
+            let (drupal_result, declaration_files) =
                 classmap_scanner::scan_drupal_directories(&drupal_web_root, &filters, progress);
+            self.note_drupal_declaration_files(declaration_files);
             let drupal_count = drupal_result.classmap.len()
                 + drupal_result.function_index.len()
                 + drupal_result.constant_index.len();

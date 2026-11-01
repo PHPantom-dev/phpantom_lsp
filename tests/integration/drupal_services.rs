@@ -52,7 +52,14 @@ const CONSUMER_PATH: &str = "web/modules/custom/acme/src/Consumer.php";
 /// An initialized Drupal project holding the stubs and `files`, every one
 /// of `files` open.
 async fn workspace(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
-    let dir = tempfile::tempdir().unwrap();
+    workspace_in(tempfile::tempdir().unwrap(), files).await
+}
+
+/// [`workspace`] in `dir`, which may hold files already.
+async fn workspace_in(
+    dir: tempfile::TempDir,
+    files: &[(&str, &str)],
+) -> (Backend, tempfile::TempDir) {
     std::fs::write(dir.path().join("composer.json"), COMPOSER).unwrap();
     for (path, content) in STUBS.iter().chain(files) {
         let full = dir.path().join(path);
@@ -162,16 +169,14 @@ async fn service_ids_complete_in_php_and_in_the_services_file() {
     assert!(labels.contains(&"acme.greeter".to_string()), "{labels:?}");
 }
 
-#[tokio::test]
-async fn references_reach_the_lookup_and_the_yaml_argument() {
-    let (backend, dir) = workspace(&[(SERVICES_PATH, SERVICES), (CONSUMER_PATH, CONSUMER)]).await;
+/// Every reference to the name at `position`, declarations included, as
+/// files and lines.
+async fn references_at(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Uri, u32)> {
     let mut found: Vec<(Uri, u32)> = backend
         .references(ReferenceParams {
             text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: uri_for(&dir, SERVICES_PATH),
-                },
-                position: position_in(SERVICES, "acme.greeter:", 3),
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
@@ -186,9 +191,86 @@ async fn references_reach_the_lookup_and_the_yaml_argument() {
         .map(|location| (location.uri, location.range.start.line))
         .collect();
     found.sort();
+    found
+}
+
+#[tokio::test]
+async fn references_reach_the_lookup_and_the_yaml_argument() {
+    let (backend, dir) = workspace(&[(SERVICES_PATH, SERVICES), (CONSUMER_PATH, CONSUMER)]).await;
+    let found = references_at(
+        &backend,
+        &uri_for(&dir, SERVICES_PATH),
+        position_in(SERVICES, "acme.greeter:", 3),
+    )
+    .await;
     let yaml = uri_for(&dir, SERVICES_PATH);
     let php = uri_for(&dir, CONSUMER_PATH);
     let mut expected = vec![(yaml.clone(), 1), (yaml, 4), (php, 7)];
     expected.sort();
     assert_eq!(found, expected);
+}
+
+/// Core sits in a folder the project's `.gitignore` leaves out, and its
+/// test modules declare services no real site has.
+#[tokio::test]
+async fn core_services_are_read_and_test_modules_are_not() {
+    let core_services =
+        "services:\n  config.factory:\n    class: Drupal\\Core\\Config\\ConfigFactory\n";
+    let fixture_services =
+        "services:\n  config.fixture:\n    class: Drupal\\Core\\Config\\ConfigFactory\n";
+    let consumer = CONSUMER.replace(
+        "$greeter = $container->get('acme.greeter');",
+        "$greeter = $container->get('config.factory');\n        $container->get('config.fixture');",
+    );
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in [
+        // A repository whose `.gitignore` leaves core out, as a Composer
+        // install of Drupal does.
+        (".git/HEAD", "ref: refs/heads/main\n"),
+        (".gitignore", "/web/core/\n"),
+        ("web/core/core.services.yml", core_services),
+        (
+            "web/core/modules/system/tests/modules/fixture/fixture.services.yml",
+            fixture_services,
+        ),
+        (
+            "web/core/lib/Drupal/Core/Config/ConfigFactory.php",
+            "<?php\nnamespace Drupal\\Core\\Config;\nclass ConfigFactory {}\n",
+        ),
+    ] {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let (backend, dir) = workspace_in(dir, &[(CONSUMER_PATH, consumer.as_str())]).await;
+    let php = uri_for(&dir, CONSUMER_PATH);
+
+    // Finding references indexes the workspace, core's YAML included.
+    let found = references_at(
+        &backend,
+        &php,
+        position_in(&consumer, "get('config.factory')", 7),
+    )
+    .await;
+    assert!(
+        found.contains(&(uri_for(&dir, "web/core/core.services.yml"), 1)),
+        "{found:?}"
+    );
+
+    let position = position_in(&consumer, "$greeter;", 2);
+    let hover = hover_text_at(&backend, &php, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(hover.contains("ConfigFactory"), "{hover}");
+
+    let found = references_at(
+        &backend,
+        &php,
+        position_in(&consumer, "get('config.fixture')", 7),
+    )
+    .await;
+    assert!(
+        found.iter().all(|(uri, _)| *uri == php),
+        "a test module's services file was read: {found:?}"
+    );
 }

@@ -286,7 +286,7 @@ impl Backend {
             self.report_workspace_index_progress(progress, 3, "Scanning workspace files");
             let walk_start = std::time::Instant::now();
             let filters = self.index_filters();
-            let (mut php_files, resource_files) =
+            let (mut php_files, mut resource_files) =
                 crate::classmap_scanner::collect_workspace_index_files_gitignore(
                     &root,
                     &vendor_dir_paths,
@@ -306,6 +306,17 @@ impl Backend {
                 let mut seen: HashSet<PathBuf> = php_files.iter().cloned().collect();
                 php_files.extend(
                     crate::classmap_scanner::collect_include_files(&include_paths, &filters)
+                        .into_iter()
+                        .filter(|path| seen.insert(path.clone())),
+                );
+            }
+            // Drupal's own walk found the declaration files the gitignore-aware
+            // walk skips; the custom ones both walks reach are listed once.
+            let drupal_files = self.drupal_declaration_files();
+            if !drupal_files.is_empty() {
+                let mut seen: HashSet<PathBuf> = resource_files.iter().cloned().collect();
+                resource_files.extend(
+                    drupal_files
                         .into_iter()
                         .filter(|path| seen.insert(path.clone())),
                 );
