@@ -1110,17 +1110,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b720-an-object-cast-written-as-an-argument-is-typed-object" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B720. An <code>(object)</code> cast written as an argument is typed <code>object</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b721-an-included-file-does-not-see-the-including-scopes-variables" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1884,17 +1873,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b720-an-object-cast-written-as-an-argument-is-typed-object" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B720. An <code>(object)</code> cast written as an argument is typed <code>object</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b721-an-included-file-does-not-see-the-including-scopes-variables" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2155,28 +2133,16 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b720-an-object-cast-written-as-an-argument-is-typed-object">B720. An <code>(object)</code> cast written as an argument is typed <code>object</code><a class="headerlink" href="#b720-an-object-cast-written-as-an-argument-is-typed-object" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">stripslashes_from_strings_only((object) ['key' =&gt; 'value']);</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">// want object{key: 'value'}&amp;stdClass, get object</span>
-</code></pre></div>
-<p>The argument's type is read off its text (<code>arg_text_types.rs</code>), which
-answers a cast by its keyword alone, so the shape <code>(object)</code> gives an
-array is lost. Assigned to a variable first, the same expression goes
-through the shared resolver and keeps it, though with its values
-widened (<code>object{key: string}&amp;stdClass</code>). Read the cast's operand
-through the shared resolver, and keep the literal values the way an
-array literal does. 1 assertion, from <code>stripslashes_from_strings_only()</code>.</p>
 <h3 id="b721-an-included-file-does-not-see-the-including-scopes-variables">B721. An included file does not see the including scope's variables<a class="headerlink" href="#b721-an-included-file-does-not-see-the-including-scopes-variables" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">// main.php</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">function render(User $user): void {</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    require __DIR__ . '/header.php';</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    $title;            // want User, get nothing</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">// header.php</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">$title = $user;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">// main.php</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">function render(User $user): void {</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    require __DIR__ . '/header.php';</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    $title;            // want User, get nothing</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">}</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">// header.php</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">$title = $user;</span>
 </code></pre></div>
 <p>The variables an included file leaves are worked out by walking its top
 level on a scope of its own, once per file, so a value it reads from
