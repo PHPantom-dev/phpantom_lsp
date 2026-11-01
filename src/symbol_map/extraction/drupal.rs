@@ -8,17 +8,33 @@ use crate::virtual_members::laravel::helpers::resolved_string_literal;
 const CONTENT_STORAGE: &str = "Drupal\\Core\\Entity\\Sql\\SqlContentEntityStorage";
 const CONFIG_STORAGE: &str = "Drupal\\Core\\Config\\Entity\\ConfigEntityStorage";
 
-/// The entity type attributes and annotations, by short name, with the
-/// storage a declaration that names none gets.
-const ENTITY_TYPE_KINDS: [(&str, Option<&str>); 3] = [
-    ("ContentEntityType", Some(CONTENT_STORAGE)),
-    ("ConfigEntityType", Some(CONFIG_STORAGE)),
-    ("EntityType", None),
-];
+/// An entity type attribute and the annotation older code writes instead,
+/// with the storage a declaration that names none gets.
+struct EntityTypeKind {
+    attribute: &'static str,
+    /// The annotation's opening, matched by short name, the way Drupal's
+    /// annotation discovery reads it.
+    annotation: &'static str,
+    default_storage: Option<&'static str>,
+}
 
-/// The attribute classes' namespace.  Annotations are matched by short
-/// name, the way Drupal's annotation discovery reads them.
-const ATTRIBUTE_NAMESPACE: &str = "Drupal\\Core\\Entity\\Attribute\\";
+const ENTITY_TYPE_KINDS: [EntityTypeKind; 3] = [
+    EntityTypeKind {
+        attribute: "Drupal\\Core\\Entity\\Attribute\\ContentEntityType",
+        annotation: "@ContentEntityType(",
+        default_storage: Some(CONTENT_STORAGE),
+    },
+    EntityTypeKind {
+        attribute: "Drupal\\Core\\Entity\\Attribute\\ConfigEntityType",
+        annotation: "@ConfigEntityType(",
+        default_storage: Some(CONFIG_STORAGE),
+    },
+    EntityTypeKind {
+        attribute: "Drupal\\Core\\Entity\\Attribute\\EntityType",
+        annotation: "@EntityType(",
+        default_storage: None,
+    },
+];
 
 /// Record the entity type `class` declares: a span over its ID, and the
 /// class and storage the ID stands for.
@@ -29,18 +45,11 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
     if !ctx.drupal {
         return;
     }
-    let Some(fqn) = ctx
-        .resolved_name_at(class.name.span.start.offset)
-        .map(|fqn| fqn.trim_start_matches('\\').to_string())
-    else {
-        return;
-    };
     let mut found = Vec::new();
-    for (kind, default_storage) in ENTITY_TYPE_KINDS {
-        let attribute_class = format!("{ATTRIBUTE_NAMESPACE}{kind}");
-        for attribute in attributes_named(&class.attribute_lists, &attribute_class, ctx) {
+    for kind in &ENTITY_TYPE_KINDS {
+        for attribute in attributes_named(&class.attribute_lists, kind.attribute, ctx) {
             let mut id = None;
-            let mut storage = default_storage.map(str::to_string);
+            let mut storage = kind.default_storage.map(str::to_string);
             for (parameter, value) in attribute_arguments(attribute, &["id"]) {
                 match parameter {
                     "id" => id = resolved_string_literal(value, ctx.content),
@@ -59,9 +68,19 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
     }
     if found.is_empty()
         && let Some((doc, offset)) = get_docblock_text_with_offset(ctx.trivias, ctx.content, class)
+        && doc.contains("EntityType(")
     {
         found.extend(annotation_entity_type(doc, offset));
     }
+    if found.is_empty() {
+        return;
+    }
+    let Some(fqn) = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .map(|fqn| crate::atom::atom(fqn.trim_start_matches('\\')))
+    else {
+        return;
+    };
     for (key, start, end, storage) in found {
         ctx.spans.push(SymbolSpan {
             start,
@@ -75,7 +94,7 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
         });
         ctx.entity_types.push(EntityTypeSite {
             start,
-            class: crate::atom::atom(&fqn),
+            class: fqn,
             storage: storage.map(|storage| crate::atom::atom(&storage)),
         });
     }
@@ -100,10 +119,9 @@ fn handler_class(handlers: &Expression<'_>, name: &str, ctx: &ExtractionCtx<'_>)
 /// docblock `doc`, which starts at `offset` in the file, declares: its ID
 /// with the ID's range in the file, and its storage.
 fn annotation_entity_type(doc: &str, offset: u32) -> Option<(String, u32, u32, Option<String>)> {
-    let (body, default_storage) = ENTITY_TYPE_KINDS.iter().find_map(|(kind, storage)| {
-        let tag = format!("@{kind}(");
-        let at = doc.find(&tag)?;
-        Some((at + tag.len(), *storage))
+    let (body, default_storage) = ENTITY_TYPE_KINDS.iter().find_map(|kind| {
+        let at = doc.find(kind.annotation)?;
+        Some((at + kind.annotation.len(), kind.default_storage))
     })?;
     let mut id = None;
     let mut storage = default_storage.map(str::to_string);
@@ -190,8 +208,11 @@ fn annotation_entries(doc: &str, from: usize) -> Vec<AnnotationEntry<'_>> {
                 key = None;
                 assigned = false;
             }
+            // A nested annotation's own pairs (`@Translation(context = …)`)
+            // are not the entity type's.
             b'(' => {
                 parens += 1;
+                path.push("(");
                 key = None;
                 assigned = false;
             }
@@ -200,6 +221,9 @@ fn annotation_entries(doc: &str, from: usize) -> Vec<AnnotationEntry<'_>> {
                     break;
                 }
                 parens -= 1;
+                path.pop();
+                key = None;
+                assigned = false;
             }
             b',' => {
                 key = None;
@@ -335,6 +359,14 @@ mod tests {
         let (id, _, _, storage) = annotation_entity_type(doc, 0).unwrap();
         assert_eq!(id, "flag");
         assert_eq!(storage.as_deref(), Some(CONFIG_STORAGE));
+    }
+
+    #[test]
+    fn a_nested_annotations_pairs_are_its_own() {
+        let doc = "/**\n * @ContentEntityType(\n *   label = @Translation(\"Note\", id = \"other\"),\n *   id = \"note\",\n *   extra = @Bar(handlers = {\"storage\" = \"Wrong\"}),\n * )\n */";
+        let (id, _, _, storage) = annotation_entity_type(doc, 0).unwrap();
+        assert_eq!(id, "note");
+        assert_eq!(storage.as_deref(), Some(CONTENT_STORAGE));
     }
 
     #[test]

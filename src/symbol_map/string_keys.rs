@@ -726,7 +726,8 @@ const YII_WEB_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\Renderer\\WebViewRender
 /// The renderer before `yiisoft/yii-view-renderer` 7 moved it.
 const YII_LEGACY_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\ViewRenderer";
 const YII_VIEW: &str = "Yiisoft\\View\\ViewInterface";
-const DRUPAL_ENTITY_TYPE_MANAGER: &str = "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
+pub(crate) const DRUPAL_ENTITY_TYPE_MANAGER: &str =
+    "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.

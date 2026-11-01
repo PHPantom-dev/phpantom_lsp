@@ -19,7 +19,7 @@ pub(crate) mod types;
 
 use crate::Backend;
 use crate::atom::Atom;
-use crate::symbol_map::StringKeyKind;
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 
 /// The web roots of the workspace's Drupal projects, and the declaration
 /// files found under them.
@@ -161,23 +161,32 @@ impl Backend {
     /// entity type `id`; a storage of `None` for a declaration that names
     /// none and has no default.
     pub(crate) fn drupal_entity_types(&self, id: &str) -> Vec<(Atom, Option<Atom>)> {
-        let mut found = Vec::new();
-        self.visit_symfony_declarations(
-            StringKeyKind::DrupalEntityType,
-            |_, map, start, _, key| {
-                if key != id {
-                    return;
-                }
-                let at = map.entity_types.partition_point(|site| site.start < start);
-                if let Some(site) = map.entity_types.get(at).filter(|site| site.start == start)
-                    && !found.iter().any(|(class, storage): &(Atom, Option<Atom>)| {
-                        *class == site.class && *storage == site.storage
-                    })
+        let mut found: Vec<(Atom, Option<Atom>)> = Vec::new();
+        self.visit_declaring_symbol_maps(|_, map| {
+            for site in &map.entity_types {
+                let at = map.spans.partition_point(|span| span.start < site.start);
+                let declares_id = map.spans[at..]
+                    .iter()
+                    .take_while(|span| span.start == site.start)
+                    .any(|span| {
+                        matches!(
+                            &span.kind,
+                            SymbolKind::StringKey {
+                                kind: StringKeyKind::DrupalEntityType,
+                                key,
+                                ..
+                            } if key == id
+                        )
+                    });
+                if declares_id
+                    && !found
+                        .iter()
+                        .any(|(class, storage)| *class == site.class && *storage == site.storage)
                 {
                     found.push((site.class, site.storage));
                 }
-            },
-        );
+            }
+        });
         found
     }
 

@@ -203,3 +203,74 @@ async fn storage_and_loads_are_typed_by_the_entity_type() {
     let unknown = hover("$unknown;").await;
     assert!(unknown.contains("EntityInterface"), "{unknown}");
 }
+
+/// A load or a service lookup called straight on the call before it, with
+/// no variable in between, is typed the same way.
+#[tokio::test]
+async fn chained_loads_and_service_lookups_are_typed() {
+    let note = NOTE.replace(
+        "class Note {}",
+        "class Note {\n    public function noteOnly(): void {}\n}",
+    );
+    let chained = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Entity\EntityTypeManagerInterface;
+
+final class Chained {
+    public function run(EntityTypeManagerInterface $manager): void {
+        $manager->getStorage('acme_note')->load(1)?->noteOnly();
+        $manager->getStorage('acme_note')->create([])->noteOnly();
+        \Drupal::service('acme.greeter')->greet();
+    }
+}
+"#;
+    let path = "web/modules/custom/acme/src/Chained.php";
+    let services = "services:\n  acme.greeter:\n    class: Drupal\\acme\\Greeter\n";
+    let mut files: Vec<(&str, &str)> = STORAGE_STUBS.to_vec();
+    files.extend([
+        (MANAGER_PATH, MANAGER),
+        (NOTE_PATH, note.as_str()),
+        ("web/modules/custom/acme/acme.services.yml", services),
+        (path, chained),
+    ]);
+    let (backend, dir) = workspace(&files).await;
+    let php = uri_for(&dir, path);
+    for (needle, target) in [
+        ("load(1)?->noteOnly", NOTE_PATH),
+        ("create([])->noteOnly", NOTE_PATH),
+        ("->greet()", "web/modules/custom/acme/src/Greeter.php"),
+    ] {
+        let inside = needle.rfind('>').unwrap() + 2;
+        let found = definitions_at(&backend, &php, position_in(chained, needle, inside)).await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!(found[0].uri, uri_for(&dir, target), "{needle}");
+    }
+}
+
+/// `getStorage(entity_type_id: 'x')` names the same entity type as the
+/// positional form.
+#[tokio::test]
+async fn a_named_entity_type_id_types_the_storage() {
+    let named = LOADER.replace(
+        "$storage = $this->manager->getStorage('acme_note');",
+        "$storage = $this->manager->getStorage(entity_type_id: 'acme_note');",
+    );
+    let mut files: Vec<(&str, &str)> = STORAGE_STUBS.to_vec();
+    files.extend([
+        (MANAGER_PATH, MANAGER),
+        (NOTE_PATH, NOTE),
+        (LOADER_PATH, named.as_str()),
+    ]);
+    let (backend, dir) = workspace(&files).await;
+    let position = position_in(&named, "$storage;", 2);
+    let hover = crate::common::hover_text_at(
+        &backend,
+        &uri_for(&dir, LOADER_PATH),
+        position.line,
+        position.character,
+    )
+    .await
+    .unwrap_or_default();
+    assert!(hover.contains("SqlContentEntityStorage<Note>"), "{hover}");
+}

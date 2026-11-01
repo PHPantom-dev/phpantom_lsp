@@ -178,7 +178,7 @@ fn static_call_on_class(
         {
             return result;
         }
-        if let Some(result) = super::symfony_calls::try_resolve_drupal_service_type(
+        if let Some(result) = super::drupal_calls::try_resolve_drupal_service_type(
             &owner.fqn(),
             method_name,
             argument_list,
