@@ -14,8 +14,8 @@ use crate::types::ParameterInfo;
 use super::arg_form::{condition_result_from_text, literal_condition_result};
 use super::without_args::try_resolve_with_template_default;
 use super::{
-    ConditionalClassContext, TemplateContext, VarClassStringResolver, resolve_self_keyword,
-    this_condition_holds, type_condition_result, union_branch_types,
+    ConditionalClassContext, TemplateContext, VarClassStringResolver, decide_nested,
+    resolve_self_keyword, this_condition_holds, type_condition_result, union_branch_types,
 };
 
 /// Resolve a conditional return type using **textual** arguments extracted
@@ -87,7 +87,7 @@ impl TextArgs<'_> {
             ..
         } = *self;
         let TypeKind::Conditional(cond) = conditional.kind() else {
-            return Some(conditional.clone());
+            return Some(decide_nested(conditional, &|c| self.resolve(c)));
         };
         let target = cond.param.as_str();
 

@@ -1114,3 +1114,70 @@ fn union_argument_against_union_condition() {
         Some(true)
     );
 }
+
+/// Resolve a `get_term_by()`-style return type, whose conditional on
+/// `$output` sits inside a union, against `text_args`.
+fn resolve_term_by(return_type: &str, text_args: &str) -> Option<String> {
+    let ty = PhpType::parse(return_type);
+    let params = [param("$field"), param_with_default("$output", "'OBJECT'")];
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
+    let tpl = TemplateContext::with_params(&[]);
+    resolve_conditional_with_text_args_and_defaults(
+        &ty,
+        &params,
+        text_args,
+        None,
+        ConditionalClassContext::default(),
+        loader,
+        &tpl,
+    )
+    .map(|t| t.to_string())
+}
+
+/// A conditional that is one member of a union is decided like one that is
+/// the whole type, and its branch merges with the members around it.
+#[test]
+fn conditional_inside_union_is_decided() {
+    let ty = "false|($output is 'ARRAY_A' ? array<string, int> : ($output is 'ARRAY_N' ? list<int> : WP_Term))";
+    assert_eq!(
+        resolve_term_by(ty, "'id', 'ARRAY_A'").as_deref(),
+        Some("false|array<string, int>")
+    );
+    assert_eq!(
+        resolve_term_by(ty, "'id'").as_deref(),
+        Some("false|WP_Term")
+    );
+    assert_eq!(
+        resolve_conditional_without_args_and_defaults(
+            &PhpType::parse(ty),
+            &[param("$field"), param_with_default("$output", "'ARRAY_N'")],
+            None,
+            None,
+        )
+        .map(|t| t.to_string())
+        .as_deref(),
+        Some("false|list<int>")
+    );
+}
+
+/// The decided branch of a conditional inside an intersection or a generic
+/// argument takes its place there.
+#[test]
+fn conditional_inside_intersection_and_generic_is_decided() {
+    assert_eq!(
+        resolve_term_by(
+            "($output is 'OBJECT' ? numeric-string : string)&non-falsy-string",
+            "'id'"
+        )
+        .as_deref(),
+        Some("numeric-string&non-falsy-string")
+    );
+    assert_eq!(
+        resolve_term_by(
+            "array<int, ($output is 'OBJECT' ? WP_Term : string)>",
+            "'id', 'ARRAY_A'"
+        )
+        .as_deref(),
+        Some("array<int, string>")
+    );
+}

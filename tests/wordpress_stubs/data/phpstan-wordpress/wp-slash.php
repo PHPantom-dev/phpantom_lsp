@@ -19,23 +19,23 @@ assertType('lowercase-string', wp_slash($value)); // SKIP: `wp_slash()` does not
 
 assertType("'baz'|'foo\\\\\'s bar'", wp_slash(rand(0, 1) === 1 ? 'baz' : "foo's bar")); // SKIP: a call on literal arguments is not evaluated
 
-assertType("array{who: 'baz', where: 'foo\\\\\'s bar'}", wp_slash(['who' => 'baz', 'where' => "foo's bar"])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType("array{who: 'baz', where: 'foo\\\\\'s bar'}", wp_slash(['who' => 'baz', 'where' => "foo's bar"])); // SKIP: `wp_slash()` does not keep the shape of the array it slashes
 
 /** @var array{who: 'baz', when: non-falsy-string, where: "foo's bar"} $value */
-assertType("array{who: 'baz', when: non-falsy-string, where: 'foo\\\\\'s bar'}", wp_slash($value)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType("array{who: 'baz', when: non-falsy-string, where: 'foo\\\\\'s bar'}", wp_slash($value)); // SKIP: `wp_slash()` does not keep the shape of the array it slashes
 
-assertType("array{outer: array{inner: 'foo\\\\\'s bar'}}", wp_slash(['outer' => ['inner' => "foo's bar"]])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType("array{outer: array{inner: 'foo\\\\\'s bar'}}", wp_slash(['outer' => ['inner' => "foo's bar"]])); // SKIP: `wp_slash()` does not keep the shape of the array it slashes
 
 $value = rand(0, 1) === 1
 	? ['outer' => ['inner' => "foo's bar"]]
 	: ['outer' => ['inner' => 'baz']];
-assertType("array{outer: array{inner: 'baz'}}|array{outer: array{inner: 'foo\\\\\'s bar'}}", wp_slash($value)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType("array{outer: array{inner: 'baz'}}|array{outer: array{inner: 'foo\\\\\'s bar'}}", wp_slash($value)); // SKIP: `wp_slash()` does not keep the shape of the array it slashes
 
 /** @var array<array{inner: "foo's bar"}> $value */
-assertType("array<array{inner: 'foo\\\\\'s bar'}>", wp_slash($value)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType("array<array{inner: 'foo\\\\\'s bar'}>", wp_slash($value)); // SKIP: `wp_slash()` does not keep the shape of the array it slashes
 
 // Nested array with multiple items at each depth
-assertType( // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType( // SKIP: `wp_slash()` does not keep the shape of the array it slashes
 	"array{level1_a: array{level2_a: 'foo\\\\\'s bar', level2_b: 'level2_b'}, level1_b: array{level2_c: array{level3_a: 'deeper foo\\\\\'s bar', level3_b: 'level3_b'}, level2_d: 'level2_d'}}",
 	wp_slash([
 		'level1_a' => [

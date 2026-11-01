@@ -81,11 +81,11 @@ assertType('bool|WP_Error', wp_unschedule_event(1, 'hook', [], Faker::bool()));
 /*
  * wp_clear_scheduled_hook()
  */
-assertType('int<0, max>|false', wp_clear_scheduled_hook('hook')); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('int<0, max>|false', wp_clear_scheduled_hook('hook', [])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('int<0, max>|false', wp_clear_scheduled_hook('hook', [], false)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('int<0, max>|WP_Error', wp_clear_scheduled_hook('hook', [], true)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('int<0, max>|WP_Error|false', wp_clear_scheduled_hook('hook', [], Faker::bool())); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('int<0, max>|false', wp_clear_scheduled_hook('hook'));
+assertType('int<0, max>|false', wp_clear_scheduled_hook('hook', []));
+assertType('int<0, max>|false', wp_clear_scheduled_hook('hook', [], false));
+assertType('int<0, max>|WP_Error', wp_clear_scheduled_hook('hook', [], true));
+assertType('int<0, max>|WP_Error|false', wp_clear_scheduled_hook('hook', [], Faker::bool()));
 
 /*
  * wp_unschedule_hook()

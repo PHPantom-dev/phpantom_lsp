@@ -7,13 +7,14 @@
 //! ```
 //!
 //! The main entry point is [`extract_conditional_return_type`], which
-//! returns a [`TypeKind::Conditional`] tree that downstream code can
-//! evaluate at call-sites by matching the actual argument types against
-//! the declared conditions.
+//! returns a type holding
+//! [`TypeKind::Conditional`](crate::php_type::TypeKind::Conditional) nodes
+//! that downstream code can evaluate at call-sites by matching the actual
+//! argument types against the declared conditions.
 
 use super::tag_kind::TagKind;
 
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::PhpType;
 
 use super::parser::{DocblockInfo, collapse_newlines, parse_docblock_for_tags};
 
@@ -27,8 +28,12 @@ use super::parser::{DocblockInfo, collapse_newlines, parse_docblock_for_tags};
 ///           : ($abstract is null ? \Illuminate\Foundation\Application : mixed))
 /// ```
 ///
-/// Returns `None` if the `@return` tag is missing or is not a conditional
-/// (i.e. does not start with `(`).
+/// A conditional need not be the whole type: one inside a union
+/// (`false|($output is 'ARRAY_A' ? … : …)`), an intersection or a generic
+/// argument is decided by the call's arguments all the same, so the whole
+/// type is returned.
+///
+/// Returns `None` if the `@return` tag is missing or holds no conditional.
 pub fn extract_conditional_return_type(docblock: &str) -> Option<PhpType> {
     extract_conditional_return_type_from_info(&parse_docblock_for_tags(docblock)?)
 }
@@ -37,16 +42,12 @@ pub fn extract_conditional_return_type(docblock: &str) -> Option<PhpType> {
 pub fn extract_conditional_return_type_from_info(info: &DocblockInfo) -> Option<PhpType> {
     let raw = extract_raw_return_content_from_info(info)?;
     let trimmed = raw.trim();
-    if !trimmed.starts_with('(') {
+    // Every conditional opens with `(`, so a type without one has none.
+    if !trimmed.contains('(') {
         return None;
     }
     let parsed = PhpType::parse(trimmed);
-    // Only return if parsing produced a Conditional variant.
-    if matches!(parsed.kind(), TypeKind::Conditional { .. }) {
-        Some(parsed)
-    } else {
-        None
-    }
+    parsed.contains_conditional().then_some(parsed)
 }
 
 // ─── Internals ──────────────────────────────────────────────────────────────

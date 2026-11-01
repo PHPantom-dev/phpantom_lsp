@@ -529,6 +529,25 @@ fn class_condition_result(
     Some(false)
 }
 
+/// `ty` with every conditional inside it (a union or intersection member, a
+/// generic argument, a shape value, …) replaced by what `decide` makes of
+/// it.
+///
+/// `false|($output is 'ARRAY_A' ? array<…> : \WP_Term)` decides its
+/// conditional against the call like a conditional that is the whole type
+/// does, and the result is simplified so the decided branch merges with the
+/// members around it: `($display is true ? void : string)|null` taking its
+/// then branch is `void|null`, and an intersection's decided members absorb
+/// their supertypes. A conditional `decide` cannot settle reads as the
+/// union of its branches.
+fn decide_nested(ty: &PhpType, decide: &dyn Fn(&PhpType) -> Option<PhpType>) -> PhpType {
+    if !ty.contains_conditional() {
+        return ty.clone();
+    }
+    ty.map_children(&|child| decide(child).unwrap_or_else(|| child.conditionals_as_branch_unions()))
+        .simplified()
+}
+
 /// Union two optional branch types produced by an undecidable conditional,
 /// dropping duplicates and any branch that could not be resolved.
 fn union_branch_types(a: Option<PhpType>, b: Option<PhpType>) -> Option<PhpType> {

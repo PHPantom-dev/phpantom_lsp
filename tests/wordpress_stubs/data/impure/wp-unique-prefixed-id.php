@@ -8,5 +8,5 @@ use function wp_unique_prefixed_id;
 use function PHPStan\Testing\assertType;
 
 if (wp_unique_prefixed_id() === 'prefix1') {
-    assertType('lowercase-string&non-falsy-string&numeric-string', wp_unique_prefixed_id()); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+    assertType('lowercase-string&non-falsy-string&numeric-string', wp_unique_prefixed_id()); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
 }

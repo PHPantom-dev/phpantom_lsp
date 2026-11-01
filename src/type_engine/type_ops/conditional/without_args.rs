@@ -11,7 +11,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::ParameterInfo;
 
 use super::arg_form::condition_result_from_text;
-use super::{this_condition_holds, type_condition_result, union_branch_types};
+use super::{decide_nested, this_condition_holds, type_condition_result, union_branch_types};
 
 /// Resolve a conditional return type **without** call-site arguments
 /// (text-based path).  Walks the tree taking the "no argument / null
@@ -157,7 +157,7 @@ pub fn resolve_conditional_without_args_and_defaults(
                 recurse(else_type)
             }
         }
-        _ => Some(conditional.clone()),
+        _ => Some(decide_nested(conditional, &recurse)),
     }
 }
 

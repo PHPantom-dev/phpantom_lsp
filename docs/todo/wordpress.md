@@ -228,6 +228,9 @@ each gap marked `// SKIP`:
   its default's type or `string`. 23 assertions.
 - **`esc_sql()` keeps the shape** of the array it escapes, each scalar
   value a `string` and anything else `''`. 11 assertions.
+- **`wp_slash()` keeps the shape** of the array it slashes, each string
+  value slashed. The stubs' conditional gives `array<key-of<T>, …>`, which
+  loses the keys each value belongs to. 6 assertions.
 - **Calls on literal arguments.** `wp_slash('foo')`,
   `trailingslashit('foo')`, `normalize_whitespace(' 0 ')`,
   `stripslashes_from_strings_only('foo')` and

@@ -35,27 +35,6 @@ gets. The WordPress stubs use them on some 150 functions, and their own
 type tests are ported in `tests/wordpress_stubs/`: each entry below names how many of
 those assertions it accounts for.
 
-### B707. A conditional type inside a union, an intersection or a generic argument is not evaluated
-
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-/** @phpstan-return ($display is true ? void : string)|null */
-function edit_term_link($link = '', $before = '', $after = '', $term = null, $display = true) { … }
-
-/** @phpstan-return ($prefix is '' ? numeric-string : string)&non-falsy-string */
-function wp_unique_id($prefix = '') { … }
-```
-
-A conditional is evaluated only when it is the whole return type. Inside
-a union (`false|(…)`, `(…)|\WP_Error`), an intersection, or a generic
-argument (`array<key-of<T>, (value-of<T> is string ? string : …)>`), it
-stays in the type unevaluated, and hover shows its source text. This is
-`get_term_by()`, `get_bookmark()`, `get_category()`, `get_tags()`,
-`get_terms()`, `wp_get_post_terms()` and every other function that adds
-`|\WP_Error` or `|false` to an argument-dependent result. 144
-assertions.
-
 ### B708. A condition over a refined type is misjudged
 
 **Impact: Medium · Complexity: Medium**
@@ -91,9 +70,10 @@ gets these wrong:
 - `resource` and `object`, which are not ruled out of `string`;
 - the key type of `array<K, V>`, which is ignored.
 
-94 assertions, from `absint()`, `has_shortcode()`, `size_format()`,
+126 assertions, from `absint()`, `has_shortcode()`, `size_format()`,
 `validate_file()`, `WP_Dependencies::query()`, `paginate_links()`,
-`trailingslashit()` and others.
+`trailingslashit()`, `wp_unique_id()`, `wp_get_object_terms()` and
+others.
 
 ### B710. A conditional over a method template ignores its bound and does not narrow it
 
@@ -122,6 +102,46 @@ an argument wider than its `of` bound (`mixed` passed for `T of
 bool|string|int`) is not clamped to the bound; and the branch a condition
 picks does not narrow the template it tested (`T` is
 `non-falsy-string` inside the true branch above). 23 assertions.
+
+### B718. An intersection of unions is not reduced to the members they share
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @phpstan-return ($category is object ? array<array-key, mixed>|\WP_Term : array<array-key, mixed>|\WP_Term|\WP_Error|null) & ($output is 'ARRAY_A' ? array<string, mixed>|\WP_Error|null : ($output is 'ARRAY_N' ? array<int, mixed>|\WP_Error|null : \WP_Term|\WP_Error|null)) */
+function get_category($category, $output = OBJECT, $filter = 'raw') { … }
+
+get_category($object);   // want WP_Term, get (array<array-key, mixed>|WP_Term|WP_Error|null)&(WP_Term|WP_Error|null)
+```
+
+Both conditionals are decided, but the intersection of the two unions they
+leave stays as written. It has to be distributed over its members and each
+pair met: `WP_Term&WP_Term` is `WP_Term`, `array<array-key, mixed>&array<string,
+mixed>` is `array<string, mixed>`, and a pair no value can satisfy
+(`WP_Term&null`, two unrelated classes) drops out. 8 assertions, from
+`get_category()`.
+
+### B719. A condition on `value-of<T>` or `key-of<T>` is judged against the argument itself
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+/**
+ * @template T
+ * @param T $value
+ * @return (value-of<T> is string ? 'strings' : 'other')
+ */
+function f($value) { … }
+
+f(['a' => 'x']);   // want 'strings', get 'other'
+f('x');            // want 'other' (a string has no values), get 'strings'
+```
+
+A condition whose subject is a type operator over a template does not look
+through the operator: the argument bound to `T` is judged as a whole. The
+WordPress stubs' `wp_slash()` declares `array<key-of<T>, (value-of<T> is
+string ? string : value-of<T>)>`, so slashing an array of strings is typed as
+keeping each literal value rather than becoming `string`.
 
 ## Standard-library return types
 

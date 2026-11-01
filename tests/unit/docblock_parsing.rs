@@ -1200,6 +1200,20 @@ fn conditional_no_return_tag() {
     assert_eq!(extract_conditional_return_type(doc), None);
 }
 
+#[test]
+fn conditional_inside_union_is_extracted_whole() {
+    let doc = "/** @phpstan-return false|($output is 'ARRAY_A' ? array : \\WP_Term) */";
+    let result = extract_conditional_return_type(doc).unwrap();
+    assert!(matches!(result.kind(), TypeKind::Union(_)));
+    assert!(result.contains_conditional());
+}
+
+#[test]
+fn parenthesized_group_without_conditional_is_not_one() {
+    let doc = "/** @return (A&B)|null */";
+    assert_eq!(extract_conditional_return_type(doc), None);
+}
+
 // ─── @mixin tag extraction ──────────────────────────────────────────────
 
 #[test]

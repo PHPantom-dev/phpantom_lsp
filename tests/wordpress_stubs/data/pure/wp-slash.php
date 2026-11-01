@@ -14,5 +14,5 @@ if (wp_slash($value) === 'foo') {
 
 $value = Faker::array();
 if (wp_slash($value) === ['foo' => 'bar']) {
-    assertType("array{foo: 'bar'}", wp_slash($value)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+    assertType("array{foo: 'bar'}", wp_slash($value));
 }
