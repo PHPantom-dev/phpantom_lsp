@@ -920,17 +920,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b714-an-phpstan-impure-call-is-narrowed-by-an-earlier-check-of-the-same-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B714. An <code>@phpstan-impure</code> call is narrowed by an earlier check of the same call
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1627,17 +1616,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b714-an-phpstan-impure-call-is-narrowed-by-an-earlier-check-of-the-same-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B714. An <code>@phpstan-impure</code> call is narrowed by an earlier check of the same call
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1866,33 +1844,18 @@ seconds a rate-limit message names.</p>
 <code>'foo'</code> is both; and a template in the asserted type (<code>TUuid</code> above) is
 left in the narrowed type instead of being replaced by what it was bound
 to. 6 assertions.</p>
-<h3 id="b714-an-phpstan-impure-call-is-narrowed-by-an-earlier-check-of-the-same-call">B714. An <code>@phpstan-impure</code> call is narrowed by an earlier check of the same call<a class="headerlink" href="#b714-an-phpstan-impure-call-is-narrowed-by-an-earlier-check-of-the-same-call" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/**</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x"> * @return string|WP_Error</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x"> * @phpstan-impure</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x"> */</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">function get_password_reset_key($user) { … }</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">if (is_wp_error(get_password_reset_key($user))) {</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    get_password_reset_key($user);   // want string|WP_Error, get WP_Error</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">}</span>
-</code></pre></div>
-<p>A call to a function marked <code>@phpstan-impure</code> returns something new each
-time, so a check on one call says nothing about the next. We narrow the
-second call as if it were the first. 4 assertions.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <h3 id="b695-a-primitive-cast-on-a-nullable-column-drops-the-null">B695. A primitive cast on a nullable column drops the <code>null</code><a class="headerlink" href="#b695-a-primitive-cast-on-a-nullable-column-drops-the-null" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// schema: `is_franchise` tinyint(1) DEFAULT NULL</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">class AdminUser extends Model</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">{</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    protected $casts = ['is_franchise' =&gt; 'boolean'];</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">$user-&gt;is_franchise;   // want bool|null, get bool</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// schema: `is_franchise` tinyint(1) DEFAULT NULL</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">class AdminUser extends Model</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">{</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    protected $casts = ['is_franchise' =&gt; 'boolean'];</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">}</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">$user-&gt;is_franchise;   // want bool|null, get bool</span>
 </code></pre></div>
 <p><code>Model::castAttribute()</code> returns a <code>null</code> value untouched for every
 primitive cast type (<code>bool</code>, <code>int</code>, <code>float</code>, <code>string</code>, <code>array</code>, dates, …),
@@ -1904,13 +1867,13 @@ this right from the same schema.</p>
 the column nullable.</p>
 <h3 id="b696-a-relation-whose-related-class-comes-from-config-is-typed-model">B696. A relation whose related class comes from <code>config()</code> is typed <code>Model</code><a class="headerlink" href="#b696-a-relation-whose-related-class-comes-from-config-is-typed-model" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// spatie/laravel-permission's HasRoles</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">public function roles(): BelongsToMany</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">{</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    return $this-&gt;morphToMany(config('permission.models.role'), 'model', …);</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">$user-&gt;roles;   // want Collection&lt;int, Role&gt;, get Collection&lt;int, Model&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// spatie/laravel-permission's HasRoles</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">public function roles(): BelongsToMany</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">{</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    return $this-&gt;morphToMany(config('permission.models.role'), 'model', …);</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">$user-&gt;roles;   // want Collection&lt;int, Role&gt;, get Collection&lt;int, Model&gt;</span>
 </code></pre></div>
 <p>The related class is a <code>config()</code> value, and <code>config/permission.php</code> holds
 a literal <code>Role::class</code> under that key. We already type config values, but
@@ -1936,13 +1899,13 @@ both ways.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first">B704. A function declared in two files resolves to whichever is found first<a class="headerlink" href="#b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">function __() {}</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function __() {}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
 </code></pre></div>
 <p>WordPress core declares nineteen of its functions a second time as
 no-ops for its script loader. Calls across the project resolve to the
