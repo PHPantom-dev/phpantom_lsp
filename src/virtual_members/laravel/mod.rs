@@ -184,6 +184,7 @@ pub(crate) use env_vars::{enumerate_env_keys, env_declaration, env_name_is_sensi
 pub(crate) use gates::{
     LaravelGateIndex, enumerate_gate_abilities, model_policy_abilities, scan_gate_registrations,
 };
+pub(crate) use inflector::singularize_english_word;
 pub(crate) use macros::{
     LaravelMacroIndex, MacroRegistration, extract_date_factory_class, extract_macro_registrations,
     extract_mixin_registrations, inject_macros, macro_closure_this_target,

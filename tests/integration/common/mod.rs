@@ -1038,7 +1038,14 @@ pub fn lsp_pos_to_offset(content: &str, pos: Position) -> usize {
     let mut offset = 0;
     for (i, line) in content.split_inclusive('\n').enumerate() {
         if i == pos.line as usize {
-            return offset + pos.character as usize;
+            let mut utf16_offset = 0;
+            for (byte_offset, character) in line.char_indices() {
+                if utf16_offset >= pos.character {
+                    return offset + byte_offset;
+                }
+                utf16_offset += character.len_utf16() as u32;
+            }
+            return offset + line.len();
         }
         offset += line.len();
     }

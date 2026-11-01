@@ -677,23 +677,6 @@ path, so build them together.
 existing `$fillable`/`$guarded` reads; `diagnostics/` for the
 call-site diagnostic pattern used by similarly-shaped checks.
 
-#### L50. "Create route" quick-fix for an unresolved route name
-
-**Impact: Low-Medium · Complexity: Medium**
-
-The unknown-route-name diagnostic (fed by `route_names/`) has no
-accompanying fix today. Once the diagnostic fires, generate a
-`Route::get('{path}', [{Controller}::class, '{method}'])
-->name('{name}');` stub appended to `routes/web.php` (or `api.php` if
-the call site is `Route::apiResource`-shaped context), inferring path
-and controller from the route name's own conventional dashes/dots
-where possible and otherwise leaving placeholders.
-
-**Where to look:** `code_actions/` for the code-action registration
-pattern used by other "declare the missing thing" fixes;
-`virtual_members/laravel/route_names/` for the existing scanner
-this reuses for the diagnostic and the insertion point.
-
 #### L61. Resolve aliased facade imports during route discovery
 
 **Impact: Low-Medium · Complexity: Medium**

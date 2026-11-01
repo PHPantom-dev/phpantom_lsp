@@ -32,6 +32,7 @@ mod code_action_change_visibility;
 mod code_action_convert_switch_to_match;
 mod code_action_convert_to_instance_variable;
 mod code_action_convert_to_interpolation;
+mod code_action_create_missing_route;
 mod code_action_create_missing_view;
 mod code_action_extract_function;
 mod code_action_extract_interface;
