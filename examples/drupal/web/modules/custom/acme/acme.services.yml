@@ -1,0 +1,6 @@
+services:
+  acme.greeter:
+    class: Drupal\acme\Greeter
+    arguments: ['@config.factory']
+  # Lets controllers and hook classes autowire the greeter by its class.
+  Drupal\acme\Greeter: '@acme.greeter'

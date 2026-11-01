@@ -1,0 +1,7 @@
+acme.greeting:
+  path: '/acme/greeting/{name}'
+  defaults:
+    _controller: '\Drupal\acme\Controller\GreetingController::greet'
+    _title: 'Greeting'
+  requirements:
+    _permission: 'access content'
