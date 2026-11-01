@@ -50,9 +50,10 @@ fn route_skeletons_infer_conventional_names_and_leave_ambiguous_parts_editable()
 
 fn inserted(content: &str) -> String {
     let (edit, position) = route_insertion(content, "registration();").unwrap();
-    let offset = crate::text_position::position_to_byte_offset(content, edit.range.start);
+    let start = crate::text_position::position_to_byte_offset(content, edit.range.start);
+    let end = crate::text_position::position_to_byte_offset(content, edit.range.end);
     let mut result = content.to_string();
-    result.insert_str(offset, &edit.new_text);
+    result.replace_range(start..end, &edit.new_text);
     let route = crate::text_position::position_to_byte_offset(&result, position);
     assert_eq!(
         &result[route..route + "registration();".len()],
@@ -67,6 +68,7 @@ fn inserted(content: &str) -> String {
 #[test]
 fn insertion_keeps_php_open_and_preserves_target_text() {
     assert_eq!(inserted(""), "<?php\n\nregistration();\n");
+    assert_eq!(inserted("\n \n"), "<?php\n\nregistration();\n");
     assert_eq!(inserted("<?php\n\n"), "<?php\n\nregistration();\n");
     assert_eq!(inserted("<?php\n"), "<?php\n\nregistration();\n");
     assert_eq!(

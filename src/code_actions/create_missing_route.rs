@@ -276,13 +276,16 @@ fn insertion_site(statements: &[Statement<'_>], end: usize) -> Option<(usize, bo
 
 fn route_insertion(content: &str, stub: &str) -> Option<(TextEdit, Position)> {
     if content.trim().is_empty() {
-        let position = offset_to_position(content, content.len());
+        // Replace any whitespace: outside the opening tag it is output.
         return Some((
             TextEdit {
-                range: Range::new(position, position),
+                range: Range::new(
+                    Position::new(0, 0),
+                    offset_to_position(content, content.len()),
+                ),
                 new_text: format!("<?php\n\n{stub}\n"),
             },
-            Position::new(position.line + 2, 0),
+            Position::new(2, 0),
         ));
     }
     crate::parser::with_parsed_program(content, "create_missing_route_target", |program, _| {
