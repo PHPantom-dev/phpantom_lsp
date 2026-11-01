@@ -18,6 +18,8 @@ use parking_lot::RwLock;
 pub(crate) mod types;
 
 use crate::Backend;
+use crate::atom::Atom;
+use crate::symbol_map::StringKeyKind;
 
 /// The web roots of the workspace's Drupal projects, and the declaration
 /// files found under them.
@@ -153,6 +155,47 @@ impl Backend {
                 .iter()
                 .any(|dir| path.starts_with(root.join(dir)))
         })
+    }
+
+    /// The entity class and storage handler of each declaration of the
+    /// entity type `id`; a storage of `None` for a declaration that names
+    /// none and has no default.
+    pub(crate) fn drupal_entity_types(&self, id: &str) -> Vec<(Atom, Option<Atom>)> {
+        let mut found = Vec::new();
+        self.visit_symfony_declarations(
+            StringKeyKind::DrupalEntityType,
+            |_, map, start, _, key| {
+                if key != id {
+                    return;
+                }
+                let at = map.entity_types.partition_point(|site| site.start < start);
+                if let Some(site) = map.entity_types.get(at).filter(|site| site.start == start)
+                    && !found.iter().any(|(class, storage): &(Atom, Option<Atom>)| {
+                        *class == site.class && *storage == site.storage
+                    })
+                {
+                    found.push((site.class, site.storage));
+                }
+            },
+        );
+        found
+    }
+
+    /// Whether `uri` belongs to a test module of a Drupal project and is not
+    /// open: what it declares is left out, since no real site enables it.
+    pub(crate) fn is_closed_drupal_test_fixture(&self, uri: &str) -> bool {
+        if !self.is_drupal_project() {
+            return false;
+        }
+        let Some(path) = crate::util::uri_to_path(uri) else {
+            return false;
+        };
+        self.drupal
+            .web_roots
+            .read()
+            .iter()
+            .any(|root| path.starts_with(root) && is_test_fixture(&path, root))
+            && !self.open_files.read().contains_key(uri)
     }
 
     /// Whether `uri` is a file a Drupal project loads services from: a

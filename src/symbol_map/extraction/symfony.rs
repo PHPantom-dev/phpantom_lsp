@@ -86,9 +86,12 @@ pub(crate) fn symfony_receiver_method(
             Some((ReceiverClass::ContainerBuilder, true))
         }
         1 if is("setAlias") => Some((ReceiverClass::ContainerBuilder, false)),
-        0 if is("getDefinition")
-            || is("findDefinition")
-            || is("hasDefinition")
+        // Symfony's container builder and Drupal's entity type manager both
+        // have these two, each for its own kind of name.
+        0 if is("getDefinition") || is("hasDefinition") => {
+            Some((ReceiverClass::DefinitionLookup, false))
+        }
+        0 if is("findDefinition")
             || is("removeDefinition")
             || is("getAlias")
             || is("hasAlias")
@@ -128,6 +131,17 @@ pub(crate) fn symfony_receiver_method(
             Some((ReceiverClass::TemplatedEmail, false))
         }
         1 if is("dispatch") => Some((ReceiverClass::EventDispatcher, false)),
+        0 if is("getStorage")
+            || is("getAccessControlHandler")
+            || is("getViewBuilder")
+            || is("getListBuilder")
+            || is("getFormObject")
+            || is("getRouteProviders")
+            || is("hasHandler")
+            || is("getHandler") =>
+        {
+            Some((ReceiverClass::EntityTypeManager, false))
+        }
         0 if is("addListener") => Some((ReceiverClass::EventListeners, true)),
         0 if is("removeListener")
             || is("hasListeners")
@@ -197,6 +211,7 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             KeyFramework::Symfony => ctx.symfony,
             KeyFramework::Twig => ctx.twig,
             KeyFramework::Yii => ctx.yii,
+            KeyFramework::Drupal => ctx.drupal,
             KeyFramework::Laravel | KeyFramework::WordPress => false,
         };
         if !receiver.names_any(records) {
@@ -2317,7 +2332,7 @@ pub(in crate::symbol_map::extraction) fn emit_messenger_handler_sites(
 
 /// The message class a `handles:` names: `Foo::class`, or a class name
 /// written out as a string.
-fn message_class(handles: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<String> {
+pub(super) fn message_class(handles: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<String> {
     if let Some(identifier) = crate::parser::class_fetch_identifier(handles) {
         let written = bytes_to_str(identifier.value());
         let resolved = ctx
@@ -2566,6 +2581,37 @@ mod tests {
                 ("app.mailer", ReceiverClass::ConfiguratorAlias, false),
             ]
         );
+    }
+
+    #[test]
+    fn a_container_builders_definition_lookups_name_a_service() {
+        let php = "<?php\nfunction f($container) {\n    $container->getDefinition('app.a');\n    $container->hasDefinition('app.b');\n}\n";
+        let map = map_of(php);
+        assert_eq!(
+            receivers(&map),
+            vec![
+                ("app.a", ReceiverClass::DefinitionLookup, false),
+                ("app.b", ReceiverClass::DefinitionLookup, false),
+            ]
+        );
+        // A receiver confirmed as a container builder names a service ID.
+        let (_, kind) = ReceiverClass::DefinitionLookup
+            .targets()
+            .iter()
+            .find(|(class, _)| {
+                *class == "Symfony\\Component\\DependencyInjection\\ContainerBuilder"
+            })
+            .expect("the container builder is a target");
+        let span = map.typed_receiver_sites[0].to_span(*kind);
+        assert!(matches!(
+            &span.kind,
+            crate::symbol_map::SymbolKind::StringKey {
+                kind: crate::symbol_map::StringKeyKind::ServiceId,
+                key,
+                is_write: false,
+                ..
+            } if key == "app.a"
+        ));
     }
 
     #[test]

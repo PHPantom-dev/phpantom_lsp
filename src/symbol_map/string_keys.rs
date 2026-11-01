@@ -155,6 +155,11 @@ pub(crate) enum StringKeyKind {
     /// `wordpress::hooks`), which a literal name matches by its literal
     /// parts.
     WordPressHook,
+    /// A Drupal entity type ID: declared by the `id` of an entity class's
+    /// `#[ContentEntityType]`-family attribute or annotation, and read by
+    /// the entity type manager's `getStorage()` and the other methods that
+    /// take one.
+    DrupalEntityType,
 }
 
 impl StringKeyKind {
@@ -201,6 +206,7 @@ impl StringKeyKind {
             | Self::TwigVariable => KeyFramework::Twig,
             Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
+            Self::DrupalEntityType => KeyFramework::Drupal,
         }
     }
 
@@ -311,6 +317,8 @@ pub(crate) enum KeyFramework {
     Yii,
     /// WordPress's hook names, read wherever the hook functions are called.
     WordPress,
+    /// Drupal's own declarations, read in a Drupal project.
+    Drupal,
 }
 
 /// A workspace symbol whose presence suppresses an otherwise-valid framework
@@ -591,6 +599,21 @@ pub(crate) struct ContainerValueSite {
     pub value: ContainerValue,
 }
 
+/// What a Drupal entity type declaration gives its ID: the entity class,
+/// and the storage handler that loads it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct EntityTypeSite {
+    /// Byte offset of the ID's first character, matching the declaration's
+    /// [`SymbolKind::StringKey`] span.
+    pub start: u32,
+    /// The class the attribute or annotation is written on.
+    pub class: crate::atom::Atom,
+    /// The `storage` handler the declaration names, or the default storage
+    /// of its kind of entity type; `None` when it names none and has no
+    /// default.
+    pub storage: Option<crate::atom::Atom>,
+}
+
 /// The value a container declaration gives, read by the kind of name it
 /// turns out to declare.
 #[derive(Debug, Clone, PartialEq)]
@@ -703,6 +726,7 @@ const YII_WEB_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\Renderer\\WebViewRender
 /// The renderer before `yiisoft/yii-view-renderer` 7 moved it.
 const YII_LEGACY_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\ViewRenderer";
 const YII_VIEW: &str = "Yiisoft\\View\\ViewInterface";
+const DRUPAL_ENTITY_TYPE_MANAGER: &str = "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -752,7 +776,8 @@ pub(crate) enum ReceiverClass {
     /// The container builder a kernel, a bundle, an extension, or a
     /// compiler pass defines services on: `register()`, `autowire()`,
     /// `setDefinition()`, and `setAlias()` declare a service ID, and the
-    /// rest of its definition API looks one up.
+    /// rest of its definition API looks one up, `getDefinition()` and
+    /// `hasDefinition()` through [`Self::DefinitionLookup`].
     ContainerBuilder,
     /// What `generateUrl()` and `redirectToRoute()` take a route name in:
     /// the shortcuts a Symfony controller inherits.
@@ -788,6 +813,14 @@ pub(crate) enum ReceiverClass {
     /// What renders a Yii view by its first argument: a view renderer's
     /// `render()` family, and a view's own `render()` inside a template.
     YiiViewRenderer,
+    /// Drupal's entity type manager, whose `getStorage()` and the other
+    /// handler getters take an entity type ID first, `getDefinition()` and
+    /// `hasDefinition()` through [`Self::DefinitionLookup`].
+    EntityTypeManager,
+    /// The definition lookups, `getDefinition()` and `hasDefinition()`, that
+    /// both Symfony's container builder and Drupal's entity type manager
+    /// have: the one takes a service ID, the other an entity type ID.
+    DefinitionLookup,
 }
 
 impl ReceiverClass {
@@ -865,6 +898,13 @@ impl ReceiverClass {
                 (YII_VIEW_RENDERER, YiiView),
                 (YII_LEGACY_VIEW_RENDERER, YiiView),
                 (YII_VIEW, YiiView),
+            ],
+            Self::EntityTypeManager => {
+                &[(DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType)]
+            }
+            Self::DefinitionLookup => &[
+                (SYMFONY_CONTAINER_BUILDER, ServiceId),
+                (DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType),
             ],
         }
     }

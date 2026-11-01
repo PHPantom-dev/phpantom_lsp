@@ -16,7 +16,7 @@ const COMPOSER: &str = r#"{
 }"#;
 
 /// Just enough of the container interfaces, where Composer would put core.
-const STUBS: &[(&str, &str)] = &[
+pub(crate) const STUBS: &[(&str, &str)] = &[
     (
         "web/core/lib/Psr/Container/ContainerInterface.php",
         "<?php\nnamespace Psr\\Container;\ninterface ContainerInterface {\n    public function get(string $id): mixed;\n    public function has(string $id): bool;\n}\n",
@@ -55,12 +55,12 @@ const CONSUMER_PATH: &str = "web/modules/custom/acme/src/Consumer.php";
 
 /// An initialized Drupal project holding the stubs and `files`, every one
 /// of `files` open.
-async fn workspace(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+pub(crate) async fn workspace(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
     workspace_in(tempfile::tempdir().unwrap(), files).await
 }
 
 /// [`workspace`] in `dir`, which may hold files already.
-async fn workspace_in(
+pub(crate) async fn workspace_in(
     dir: tempfile::TempDir,
     files: &[(&str, &str)],
 ) -> (Backend, tempfile::TempDir) {
@@ -83,12 +83,12 @@ async fn workspace_in(
     (backend, dir)
 }
 
-fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
+pub(crate) fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Uri {
     Uri::from_file_path(dir.path().join(rel)).unwrap()
 }
 
 /// The position `inside` bytes into the first occurrence of `needle`.
-fn position_in(content: &str, needle: &str, inside: usize) -> Position {
+pub(crate) fn position_in(content: &str, needle: &str, inside: usize) -> Position {
     offset_position(
         content,
         content.find(needle).expect("needle should exist") + inside,
@@ -175,7 +175,11 @@ async fn service_ids_complete_in_php_and_in_the_services_file() {
 
 /// Every reference to the name at `position`, declarations included, as
 /// files and lines.
-async fn references_at(backend: &Backend, uri: &Uri, position: Position) -> Vec<(Uri, u32)> {
+pub(crate) async fn references_at(
+    backend: &Backend,
+    uri: &Uri,
+    position: Position,
+) -> Vec<(Uri, u32)> {
     let mut found: Vec<(Uri, u32)> = backend
         .references(ReferenceParams {
             text_document_position_params: TextDocumentPositionParams {
@@ -294,7 +298,11 @@ final class StaticConsumer {
 const STATIC_CONSUMER_PATH: &str = "web/modules/custom/acme/src/StaticConsumer.php";
 
 /// The definitions of the name at `position`.
-async fn definitions_at(backend: &Backend, uri: &Uri, position: Position) -> Vec<Location> {
+pub(crate) async fn definitions_at(
+    backend: &Backend,
+    uri: &Uri,
+    position: Position,
+) -> Vec<Location> {
     let response = backend
         .goto_definition(DefinitionParams {
             text_document_position_params: TextDocumentPositionParams {

@@ -102,6 +102,8 @@ struct ExtractionCtx<'a> {
     /// What the file's PHP configurator calls declare a service or a
     /// parameter as.
     container_values: Vec<crate::symbol_map::ContainerValueSite>,
+    /// The entity types the file's entity classes declare.
+    entity_types: Vec<crate::symbol_map::EntityTypeSite>,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -146,7 +148,8 @@ struct ExtractionCtx<'a> {
     /// type engine to confirm as naming a service or a parameter.
     service_container: bool,
     /// Whether the project is a Drupal site.  Gates the lookups only
-    /// Drupal makes, such as `\Drupal::service()`.
+    /// Drupal makes, such as `\Drupal::service()`, the entity types an
+    /// entity class declares, and the entity type IDs its manager reads.
     drupal: bool,
     /// Whether the project uses Twig, outside Symfony too.  Gates the
     /// `render()` calls recorded for the type engine to confirm as naming
@@ -307,6 +310,7 @@ impl<'a> ExtractionCtx<'a> {
 }
 
 mod class_like;
+mod drupal;
 mod expressions;
 mod keywords;
 pub(crate) mod laravel;
@@ -322,6 +326,7 @@ mod yii;
 mod yii_routes;
 
 use class_like::*;
+use drupal::*;
 use expressions::*;
 use keywords::*;
 use laravel::*;
@@ -471,6 +476,7 @@ fn extract_symbol_map_inner(
         twig_callables: Vec::new(),
         twig_contexts: Vec::new(),
         container_values: Vec::new(),
+        entity_types: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
@@ -622,6 +628,7 @@ fn extract_symbol_map_inner(
     ctx.typed_receiver_sites.sort_by_key(|s| s.start);
     ctx.morph_column_sites.sort_by_key(|s| s.start);
     ctx.container_values.sort_by_key(|s| s.start);
+    ctx.entity_types.sort_by_key(|s| s.start);
     ctx.routes.shrink_to_fit();
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
@@ -662,6 +669,7 @@ fn extract_symbol_map_inner(
         twig_callables: ctx.twig_callables,
         twig_contexts: ctx.twig_contexts,
         container_values: ctx.container_values,
+        entity_types: ctx.entity_types,
         routes: ctx.routes,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx
