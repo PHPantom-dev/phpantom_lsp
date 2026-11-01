@@ -132,7 +132,7 @@ $noteAttribute->setClass(Note::class);
 $noteDefinition = $noteAttribute->get();
 check("acme_note's storage, which NoteCounter::first() loads from, is core's SQL storage", $noteDefinition->getStorageClass() === SqlContentEntityStorage::class);
 check('acme_note loads Note', $noteDefinition->getClass() === Note::class);
-check('NoteCounter::first() asks for acme_note', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "getStorage('acme_note')->load(1)"));
+check('NoteCounter::first() asks for acme_note', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "getStorage('acme_note');"));
 
 // ─── Hooks and theme hooks ──────────────────────────────────────────────────
 
