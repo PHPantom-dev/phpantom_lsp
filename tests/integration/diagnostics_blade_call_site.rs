@@ -1206,6 +1206,55 @@ class ViewServiceProvider
         assert!(diags.is_empty(), "expected no report, got {diags:?}");
     }
 
+    /// Templates that include each other never settle what reaches either,
+    /// so the check stands down instead of looping.
+    #[tokio::test]
+    async fn templates_that_include_each_other_stand_the_missing_check_down() {
+        let diags = middle_of_chain_diagnostics((
+            "resources/views/servers/show.blade.php",
+            "@php\n/**\n * @bladestan-signature\n * @var string $VERSION\n */\n@endphp\n@if(false)\n@include('scripts.apps')\n@endif\n",
+        ))
+        .await;
+        // The outer template alone leaves `$server` and `$data` out.
+        assert_eq!(diags.len(), 2, "got {diags:?}");
+
+        let cyclic_middle = format!("{APP_SCRIPTS}@include('servers.show')\n");
+        let (backend, dir) = workspace(&[
+            ("resources/views/scripts/apps/wp.blade.php", WP_SCRIPT),
+            ("resources/views/scripts/apps.blade.php", &cyclic_middle),
+            (
+                "resources/views/servers/show.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $VERSION\n */\n@endphp\n@include('scripts.apps')\n",
+            ),
+        ]);
+        for (relative, text) in [
+            (
+                "resources/views/scripts/apps.blade.php",
+                cyclic_middle.as_str(),
+            ),
+            (
+                "resources/views/servers/show.blade.php",
+                "@php\n/**\n * @bladestan-signature\n * @var string $VERSION\n */\n@endphp\n@include('scripts.apps')\n",
+            ),
+        ] {
+            let uri = Uri::from_file_path(dir.path().join(relative)).unwrap();
+            open_document(&backend, &uri, "blade", text).await;
+        }
+        let diags = call_site_diagnostics(
+            &backend,
+            &dir,
+            "resources/views/scripts/apps.blade.php",
+            "blade",
+        )
+        .await;
+        assert!(
+            diags
+                .iter()
+                .all(|(code, _)| code != "missing_view_variable"),
+            "a cycle settles nothing, got {diags:?}"
+        );
+    }
+
     /// A template reachable along many include paths is read once per
     /// lookup, not once per path: six levels of six templates, each
     /// including every template one level below, hand the bottom level
