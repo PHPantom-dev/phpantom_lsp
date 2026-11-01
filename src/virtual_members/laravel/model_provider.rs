@@ -20,7 +20,7 @@ use super::accessors::{
     legacy_accessor_property_name, legacy_mutator_property_name,
 };
 use super::builder::build_builder_forwarded_methods;
-use super::casts::cast_type_to_php_type;
+use super::casts::column_cast_type;
 use super::collections::custom_collection_for_model;
 use super::database_schema::SchemaTable;
 use super::relationships::{
@@ -52,6 +52,16 @@ pub struct LaravelModelProvider;
 /// Laravel date type used for date-related virtual properties.
 fn carbon_type() -> PhpType {
     PhpType::named(atom(CONFIGURED_DATE_CLASS_FQN))
+}
+
+/// The configured date class, nullable for a nullable column: Eloquent
+/// converts a date column's value only when it is not `null`.
+fn date_column_type(nullable: bool) -> PhpType {
+    if nullable {
+        PhpType::nullable(carbon_type())
+    } else {
+        carbon_type()
+    }
 }
 
 /// The column `SoftDeletes` casts to a date, when the model uses the trait:
@@ -267,12 +277,14 @@ impl<'a> ModelMembers<'a> {
 
         // ── Cast properties ─────────────────────────────────────────
         for (column, cast_type) in &laravel.casts_definitions {
-            let php_type = cast_type_to_php_type(cast_type, self.class_loader);
+            let column_source = schema_column_source(schema_table, column);
+            let nullable = column_source.as_ref().is_some_and(|c| c.nullable);
+            let php_type = column_cast_type(cast_type, self.class_loader, nullable);
             self.seen_props.insert(column.clone());
             self.properties.push(PropertyInfo {
                 source: Some(PropertySource::Cast {
                     cast: cast_type.clone(),
-                    column: schema_column_source(schema_table, column),
+                    column: column_source,
                     attribute_default: attribute_default_source(class, column),
                     mutator: self.mutator_methods.get(column).cloned(),
                 }),
@@ -282,19 +294,22 @@ impl<'a> ModelMembers<'a> {
 
         // ── $dates properties (deprecated, lower priority than $casts) ──
         // Columns in `$dates` are typed as Carbon\Carbon unless already
-        // covered by an explicit `$casts` entry.
+        // covered by an explicit `$casts` entry.  A `null` is not converted,
+        // so a nullable column stays nullable.
         for column in &laravel.dates_definitions {
             if !self.seen_props.insert(column.clone()) {
                 continue;
             }
+            let column_source = schema_column_source(schema_table, column);
+            let php_type = date_column_type(column_source.as_ref().is_some_and(|c| c.nullable));
             self.properties.push(PropertyInfo {
                 source: Some(PropertySource::Cast {
                     cast: "date".to_string(),
-                    column: schema_column_source(schema_table, column),
+                    column: column_source,
                     attribute_default: attribute_default_source(class, column),
                     mutator: self.mutator_methods.get(column).cloned(),
                 }),
-                ..PropertyInfo::virtual_property_typed(column, Some(&carbon_type()))
+                ..PropertyInfo::virtual_property_typed(column, Some(&php_type))
             });
         }
 
@@ -329,7 +344,7 @@ impl<'a> ModelMembers<'a> {
                 continue;
             }
             let php_type = if timestamps.contains(&column.name) {
-                carbon_type()
+                date_column_type(column.nullable)
             } else if soft_delete == Some(column.name.as_str()) {
                 PhpType::nullable(carbon_type())
             } else {

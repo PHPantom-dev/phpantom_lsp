@@ -87,6 +87,35 @@ fn carbon_immutable_type() -> PhpType {
 /// The fully-qualified name of the `Castable` contract.
 const CASTABLE_FQN: &str = "Illuminate\\Contracts\\Database\\Eloquent\\Castable";
 
+/// The type of a column cast to `cast_type`, as [`resolve_cast_type`] maps it.
+#[cfg(test)]
+pub(super) fn cast_type_to_php_type(
+    cast_type: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> PhpType {
+    resolve_cast_type(cast_type, class_loader).0
+}
+
+/// The type a column cast to `cast_type` reads as, `null` included when
+/// the column is nullable and the cast hands a `null` back untouched.
+///
+/// `Model::castAttribute()` returns `null` as is for every primitive cast
+/// (`boolean`, `integer`, `array`, the date casts, …) and for an enum, and
+/// Laravel's own `As*` casts return `null` for a `null` attribute.  A
+/// custom cast decides for itself, so its declared type stands.
+pub(super) fn column_cast_type(
+    cast_type: &str,
+    class_loader: &ResolvedClassLoader<'_>,
+    column_nullable: bool,
+) -> PhpType {
+    let (php_type, keeps_null) = resolve_cast_type(cast_type, class_loader);
+    if column_nullable && keeps_null && !php_type.is_mixed() {
+        PhpType::nullable(php_type)
+    } else {
+        php_type
+    }
+}
+
 /// Map an Eloquent cast type string to a PHP type.
 ///
 /// Handles built-in cast strings (`datetime`, `boolean`, `array`, etc.),
@@ -105,39 +134,38 @@ const CASTABLE_FQN: &str = "Illuminate\\Contracts\\Database\\Eloquent\\Castable"
 /// Class-based cast types may carry a `:argument` suffix (e.g.
 /// `Address::class.':nullable'`).  The suffix is stripped before
 /// resolving the class.
-pub(super) fn cast_type_to_php_type(
-    cast_type: &str,
-    class_loader: &ResolvedClassLoader<'_>,
-) -> PhpType {
+///
+/// Also returns whether the cast passes a `null` value through.
+fn resolve_cast_type(cast_type: &str, class_loader: &ResolvedClassLoader<'_>) -> (PhpType, bool) {
     // 1. Check the built-in mapping table.
     let lower = cast_type.to_lowercase();
     if let Some(php_type) = CAST_TYPE_MAP.get(lower.as_str()) {
-        return php_type.clone();
+        return (php_type.clone(), true);
     }
 
     // 2. Handle `decimal:N` variants (e.g. `decimal:2`, `decimal:8`).
     if lower.starts_with("decimal:") || lower == "decimal" {
-        return PhpType::float();
+        return (PhpType::float(), true);
     }
 
     // 3. Handle `datetime:format` variants (e.g. `datetime:Y-m-d`).
     if lower.starts_with("datetime:") {
-        return carbon_type();
+        return (carbon_type(), true);
     }
 
     // 4. Handle `date:format` variants.
     if lower.starts_with("date:") {
-        return carbon_type();
+        return (carbon_type(), true);
     }
 
     // 5. Handle `immutable_datetime:format` variants.
     if lower.starts_with("immutable_datetime:") {
-        return carbon_immutable_type();
+        return (carbon_immutable_type(), true);
     }
 
     // 6. Handle `immutable_date:format` variants.
     if lower.starts_with("immutable_date:") {
-        return carbon_immutable_type();
+        return (carbon_immutable_type(), true);
     }
 
     // 7. Laravel's own class-based casts (`AsEnumCollection::of(Status::class)`,
@@ -147,7 +175,11 @@ pub(super) fn cast_type_to_php_type(
     //    generic Castable rule below, which would otherwise type the
     //    property as the cast class itself.
     if let Some(php_type) = framework_cast_type(cast_type) {
-        return php_type;
+        let keeps_null = !matches!(
+            framework_cast_short(cast_class_name(cast_type)),
+            Some("AsBinary" | "AsVector")
+        );
+        return (php_type, keeps_null);
     }
 
     // 8. Assume it's a class-based cast.  Strip any `:argument` suffix
@@ -159,7 +191,7 @@ pub(super) fn cast_type_to_php_type(
     if let Some(cast_class) = class_loader(Fqn::new(class_name)) {
         // 8a. Enums — the property type is the enum itself.
         if cast_class.kind == ClassLikeKind::Enum {
-            return PhpType::named(atom(class_name));
+            return (PhpType::named(atom(class_name)), true);
         }
 
         // 8b. Castable implementations — the property type is the
@@ -167,7 +199,7 @@ pub(super) fn cast_type_to_php_type(
         //     which returns a CastsAttributes instance, but the
         //     developer-facing type is the Castable class.
         if is_castable(&cast_class) {
-            return PhpType::named(atom(class_name));
+            return (PhpType::named(atom(class_name)), false);
         }
 
         // 8c. `@implements CastsAttributes<TGet, TSet>` — the canonical
@@ -177,7 +209,7 @@ pub(super) fn cast_type_to_php_type(
         //     an implementation detail that may be `mixed`, less
         //     specific, or missing entirely.
         if let Some(tget) = extract_tget_from_implements_generics(&cast_class) {
-            return tget;
+            return (tget, false);
         }
 
         // 8d. Fallback: inspect the `get()` method's return type.
@@ -189,12 +221,12 @@ pub(super) fn cast_type_to_php_type(
             && let Some(ref rt) = get_method.return_type
             && !rt.is_mixed()
         {
-            return rt.clone();
+            return (rt.clone(), false);
         }
     }
 
     // 9. Fallback: unknown cast type.
-    PhpType::mixed()
+    (PhpType::mixed(), false)
 }
 
 /// The class a cast type string names, without its argument suffix.

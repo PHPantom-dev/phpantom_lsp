@@ -71,65 +71,7 @@ No outstanding items.
 
 ## Laravel
 
-### B695. A primitive cast on a nullable column drops the `null`
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-// schema: `is_franchise` tinyint(1) DEFAULT NULL
-class AdminUser extends Model
-{
-    protected $casts = ['is_franchise' => 'boolean'];
-}
-
-$user->is_franchise;   // want bool|null, get bool
-```
-
-`Model::castAttribute()` returns a `null` value untouched for every
-primitive cast type (`bool`, `int`, `float`, `string`, `array`, dates, …),
-so a nullable column keeps its `null` through the cast. We take the cast's
-type and drop the column's nullability, so a null check on the property
-reads as redundant and the `null` case is never offered. Laravel Idea gets
-this right from the same schema.
-
-Found on a Laravel project's admin user model, whose schema dump marks
-the column nullable.
-
-### B696. A relation whose related class comes from `config()` is typed `Model`
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-// spatie/laravel-permission's HasRoles
-public function roles(): BelongsToMany
-{
-    return $this->morphToMany(config('permission.models.role'), 'model', …);
-}
-
-$user->roles;   // want Collection<int, Role>, get Collection<int, Model>
-```
-
-The related class is a `config()` value, and `config/permission.php` holds
-a literal `Role::class` under that key. We already type config values, but
-relationship body inference does not take a class from one, so every
-relation declared this way (spatie/laravel-permission's `roles` and
-`permissions` are the common case) falls back to the base `Model`. Laravel
-Idea resolves both to the configured classes.
-
-### B697. `analyze` and the editor disagree on a nullable `updated_at`
-
-**Impact: Medium · Complexity: Medium**
-
-On a model whose schema dump declares `updated_at timestamp NULL`, the
-same binary reports `$model->updated_at` as `Illuminate\Support\Carbon`
-from `analyze` and as `null|Illuminate\Support\Carbon` in the editor
-(the schema is right, so the editor is). `created_at` (`NOT NULL`) is
-`Carbon` in both. Some part of the model's column sources is loaded
-differently, or in a different order, between the CLI and the language
-server. Find which, and make both read the schema the same way.
-
-Found on a Laravel project's admin user model by probing the same file
-both ways.
+No outstanding items.
 
 ## Blade
 

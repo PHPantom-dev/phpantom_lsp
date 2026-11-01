@@ -80,6 +80,9 @@ fn refine_laravel_class(backend: &Backend, mut loaded: Arc<ClassInfo>) -> Arc<Cl
         }
         _ => {}
     }
+    // Fill in the related model of a relation declared with a `config()`
+    // value as its related class.
+    loaded = crate::virtual_members::laravel::patch_config_related_models(backend, loaded);
     // A facade whose `getFacadeAccessor()` names a container binding needs
     // the alias table to reach the class it forwards to, and the virtual
     // member provider that does the forwarding reads that table from the

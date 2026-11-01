@@ -12,15 +12,16 @@
 //! [`ClassInfo`]/[`LaravelMetadata`] into virtual members at completion
 //! time.
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::atom::{Atom, atom, last_segment};
+use crate::atom::{Atom, atom, bytes_to_str, last_segment};
 use crate::parser::DocblockCtx;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{CastSources, LaravelMetadata, MethodInfo, model_declaration};
 use crate::util::short_name;
 
-use super::relationships::is_inferable_relationship_short_name;
+use super::relationships::{config_related_model_key, is_inferable_relationship_short_name};
 use super::{infer_relationship_from_body, is_soft_deletes_trait};
 
 mod attributes;
@@ -114,18 +115,24 @@ pub(crate) fn extract_laravel_trait_metadata<'a>(
     content: &str,
 ) -> Option<Box<LaravelMetadata>> {
     let morph_type_columns = extract_morph_type_columns(trait_def.members.iter(), content);
+    let config_related_models = extract_config_related_models(trait_def.members.iter(), content);
     let table_name = extract_string_property(trait_def.members.iter(), content, "table");
     let has_get_table_method = methods.iter().any(|method| {
         !method.is_abstract && !method.is_virtual && method.name.eq_ignore_ascii_case("getTable")
     });
-    (!morph_type_columns.is_empty() || table_name.is_some() || has_get_table_method).then(|| {
-        Box::new(LaravelMetadata {
-            morph_type_columns,
-            table_name,
-            has_get_table_method,
-            ..Default::default()
+    (!morph_type_columns.is_empty()
+        || !config_related_models.is_empty()
+        || table_name.is_some()
+        || has_get_table_method)
+        .then(|| {
+            Box::new(LaravelMetadata {
+                morph_type_columns,
+                config_related_models,
+                table_name,
+                has_get_table_method,
+                ..Default::default()
+            })
         })
-    })
 }
 
 /// Build the [`LaravelMetadata`] for a class from its AST node.
@@ -203,6 +210,7 @@ pub(crate) fn extract_laravel_metadata<'a>(
 
     let belongs_to_many_pivots = extract_pivot_relations(class.members.iter(), content);
     let morph_type_columns = extract_morph_type_columns(class.members.iter(), content);
+    let config_related_models = extract_config_related_models(class.members.iter(), content);
 
     let (attributes_definitions, attribute_defaults): (Vec<_>, Vec<_>) =
         extract_attributes(class.members.iter(), content)
@@ -293,8 +301,37 @@ pub(crate) fn extract_laravel_metadata<'a>(
         policy_class,
         belongs_to_many_pivots,
         morph_type_columns,
+        config_related_models,
         facade_accessor,
     }
+}
+
+/// The relationship methods among `members` whose related model is a
+/// `config()` value, each with its config key.
+fn extract_config_related_models<'a>(
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    content: &str,
+) -> Vec<(Atom, String)> {
+    let mut models = Vec::new();
+    for member in members {
+        let class_like::member::ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        let class_like::method::MethodBody::Concrete(block) = &method.body else {
+            continue;
+        };
+        let span = block.span();
+        let Some(body) = content.get(span.start.offset as usize..span.end.offset as usize) else {
+            continue;
+        };
+        if !body.contains("config(") {
+            continue;
+        }
+        if let Some(key) = config_related_model_key(body) {
+            models.push((atom(bytes_to_str(method.name.value)), key.to_string()));
+        }
+    }
+    models
 }
 
 /// The [`model_declaration`] flags of `meta`, counting a non-empty list

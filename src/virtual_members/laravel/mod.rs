@@ -246,6 +246,7 @@ pub(crate) use relationships::class_has_relation_method_ci;
 pub(crate) use relationships::classify_relationship_typed;
 pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
+pub(crate) use relationships::patch_config_related_models;
 pub(crate) use relationships::{
     RELATION_QUERY_METHODS, related_model_type, relation_query_method, resolve_relation_chain,
     resolve_relation_chain_details, resolve_relation_type,

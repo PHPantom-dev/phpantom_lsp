@@ -141,10 +141,23 @@ impl ResolvedType {
             // For unions/intersections, check whether the class still
             // appears as a top-level member (e.g. `Foobar|int` still
             // contains `Foobar`).
-            new_type.top_level_class_names().iter().any(|name| {
+            let new_names = new_type.top_level_class_names();
+            if new_names.iter().any(|name| {
                 let name = name.strip_prefix('\\').unwrap_or(name);
                 name == ci.name || name == ci.fqn()
-            })
+            }) {
+                return true;
+            }
+            // A name the loader maps to a class spelled differently (the
+            // configured Laravel date class) never matches the class's own
+            // name, but the class still stands for it when the old type
+            // named that one class alone and the new type names nothing
+            // else, as when a `null` is narrowed away.
+            let old_names = self.type_string.top_level_class_names();
+            let [old_name] = old_names.as_slice() else {
+                return false;
+            };
+            !new_names.is_empty() && new_names.iter().all(|name| name == old_name)
         });
         if !still_matches {
             self.class_info = None;
