@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793562992850,
+  "lastUpdate": 1793563762530,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -60347,6 +60347,324 @@ window.BENCHMARK_DATA = {
             "name": "yii_completion/route_argument",
             "value": 0.052,
             "range": "± 0.004",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "abs@stubbe.dev",
+            "name": "Alexander Bugge Stage",
+            "username": "stubbedev"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2a87b9d2efbdbeb32ccf396206b1ddbf8dfdc9a7",
+          "message": "A replace on a subject of unknown type is benevolent\n\n`preg_replace()` and the rest of the replace family return the shape of\ntheir subject. A subject the engine cannot pin down left the declared\n`array<array-key, string>|string|null`, so the idiomatic\n`trim(preg_replace('/\\s+/', ' ', $x))` on an untyped `$x` reported a\ntype mismatch, and feeding that result back in as the subject of another\nreplace reported again.\n\nPHPStan's ReplaceFunctionsDynamicReturnTypeExtension answers a `mixed`\nsubject with a benevolent union of the declared return type, so the\nresult is not enforced against the next call. Do the same: the\nconditional the stub patch synthesises for the replace family now\nanswers an undecided subject with a benevolent union of both branches,\nand a benevolent subject that reaches both branches keeps that\nleniency. A `string` subject is unchanged and still reports the `null`\nthat `preg_replace()` returns on a PCRE error, as PHPStan does.\n\n`ConditionalType::else_when_undecided` was a bool choosing between two\nreadings of an undecided condition; it becomes the `UndecidedReading`\nenum so the third reading can be expressed, and the three places that\nanswered an undecided condition share one `undecided_answer` helper.\n\nCloses #515",
+          "timestamp": "2026-11-01T20:54:33+01:00",
+          "tree_id": "5d4da73e9c7dbea0fe92155a04a0fff9c61e99f2",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2a87b9d2efbdbeb32ccf396206b1ddbf8dfdc9a7"
+        },
+        "date": 1793563754047,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 3.546,
+            "range": "± 0.122",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.024,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.08,
+            "range": "± 0.017",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.107,
+            "range": "± 0.023",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.25,
+            "range": "± 0.03",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.266,
+            "range": "± 0.021",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 1.203,
+            "range": "± 0.047",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 2.5,
+            "range": "± 0.038",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.08,
+            "range": "± 0.015",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.034,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.031,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.039,
+            "range": "± 0.013",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 3.968,
+            "range": "± 0.055",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.132,
+            "range": "± 0.071",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.247,
+            "range": "± 0.027",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.04,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.023,
+            "range": "± 0.014",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.09,
+            "range": "± 0.02",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.037,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.028,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.136,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 0.771,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 4.184,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 0.786,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.704,
+            "range": "± 0.013",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.242,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 6.369,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 0.723,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "custom_builder_completion/custom_builder_deep_inheritance",
+            "value": 0.046,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_where_prefix",
+            "value": 0.042,
+            "range": "± 0.015",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_completion/model_typing_sequence",
+            "value": 0.209,
+            "range": "± 0.057",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cold_confirmation/1",
+            "value": 0.055,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cached_request/1",
+            "value": 0.032,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cold_confirmation/128",
+            "value": 0.107,
+            "range": "± 0.018",
+            "unit": "ms"
+          },
+          {
+            "name": "laravel_morph_column_completion/cached_request/128",
+            "value": 0.058,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/50",
+            "value": 0.178,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "find_references/hierarchy_scan/150",
+            "value": 0.26,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/service_id_php",
+            "value": 0.232,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/translation_key_php",
+            "value": 0.575,
+            "range": "± 0.044",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/route_name_php",
+            "value": 0.246,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/template_name_php",
+            "value": 0.22,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "symfony_completion/route_name_twig",
+            "value": 0.185,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/view_name_php",
+            "value": 0.085,
+            "range": "± 0.013",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/view_path_php",
+            "value": 0.066,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/view_name_template",
+            "value": 0.069,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/route_name",
+            "value": 0.094,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/route_name_wrapper",
+            "value": 0.122,
+            "range": "± 0.016",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/route_parameter_key",
+            "value": 0.068,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "yii_completion/route_argument",
+            "value": 0.033,
+            "range": "± 0.009",
             "unit": "ms"
           }
         ]
