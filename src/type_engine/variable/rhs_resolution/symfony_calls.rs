@@ -79,15 +79,7 @@ pub(super) fn try_resolve_drupal_service_type(
     argument_list: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    if !method_name.eq_ignore_ascii_case("service")
-        || !crate::drupal::is_service_lookup(owner_fqn, method_name)
-    {
-        return None;
-    }
-    let backend = ctx
-        .file
-        .backend
-        .filter(|backend| backend.is_drupal_project())?;
+    let backend = ctx.file.backend?;
     let Some(Argument::Positional(argument)) = argument_list.arguments.first() else {
         return None;
     };
@@ -95,12 +87,14 @@ pub(super) fn try_resolve_drupal_service_type(
         argument.value,
         ctx.file.content,
     )?;
-    let classes: Vec<Arc<ClassInfo>> = backend
-        .symfony_service_classes(key)
-        .iter()
-        .filter_map(|class| (ctx.file.class_loader)(Fqn::new(class)))
-        .collect();
-    (!classes.is_empty()).then(|| ResolvedType::from_classes(classes))
+    let classes = crate::drupal::types::service_classes(
+        backend,
+        owner_fqn,
+        method_name,
+        key,
+        ctx.file.class_loader,
+    )?;
+    Some(ResolvedType::from_classes(classes))
 }
 
 /// What Messenger's `HandleTrait::handle()` returns for the message it is

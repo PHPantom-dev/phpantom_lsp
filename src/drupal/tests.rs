@@ -78,6 +78,19 @@ fn other_yaml_is_not_read_as_services() {
         ("docker-compose.yml", "services:\n  php: ~\n"),
         // A services file outside every web root.
         ("tools/acme.services.yml", "services:\n  tools.thing: ~\n"),
+        // Templates and copies Drupal never loads as they stand.
+        (
+            "web/sites/default/default.services.yml",
+            "services:\n  template.thing: ~\n",
+        ),
+        (
+            "web/core/assets/scaffold/files/development.services.yml",
+            "services:\n  scaffold.thing: ~\n",
+        ),
+        (
+            "web/sites/simpletest/123/services.yml",
+            "services:\n  test.thing: ~\n",
+        ),
     ]);
     assert!(
         backend

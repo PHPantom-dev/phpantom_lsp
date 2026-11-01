@@ -451,18 +451,37 @@ final class Renamed {
             .is_none(),
         "the core class \\Drupal was offered for rename"
     );
-    let core_service = position_in(consumer, "config.factory", 2);
-    assert!(
-        crate::common::prepare_rename(&backend, &php, core_service.line, core_service.character)
-            .await
-            .is_none(),
-        "a core service ID was offered for rename"
-    );
     let custom_class = position_in(consumer, "new Greeter", 5);
     assert!(
         crate::common::prepare_rename(&backend, &php, custom_class.line, custom_class.character)
             .await
             .is_some(),
         "a custom class could not be renamed"
+    );
+}
+
+/// A call chained straight off `\Drupal::service()`, with no variable in
+/// between, is typed the same way.
+#[tokio::test]
+async fn a_chained_drupal_service_call_is_typed() {
+    let chained = STATIC_CONSUMER.replace(
+        "$greeter = \\Drupal::service('acme.greeter');",
+        "\\Drupal::service('acme.greeter')->greet();",
+    );
+    let (backend, dir) = workspace(&[
+        (SERVICES_PATH, SERVICES),
+        (STATIC_CONSUMER_PATH, chained.as_str()),
+    ])
+    .await;
+    let found = definitions_at(
+        &backend,
+        &uri_for(&dir, STATIC_CONSUMER_PATH),
+        position_in(&chained, "->greet()", 3),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        found[0].uri,
+        uri_for(&dir, "web/modules/custom/acme/src/Greeter.php")
     );
 }

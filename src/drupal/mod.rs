@@ -15,6 +15,8 @@ use std::sync::atomic::Ordering;
 
 use parking_lot::RwLock;
 
+pub(crate) mod types;
+
 use crate::Backend;
 
 /// The web roots of the workspace's Drupal projects, and the declaration
@@ -29,10 +31,24 @@ pub(crate) struct DrupalState {
 }
 
 /// Whether the file name at the end of `path` is one Drupal loads services
-/// from: `services.yml`, or one ending in `.services.yml`.
+/// from: `services.yml`, or one ending in `.services.yml` other than
+/// `default.services.yml`, the template a site's `services.yml` is copied
+/// from.
 fn is_services_file_name(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
-    name == "services.yml" || name.ends_with(".services.yml")
+    name == "services.yml" || (name.ends_with(".services.yml") && name != "default.services.yml")
+}
+
+/// The folders of a web root whose YAML Drupal never loads as it stands:
+/// core's scaffold sources, which Composer copies into `sites/`, and the
+/// sites functional tests generate.
+const UNLOADED_DIRS: [&str; 2] = ["core/assets", "sites/simpletest"];
+
+/// Whether `path` lies in one of the [`UNLOADED_DIRS`] of `web_root`.
+fn is_unloaded(path: &Path, web_root: &Path) -> bool {
+    UNLOADED_DIRS
+        .iter()
+        .any(|dir| path.starts_with(web_root.join(dir)))
 }
 
 /// The folders of a web root that Composer installs and overwrites: core,
@@ -59,6 +75,7 @@ pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
         .and_then(|name| name.to_str())
         .is_some_and(is_services_file_name)
         && !is_test_fixture(path, web_root)
+        && !is_unloaded(path, web_root)
 }
 
 /// Whether `path` lies under a `tests` folder of the web root: it belongs to
@@ -111,6 +128,16 @@ impl Backend {
         }
     }
 
+    /// Whether `uri` is code Composer installs and overwrites: a vendor
+    /// package, or Drupal core or a contributed extension in the web root.
+    /// Rename and move never edit it.
+    pub(crate) fn is_installed_package_uri(&self, uri: &str, vendor_prefixes: &[String]) -> bool {
+        vendor_prefixes
+            .iter()
+            .any(|prefix| uri.starts_with(prefix.as_str()))
+            || self.is_drupal_read_only_uri(uri)
+    }
+
     /// Whether `uri` is a file of Drupal core or of a contributed extension,
     /// which Composer overwrites on its next update: read for what it
     /// declares, but never edited.
@@ -141,17 +168,17 @@ impl Backend {
         let Some(path) = crate::util::uri_to_path(uri) else {
             return false;
         };
-        let Some(in_fixture) = self
+        let Some((in_fixture, unloaded)) = self
             .drupal
             .web_roots
             .read()
             .iter()
             .find(|root| path.starts_with(root))
-            .map(|root| is_test_fixture(&path, root))
+            .map(|root| (is_test_fixture(&path, root), is_unloaded(&path, root)))
         else {
             return false;
         };
-        !in_fixture || self.open_files.read().contains_key(uri)
+        !unloaded && (!in_fixture || self.open_files.read().contains_key(uri))
     }
 }
 

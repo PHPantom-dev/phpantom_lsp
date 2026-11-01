@@ -124,10 +124,7 @@ impl Backend {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
 
         for file_uri in &all_uris {
-            if vendor_prefixes
-                .iter()
-                .any(|p| file_uri.starts_with(p.as_str()))
-            {
+            if self.is_installed_package_uri(file_uri, &vendor_prefixes) {
                 continue;
             }
             // A YAML/XML occurrence may be spelled the escaped `App\\Foo`

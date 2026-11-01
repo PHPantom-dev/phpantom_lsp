@@ -273,11 +273,25 @@ impl Backend {
         }
         let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
         uris.sort_unstable();
+        // Only Symfony declares names through calls the type engine has to
+        // confirm; a Drupal project records none.
+        let needs_typed = match kind.framework() {
+            KeyFramework::ServiceContainer => self.is_symfony_project(),
+            KeyFramework::Laravel
+            | KeyFramework::Symfony
+            | KeyFramework::Twig
+            | KeyFramework::Yii
+            | KeyFramework::WordPress => true,
+        };
         for uri in uris {
             let Some(map) = self.symbol_map_for(&uri) else {
                 continue;
             };
-            let typed = self.typed_receiver_spans_for(&uri, &map);
+            let typed = if needs_typed {
+                self.typed_receiver_spans_for(&uri, &map)
+            } else {
+                std::sync::Arc::default()
+            };
             for span in map.spans.iter().chain(typed.iter()) {
                 if let SymbolKind::StringKey {
                     kind: span_kind,

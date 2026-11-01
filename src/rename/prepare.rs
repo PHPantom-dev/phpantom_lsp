@@ -743,24 +743,14 @@ impl Backend {
     /// rejected.
     fn is_vendor_symbol(&self, uri: &str, content: &str, position: Position) -> bool {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
-        let is_drupal = self.is_drupal_project();
 
-        if vendor_prefixes.is_empty() && !is_drupal {
+        if vendor_prefixes.is_empty() && !self.is_drupal_project() {
             return false;
         }
 
-        for loc in self.resolve_definition(uri, content, position) {
-            let def_uri = loc.uri.to_string();
-            if vendor_prefixes
-                .iter()
-                .any(|p| def_uri.starts_with(p.as_str()))
-                || (is_drupal && self.is_drupal_read_only_uri(&def_uri))
-            {
-                return true;
-            }
-        }
-
-        false
+        self.resolve_definition(uri, content, position)
+            .iter()
+            .any(|loc| self.is_installed_package_uri(loc.uri.as_str(), &vendor_prefixes))
     }
 
     /// Determine whether this rename targets a property (as opposed to

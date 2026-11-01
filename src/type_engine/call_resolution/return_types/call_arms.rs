@@ -316,6 +316,22 @@ impl Backend {
         }
         let owner_class = all_owners.into_iter().next();
 
+        // `\Drupal::service('id')` is typed by the class the ID is built
+        // from (see `crate::drupal::types`).
+        if let Some(ref owner) = owner_class
+            && let Some(backend) = ctx.file.backend
+            && let Some(id) = first_literal_text_arg(text_args)
+            && let Some(classes) = crate::drupal::types::service_classes(
+                backend,
+                &owner.fqn(),
+                method_name,
+                id,
+                ctx.file.class_loader,
+            )
+        {
+            return classes;
+        }
+
         if let Some(ref owner) = owner_class {
             // A static call through a Laravel facade is typed by the
             // container class the facade forwards to, so that
@@ -1089,4 +1105,11 @@ fn method_call_return_hint(
             &tpl,
         ),
     )
+}
+
+/// The value of a call's first argument, when it is a plain string
+/// literal.
+fn first_literal_text_arg(text_args: &str) -> Option<&str> {
+    let first = split_top_level_commas(text_args).first().copied()?;
+    crate::text_scan::unquote_php_string(crate::call_args::text_arg_value(first).trim())
 }
