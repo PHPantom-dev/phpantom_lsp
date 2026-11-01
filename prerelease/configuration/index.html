@@ -2026,10 +2026,10 @@ those still need a restart to fully apply.</p>
 <td>Report a member access on a union when only some of its classes declare the member. Matches PHPStan's <code>checkUnionTypes</code>.</td>
 </tr>
 <tr>
-<td><code>downgrade-nullable-argument-mismatch</code></td>
+<td><code>possibly-empty-mismatches</code></td>
 <td>bool</td>
 <td><code>false</code></td>
-<td>Downgrade <code>type_mismatch_argument</code> to a warning when the only reason an argument fails to satisfy the parameter is a stray <code>null</code> (every non-null member of the argument's type is already compatible).</td>
+<td>Report a type mismatch on an argument, return value or property assignment when the only members that fail are <code>null</code> or <code>false</code>, such as a <code>string|false</code> passed to a <code>string</code> parameter. Matches PHPStan's <code>checkUnionTypes</code> and <code>checkNullables</code>.</td>
 </tr>
 <tr>
 <td><code>workspace</code></td>

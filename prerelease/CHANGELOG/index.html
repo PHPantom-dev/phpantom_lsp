@@ -5175,6 +5175,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A value that may only be <code>null</code> or <code>false</code> is no longer reported by default.</strong> Passing a <code>string|false</code> to a <code>string</code> parameter, returning it from a <code>string</code> function or assigning it to a <code>string</code> property only fails if the value turns out empty. Set <code>possibly-empty-mismatches = true</code> under <code>[diagnostics]</code> to report these as errors. It replaces <code>downgrade-nullable-argument-mismatch</code>, which is gone. A mismatch where some other member fails is still reported. Contributed by @stubbedev.</li>
 <li><strong>Faster analysis of Laravel projects.</strong> Classes the project's Laravel setup adds to, such as the auth guard, the <code>Storage</code> facade, and classes with macros or pivot accessors, are no longer rebuilt every time they are looked up. Analysing a large Laravel application takes about an eighth less CPU time.</li>
 <li><strong>Faster diagnostics after each edit.</strong> The diagnostics for an edited file reuse the parse the edit already made, instead of parsing the file twice more.</li>
 <li><strong>Faster diagnostics in Blade templates.</strong> A template is parsed once per diagnostic pass instead of once per check.</li>
