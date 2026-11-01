@@ -101,7 +101,7 @@ impl Backend {
         // `$twig->render('|')`, and in a Yii one `$urls->generate('|')` and
         // `#[RouteArgument('|')]`.
         if matches!(string_ctx, StringContext::InStringLiteral)
-            && (self.is_symfony_project() || self.is_twig_project() || self.is_yii_project())
+            && (self.reads_service_container() || self.is_twig_project() || self.is_yii_project())
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_symfony_string_key_completion(uri, content, position, code, ctx)

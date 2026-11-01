@@ -263,6 +263,7 @@ pub mod diagnostics;
 pub mod docblock;
 mod document_links;
 mod document_symbols;
+mod drupal;
 mod file_state;
 pub mod fix;
 mod folding;
@@ -538,6 +539,8 @@ pub struct BackendState {
     pub(crate) yii: yii::YiiState,
     /// The files that fire or use a WordPress hook.
     pub(crate) wordpress_hooks: wordpress::hooks::HookFiles,
+    /// The web roots of the workspace's Drupal projects.
+    pub(crate) drupal: drupal::DrupalState,
     /// The `Pest.php` files of the project's test directories, read on
     /// first use and dropped when one is saved.  `None` until then.
     pub(crate) pest_configs: Arc<RwLock<Option<pest::PestConfigs>>>,

@@ -134,6 +134,7 @@ impl Backend {
                 .filter_map(composer::locked_phpunit_major)
                 .min(),
         );
+        self.clear_drupal_web_roots();
 
         // A permission package answers authorization checks from the database,
         // so the abilities this project uses are not written in its source and
@@ -350,6 +351,7 @@ impl Backend {
         // depend on.  detect_drupal_web_root() returns None for
         // non-Drupal projects so this block is a no-op in that case.
         if let Some(drupal_web_root) = drupal_web_root {
+            self.note_drupal_web_root(&drupal_web_root);
             if let Some(p) = progress {
                 p.set_scope(at(55), at(59), "Scanning Drupal directories");
             }
@@ -460,6 +462,7 @@ impl Backend {
         let mut any_twig = false;
         let mut any_yii = false;
         let mut phpunit_major: Option<u8> = None;
+        self.clear_drupal_web_roots();
 
         for (sub_idx, (sub_root, _)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;

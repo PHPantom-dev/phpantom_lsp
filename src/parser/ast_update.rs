@@ -562,6 +562,7 @@ impl Backend {
                 content,
                 &owned_resolved,
                 self.is_symfony_project(),
+                self.reads_service_container(),
                 self.is_twig_project(),
                 yii_dir.as_deref(),
             )

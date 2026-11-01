@@ -1,0 +1,128 @@
+use std::path::Path;
+
+use crate::symbol_map::StringKeyKind;
+
+/// A Drupal project's backend whose web root is `web/` under the
+/// workspace, with `files` published the way the workspace index publishes
+/// them.
+fn drupal_backend(files: &[(&str, &str)]) -> (crate::Backend, tempfile::TempDir) {
+    backend_with_web_root(files, true)
+}
+
+/// A backend with a web root `web/` under the workspace, marked as a
+/// Drupal project only when `is_drupal` holds.
+fn backend_with_web_root(
+    files: &[(&str, &str)],
+    is_drupal: bool,
+) -> (crate::Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = crate::Backend::new_test_with_workspace(dir.path().to_path_buf(), vec![]);
+    backend.set_is_symfony(false);
+    if is_drupal {
+        backend.mark_drupal_project();
+    }
+    backend.note_drupal_web_root(&dir.path().join("web"));
+    for (path, content) in files {
+        let uri = uri(dir.path(), path);
+        backend.update_resource_symbol_index(&uri, content);
+    }
+    (backend, dir)
+}
+
+fn uri(root: &Path, path: &str) -> String {
+    crate::util::path_to_uri(&root.join(path))
+}
+
+const SERVICES: &str = "parameters:\n  acme.limit: 10\nservices:\n  acme.greeter:\n    class: Drupal\\acme\\Greeter\n    arguments: ['@config.factory']\n";
+
+#[test]
+fn services_files_in_the_web_root_declare_services_and_parameters() {
+    let (backend, _dir) = drupal_backend(&[
+        ("web/modules/custom/acme/acme.services.yml", SERVICES),
+        (
+            "web/core/core.services.yml",
+            "services:\n  config.factory:\n    class: Drupal\\Core\\Config\\ConfigFactory\n",
+        ),
+        (
+            "web/sites/default/services.yml",
+            "parameters:\n  session.storage.options: {}\n",
+        ),
+    ]);
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::ServiceId),
+        vec!["acme.greeter".to_string(), "config.factory".to_string()]
+    );
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::ContainerParameter),
+        vec![
+            "acme.limit".to_string(),
+            "session.storage.options".to_string()
+        ]
+    );
+    let classes: Vec<String> = backend
+        .symfony_service_classes("acme.greeter")
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(classes, vec!["Drupal\\acme\\Greeter".to_string()]);
+}
+
+#[test]
+fn other_yaml_is_not_read_as_services() {
+    let (backend, _dir) = drupal_backend(&[
+        // A file with a `services:` key that Drupal does not load services from.
+        (
+            "web/modules/custom/acme/acme.info.yml",
+            "services:\n  not.a_service: ~\n",
+        ),
+        ("docker-compose.yml", "services:\n  php: ~\n"),
+        // A services file outside every web root.
+        ("tools/acme.services.yml", "services:\n  tools.thing: ~\n"),
+    ]);
+    assert!(
+        backend
+            .symfony_declared_names(StringKeyKind::ServiceId)
+            .is_empty()
+    );
+}
+
+#[test]
+fn drupal_reads_the_service_container_and_nothing_else_from_symfony() {
+    let (backend, _dir) = drupal_backend(&[]);
+    assert!(backend.string_key_kind_enabled(StringKeyKind::ServiceId));
+    assert!(backend.string_key_kind_enabled(StringKeyKind::ContainerParameter));
+    for kind in [
+        StringKeyKind::SymfonyRoute,
+        StringKeyKind::SymfonyTranslation,
+        StringKeyKind::SymfonyEvent,
+        StringKeyKind::MessengerBus,
+        StringKeyKind::SymfonyConfigKey,
+    ] {
+        assert!(!backend.string_key_kind_enabled(kind), "{kind:?}");
+    }
+}
+
+#[test]
+fn a_symfony_config_directory_means_nothing_in_drupal() {
+    let (backend, _dir) =
+        drupal_backend(&[("config/services.yaml", "services:\n  app.mailer: ~\n")]);
+    assert!(
+        backend
+            .symfony_declared_names(StringKeyKind::ServiceId)
+            .is_empty()
+    );
+}
+
+#[test]
+fn nothing_is_read_outside_a_drupal_project() {
+    let (backend, dir) = backend_with_web_root(&[], false);
+    backend.update_resource_symbol_index(
+        &uri(dir.path(), "web/modules/custom/acme/acme.services.yml"),
+        SERVICES,
+    );
+    assert!(
+        backend
+            .symfony_declared_names(StringKeyKind::ServiceId)
+            .is_empty()
+    );
+}

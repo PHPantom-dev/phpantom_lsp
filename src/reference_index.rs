@@ -740,11 +740,13 @@ impl Backend {
         // `$x->prop === 'literal'`, so skip them there.
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let is_symfony = self.is_symfony_project();
+        let reads_container = self.reads_service_container();
         let is_twig = self.is_twig_project();
         let is_yii = self.is_yii_project();
         let enabled = |kind: StringKeyKind| match kind.framework() {
             KeyFramework::Laravel => is_laravel,
-            KeyFramework::ServiceContainer | KeyFramework::Symfony => is_symfony,
+            KeyFramework::ServiceContainer => reads_container,
+            KeyFramework::Symfony => is_symfony,
             KeyFramework::Twig => is_twig,
             KeyFramework::Yii => is_yii,
             KeyFramework::WordPress => false,

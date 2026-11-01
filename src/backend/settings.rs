@@ -110,7 +110,8 @@ impl Backend {
 
     /// Record that a Composer project of the workspace is a Drupal site,
     /// so every workspace walk reads Drupal's `.module`, `.install`, …
-    /// files as PHP the way the web-root class scan does.
+    /// files as PHP the way the web-root class scan does, and Drupal's own
+    /// declarations, such as its services, are read (see [`crate::drupal`]).
     ///
     /// Only ever turned on: a workspace whose subprojects include one
     /// Drupal site treats those extensions as PHP throughout.

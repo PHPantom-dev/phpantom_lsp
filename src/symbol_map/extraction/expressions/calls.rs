@@ -688,7 +688,7 @@ mod tests {
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
 
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, true, true, None,
+            program, php, &names, true, true, true, None,
         );
 
         assert_eq!(map.conditional_string_key_spans.len(), 1);

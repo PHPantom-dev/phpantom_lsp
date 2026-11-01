@@ -407,6 +407,8 @@ impl Backend {
                 return (!items.is_empty())
                     .then_some(CompletionResponse::CompletionItemList(items));
             }
+        } else if self.is_drupal_services_uri(uri) {
+            resource_key_at(content, cursor)?
         } else if !is_symfony {
             return None;
         } else if crate::symfony::resources::is_container_config_uri(uri) {

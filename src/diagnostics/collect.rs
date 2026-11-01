@@ -473,7 +473,7 @@ impl Backend {
 
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let has_string_keys = is_laravel
-            || self.is_symfony_project()
+            || self.reads_service_container()
             || self.is_twig_project()
             || self.is_yii_project();
         for collector in SLOW_COLLECTORS {

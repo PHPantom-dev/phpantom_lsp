@@ -397,6 +397,7 @@ mod tests {
             &names,
             false,
             false,
+            false,
             Some(std::path::Path::new("/p")),
         )
     }

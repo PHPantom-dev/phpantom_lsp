@@ -181,7 +181,7 @@ fn read_php_file(uri: &str, content: &str) -> SymbolMap {
     let resolver = mago_names::resolver::NameResolver::new(&arena);
     let names = crate::names::OwnedResolvedNames::from_resolved(&resolver.resolve(program));
     let map = crate::symbol_map::extract_symbol_map_for_index(
-        program, content, &names, true, false, None,
+        program, content, &names, true, true, false, None,
     );
     let mut configurators = HashMap::new();
     for statement in program.statements.iter() {

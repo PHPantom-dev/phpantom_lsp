@@ -149,7 +149,7 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     argument_list: &ArgumentList<'_>,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    if !ctx.symfony && !ctx.twig && !ctx.yii {
+    if !ctx.service_container && !ctx.twig && !ctx.yii {
         return;
     }
     if ctx.symfony && member_name.eq_ignore_ascii_case("trans") {
@@ -189,7 +189,8 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         // Outside Symfony, only the calls of the framework the project uses
         // are left: Twig's own `render()`, or Yii's URL generator.
         let records = |kind: StringKeyKind| match kind.framework() {
-            KeyFramework::ServiceContainer | KeyFramework::Symfony => ctx.symfony,
+            KeyFramework::ServiceContainer => ctx.service_container,
+            KeyFramework::Symfony => ctx.symfony,
             KeyFramework::Twig => ctx.twig,
             KeyFramework::Yii => ctx.yii,
             KeyFramework::Laravel | KeyFramework::WordPress => false,
@@ -2523,7 +2524,7 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, true, true, None,
+            program, php, &names, true, true, true, None,
         )
     }
 
@@ -3147,7 +3148,7 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, false, None,
+            program, php, &names, false, false, false, None,
         );
         assert!(map.typed_receiver_sites.is_empty());
     }
@@ -3161,7 +3162,7 @@ mod tests {
         let resolver = mago_names::resolver::NameResolver::new(&arena);
         let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
         let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
-            program, php, &names, false, true, None,
+            program, php, &names, false, false, true, None,
         );
         assert_eq!(
             receivers(&map),

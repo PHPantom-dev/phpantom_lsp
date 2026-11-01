@@ -180,7 +180,8 @@ impl Backend {
     pub(crate) fn string_key_kind_enabled(&self, kind: StringKeyKind) -> bool {
         match kind.framework() {
             KeyFramework::Laravel => self.resolved_class_cache.read().laravel().is_enabled(),
-            KeyFramework::ServiceContainer | KeyFramework::Symfony => self.is_symfony_project(),
+            KeyFramework::ServiceContainer => self.reads_service_container(),
+            KeyFramework::Symfony => self.is_symfony_project(),
             KeyFramework::Twig => self.is_twig_project(),
             KeyFramework::Yii => self.is_yii_project(),
             // The hook functions' names are WordPress's own, and a project
@@ -195,7 +196,7 @@ impl Backend {
     /// Dependencies are never part of the project's own configuration, so a
     /// vendor file that happens to be parsed is left out.
     pub(crate) fn note_symfony_declarations(&self, uri: &str, map: &SymbolMap) {
-        if !self.is_symfony_project() && !self.is_twig_project() && !self.is_yii_project() {
+        if !self.reads_service_container() && !self.is_twig_project() && !self.is_yii_project() {
             return;
         }
         let declares = declares_symfony_keys(map, |kind| self.string_key_kind_enabled(kind))
