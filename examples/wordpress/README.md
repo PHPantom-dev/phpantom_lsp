@@ -28,7 +28,9 @@ most typed WordPress projects get core's declarations.
   `ProductRepository::create()`), find its references, rename it, or
   complete inside the quotes of an `add_action()`.
   `'acme_shop_saved_acme_product'` goes to a hook the plugin fires under a
-  name it builds at runtime.
+  name it builds at runtime. Core's hooks navigate and complete too: in
+  `src/Plugin.php`, `'init'` goes to the `do_action()` in the core
+  Composer installed.
 - A `@global` tag types the global a function imports. Complete after
   `$wpdb->` in `ProductRepository::countInStock()`. Without one, the global
   takes the type the stubs' own `@global` tags give it: complete after

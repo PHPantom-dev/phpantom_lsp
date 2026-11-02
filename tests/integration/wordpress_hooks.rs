@@ -340,8 +340,8 @@ async fn renaming_a_hook_rewrites_every_literal_that_spells_it() {
     // A use that a pattern matches is renamed without the pattern.
     let edit = rename(
         &listens,
-        position_in(LISTENS_PHP, "'save_post_product'", 3),
-        "save_post_page",
+        position_in(LISTENS_PHP, "'acme_status_paid'", 3),
+        "acme_status_settled",
     )
     .await
     .unwrap()
@@ -440,5 +440,178 @@ async fn hovering_a_hook_says_where_it_fires() {
             .await
             .unwrap(),
     );
+    assert!(shown.contains("Fired by WordPress core, 1 use"), "{shown}");
+
+    let unknown = r#"<?php
+add_action('acme_never_fired', 'acme_boot');
+"#;
+    let (backend, dir) = workspace(&[("src/unknown.php", unknown)]).await;
+    let shown = match backend
+        .hover(HoverParams {
+            text_document_position_params: text_position(
+                &uri_for(&dir, "src/unknown.php"),
+                position_in(unknown, "'acme_never", 3),
+            ),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .map(|hover| hover.contents)
+    {
+        Some(Contents::MarkupContent(markup)) => markup.value,
+        other => panic!("unexpected hover {other:?}"),
+    };
     assert!(shown.contains("Not fired in the project, 1 use"), "{shown}");
+}
+
+#[tokio::test]
+async fn without_core_installed_its_hooks_complete_from_the_list() {
+    let typing = r#"<?php
+add_action('wp_lo');
+"#;
+    let (backend, dir) =
+        workspace(&[("src/Mailer.php", LISTENS_PHP), ("src/typing.php", typing)]).await;
+    let uri = uri_for(&dir, "src/typing.php");
+    let position = position_in(typing, "wp_lo')", 5);
+    let found = response_items(
+        completion_response(&backend, &uri, position.line, position.character, None).await,
+    )
+    .unwrap_or_default();
+    let labels: Vec<&str> = found.iter().map(|item| item.label.as_str()).collect();
+    assert!(labels.contains(&"wp_loaded"), "{labels:?}");
+
+    // Core keeps the name it fires a hook under, so the listeners cannot be
+    // renamed away from it, a name its pattern matches included.
+    for needle in ["'save_post'", "'save_post_product'"] {
+        let prepared = backend
+            .prepare_rename(text_position(
+                &uri_for(&dir, "src/Mailer.php"),
+                position_in(LISTENS_PHP, needle, 3),
+            ))
+            .await
+            .unwrap();
+        assert!(prepared.is_none(), "{needle}: {prepared:?}");
+    }
+}
+
+const INSTALLED: &str = r#"{ "packages": [
+    { "name": "roots/wordpress-no-content", "type": "wordpress-core", "install-path": "../../web/wp" },
+    { "name": "acme/shop", "type": "wordpress-plugin", "install-path": "../acme/shop" },
+    { "name": "acme/library", "type": "library", "install-path": "../acme/library" }
+] }"#;
+
+const CORE_PHP: &str = r#"<?php
+function wp_insert_post($post) {
+    do_action('save_post', $post->ID, $post);
+    do_action("save_post_{$post->post_type}", $post->ID, $post);
+}
+do_action('init');
+"#;
+
+const PLUGIN_PHP: &str = r#"<?php
+do_action('acme_shop_loaded');
+add_action('init', 'acme_shop_boot');
+"#;
+
+const LIBRARY_PHP: &str = r#"<?php
+do_action('acme_library_loaded');
+"#;
+
+const PLUGIN_CODE: &str = r#"<?php
+namespace Acme\Shop;
+
+add_action('init', 'boot');
+add_action('save_post_product', 'reindex');
+add_action('acme_');
+add_action('wp_lo');
+"#;
+
+/// A project whose core and a plugin are installed with Composer, core
+/// under a web root the way Bedrock lays it out.
+async fn installed_workspace() -> (Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let files = [
+        ("composer.json", COMPOSER),
+        ("vendor/composer/installed.json", INSTALLED),
+        ("web/wp/wp-includes/post.php", CORE_PHP),
+        ("vendor/acme/shop/shop.php", PLUGIN_PHP),
+        ("vendor/acme/shop/tests/fixture.php", LIBRARY_PHP),
+        ("vendor/acme/library/library.php", LIBRARY_PHP),
+        ("src/plugin.php", PLUGIN_CODE),
+    ];
+    for (path, content) in files {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+    }
+    let backend = Backend::new_test();
+    crate::common::initialize_with_options(&backend, dir.path(), None).await;
+    open_document(
+        &backend,
+        &uri_for(&dir, "src/plugin.php"),
+        "php",
+        PLUGIN_CODE,
+    )
+    .await;
+    (backend, dir)
+}
+
+#[tokio::test]
+async fn an_installed_core_and_plugin_fire_hooks_the_project_uses() {
+    let (backend, dir) = installed_workspace().await;
+    let uri = uri_for(&dir, "src/plugin.php");
+    let core = uri_for(&dir, "web/wp/wp-includes/post.php");
+
+    let found = definitions(&backend, &uri, position_in(PLUGIN_CODE, "'init'", 3)).await;
+    assert_eq!(found, vec![(core.clone(), 5)]);
+    let found = definitions(
+        &backend,
+        &uri,
+        position_in(PLUGIN_CODE, "'save_post_product'", 3),
+    )
+    .await;
+    assert_eq!(found, vec![(core.clone(), 3)]);
+
+    // The places a dependency fires a hook are references to it, but the
+    // places it listens are not the project's concern.
+    let found = references(&backend, &uri, position_in(PLUGIN_CODE, "'init'", 3), true).await;
+    assert_eq!(found, sorted(vec![(core.clone(), 5), (uri.clone(), 3)]));
+
+    let items = |needle: &'static str| {
+        let backend = &backend;
+        let uri = &uri;
+        async move {
+            let position = position_in(PLUGIN_CODE, needle, needle.len() - 2);
+            let found = response_items(
+                completion_response(backend, uri, position.line, position.character, None).await,
+            )
+            .unwrap_or_default();
+            found
+                .into_iter()
+                .map(|item| item.label)
+                .collect::<Vec<String>>()
+        }
+    };
+    // A plugin's hooks complete, a library's and a test fixture's do not.
+    assert_eq!(items("'acme_')").await, ["acme_shop_loaded"]);
+    // The installed core is read instead of the list in the binary.
+    assert!(items("'wp_lo')").await.is_empty());
+
+    let prepared = backend
+        .prepare_rename(text_position(&uri, position_in(PLUGIN_CODE, "'init'", 3)))
+        .await
+        .unwrap();
+    assert!(prepared.is_none(), "{prepared:?}");
+    let renamed = backend
+        .rename(RenameParams {
+            text_document_position_params: text_position(
+                &uri,
+                position_in(PLUGIN_CODE, "'init'", 3),
+            ),
+            new_name: "acme_init".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+    assert!(renamed.is_none(), "{renamed:?}");
 }

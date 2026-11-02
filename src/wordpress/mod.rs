@@ -15,8 +15,10 @@
 //! arguments in `type_engine::type_ops::call_site_returns`.
 //!
 //! Hook names tie a listener to the places that fire it, and navigate as
-//! string keys (see [`hooks`]).
+//! string keys (see [`hooks`]), core's and the installed plugins' too (see
+//! [`hook_sources`]).
 
+mod hook_sources;
 pub(crate) mod hooks;
 
 use std::path::{Path, PathBuf};

@@ -14,21 +14,26 @@
 //! the hook. A literal name matches a pattern when it holds the literal
 //! parts in order, each computed part standing for at least one character,
 //! and two patterns match when their literal parts are the same. A pattern's
-//! span covers its first literal part only, since the computed parts carry
-//! spans of their own.
+//! span covers its first literal part with a word in it only, since the
+//! computed parts carry spans of their own.
 //!
 //! The files that hold a hook span are tracked here, so completion and
-//! navigation read those symbol maps rather than every file's.
+//! navigation read those symbol maps rather than every file's. The hooks a
+//! dependency fires (see [`super::hook_sources`]) complete and navigate
+//! too, but are not the project's own: a rename does not reach them, and
+//! refuses a name one of them fires.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use tower_lsp_server::gen_lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemTextEdit, CompletionResponse,
     DocumentHighlight, DocumentHighlightKind, InsertTextFormat, Location, Position, Range,
     TextEdit,
 };
 
+use super::hook_sources::{DependencyHooks, listed_core_hooks};
 use crate::Backend;
 use crate::completion::laravel_string_keys::{ArgumentSlot, scalar_argument_at};
 use crate::completion::source::code_context::CodeContext;
@@ -199,10 +204,12 @@ pub(crate) fn is_valid_hook_name(name: &str) -> bool {
             .any(|c| matches!(c, '\'' | '"' | '\\' | '$' | '{' | '}') || c.is_control())
 }
 
-/// The files whose symbol maps hold a hook span.
+/// The files whose symbol maps hold a hook span, and the hooks the
+/// installed WordPress packages fire.
 #[derive(Default)]
 pub(crate) struct HookFiles {
     uris: RwLock<HashSet<String>>,
+    pub(super) dependencies: Mutex<Option<Arc<DependencyHooks>>>,
 }
 
 /// One hook span of some file: its byte range, its name, and whether it
@@ -267,29 +274,85 @@ impl Backend {
     }
 
     /// Visit the hook spans of every file that holds one, file by file in a
-    /// stable order.
-    fn visit_hook_files(&self, mut visit: impl FnMut(&str, &SymbolMap)) {
+    /// stable order: the project's own files, then the places the installed
+    /// WordPress packages fire a hook. `external` is set for a file of one
+    /// of the packages, which the project may index as its own too.
+    fn visit_hook_files(&self, mut visit: impl FnMut(&str, bool, &[HookSpan<'_>])) {
+        let dependencies = self.wordpress_dependency_hooks();
         let mut uris: Vec<String> = self.wordpress_hooks.uris.read().iter().cloned().collect();
         uris.sort_unstable();
-        for uri in uris {
-            if let Some(map) = self.symbol_map_for(&uri) {
-                visit(&uri, &map);
+        for uri in &uris {
+            if let Some(map) = self.symbol_map_for(uri) {
+                let spans: Vec<HookSpan<'_>> = hook_spans(&map).collect();
+                visit(uri, dependencies.holds(uri), &spans);
             }
+        }
+        let mut spans = Vec::new();
+        for (uri, firings) in &dependencies.files {
+            if uris.binary_search(uri).is_ok() {
+                continue;
+            }
+            spans.clear();
+            spans.extend(firings.iter().map(|firing| HookSpan {
+                start: firing.start,
+                end: firing.end,
+                key: firing.key.as_str(),
+                fires: true,
+            }));
+            visit(uri, true, &spans);
         }
     }
 
-    /// Every hook name the project fires or uses, sorted, leaving out the
-    /// span that starts at `except` (a file and an offset): the one being
-    /// typed.
+    /// Whether the hooks core fires are read from files, the project's own
+    /// or an installed package's, rather than taken from the list in the
+    /// binary.
+    fn reads_core_hooks(&self, dependencies: &DependencyHooks) -> bool {
+        dependencies.has_core
+            || self
+                .wordpress_hooks
+                .uris
+                .read()
+                .iter()
+                .any(|uri| uri.contains("/wp-includes/"))
+    }
+
+    /// Whether something other than the project fires the hook `key`: an
+    /// installed WordPress package, or core when the project has none to
+    /// read. A rename of such a hook would leave its listeners behind.
+    pub(crate) fn wordpress_hook_is_external(&self, key: &str) -> bool {
+        let mut external = false;
+        self.visit_hook_files(|_, is_external, spans| {
+            external = external
+                || is_external
+                    && spans
+                        .iter()
+                        .any(|span| span.fires && hook_names_match(key, span.key));
+        });
+        external || self.wordpress_hook_is_listed(key)
+    }
+
+    /// Whether the list in the binary names the hook `key`, while the
+    /// project has no core to read.
+    fn wordpress_hook_is_listed(&self, key: &str) -> bool {
+        !self.reads_core_hooks(&self.wordpress_dependency_hooks())
+            && listed_core_hooks().any(|name| hook_names_match(key, name))
+    }
+
+    /// Every hook name the project fires or uses, or a dependency fires,
+    /// sorted, leaving out the span that starts at `except` (a file and an
+    /// offset): the one being typed.
     fn wordpress_hook_names(&self, except: Option<(&str, u32)>) -> Vec<String> {
         let mut names = Vec::new();
-        self.visit_hook_files(|uri, map| {
-            for span in hook_spans(map) {
+        self.visit_hook_files(|uri, _, spans| {
+            for span in spans {
                 if except != Some((uri, span.start)) {
                     names.push(span.key.to_string());
                 }
             }
         });
+        if !self.reads_core_hooks(&self.wordpress_dependency_hooks()) {
+            names.extend(listed_core_hooks().map(str::to_string));
+        }
         names.sort_unstable();
         names.dedup();
         names
@@ -308,8 +371,9 @@ impl Backend {
         literal_only: bool,
     ) -> Vec<Location> {
         let mut locations = Vec::new();
-        self.visit_hook_files(|uri, map| {
-            let found: Vec<(u32, u32)> = hook_spans(map)
+        self.visit_hook_files(|uri, _, spans| {
+            let found: Vec<(u32, u32)> = spans
+                .iter()
                 .filter(|span| {
                     (if span.fires { fires } else { uses })
                         && (!literal_only || span.key == key)
@@ -340,8 +404,8 @@ impl Backend {
         locations
     }
 
-    /// Every place the project fires the hook `key`, or a pattern it
-    /// matches.
+    /// Every place the project or a dependency fires the hook `key`, or a
+    /// pattern it matches.
     pub(crate) fn wordpress_hook_definitions(&self, key: &str) -> Vec<Location> {
         self.wordpress_hook_locations(key, true, false, false)
     }
@@ -394,7 +458,9 @@ impl Backend {
             1 => format!("1 {one}"),
             n => format!("{n} {many}"),
         };
-        if fired == 0 {
+        if fired == 0 && self.wordpress_hook_is_listed(key) {
+            format!("Fired by WordPress core, {}", count(used, "use", "uses"))
+        } else if fired == 0 {
             format!("Not fired in the project, {}", count(used, "use", "uses"))
         } else {
             format!(
@@ -406,7 +472,8 @@ impl Backend {
     }
 
     /// Complete the hook name a string literal passed to a hook function is
-    /// being typed as: every name the project fires or uses, and each
+    /// being typed as: every name the project fires or uses or a
+    /// dependency fires, and each
     /// pattern as a snippet with a placeholder for each computed part.
     pub(crate) fn try_wordpress_hook_completion(
         &self,

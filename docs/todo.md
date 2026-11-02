@@ -38,7 +38,6 @@ contributor even though it's short.
 | L63 | [Middleware alias names](todo/laravel.md#l63-middleware-alias-names) | Medium-High | Medium |
 | L64 | [Routes on controller methods](todo/laravel.md#l64-routes-on-controller-methods) | Medium-High | Medium |
 | L65 | [Unknown Blade and Livewire components](todo/laravel.md#l65-unknown-blade-and-livewire-components) | Medium-High | Medium |
-| WP16 | [Core's hook names outside the project's own files](todo/wordpress.md#wp16-cores-hook-names-outside-the-projects-own-files) | Medium-High | Medium      |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -104,7 +103,6 @@ ships, remove every row that names it.
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | WP9 | [The argument types the WordPress stubs declare](todo/wordpress.md#wp9-the-argument-types-the-wordpress-stubs-declare) | Medium      | Low-Medium  |
-| WP16 | [Core's hook names outside the project's own files](todo/wordpress.md#wp16-cores-hook-names-outside-the-projects-own-files) | Medium-High | Medium      |
 | WP3 | [WordPress core for a plugin or theme opened on its own](todo/wordpress.md#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own) | Medium-High | Medium      |
 | WP15 | [`analyze` leaves out a plugin's files outside its PSR-4 roots](todo/wordpress.md#wp15-analyze-leaves-out-a-plugins-files-outside-its-psr-4-roots) | Medium      | Low         |
 | WP6 | [Template parts](todo/wordpress.md#wp6-template-parts) | Medium      | Medium      |

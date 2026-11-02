@@ -6,7 +6,9 @@ WordPress gets the generic engine, plus the output constants (`OBJECT`,
 decides that they declare too wide (`src/wordpress/`), or that no PHPDoc
 type can spell (`src/type_engine/type_ops/call_site_returns/wordpress.rs`).
 Hook names navigate between the places that fire a hook and its listeners
-(`src/wordpress/hooks.rs`). Core's functions
+(`src/wordpress/hooks.rs`), core's and the installed plugins' read from
+their files, or core's from a list in the binary when only the stubs are
+installed (`src/wordpress/hook_sources.rs`). Core's functions
 and classes resolve only when the project indexes WordPress itself or a
 stub package for it. The stubs' own type tests run in
 `tests/wordpress_stubs/`, and what the engine reads wrongly in them is
@@ -35,7 +37,7 @@ installed. Of their 104 and 232 diagnostics (2026-11-02), most are what
 the stubs or the projects' own docblocks declare, and PHPStan reports
 them too. What they show PHPantom getting wrong is filed below under
 WP3, WP9 and WP15. Hooks and template parts produce no diagnostics
-today, so the baseline cannot rank WP5, WP6 and WP16; they rank by what an
+today, so the baseline cannot rank WP5 and WP6; they rank by what an
 editor user compares first.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
@@ -121,6 +123,11 @@ plugins the code calls into (WooCommerce, ACF) are the same question one
 level over; decide whether to index the whole `wp-content/plugins/`
 tree or only what the workspace references.
 
+The hooks core and the sibling plugins fire belong with them: today
+`src/wordpress/hook_sources.rs` reads the hooks of the WordPress packages
+Composer installs, and falls back to its list of core's hook names, so a
+plugin opened on its own completes core's hooks but cannot go to them.
+
 This follows the rule in `external-stubs.md`: Drupal's web root and
 sibling editor folders are detected, never typed by the user, and every
 new source of PHP maps onto an existing role.
@@ -134,35 +141,6 @@ but leaves 18 members "could not be resolved" on the object it builds.
 **Where to look:** `src/classmap_scanner/discovery.rs`
 (`scan_drupal_directories` is the closest precedent),
 `src/config/indexing.rs`.
-
----
-
-## WP16. Core's hook names outside the project's own files
-
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-add_action('init', [$this, 'registerBlocks']);   // goes nowhere, `init` is not completed
-```
-
-Hook names are read from the symbol maps of the project's own files, so
-core's hooks are known only when the workspace is a whole install with
-`wp-includes/` and `wp-admin/` in it. The stubs fire no hook (their
-functions have no bodies), and a dependency's files are left out: core
-installed with Composer (`roots/wordpress`, `johnpbloch/wordpress-core`),
-WooCommerce, and the install [WP3](#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own)
-finds above a plugin opened on its own. So a use of `init` or `save_post`
-has nowhere to go and core's names are not completed, which are the hooks
-a plugin uses most.
-
-Read the places a dependency fires its hooks from its files when they are
-installed, as names to complete and go to rather than as the project's
-own (a rename must not reach them), and decide what a project with only
-the stubs gets: the hook list `wp-hooks/wordpress-core` publishes (every
-core hook with its docblock, which WP5 could read too) is one source.
-
-**Where to look:** `src/wordpress/hooks.rs` (`note_wordpress_hooks`
-leaves out vendor files).
 
 ---
 
@@ -194,6 +172,11 @@ PHPStan's WordPress extension also checks a callback against the hook:
 too few accepted arguments for the parameters it declares (the fourth
 argument of `add_action()`), and a filter callback that returns nothing.
 Those are good diagnostics once the types are there.
+
+A project with only the stubs has no core to read the docblocks from: the
+list of core's hooks in `src/wordpress/core_hooks.txt` holds names only.
+The hook list `wp-hooks/wordpress-core` publishes has every core hook with
+its docblock, and could take its place.
 
 **Where to look:**
 `src/type_engine/variable/forward_walk/callable_inference.rs`, and PHPStan's

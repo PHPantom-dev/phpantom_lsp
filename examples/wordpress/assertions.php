@@ -108,6 +108,13 @@ check('ARRAY_A is defined', defined('ARRAY_A'));
 check('$wpdb is a wpdb', $GLOBALS['wpdb'] instanceof wpdb);
 check('$wp_query is a WP_Query', $GLOBALS['wp_query'] instanceof WP_Query);
 
+// ── Plugin: Plugin ──────────────────────────────────────────────────────────
+
+check(
+    'core fires the init hook the plugin listens to',
+    has_action('init', [ProductPostType::class, 'register']) !== false && did_action('init') > 0,
+);
+
 // ── Plugin: ProductPostType ─────────────────────────────────────────────────
 
 check('register_post_type() returns a WP_Post_Type', ProductPostType::register() instanceof WP_Post_Type);

@@ -5,8 +5,9 @@
 //! A name built at runtime, interpolated (`"save_post_{$post->post_type}"`)
 //! or concatenated (`'save_post_' . $post->post_type`), is recorded as a
 //! pattern: its literal parts, and each computed part as its source text in
-//! braces. A name with no literal part at all names no hook in particular,
-//! and is left out.
+//! braces. A name with no letter or digit in its literal parts
+//! (`"{$new_status}_{$post->post_type}"`) names no hook in particular: it
+//! matches nearly every name. It is left out.
 
 use super::*;
 use crate::symbol_map::StringKeyKind;
@@ -50,7 +51,7 @@ pub(in crate::symbol_map::extraction) fn emit_wordpress_hook_span(
 
 /// The hook name `expr` spells, and the byte range of the literal that
 /// spells it: the whole string's contents for a literal name, its first
-/// literal part for a pattern.
+/// literal part with a word in it for a pattern.
 fn hook_name(expr: &Expression<'_>, content: &str) -> Option<(String, u32, u32)> {
     if let Some((value, start, end)) = resolved_string_literal(expr, content) {
         // A brace would read as a computed part.
@@ -106,7 +107,8 @@ fn hook_name(expr: &Expression<'_>, content: &str) -> Option<(String, u32, u32)>
 #[derive(Default)]
 struct Pattern {
     key: String,
-    /// The byte range of the first non-empty literal part.
+    /// The byte range of the first literal part with a letter or digit in
+    /// it.
     first_literal: Option<(u32, u32)>,
 }
 
@@ -117,7 +119,7 @@ impl Pattern {
         if value.contains('{') {
             return None;
         }
-        if !value.is_empty() && self.first_literal.is_none() {
+        if self.first_literal.is_none() && value.chars().any(char::is_alphanumeric) {
             self.first_literal = Some((start, end));
         }
         self.key.push_str(value);

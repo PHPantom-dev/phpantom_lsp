@@ -96,6 +96,8 @@ do_action('acme_status_' . $order->status . '_done');
 do_action("acme_$step");
 do_action($dynamic);
 do_action("{$dynamic}");
+do_action("{$old}_{$new}");
+do_action("{$old}_to_{$new}");
 do_action('braces{}');
 Other\do_action('qualified');
 $hooks->add_action('method');
@@ -118,6 +120,7 @@ $hooks->add_action('method');
                 true
             ),
             ("acme_{$step}".into(), "acme_".into(), true),
+            ("{$old}_to_{$new}".into(), "_to_".into(), true),
         ]
     );
 }

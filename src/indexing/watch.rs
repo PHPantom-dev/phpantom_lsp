@@ -142,6 +142,7 @@ impl Backend {
             self.rescan_composer_indexes(root, &batch.composer_changes);
             self.forget_vendor_twig_callables();
             self.forget_symfony_bundle_declarations();
+            self.forget_wordpress_dependency_hooks();
         }
 
         if !batch.resource_changes.is_empty() {
