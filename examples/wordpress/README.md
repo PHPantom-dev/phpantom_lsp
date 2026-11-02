@@ -22,6 +22,13 @@ most typed WordPress projects get core's declarations.
   `src/ProductShortcode.php`, or complete a key inside `$args['']`.
 - `is_wp_error()` narrows. In `ProductRepository::create()`, `$id` is an
   `int` once the error has been returned.
+- Hook names navigate between the places that fire a hook and the ones that
+  listen to it. In the theme's `functions.php`, go to the definition of
+  `'acme_shop_product_created'` (it jumps to the `do_action()` in
+  `ProductRepository::create()`), find its references, rename it, or
+  complete inside the quotes of an `add_action()`.
+  `'acme_shop_saved_acme_product'` goes to a hook the plugin fires under a
+  name it builds at runtime.
 - A `@global` tag types the global a function imports. Complete after
   `$wpdb->` in `ProductRepository::countInStock()`, or after `$wp_query->`
   in the theme's `acme_theme_last_page()`.

@@ -5,7 +5,8 @@ WordPress gets the generic engine, plus the output constants (`OBJECT`,
 `ARRAY_A`, …) its stubs leave out and the return types an argument
 decides that they declare too wide (`src/wordpress/`), or that no PHPDoc
 type can spell (`src/type_engine/type_ops/call_site_returns/wordpress.rs`).
-Core's functions
+Hook names navigate between the places that fire a hook and its listeners
+(`src/wordpress/hooks.rs`). Core's functions
 and classes resolve only when the project indexes WordPress itself or a
 stub package for it. The stubs' own type tests run in
 `tests/wordpress_stubs/`, and what the engine reads wrongly in them is
@@ -35,7 +36,7 @@ installed. Of their 104 and 232 diagnostics (2026-11-02), most are what
 the stubs or the projects' own docblocks declare, and PHPStan reports
 them too. What they show PHPantom getting wrong is filed below under
 WP3, WP9 and WP15. Hooks and template parts produce no diagnostics
-today, so the baseline cannot rank WP4 to WP6; they rank by what an
+today, so the baseline cannot rank WP5, WP6 and WP16; they rank by what an
 editor user compares first.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
@@ -137,54 +138,38 @@ but leaves 18 members "could not be resolved" on the object it builds.
 
 ---
 
-## WP4. Hook names
+## WP16. Core's hook names outside the project's own files
 
-**Impact: High · Complexity: Medium**
+**Impact: Medium-High · Complexity: Medium**
 
 ```php
-add_action('acme_order_placed', [$this, 'sendReceipt']);
-
-do_action('acme_order_placed', $order);
+add_action('init', [$this, 'registerBlocks']);   // goes nowhere, `init` is not completed
 ```
 
-The hook name is the string that ties a listener to the place that fires
-it, and nothing navigates between the two today. Treat it as a string
-key, the way Laravel's route, config, and translation names are:
+Hook names are read from the symbol maps of the project's own files, so
+core's hooks are known only when the workspace is a whole install with
+`wp-includes/` and `wp-admin/` in it. The stubs fire no hook (their
+functions have no bodies), and a dependency's files are left out: core
+installed with Composer (`roots/wordpress`, `johnpbloch/wordpress-core`),
+WooCommerce, and the install [WP3](#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own)
+finds above a plugin opened on its own. So a use of `init` or `save_post`
+has nowhere to go and core's names are not completed, which are the hooks
+a plugin uses most.
 
-- **Declarations**: `do_action()`, `do_action_ref_array()`,
-  `do_action_deprecated()`, `apply_filters()`,
-  `apply_filters_ref_array()`, `apply_filters_deprecated()`.
-- **Uses**: `add_action()`, `add_filter()`, `remove_action()`,
-  `remove_filter()`, `has_action()`, `has_filter()`, `did_action()`,
-  `doing_action()`.
-- **Features**: completion of hook names in a use, go-to-definition from
-  a use to every place that fires it, find references, rename, and
-  document highlight.
-- **Dynamic names**: core fires many hooks with an interpolated name
-  (`"save_post_{$post->post_type}"`). Match a use against the literal
-  parts, and offer the pattern in completion.
+Read the places a dependency fires its hooks from its files when they are
+installed, as names to complete and go to rather than as the project's
+own (a rename must not reach them), and decide what a project with only
+the stubs gets: the hook list `wp-hooks/wordpress-core` publishes (every
+core hook with its docblock, which WP5 could read too) is one source.
 
-Reporting a hook nothing fires is not safe as a default: a plugin
-listens to hooks that other plugins or a future core version fire. If it
-is done at all, it belongs behind an opt-in.
-
-PHP Tools added hook navigation in 2026, and PhpStorm has it built in,
-so this is the feature a WordPress developer will compare first.
-PhpStorm, pointed at a WordPress install, completes core's and the
-project's own hook names in `add_action('…')`, navigates from a use to
-where the hook fires, and marks both ends in the gutter. Its completion
-only opens on an explicit Ctrl+Space; ours opens on the quote, since `'`
-and `"` are already completion triggers.
-
-**Where to look:** the string-key machinery Laravel and Symfony names
-use (`src/virtual_members/laravel/string_keys.rs`,
-`src/symbol_map/extraction/symfony.rs`).
+**Where to look:** `src/wordpress/hooks.rs` (`note_wordpress_hooks`
+leaves out vendor files).
 
 ---
 
 ## WP5. Hook callback parameter and return types
 
-**Impact: Medium-High · Complexity: Medium-High** (depends on WP4)
+**Impact: Medium-High · Complexity: Medium-High**
 
 ```php
 /**
@@ -202,7 +187,7 @@ add_filter('the_content', function ($content) {
 Core documents every hook with a docblock above the call that fires it.
 Its `@param` tags type the callback's parameters, and a filter's first
 `@param` is also what the callback must return and what
-`apply_filters()` returns. With WP4 linking a callback to its hook, the
+`apply_filters()` returns. With a callback linked to its hook by name, the
 closure parameter inference that already feeds `array_map()` callbacks
 can feed hook callbacks from the same docblock.
 

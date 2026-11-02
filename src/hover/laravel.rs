@@ -328,6 +328,7 @@ impl Backend {
                     );
                 ("View", detail)
             }
+            StringKeyKind::WordPressHook => ("Hook", self.wordpress_hook_detail(key)),
         };
 
         Some(make_hover(format!(

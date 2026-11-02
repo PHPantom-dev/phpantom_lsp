@@ -531,6 +531,7 @@ impl Backend {
                 None => files.get(&update.uri).and_then(|old| old.blade.clone()),
             };
             self.note_symfony_declarations(&update.uri, &update.symbol_map);
+            self.note_wordpress_hooks(&update.uri, &update.symbol_map);
             let state = crate::file_state::FileState {
                 symbol_map: Some(Arc::clone(&update.symbol_map)),
                 parse_errors: std::mem::take(&mut update.parse_errors),
@@ -554,6 +555,7 @@ impl Backend {
         let mut files = self.files.write();
         for (uri, map) in maps {
             self.note_symfony_declarations(&uri, &map);
+            self.note_wordpress_hooks(&uri, &map);
             let state = match files.get(&uri) {
                 Some(state) => state.with_symbol_map(map),
                 None => crate::file_state::FileState {

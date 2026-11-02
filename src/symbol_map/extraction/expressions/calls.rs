@@ -402,6 +402,7 @@ fn extract_function_call<'a>(
                 &func_call.argument_list,
                 ctx,
             );
+            emit_wordpress_hook_span(raw, &func_call.argument_list, ctx);
             if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
                 ctx.content,
                 name_clean,

@@ -79,6 +79,7 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::YiiRoute => backend.symfony_declaration_locations(*kind, key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
         StringKeyKind::YiiRouteArgument => backend.yii_route_argument_locations(key),
+        StringKeyKind::WordPressHook => backend.wordpress_hook_definitions(key),
     }
 }
 
@@ -287,6 +288,11 @@ pub(crate) fn find_laravel_string_key_references(
         // by the file they name rather than in the key's snapshot.
         StringKeyKind::YiiView => {
             return backend.find_yii_view_references(key, include_declaration);
+        }
+        // A pattern only names a hook by matching it, so the places that
+        // fire or use it are found by matching too.
+        StringKeyKind::WordPressHook => {
+            return backend.wordpress_hook_references(key, include_declaration, false);
         }
     };
 

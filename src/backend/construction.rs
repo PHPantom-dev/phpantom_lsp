@@ -110,6 +110,7 @@ impl BackendState {
             is_yii: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             twig: crate::twig::TwigState::default(),
             yii: crate::yii::YiiState::default(),
+            wordpress_hooks: crate::wordpress::hooks::HookFiles::default(),
             pest_configs: Arc::new(RwLock::new(None)),
             member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
             diag: crate::diagnostics::state::DiagnosticState::new(),

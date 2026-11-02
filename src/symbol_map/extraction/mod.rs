@@ -284,6 +284,7 @@ mod phpunit;
 mod statements;
 mod subject_text;
 mod symfony;
+mod wordpress;
 mod yii;
 mod yii_routes;
 
@@ -295,6 +296,7 @@ use phpunit::*;
 use statements::*;
 use subject_text::*;
 use symfony::*;
+use wordpress::*;
 use yii::*;
 use yii_routes::*;
 

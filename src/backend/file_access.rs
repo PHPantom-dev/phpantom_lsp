@@ -461,6 +461,7 @@ impl Backend {
         self.evict_reference_index_uri(uri);
         self.remove_framework_uri(uri);
         self.forget_symfony_declarations(uri);
+        self.forget_wordpress_hooks(uri);
         // Likewise a template's injected variables.
         self.blade.uris.write().remove(uri);
         self.blade.injected_vars.write().remove(uri);

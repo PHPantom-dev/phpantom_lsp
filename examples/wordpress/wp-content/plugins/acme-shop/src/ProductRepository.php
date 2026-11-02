@@ -70,6 +70,15 @@ final class ProductRepository
         update_post_meta($id, '_acme_sku', $sku);
         update_post_meta($id, '_acme_price', $price);
 
+        // Try: find the references of the hook name, or rename it. The
+        // theme's functions.php listens to it.
+        do_action('acme_shop_product_created', $id);
+
+        // Try: find the references of this hook name too. It is built at
+        // runtime, the way core builds 'save_post_{$post->post_type}', and
+        // the theme listens to the name it builds, 'acme_shop_saved_acme_product'.
+        do_action('acme_shop_saved_' . ProductPostType::NAME, $id);
+
         return $id;
     }
 

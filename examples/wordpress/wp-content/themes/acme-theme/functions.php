@@ -58,6 +58,21 @@ function acme_theme_first_category_link(WP_Post $post): string
     return is_wp_error($link) ? '' : $link;
 }
 
+// Try: go to the definition of the hook name. It jumps to where
+// ProductRepository::create() in the plugin fires it. Inside the quotes,
+// completion offers every hook the plugin and the theme fire or listen to.
+add_action('acme_shop_product_created', 'acme_theme_forget_products');
+
+// Try: go to the definition of this one too. The plugin fires it under a
+// name it builds, 'acme_shop_saved_' . ProductPostType::NAME, which this
+// name matches.
+add_action('acme_shop_saved_acme_product', 'acme_theme_forget_products');
+
+function acme_theme_forget_products(): void
+{
+    wp_cache_delete('acme_theme_products');
+}
+
 add_action('wp_enqueue_scripts', 'acme_theme_enqueue_assets');
 
 function acme_theme_enqueue_assets(): void

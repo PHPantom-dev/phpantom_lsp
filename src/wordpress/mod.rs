@@ -13,6 +13,11 @@
 //! type no PHPDoc type can spell (the shape `wp_parse_args()` merges, the
 //! literal `trailingslashit('foo')` returns) is read off the call's
 //! arguments in `type_engine::type_ops::call_site_returns`.
+//!
+//! Hook names tie a listener to the places that fire it, and navigate as
+//! string keys (see [`hooks`]).
+
+pub(crate) mod hooks;
 
 use std::path::{Path, PathBuf};
 

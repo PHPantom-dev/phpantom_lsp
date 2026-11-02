@@ -530,6 +530,8 @@ pub struct BackendState {
     pub(crate) is_yii: Arc<std::sync::atomic::AtomicBool>,
     /// The Yii path aliases the project's configuration declares.
     pub(crate) yii: yii::YiiState,
+    /// The files that fire or use a WordPress hook.
+    pub(crate) wordpress_hooks: wordpress::hooks::HookFiles,
     /// The `Pest.php` files of the project's test directories, read on
     /// first use and dropped when one is saved.  `None` until then.
     pub(crate) pest_configs: Arc<RwLock<Option<pest::PestConfigs>>>,

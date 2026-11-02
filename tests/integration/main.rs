@@ -297,6 +297,7 @@ mod twig_templates;
 mod type_definition;
 mod type_hierarchy;
 mod watched_files;
+mod wordpress_hooks;
 mod workspace_symbols;
 mod yii_routes;
 mod yii_views;

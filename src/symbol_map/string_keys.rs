@@ -121,6 +121,14 @@ pub(crate) enum StringKeyKind {
     /// under the routes that dispatch to that handler, whose paths declare
     /// it.
     YiiRouteArgument,
+    /// A WordPress hook name: declared by each place that fires it (a
+    /// `do_action()`, an `apply_filters()`, and their `_ref_array` and
+    /// `_deprecated` forms), and read by `add_action()`, `add_filter()`, and
+    /// the rest of the listener API. A name built at runtime
+    /// (`"save_post_{$post->post_type}"`) is stored as a pattern (see
+    /// `wordpress::hooks`), which a literal name matches by its literal
+    /// parts.
+    WordPressHook,
 }
 
 impl StringKeyKind {
@@ -156,6 +164,11 @@ impl StringKeyKind {
             self,
             Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument
         )
+    }
+
+    /// Whether this key belongs to WordPress.
+    pub(crate) const fn is_wordpress(self) -> bool {
+        matches!(self, Self::WordPressHook)
     }
 }
 

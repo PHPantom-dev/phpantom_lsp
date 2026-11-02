@@ -162,6 +162,11 @@ impl Backend {
     pub(crate) fn string_key_kind_enabled(&self, kind: StringKeyKind) -> bool {
         if kind == StringKeyKind::TwigTemplate {
             self.is_twig_project()
+        } else if kind.is_wordpress() {
+            // The hook functions' names are WordPress's own, and a project
+            // that calls them is a WordPress one whatever its
+            // `composer.json` says, or whether it has one at all.
+            true
         } else if kind.is_yii() {
             self.is_yii_project()
         } else if kind.is_symfony() {

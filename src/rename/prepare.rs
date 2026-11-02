@@ -276,7 +276,10 @@ impl Backend {
         }
 
         if !is_valid_new_name(&span.kind, new_name) {
-            return Err(format!("`{new_name}` is not a valid PHP name"));
+            return Err(match span.kind {
+                SymbolKind::StringKey { .. } => format!("`{new_name}` is not a valid hook name"),
+                _ => format!("`{new_name}` is not a valid PHP name"),
+            });
         }
 
         if let SymbolKind::NamespaceDeclaration { ref name } = span.kind {
@@ -701,6 +704,12 @@ impl Backend {
             SymbolKind::ConstantReference { name, .. } => Some((name.to_string(), range)),
             SymbolKind::NamespaceDeclaration { name } => Some((name.to_string(), range)),
             SymbolKind::LaravelMacroString { name } => Some((name.clone(), range)),
+            // A pattern does not spell the hooks it matches.
+            SymbolKind::StringKey {
+                kind: crate::symbol_map::StringKeyKind::WordPressHook,
+                key,
+                ..
+            } if !crate::wordpress::hooks::is_pattern(key) => Some((key.clone(), range)),
             SymbolKind::SelfStaticParent { .. } => None,
             SymbolKind::StringKey { .. }
             | SymbolKind::CommandOwnParam { .. }

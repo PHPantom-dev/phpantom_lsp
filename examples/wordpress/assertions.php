@@ -192,6 +192,16 @@ wp_set_current_user(1);
 // ── Theme ───────────────────────────────────────────────────────────────────
 
 check('acme_theme_price() formats the price meta', acme_theme_price($id) === '12.50');
+check(
+    'the theme listens to the hook create() fires',
+    has_action('acme_shop_product_created', 'acme_theme_forget_products') !== false
+        && did_action('acme_shop_product_created') > 0,
+);
+check(
+    'the name create() builds is the one the theme listens to',
+    has_action('acme_shop_saved_acme_product', 'acme_theme_forget_products') !== false
+        && did_action('acme_shop_saved_acme_product') > 0,
+);
 check('acme_theme_last_page() returns an int', is_int(acme_theme_last_page()));
 check('trailingslashit() appends one slash', trailingslashit('assets') === 'assets/');
 
