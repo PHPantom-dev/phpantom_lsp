@@ -15,6 +15,7 @@ use std::sync::atomic::Ordering;
 
 use parking_lot::RwLock;
 
+pub(crate) mod links;
 pub(crate) mod types;
 
 use crate::Backend;
@@ -41,6 +42,8 @@ pub(crate) enum DeclarationFile {
     Services,
     /// `<extension>.routing.yml`.
     Routing,
+    /// `<extension>.links.{menu,task,action,contextual}.yml`.
+    Links,
 }
 
 /// The kind of declaration file the file name at the end of `path` is, if
@@ -52,6 +55,16 @@ fn declaration_file_kind(path: &str) -> Option<DeclarationFile> {
         Some(DeclarationFile::Services)
     } else if name.ends_with(".routing.yml") {
         Some(DeclarationFile::Routing)
+    } else if [
+        ".links.menu.yml",
+        ".links.task.yml",
+        ".links.action.yml",
+        ".links.contextual.yml",
+    ]
+    .iter()
+    .any(|suffix| name.ends_with(suffix))
+    {
+        Some(DeclarationFile::Links)
     } else {
         None
     }
@@ -258,18 +271,11 @@ impl Backend {
             && !self.open_files.read().contains_key(uri)
     }
 
-    /// Whether `uri` is a file a Drupal project loads services from: a
-    /// services file inside one of its web roots, outside test modules
-    /// unless it is open.
+    /// The kind of declaration file `uri` is in a Drupal project: one
+    /// inside one of its web roots, outside test modules unless it is open.
     ///
     /// Other YAML files in a Drupal project have a `services:` key with
     /// another meaning, or none at all.
-    pub(crate) fn is_drupal_services_uri(&self, uri: &str) -> bool {
-        self.drupal_declaration_file(uri) == Some(DeclarationFile::Services)
-    }
-
-    /// The kind of declaration file `uri` is in a Drupal project: one
-    /// inside one of its web roots, outside test modules unless it is open.
     pub(crate) fn drupal_declaration_file(&self, uri: &str) -> Option<DeclarationFile> {
         if !self.is_drupal_project() {
             return None;

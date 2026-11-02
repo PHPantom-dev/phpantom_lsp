@@ -289,6 +289,9 @@ impl Backend {
                 crate::drupal::DeclarationFile::Routing => {
                     spans = crate::symfony::routes::drupal_routing_spans(content);
                 }
+                crate::drupal::DeclarationFile::Links => {
+                    spans = crate::drupal::links::links_route_spans(content);
+                }
             }
         } else if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
             declares_twig_loader = crate::symfony::tags::tags_twig_loader(content);

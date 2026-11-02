@@ -5,6 +5,7 @@ use crate::common::{completion_response, hover_text_at, response_labels};
 use crate::drupal_services::{
     definitions_at, position_in, references_at, uri_for, workspace, workspace_in,
 };
+use tower_lsp_server::gen_lsp_types::Position;
 
 /// Just enough of core's routing API, where Composer would put core.
 const ROUTING_STUBS: &[(&str, &str)] = &[
@@ -141,6 +142,10 @@ async fn core_routes_complete_and_test_modules_do_not() {
             "web/core/modules/system/tests/modules/router_test/router_test.routing.yml",
             "router_test.1:\n  path: '/router_test/test1'\n",
         ),
+        (
+            "web/core/modules/node/node.links.action.yml",
+            "node.add_page:\n  route_name: node.add_page\n  appears_on:\n    - system.admin_content\n",
+        ),
     ] {
         let full = dir.path().join(path);
         std::fs::create_dir_all(full.parent().unwrap()).unwrap();
@@ -160,6 +165,15 @@ async fn core_routes_complete_and_test_modules_do_not() {
         position_in(&consumer, "new Url('acme.greeting')", 10),
     )
     .await;
+    let system = uri_for(&dir, "web/core/modules/system/system.routing.yml");
+    let found = references_at(&backend, &system, Position::new(2, 3)).await;
+    assert!(
+        found.contains(&(
+            uri_for(&dir, "web/core/modules/node/node.links.action.yml"),
+            3
+        )),
+        "{found:?}"
+    );
 
     for (needle, inside) in [
         ("fromRoute('')", 11),
@@ -206,4 +220,70 @@ final class Links {
     let yaml = uri_for(&dir, ROUTING_PATH);
     let found = references_at(&backend, &yaml, position_in(ROUTING, "acme.greeting", 2)).await;
     assert_eq!(found, vec![(yaml, 0), (php.clone(), 8), (php, 9)]);
+}
+
+const TASKS: &str = "acme.greeting_tab:\n  route_name: acme.greeting\n  base_route: 'acme.greeting'\n  parent_id: acme.greeting\n  title: 'Greeting'\n";
+const TASKS_PATH: &str = "web/modules/custom/acme/acme.links.task.yml";
+const ACTIONS: &str = "acme.add:\n  route_name: \"acme.greeting\"\n  appears_on:\n    - acme.greeting\n    - 'acme.greeting' # the list\n  parent: acme.greeting\nacme.flow:\n  route_name: acme.greeting\n  appears_on: [acme.greeting, 'acme.greeting']\n";
+const ACTIONS_PATH: &str = "web/modules/custom/acme/acme.links.action.yml";
+
+/// Links files place routes by name: `route_name`, `base_route`, and the
+/// items of `appears_on`, but not the menu link or task a `parent` names.
+#[tokio::test]
+async fn links_files_read_route_names() {
+    let (backend, dir) = workspace(&files(&[
+        (ROUTING_PATH, ROUTING),
+        (TASKS_PATH, TASKS),
+        (ACTIONS_PATH, ACTIONS),
+    ]))
+    .await;
+    let yaml = uri_for(&dir, ROUTING_PATH);
+    let tasks = uri_for(&dir, TASKS_PATH);
+    let actions = uri_for(&dir, ACTIONS_PATH);
+
+    let found = definitions_at(&backend, &tasks, position_in(TASKS, "acme.greeting\n", 3)).await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((&found[0].uri, found[0].range.start.line), (&yaml, 0));
+
+    let found = references_at(&backend, &yaml, position_in(ROUTING, "acme.greeting", 2)).await;
+    let mut expected = vec![
+        (yaml, 0),
+        (tasks.clone(), 1),
+        (tasks, 2),
+        (actions.clone(), 1),
+        (actions.clone(), 3),
+        (actions.clone(), 4),
+        (actions.clone(), 7),
+        (actions.clone(), 8),
+        (actions, 8),
+    ];
+    expected.sort();
+    assert_eq!(found, expected);
+}
+
+#[tokio::test]
+async fn links_files_complete_route_names() {
+    for (content, needle, inside) in [
+        ("acme.tab:\n  route_name: acme.gr\n", "acme.gr\n", 7),
+        ("acme.tab:\n  base_route: 'acme.\n", "'acme.", 6),
+        ("acme.add:\n  appears_on:\n    - \n", "- \n", 2),
+    ] {
+        let (backend, dir) =
+            workspace(&files(&[(ROUTING_PATH, ROUTING), (TASKS_PATH, content)])).await;
+        let position = position_in(content, needle, inside);
+        let labels = response_labels(
+            completion_response(
+                &backend,
+                &uri_for(&dir, TASKS_PATH),
+                position.line,
+                position.character,
+                None,
+            )
+            .await,
+        );
+        assert!(
+            labels.contains(&"acme.greeting".to_string()),
+            "{content}: {labels:?}"
+        );
+    }
 }
