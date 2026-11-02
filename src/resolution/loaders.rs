@@ -9,7 +9,7 @@ use crate::class_lookup::{Fqn, ResolvedClassLoader, SourceClassLoader};
 use crate::definition::member::MemberKind;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{CtxLoaders, FileCtx, Loaders, ResolutionCtx, VarResolutionCtx};
-use crate::types::{ClassInfo, FileContext, FunctionInfo, PerBlock};
+use crate::types::{ClassInfo, FileContext, FunctionInfo, PerBlock, ResolvedType};
 
 impl Backend {
     /// Return a class-loader closure bound to a [`FileContext`].
@@ -339,18 +339,22 @@ impl Backend {
 
     /// Check whether `cursor_offset` is inside a closure whose
     /// enclosing call site declares `@param-closure-this`, and if so
-    /// return the overridden class.
+    /// return what `$this` is bound to: one entry per class, with the
+    /// members of an intersection sharing its `type_string`.  Empty when
+    /// nothing rebinds `$this`.
     ///
     /// This is a convenience wrapper that builds the [`ResolutionCtx`]
-    /// and calls [`find_closure_this_override`] so that callers (hover,
+    /// and calls [`find_closure_this_types`] so that callers (hover,
     /// go-to-definition, go-to-type-definition) don't need to duplicate
     /// that boilerplate.
-    pub(crate) fn resolve_closure_this_override(
+    ///
+    /// [`find_closure_this_types`]: crate::type_engine::variable::closure_resolution::find_closure_this_types
+    pub(crate) fn resolve_closure_this_types(
         &self,
         uri: &str,
         content: &str,
         cursor_offset: u32,
-    ) -> Option<Arc<ClassInfo>> {
+    ) -> Vec<ResolvedType> {
         let ctx = self.file_context_at(uri, cursor_offset);
         if let Some(target) =
             crate::virtual_members::laravel::macro_closure_this_target(content, cursor_offset)
@@ -358,17 +362,20 @@ impl Backend {
             let target = self.facade_macro_concrete(&target).unwrap_or(target);
             if let Some(class) = self.find_or_load_class(&target) {
                 let class_loader = self.resolved_class_loader(&ctx);
-                return Some(crate::virtual_members::resolve_class_fully_maybe_cached(
-                    &class,
-                    &class_loader,
-                    Some(&self.resolved_class_cache),
-                ));
+                return vec![ResolvedType::from_arc(
+                    crate::virtual_members::resolve_class_fully_maybe_cached(
+                        &class,
+                        &class_loader,
+                        Some(&self.resolved_class_cache),
+                    ),
+                )];
             }
         }
         let loaders = self.file_loaders(&ctx);
-        crate::type_engine::variable::closure_resolution::find_closure_this_override(
+        crate::type_engine::variable::closure_resolution::find_closure_this_types(
             &loaders.resolution_ctx_at(content, cursor_offset),
         )
+        .unwrap_or_default()
     }
 
     /// Return a constant-value-loader closure bound to a [`FileContext`].
