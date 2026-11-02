@@ -3,6 +3,9 @@
 //! constructor calls read (see [`crate::drupal`]).
 
 use super::*;
+use crate::symbol_map::extraction::symfony::{
+    RouteDeclaration, RouteName, push_route_spans, route_declarations,
+};
 use crate::symbol_map::{EntityTypeSite, StringKeyKind};
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 
@@ -99,6 +102,73 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
             storage: storage.map(|storage| crate::atom::atom(&storage)),
         });
     }
+}
+
+/// Record the routes the `#[Route]` attributes of a controller declare, the
+/// way Drupal's attribute route discovery reads them.
+///
+/// Drupal looks for them in the classes under an extension's `Controller`
+/// namespace.  A route on a method is named by its `name:`, after the name
+/// of the class's own first `#[Route]`; one without a name is rejected.  A
+/// class with no routes on its methods and an `__invoke()` is a single
+/// action, and its own `#[Route]`s are its routes.
+pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || class.modifiers.contains_abstract() {
+        return;
+    }
+    let is_controller = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .is_some_and(is_controller_class);
+    if !is_controller {
+        return;
+    }
+    // Drupal's discovery reads attributes only, never `@Route` annotations.
+    let class_routes = route_declarations(&class.attribute_lists, None, class, ctx);
+    let prefix = match class_routes.first().map(|route| &route.name) {
+        Some(RouteName::Literal(name, _, _)) => name.as_str(),
+        _ => "",
+    };
+    let is_named = |route: &&RouteDeclaration| matches!(route.name, RouteName::Literal(..));
+    let mut spans = Vec::new();
+    let mut any_method_route = false;
+    let mut invokable = false;
+    for member in class.members.iter() {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        invokable |= bytes_to_str(method.name.value).eq_ignore_ascii_case("__invoke");
+        let routes = route_declarations(&method.attribute_lists, None, class, ctx);
+        any_method_route |= !routes.is_empty();
+        for route in routes.iter().filter(is_named) {
+            push_route_spans(
+                route,
+                prefix,
+                None,
+                StringKeyKind::DrupalRoute,
+                &[],
+                &mut spans,
+            );
+        }
+    }
+    if !any_method_route && invokable {
+        for route in class_routes.iter().filter(is_named) {
+            push_route_spans(route, "", None, StringKeyKind::DrupalRoute, &[], &mut spans);
+        }
+    }
+    ctx.spans.extend(spans);
+}
+
+/// Whether `fqn` is a class under an extension's (or core's) `Controller`
+/// namespace: `Drupal\<extension>\Controller\…`.
+fn is_controller_class(fqn: &str) -> bool {
+    let mut segments = fqn.trim_start_matches('\\').split('\\');
+    segments.next() == Some("Drupal")
+        && segments.next().is_some()
+        && segments.next() == Some("Controller")
+        && segments.next().is_some()
 }
 
 /// Record the route name `new Url('…')` reads.

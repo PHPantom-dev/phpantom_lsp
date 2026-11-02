@@ -83,6 +83,66 @@ fn a_routing_file_under_a_config_directory_is_drupals_in_a_symfony_site() {
     );
 }
 
+/// The route names `content`, published as the template at `path`, reads,
+/// with the kind of route each is read as.
+fn template_routes(
+    backend: &crate::Backend,
+    root: &Path,
+    path: &str,
+    content: &str,
+) -> Vec<(StringKeyKind, String)> {
+    let template = uri(root, path);
+    backend.update_resource_symbol_index(&template, content);
+    let map = backend
+        .symbol_map_for(&template)
+        .expect("the template's map");
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            crate::symbol_map::SymbolKind::StringKey { kind, key, .. }
+                if matches!(
+                    kind,
+                    StringKeyKind::DrupalRoute | StringKeyKind::SymfonyRoute
+                ) =>
+            {
+                Some((*kind, key.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_drupal_sites_templates_name_drupal_routes_in_a_symfony_project() {
+    let (backend, dir) = drupal_backend(&[]);
+    backend.set_is_symfony(true);
+    assert_eq!(
+        template_routes(
+            &backend,
+            dir.path(),
+            "web/modules/custom/acme/templates/acme.html.twig",
+            "{{ path('acme.greeting') }}\n",
+        ),
+        vec![(StringKeyKind::DrupalRoute, "acme.greeting".to_string())]
+    );
+}
+
+#[test]
+fn a_template_outside_the_web_root_names_symfony_routes() {
+    // A Symfony application beside the Drupal site, in the same workspace.
+    let (backend, dir) = drupal_backend(&[]);
+    backend.set_is_symfony(true);
+    assert_eq!(
+        template_routes(
+            &backend,
+            dir.path(),
+            "app/templates/base.html.twig",
+            "{{ path('blog_index') }}\n",
+        ),
+        vec![(StringKeyKind::SymfonyRoute, "blog_index".to_string())]
+    );
+}
+
 #[test]
 fn other_yaml_is_not_read_as_services() {
     let (backend, _dir) = drupal_backend(&[

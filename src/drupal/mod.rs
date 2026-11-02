@@ -271,6 +271,20 @@ impl Backend {
             && !self.open_files.read().contains_key(uri)
     }
 
+    /// Whether `uri` is inside one of the web roots of the workspace's
+    /// Drupal projects, where Drupal's own reading of a file wins over
+    /// Symfony's.
+    pub(crate) fn is_in_drupal_web_root(&self, uri: &str) -> bool {
+        self.is_drupal_project()
+            && crate::util::uri_to_path(uri).is_some_and(|path| {
+                self.drupal
+                    .web_roots
+                    .read()
+                    .iter()
+                    .any(|root| path.starts_with(root))
+            })
+    }
+
     /// The kind of declaration file `uri` is in a Drupal project: one
     /// inside one of its web roots, outside test modules unless it is open.
     ///

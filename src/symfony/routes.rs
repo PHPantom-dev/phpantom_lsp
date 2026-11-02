@@ -382,8 +382,9 @@ fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>, imports: &mut Vec<RouteI
 // ─── Twig ───────────────────────────────────────────────────────────────────
 
 /// The route names a Twig template's `path('…')` and `url('…')` calls
-/// read, sorted by offset.
-pub(crate) fn twig_route_spans(content: &str) -> Vec<SymbolSpan> {
+/// read, as `kind` keys (Symfony's and Drupal's Twig both have the two
+/// functions), sorted by offset.
+pub(crate) fn twig_route_spans(content: &str, kind: StringKeyKind) -> Vec<SymbolSpan> {
     let bytes = content.as_bytes();
     let mut spans = Vec::new();
     let mut cursor = 0usize;
@@ -417,8 +418,12 @@ pub(crate) fn twig_route_spans(content: &str) -> Vec<SymbolSpan> {
             break;
         };
         let name = &content[start..start + len];
-        if is_route_name(name) {
-            spans.push(route_span(name, start, false));
+        let is_name = match kind {
+            StringKeyKind::DrupalRoute => is_drupal_route_name(name),
+            _ => is_route_name(name),
+        };
+        if is_name {
+            spans.push(route_span_of(kind, name, start, false));
         }
         cursor = start + len + 1;
     }
@@ -574,7 +579,7 @@ mod tests {
     fn twig_reads_path_and_url_calls() {
         let twig = "{# path('commented') #}\n<a href=\"{{ path('blog_index') }}\">{{ url( \"blog_post\", {slug: post.slug}) }}</a>\n{{ app.request.path('not_a_route') }}{{ asset_path('nor_this') }}\n";
         assert_eq!(
-            routes(&twig_route_spans(twig), twig),
+            routes(&twig_route_spans(twig, StringKeyKind::SymfonyRoute), twig),
             vec![
                 ("blog_index".to_string(), false),
                 ("blog_post".to_string(), false),

@@ -348,9 +348,20 @@ impl Backend {
         let cursor = position_to_offset(content, position) as usize;
         let (kind, prefix_start) = if self.is_twig_template_uri(uri) {
             // Template names are Twig's, and route names and translation
-            // keys Symfony's.
+            // keys Symfony's; Drupal's Twig reads route names too.
             if !self.is_twig_project() {
-                return None;
+                if !self.is_drupal_project() {
+                    return None;
+                }
+                let start = crate::symfony::routes::twig_route_name_start(content, cursor)?;
+                return self.symfony_key_response(
+                    uri,
+                    StringKeyKind::DrupalRoute,
+                    content,
+                    start,
+                    cursor,
+                    position,
+                );
             }
             if is_symfony
                 && let Some((start, domain)) =
@@ -382,11 +393,25 @@ impl Backend {
             }
             if let Some(start) = crate::twig::templates::twig_template_name_start(content, cursor) {
                 (StringKeyKind::TwigTemplate, start)
+            } else if let Some(start) = self
+                .is_in_drupal_web_root(uri)
+                .then(|| crate::symfony::routes::twig_route_name_start(content, cursor))
+                .flatten()
+            {
+                // The templates in a Drupal web root name Drupal's routes,
+                // also when the site requires Symfony's container.
+                (StringKeyKind::DrupalRoute, start)
             } else if let Some(start) = is_symfony
                 .then(|| crate::symfony::routes::twig_route_name_start(content, cursor))
                 .flatten()
             {
                 (StringKeyKind::SymfonyRoute, start)
+            } else if let Some(start) = self
+                .is_drupal_project()
+                .then(|| crate::symfony::routes::twig_route_name_start(content, cursor))
+                .flatten()
+            {
+                (StringKeyKind::DrupalRoute, start)
             } else {
                 let (start, kind) = crate::twig::callables::callable_name_start(content, cursor)?;
                 let names = self.twig_callable_names(kind);

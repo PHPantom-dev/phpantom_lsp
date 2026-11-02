@@ -256,6 +256,8 @@ impl Backend {
             let spans = if is_template {
                 if self.is_twig_project() {
                     self.twig_template_spans(uri, content, is_symfony)
+                } else if self.is_drupal_project() {
+                    crate::symfony::routes::twig_route_spans(content, StringKeyKind::DrupalRoute)
                 } else {
                     Vec::new()
                 }
@@ -386,16 +388,32 @@ impl Backend {
 
 impl Backend {
     /// The spans of a Twig template: the names it is loaded by, the
-    /// templates, blocks, filters, functions, and variables it names, and in
-    /// a Symfony project the route names and translation keys it reads.
+    /// templates, blocks, filters, functions, and variables it names, the
+    /// route names it reads, Drupal's inside a Drupal web root and
+    /// Symfony's elsewhere in a Symfony project, and in a Symfony project
+    /// its translation keys.
     fn twig_template_spans(&self, uri: &str, content: &str, is_symfony: bool) -> Vec<SymbolSpan> {
         let roots = self.twig_roots();
         let names = crate::util::uri_to_path(uri)
             .map(|path| roots.template_names(&path))
             .unwrap_or_default();
         let mut spans = crate::twig::templates::template_declaration_spans(names);
+        // A Drupal site that requires Symfony's container is a Symfony
+        // project too, but the templates in its web root name Drupal's
+        // routes.  A Symfony application beside it keeps its own.
+        let route_kind = if self.is_in_drupal_web_root(uri) {
+            Some(StringKeyKind::DrupalRoute)
+        } else if is_symfony {
+            Some(StringKeyKind::SymfonyRoute)
+        } else if self.is_drupal_project() {
+            Some(StringKeyKind::DrupalRoute)
+        } else {
+            None
+        };
+        if let Some(kind) = route_kind {
+            spans.extend(crate::symfony::routes::twig_route_spans(content, kind));
+        }
         if is_symfony {
-            spans.extend(crate::symfony::routes::twig_route_spans(content));
             spans.extend(crate::symfony::translations::twig_translation_spans(
                 content,
             ));

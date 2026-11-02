@@ -287,3 +287,89 @@ async fn links_files_complete_route_names() {
         );
     }
 }
+
+const ROUTE_ATTRIBUTE: (&str, &str) = (
+    "web/core/lib/Symfony/Routing/Route.php",
+    "<?php\nnamespace Symfony\\Component\\Routing\\Attribute;\n#[\\Attribute]\nclass Route {\n    public function __construct(?string $path = null, ?string $name = null) {}\n}\n",
+);
+
+const ATTRIBUTE_CONTROLLER: &str = r#"<?php
+namespace Drupal\acme\Controller;
+
+use Symfony\Component\Routing\Attribute\Route;
+
+#[Route(path: '/notes', name: 'acme.notes.')]
+final class NoteController {
+    #[Route(path: '/list', name: 'list')]
+    public function list(): array { return []; }
+
+    #[Route(path: '/unnamed')]
+    public function unnamed(): array { return []; }
+}
+
+#[Route('/about', name: 'acme.about')]
+final class AboutController {
+    public function __invoke(): array { return []; }
+}
+"#;
+
+const ATTRIBUTE_PATH: &str = "web/modules/custom/acme/src/Controller/NoteController.php";
+
+const NOT_A_CONTROLLER: &str = r#"<?php
+namespace Drupal\acme\Form;
+
+use Symfony\Component\Routing\Attribute\Route;
+
+final class Elsewhere {
+    #[Route(path: '/elsewhere', name: 'acme.elsewhere')]
+    public function page(): array { return []; }
+}
+"#;
+
+const TEMPLATE: &str =
+    "<a href=\"{{ path('acme.notes.list') }}\">{{ url('acme.about') }}</a>\n{{ path('') }}\n";
+const TEMPLATE_PATH: &str = "web/modules/custom/acme/templates/acme-notes.html.twig";
+
+/// Drupal reads `#[Route]` on the classes of an extension's `Controller`
+/// namespace, and its Twig's `path()` and `url()` read route names.
+#[tokio::test]
+async fn route_attributes_declare_and_templates_read() {
+    let (backend, dir) = workspace(&files(&[
+        ROUTE_ATTRIBUTE,
+        (ATTRIBUTE_PATH, ATTRIBUTE_CONTROLLER),
+        (
+            "web/modules/custom/acme/src/Form/Elsewhere.php",
+            NOT_A_CONTROLLER,
+        ),
+        (TEMPLATE_PATH, TEMPLATE),
+    ]))
+    .await;
+    let php = uri_for(&dir, ATTRIBUTE_PATH);
+    let twig = uri_for(&dir, TEMPLATE_PATH);
+
+    for (needle, line) in [("path('acme.notes.list')", 7), ("url('acme.about')", 14)] {
+        let found = definitions_at(
+            &backend,
+            &twig,
+            position_in(TEMPLATE, needle, needle.find('\'').unwrap() + 2),
+        )
+        .await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!(
+            (&found[0].uri, found[0].range.start.line),
+            (&php, line),
+            "{needle}"
+        );
+    }
+
+    let position = position_in(TEMPLATE, "path('')", 6);
+    let labels = response_labels(
+        completion_response(&backend, &twig, position.line, position.character, None).await,
+    );
+    let mut routes: Vec<_> = labels
+        .iter()
+        .filter(|label| label.starts_with("acme."))
+        .collect();
+    routes.sort();
+    assert_eq!(routes, ["acme.about", "acme.notes.list"]);
+}
