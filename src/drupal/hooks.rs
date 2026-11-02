@@ -7,7 +7,9 @@
 //! `<extension>_<name>` in an extension's procedural files.  The
 //! extensions come from their `*.info.yml`.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::Backend;
 
@@ -35,6 +37,89 @@ pub(crate) enum DrupalFile {
     /// A file of a test module, which no real site enables: it neither
     /// documents nor implements a hook.
     Test,
+    /// An extension's procedural file, whose global functions named
+    /// `<extension>_<hook>` implement hooks.
+    Procedural(Procedural),
+}
+
+/// The extension a procedural file belongs to, and the names its
+/// functions can start with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Procedural {
+    /// The file's own extension, tried first.
+    pub extension: String,
+    /// Every extension of the file's group (modules and profiles, or
+    /// themes), longest name first, tried next.
+    pub group: Arc<[String]>,
+    /// The file is a `.post_update.php`, whose functions implement
+    /// `hook_post_update_NAME` and nothing Drupal collects.
+    pub post_update: bool,
+}
+
+/// The extensions of the workspace, by directory, and the names of each
+/// group, longest first.
+#[derive(Default)]
+pub(crate) struct ExtensionIndex {
+    by_dir: HashMap<PathBuf, (String, bool)>,
+    modules: Arc<[String]>,
+    themes: Arc<[String]>,
+}
+
+impl ExtensionIndex {
+    fn add(&mut self, extensions: Vec<Extension>) {
+        for extension in extensions {
+            self.by_dir
+                .insert(extension.dir, (extension.name, extension.is_theme));
+        }
+        let group = |is_theme: bool| -> Arc<[String]> {
+            let mut names: Vec<String> = self
+                .by_dir
+                .values()
+                .filter(|(_, theme)| *theme == is_theme)
+                .map(|(name, _)| name.clone())
+                .collect();
+            names.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+            names.dedup();
+            names.into()
+        };
+        self.modules = group(false);
+        self.themes = group(true);
+    }
+
+    /// The extension a file belongs to: the one of its nearest ancestor
+    /// directory holding an `.info.yml`, with that directory.
+    fn owner<'a>(&'a self, path: &'a Path) -> Option<(&'a Path, &'a str, bool)> {
+        path.ancestors().skip(1).find_map(|dir| {
+            self.by_dir
+                .get(dir)
+                .map(|(name, is_theme)| (dir, name.as_str(), *is_theme))
+        })
+    }
+}
+
+/// Whether a file at `relative` to its extension's directory is one the
+/// hook collector reads functions from.
+fn is_procedural_file(relative: &Path, is_theme: bool) -> bool {
+    let skipped: &[&str] = if is_theme {
+        &["tests", "js", "css", "templates"]
+    } else {
+        &["tests", "js", "css"]
+    };
+    let in_skipped = relative.parent().is_some_and(|dir| {
+        dir.components()
+            .any(|part| skipped.iter().any(|skip| part.as_os_str() == *skip))
+    });
+    let Some(name) = relative.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let suffixes: &[&str] = if is_theme {
+        &[".inc", ".theme"]
+    } else {
+        &[".module", ".inc", ".install", ".profile"]
+    };
+    let eligible = suffixes.iter().any(|suffix| name.ends_with(suffix))
+        || (is_theme && name == "theme-settings.php");
+    eligible && !in_skipped
 }
 
 /// Whether the file name at the end of `path` is an extension's
@@ -81,7 +166,7 @@ pub(crate) fn hook_class_extension(fqn: &str) -> Option<&str> {
 impl Backend {
     /// Remember the extensions the Drupal walk found.
     pub(crate) fn note_drupal_extensions(&self, extensions: Vec<Extension>) {
-        self.drupal.extensions.write().extend(extensions);
+        self.drupal.extensions.write().add(extensions);
     }
 
     /// What the PHP file at `uri` holds of hooks.
@@ -100,10 +185,48 @@ impl Backend {
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.ends_with(".api.php"));
         if is_api {
-            DrupalFile::Api
-        } else {
-            DrupalFile::Other
+            return DrupalFile::Api;
         }
+        self.procedural_file(&path)
+            .map_or(DrupalFile::Other, DrupalFile::Procedural)
+    }
+
+    /// The extension and group of a procedural file, by the extension that
+    /// owns it, or before the walk has read any `.info.yml` by the file's
+    /// own name (`acme.module`).
+    fn procedural_file(&self, path: &Path) -> Option<Procedural> {
+        let name = path.file_name()?.to_str()?;
+        let extensions = self.drupal.extensions.read();
+        let (extension, is_theme, relative) = match extensions.owner(path) {
+            Some((dir, extension, is_theme)) => (
+                extension.to_string(),
+                is_theme,
+                path.strip_prefix(dir).ok()?,
+            ),
+            None => {
+                let (stem, suffix) = name.rsplit_once('.')?;
+                let is_theme = match suffix {
+                    "module" | "install" | "profile" => false,
+                    "theme" => true,
+                    _ => return None,
+                };
+                (stem.to_string(), is_theme, Path::new(name))
+            }
+        };
+        let post_update = !is_theme && name.ends_with(".post_update.php");
+        if !post_update && !is_procedural_file(relative, is_theme) {
+            return None;
+        }
+        let group = if is_theme {
+            Arc::clone(&extensions.themes)
+        } else {
+            Arc::clone(&extensions.modules)
+        };
+        Some(Procedural {
+            extension,
+            group,
+            post_update,
+        })
     }
 }
 

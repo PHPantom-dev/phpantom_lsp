@@ -720,6 +720,95 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_hook_doc_span(
     });
 }
 
+/// The attributes that keep Drupal's hook collector from reading a
+/// procedural function: it implements its hook through a hook class.
+const LEGACY_HOOK_ATTRIBUTES: [&str; 3] = [
+    "Drupal\\Core\\Hook\\Attribute\\LegacyHook",
+    "Drupal\\Core\\Hook\\Attribute\\LegacyModuleImplementsAlter",
+    "Drupal\\Core\\Hook\\Attribute\\LegacyRequirementsHook",
+];
+const SCAN_STOP_ATTRIBUTE: &str = "Drupal\\Core\\Hook\\Attribute\\ProceduralHookScanStop";
+
+/// Record the hook a global function of an extension's procedural file
+/// implements, named `<extension>_<hook>` the way Drupal's hook collector
+/// reads it: the file's own extension first, then every extension of its
+/// group, longest first.  The span covers the hook after the extension, so
+/// the function's own span still answers on the extension part.
+pub(in crate::symbol_map::extraction) fn emit_drupal_procedural_hook_span(
+    function: &Function<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let crate::drupal::hooks::DrupalFile::Procedural(procedural) = &ctx.drupal_file else {
+        return;
+    };
+    if !ctx.drupal || ctx.drupal_hook_scan_stopped {
+        return;
+    }
+    if attributes_named(&function.attribute_lists, SCAN_STOP_ATTRIBUTE, ctx)
+        .next()
+        .is_some()
+    {
+        ctx.drupal_hook_scan_stopped = true;
+        return;
+    }
+    let is_legacy = LEGACY_HOOK_ATTRIBUTES.iter().any(|legacy| {
+        attributes_named(&function.attribute_lists, legacy, ctx)
+            .next()
+            .is_some()
+    });
+    let namespaced = ctx
+        .resolved_name_at(function.name.span.start.offset)
+        .is_some_and(|fqn| fqn.trim_start_matches('\\').contains('\\'));
+    if is_legacy || namespaced {
+        return;
+    }
+    let name = bytes_to_str(function.name.value);
+    let hook_of = |extension: &str| {
+        name.strip_prefix(extension)?
+            .strip_prefix('_')
+            .filter(|hook| !hook.is_empty())
+    };
+    // Only the file's own extension names an update function or a post
+    // update, which Drupal reads by the extension that owns the file.
+    let found = if procedural.post_update {
+        hook_of(&procedural.extension)
+            .filter(|hook| hook.starts_with("post_update_"))
+            .map(|hook| (procedural.extension.len(), hook))
+    } else {
+        hook_of(&procedural.extension)
+            .map(|hook| (procedural.extension.len(), hook))
+            .or_else(|| {
+                procedural.group.iter().find_map(|extension| {
+                    hook_of(extension)
+                        .filter(|hook| !starts_with_update_number(hook))
+                        .map(|hook| (extension.len(), hook))
+                })
+            })
+    };
+    let Some((prefix, hook)) = found else {
+        return;
+    };
+    let start = function.name.span.start.offset + prefix as u32 + 1;
+    let key = hook.to_string();
+    ctx.spans.push(SymbolSpan {
+        start,
+        end: start + key.len() as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalHook,
+            key,
+            is_write: false,
+            is_optional: false,
+        },
+    });
+}
+
+/// `update_` followed by a digit: an update function, which only the
+/// extension that owns the file names.
+fn starts_with_update_number(hook: &str) -> bool {
+    hook.strip_prefix("update_")
+        .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+}
+
 /// Record the hooks the `#[Hook]` attributes of a hook class implement:
 /// one on a method implements the hook for that method, one on the class
 /// for `__invoke()` or the `method:` it names.  Drupal discovers hook

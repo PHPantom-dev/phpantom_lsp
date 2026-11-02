@@ -40,7 +40,7 @@ pub(crate) struct DrupalState {
     /// implement hooks, which the workspace walk never reaches either.
     hook_php_files: RwLock<Vec<PathBuf>>,
     /// The modules, install profiles, and themes of every web root.
-    extensions: RwLock<Vec<hooks::Extension>>,
+    extensions: RwLock<hooks::ExtensionIndex>,
 }
 
 /// A kind of file Drupal reads declarations from.
@@ -281,7 +281,7 @@ impl Backend {
         self.drupal.web_roots.write().clear();
         self.drupal.declaration_files.write().clear();
         self.drupal.hook_php_files.write().clear();
-        self.drupal.extensions.write().clear();
+        *self.drupal.extensions.write() = hooks::ExtensionIndex::default();
     }
 
     /// Remember the declaration files the Drupal walk found: the YAML for

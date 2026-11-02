@@ -110,6 +110,9 @@ struct ExtractionCtx<'a> {
     drupal_routes: Vec<crate::symbol_map::DrupalRouteSite>,
     /// What the file holds of Drupal hooks, which its path says.
     drupal_file: crate::drupal::hooks::DrupalFile,
+    /// A procedural function with `#[ProceduralHookScanStop]` was read:
+    /// Drupal's hook collector reads no function after it.
+    drupal_hook_scan_stopped: bool,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -524,6 +527,7 @@ fn extract_symbol_map_inner(
         drupal_route_aliases: Vec::new(),
         drupal_routes: Vec::new(),
         drupal_file,
+        drupal_hook_scan_stopped: false,
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,

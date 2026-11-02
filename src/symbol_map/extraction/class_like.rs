@@ -924,6 +924,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
         },
     });
     emit_drupal_hook_doc_span(func, ctx);
+    emit_drupal_procedural_hook_span(func, ctx);
 
     // Docblock.  We extract type spans and template params now, but
     // defer `@param $var` variable spans until after we know
