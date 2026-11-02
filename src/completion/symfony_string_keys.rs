@@ -353,7 +353,7 @@ impl Backend {
                 if !self.is_drupal_project() {
                     return None;
                 }
-                let start = crate::symfony::routes::twig_route_name_start(content, cursor)?;
+                let start = crate::symfony::routes::drupal_twig_route_name_start(content, cursor)?;
                 return self.symfony_key_response(
                     uri,
                     StringKeyKind::DrupalRoute,
@@ -395,7 +395,7 @@ impl Backend {
                 (StringKeyKind::TwigTemplate, start)
             } else if let Some(start) = self
                 .is_in_drupal_web_root(uri)
-                .then(|| crate::symfony::routes::twig_route_name_start(content, cursor))
+                .then(|| crate::symfony::routes::drupal_twig_route_name_start(content, cursor))
                 .flatten()
             {
                 // The templates in a Drupal web root name Drupal's routes,
@@ -408,7 +408,7 @@ impl Backend {
                 (StringKeyKind::SymfonyRoute, start)
             } else if let Some(start) = self
                 .is_drupal_project()
-                .then(|| crate::symfony::routes::twig_route_name_start(content, cursor))
+                .then(|| crate::symfony::routes::drupal_twig_route_name_start(content, cursor))
                 .flatten()
             {
                 (StringKeyKind::DrupalRoute, start)

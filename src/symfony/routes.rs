@@ -446,10 +446,28 @@ fn route_function_before(before: &str) -> Option<&str> {
 /// Where the route name a Twig `path('` or `url('` the cursor is in starts,
 /// when the name typed so far runs up to `cursor`.
 pub(crate) fn twig_route_name_start(content: &str, cursor: usize) -> Option<usize> {
+    twig_route_name_start_where(content, cursor, |byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-')
+    })
+}
+
+/// [`twig_route_name_start`] for a Drupal route name, which may be one of
+/// the angle-bracketed routes such as `<front>`.
+pub(crate) fn drupal_twig_route_name_start(content: &str, cursor: usize) -> Option<usize> {
+    twig_route_name_start_where(content, cursor, |byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-' | b'<' | b'>')
+    })
+}
+
+fn twig_route_name_start_where(
+    content: &str,
+    cursor: usize,
+    is_name_byte: impl Fn(u8) -> bool,
+) -> Option<usize> {
     let before = content.get(..cursor)?;
     let name_start = before
         .bytes()
-        .rposition(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-')))
+        .rposition(|byte| !is_name_byte(byte))
         .map_or(0, |index| index + 1);
     let before_name = before[..name_start].strip_suffix(['\'', '"'])?;
     let before_paren = before_name.trim_end().strip_suffix('(')?;
@@ -585,6 +603,13 @@ mod tests {
                 ("blog_post".to_string(), false),
             ]
         );
+    }
+
+    #[test]
+    fn drupal_twig_completion_reads_angle_brackets() {
+        let twig = "{{ path('<fr";
+        assert_eq!(drupal_twig_route_name_start(twig, twig.len()), Some(9));
+        assert_eq!(twig_route_name_start(twig, twig.len()), None);
     }
 
     #[test]

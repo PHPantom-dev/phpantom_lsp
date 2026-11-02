@@ -26,8 +26,9 @@ pub(crate) fn links_route_spans(content: &str) -> Vec<SymbolSpan> {
         }
         let indent = crate::framework::leading_spaces(semantic);
         let text = &semantic[indent..];
+        // YAML lets a block list's items sit at its key's indentation.
         if let Some(list) = appears_on {
-            if indent > list
+            if indent >= list
                 && let Some(item) = text.strip_prefix('-')
             {
                 let item_start = line_start + indent + 1;
@@ -113,14 +114,18 @@ pub(crate) fn links_route_name_start(content: &str, cursor: usize) -> Option<usi
 }
 
 /// Whether a list item indented by `indent`, after the text `above`, is an
-/// item of an `appears_on:` list.
+/// item of an `appears_on:` list: the first line above it that is not an
+/// item of the same list is the key, indented no deeper than the item.
 fn in_appears_on(above: &str, indent: usize) -> bool {
     above
         .lines()
         .rev()
         .map(crate::symfony::resources::yaml_content_before_comment)
         .filter(|line| !line.trim().is_empty())
-        .find(|line| crate::framework::leading_spaces(line) < indent)
+        .find(|line| {
+            let line_indent = crate::framework::leading_spaces(line);
+            line_indent < indent || (line_indent == indent && !line[line_indent..].starts_with('-'))
+        })
         .is_some_and(|line| line.trim() == "appears_on:")
 }
 
@@ -137,8 +142,13 @@ mod tests {
 
     #[test]
     fn route_keys_and_appears_on_items_read_routes() {
-        let yaml = "a:\n  route_name: one\n  base_route: 'two'\n  parent_id: no\n  appears_on:\n    - three\n    - \"four\" # comment\n  parent: no\nb:\n  appears_on: [five, 'six']\nroute_name: not_a_link\n";
-        assert_eq!(routes(yaml), ["one", "two", "three", "four", "five", "six"]);
+        let yaml = "a:\n  route_name: one\n  base_route: 'two'\n  parent_id: no\n  appears_on:\n    - three\n    - \"four\" # comment\n  parent: no\nb:\n  appears_on: [five, 'six']\nc:\n  appears_on:\n  - seven\n  - eight\n  title: no\nroute_name: not_a_link\n";
+        assert_eq!(
+            routes(yaml),
+            [
+                "one", "two", "three", "four", "five", "six", "seven", "eight"
+            ]
+        );
     }
 
     #[test]
@@ -157,5 +167,10 @@ mod tests {
         assert_eq!(links_route_name_start(yaml, yaml.len()), None);
         let yaml = "a:\n  menu_name:\n    - x";
         assert_eq!(links_route_name_start(yaml, yaml.len()), None);
+        let yaml = "a:\n  appears_on:\n  - one\n  - tw";
+        assert_eq!(
+            links_route_name_start(yaml, yaml.len()),
+            Some(yaml.len() - 2)
+        );
     }
 }
