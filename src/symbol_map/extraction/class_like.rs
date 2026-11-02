@@ -20,6 +20,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_symfony_listener_spans(class, ctx);
     emit_messenger_handler_sites(class, ctx);
     emit_twig_callable_attributes(class, ctx);
+    emit_twig_global_declarations(class, ctx);
     emit_yii_route_argument_spans(class, ctx);
 
     if let Some(ref extends) = class.extends {
@@ -588,6 +589,7 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
     });
 
     extract_from_attribute_lists(&method.attribute_lists, ctx, 0);
+    record_template_action_context(method, ctx);
 
     // Docblock on the method.  We extract type spans and template params
     // now, but defer `@param $var` variable spans until after we know

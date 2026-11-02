@@ -46,6 +46,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
         StringKeyKind::YiiRouteArgument => CompletionItemKind::Field,
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => CompletionItemKind::Function,
+        StringKeyKind::TwigVariable => CompletionItemKind::Variable,
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::YiiRoute
@@ -195,6 +196,7 @@ impl Backend {
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::TwigBlock
+            | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
             | StringKeyKind::YiiView => Arc::new([]),
         }

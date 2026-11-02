@@ -224,6 +224,9 @@ $twig->addExtension(new TranslationExtension($translator));
 $twig->addExtension(new RoutingExtension($urls));
 $twig->addExtension(new AppExtension());
 $twig->addExtension(new AttributeExtension(Badges::class));
+foreach (Yaml::parseFile("$config/packages/twig.yaml")['twig']['globals'] as $name => $value) {
+    $twig->addGlobal($name, $value);
+}
 $html = $twig->render('demo/index.html.twig', ['sender' => 'PHPantom', 'support' => '', 'title' => '']);
 
 check('demo/index.html.twig extends base.html.twig', str_contains($html, '<!doctype html>'));
@@ -235,6 +238,8 @@ check("The template's path('app_demo_legacy') resolves", str_contains($html, 'hr
 check("The template's path('admin_dashboard') resolves", str_contains($html, 'href="/admin"'));
 check("The template's path('_preview_error', ...) resolves", str_contains($html, 'href="/_error/404"'));
 check("The template's |initials filter is AppExtension::initials()", str_contains($html, '<p>P <span class="badge">demo</span> PHPANTOM</p>'));
+check('demo/_card.html.twig is handed the sender demo/index.html.twig is rendered with', str_contains($html, 'Every string links back to its declaration, PHPantom'));
+check('config/packages/twig.yaml declares support_url as a global', str_contains($html, 'href="https://example.com/support"'));
 
 // ─── Forms ──────────────────────────────────────────────────────────────────
 

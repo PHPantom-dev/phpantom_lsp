@@ -297,6 +297,9 @@ pub(crate) struct SymbolMap {
     /// The Twig filters and functions the file declares, in source order.
     /// Empty for every file that declares none.
     pub twig_callables: Vec<TwigCallableSite>,
+    /// The variables the file's renders hand the Twig templates they
+    /// render, in source order.  Empty for every file that renders none.
+    pub twig_contexts: Vec<TwigContextSite>,
     /// The classes, aliases, and values the file's service and container
     /// parameter declarations give, sorted by `start`.  Empty for every file
     /// that declares none.

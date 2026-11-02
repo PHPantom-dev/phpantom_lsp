@@ -103,6 +103,13 @@ pub(crate) enum StringKeyKind {
     /// `TwigFunction` and `#[AsTwigFunction]`, and called by a template's
     /// `icon(…)`.
     TwigFunction,
+    /// A variable a Twig template reads.  What a template receives is
+    /// passed by the renders of it (see [`TwigContextSite`]) or set by the
+    /// template itself, so a name only means something in the template it
+    /// is written in (see `twig::variables`).  The project's globals are
+    /// declared with this kind: a `twig.globals` key, an `addGlobal()`, or
+    /// a `getGlobals()` key.
+    TwigVariable,
     /// A bundle configuration key, as its dotted path from the bundle's
     /// root (`acme_demo.mailer.dsn`): declared by a `TreeBuilder` schema in
     /// a `getConfigTreeBuilder()` (see `symfony::config_tree`), and read by
@@ -175,7 +182,11 @@ impl StringKeyKind {
     pub(crate) const fn is_twig(self) -> bool {
         matches!(
             self,
-            Self::TwigTemplate | Self::TwigBlock | Self::TwigFilter | Self::TwigFunction
+            Self::TwigTemplate
+                | Self::TwigBlock
+                | Self::TwigFilter
+                | Self::TwigFunction
+                | Self::TwigVariable
         )
     }
 
@@ -414,6 +425,28 @@ pub(crate) enum TwigCallableTarget {
     Inline,
 }
 
+/// The variables one render of a Twig template hands it: the keys of a
+/// `render()`'s context array, of a templated email's `context()`, or of
+/// what a `#[Template]` action returns.
+///
+/// Keyed by the template name it renders, whose span (or typed receiver
+/// site, for a `render()` only its receiver's type confirms) starts at
+/// [`Self::template_start`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TwigContextSite {
+    pub template_start: u32,
+    /// The names passed, each with the byte range it is written at.
+    pub vars: Vec<TwigContextVar>,
+}
+
+/// One variable a [`TwigContextSite`] passes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TwigContextVar {
+    pub name: Atom,
+    pub start: u32,
+    pub end: u32,
+}
+
 // ─── Container declarations ─────────────────────────────────────────────────
 
 /// What a Symfony service or container parameter declaration says about the
@@ -618,6 +651,9 @@ pub(crate) enum ReceiverClass {
     /// A templated email, whose `htmlTemplate()` and `textTemplate()` name
     /// the templates its bodies are rendered from.
     TemplatedEmail,
+    /// Twig's environment, whose `addGlobal()` declares a variable every
+    /// template receives.
+    TwigGlobals,
     /// An event dispatcher, whose `dispatch()` takes the event's name after
     /// the event itself.
     EventDispatcher,
@@ -637,7 +673,7 @@ impl ReceiverClass {
     pub(crate) fn targets(self) -> &'static [(&'static str, StringKeyKind)] {
         use StringKeyKind::{
             ContainerParameter, ServiceId, SymfonyEvent, SymfonyRoute, SymfonyTranslation,
-            TranslationDomain, TwigTemplate, View, YiiRoute, YiiView,
+            TranslationDomain, TwigTemplate, TwigVariable, View, YiiRoute, YiiView,
         };
         match self {
             // The concrete `Illuminate\View\Factory` implements the
@@ -695,6 +731,7 @@ impl ReceiverClass {
                 (SYMFONY_CONTROLLER_HELPER, TwigTemplate),
                 (TWIG_ENVIRONMENT, TwigTemplate),
             ],
+            Self::TwigGlobals => &[(TWIG_ENVIRONMENT, TwigVariable)],
             Self::TemplatedEmail => &[(SYMFONY_TEMPLATED_EMAIL, TwigTemplate)],
             // The component's dispatcher extends the contract, so the
             // contract covers both.

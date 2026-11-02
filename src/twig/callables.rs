@@ -288,16 +288,16 @@ impl Backend {
 
 // ─── Templates ──────────────────────────────────────────────────────────────
 
-fn is_identifier_start(byte: u8) -> bool {
+pub(super) fn is_identifier_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || byte == b'_'
 }
 
-fn is_identifier_byte(byte: u8) -> bool {
+pub(super) fn is_identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 /// The identifier that starts at `start`, and where it ends.
-fn word_at(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
+pub(super) fn word_at(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
     if start >= end || !is_identifier_start(bytes[start]) {
         return None;
     }
@@ -312,7 +312,7 @@ fn word_at(bytes: &[u8], start: usize, end: usize) -> Option<usize> {
 
 /// The tag a `{% … %}` block whose body spans `body..end` opens with, and
 /// where its name ends.
-fn tag_at(content: &str, body: usize, end: usize) -> Option<(&str, usize)> {
+pub(super) fn tag_at(content: &str, body: usize, end: usize) -> Option<(&str, usize)> {
     let bytes = content.as_bytes();
     let mut start = body;
     // `{%-` and `{%~` trim the whitespace around the tag.
@@ -325,7 +325,7 @@ fn tag_at(content: &str, body: usize, end: usize) -> Option<(&str, usize)> {
 }
 
 /// The tags whose body is written out as it stands rather than read.
-fn opens_raw_text(tag: &str) -> Option<&'static str> {
+pub(super) fn opens_raw_text(tag: &str) -> Option<&'static str> {
     match tag {
         "verbatim" => Some("endverbatim"),
         "raw" => Some("endraw"),
@@ -494,7 +494,7 @@ fn scan_expression(
 
 /// Where the test an `is` (or `is not`) ending at `start` applies ends:
 /// its name, of one word or of two (`same as`, `divisible by`).
-fn skip_test(bytes: &[u8], start: usize, end: usize) -> usize {
+pub(super) fn skip_test(bytes: &[u8], start: usize, end: usize) -> usize {
     let next_word = |from: usize| {
         let word_start = skip_whitespace(bytes, from, end);
         word_at(bytes, word_start, end).map(|word_end| (word_start, word_end))

@@ -33,4 +33,9 @@
      function where an expression starts. A filter or function no extension
      declares is reported. #}
   <p>{{ sender|initials }} {{ badge('demo') }} {{ sender|upper }}</p>
+  {# Try: go-to-definition on sender, which leads to the key
+     DemoController::index() passes it under, or on support_url, a global
+     config/packages/twig.yaml declares. Hover one to see where it comes
+     from, and complete a variable where an expression starts. #}
+  <p>{{ sender }} <a href="{{ support_url }}">Support</a></p>
 {% endblock %}

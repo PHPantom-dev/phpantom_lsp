@@ -87,12 +87,15 @@ impl CheckedStringKind {
             // dispatching one nobody listens to is no mistake.  Nor is
             // listening to a WordPress hook nothing in the project fires,
             // since another plugin or a later core may fire it.  A block
-            // name that nothing above defines starts a new block.
+            // name that nothing above defines starts a new block.  A
+            // template variable no render was found to pass may be passed
+            // by one that builds its context at runtime.
             StringKeyKind::WordPressHook
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack
             | StringKeyKind::TwigBlock
+            | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
             | StringKeyKind::Env
             | StringKeyKind::SymfonyConfigKey

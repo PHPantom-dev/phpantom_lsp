@@ -1390,6 +1390,15 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                 sm.twig_callables.capacity() * size_of::<crate::symbol_map::TwigCallableSite>(),
             );
             sym.add(
+                sm.twig_contexts.capacity() * size_of::<crate::symbol_map::TwigContextSite>()
+                    + sm.twig_contexts
+                        .iter()
+                        .map(|site| {
+                            site.vars.capacity() * size_of::<crate::symbol_map::TwigContextVar>()
+                        })
+                        .sum::<usize>(),
+            );
+            sym.add(
                 sm.container_values.capacity() * size_of::<crate::symbol_map::ContainerValueSite>(),
             );
             sym.add(sm.routes.capacity() * size_of::<crate::symbol_map::RouteSite>());

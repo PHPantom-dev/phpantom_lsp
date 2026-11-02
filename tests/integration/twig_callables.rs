@@ -299,9 +299,11 @@ async fn filters_and_functions_complete_apart() {
         labels(position_in(content, "| }}", 1)).await,
         ["price", "raw", "upper"]
     );
+    // Where an expression starts, the variables every template has come
+    // before the functions.
     assert_eq!(
         labels(position_in(content, "if  %}", 3)).await,
-        ["icon", "parent", "range"]
+        ["_charset", "_context", "_self", "icon", "parent", "range"]
     );
 }
 

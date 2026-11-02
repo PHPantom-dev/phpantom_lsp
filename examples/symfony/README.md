@@ -60,6 +60,13 @@ catalogues together, the way a real Symfony project does.
   `#[AsTwigFunction]` in `src/Twig/Badges.php`, or of `upper` to reach
   Twig's own extension. Hover one for its signature, complete a filter after
   `|`, and misspell one to see it reported.
+- Template variables lead to what passes them. In
+  `templates/demo/index.html.twig`, go to the definition of `sender` to reach
+  the key `DemoController` renders the template with, or of `support_url` to
+  reach the global `config/packages/twig.yaml` declares. In
+  `templates/demo/_card.html.twig`, `sender` comes through the template that
+  includes it. Hover a variable to see where it comes from, and complete one
+  where an expression starts.
 - Form fields and validation mappings name the properties of the class they
   map. In `src/Form/RegistrationType.php` or `config/validator/User.yaml`, go
   to the definition of `email`, find the references of `$displayName` in

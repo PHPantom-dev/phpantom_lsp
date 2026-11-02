@@ -79,6 +79,7 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::YiiRoute => backend.symfony_declaration_locations(*kind, key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
+        StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
         StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
             backend.twig_callable_definitions(*kind, key)
         }
@@ -299,6 +300,14 @@ pub(crate) fn find_laravel_string_key_references(
         // that extend each other.
         StringKeyKind::TwigBlock => {
             return backend.twig_block_references(uri, None, key);
+        }
+        // A template's variable is its own, but a global is every
+        // template's.
+        StringKeyKind::TwigVariable if backend.is_twig_template_uri(uri) => {
+            return backend.twig_variable_references(uri, None, key);
+        }
+        StringKeyKind::TwigVariable => {
+            return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // A pattern only names a hook by matching it, so the places that
         // fire or use it are found by matching too.

@@ -97,6 +97,8 @@ struct ExtractionCtx<'a> {
     messenger_handlers: Vec<crate::symbol_map::MessengerHandlerSite>,
     /// The Twig filters and functions the file declares.
     twig_callables: Vec<crate::symbol_map::TwigCallableSite>,
+    /// The variables the file's renders hand Twig templates.
+    twig_contexts: Vec<crate::symbol_map::TwigContextSite>,
     /// What the file's PHP configurator calls declare a service or a
     /// parameter as.
     container_values: Vec<crate::symbol_map::ContainerValueSite>,
@@ -288,6 +290,7 @@ mod statements;
 mod subject_text;
 mod symfony;
 mod twig;
+mod twig_context;
 mod wordpress;
 mod yii;
 mod yii_routes;
@@ -301,6 +304,7 @@ use statements::*;
 use subject_text::*;
 use symfony::*;
 use twig::*;
+use twig_context::*;
 use wordpress::*;
 use yii::*;
 use yii_routes::*;
@@ -411,6 +415,7 @@ fn extract_symbol_map_inner(
         gate_subjects: Vec::new(),
         messenger_handlers: Vec::new(),
         twig_callables: Vec::new(),
+        twig_contexts: Vec::new(),
         container_values: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
@@ -589,6 +594,7 @@ fn extract_symbol_map_inner(
         gate_subjects: ctx.gate_subjects,
         messenger_handlers: ctx.messenger_handlers,
         twig_callables: ctx.twig_callables,
+        twig_contexts: ctx.twig_contexts,
         container_values: ctx.container_values,
         routes: ctx.routes,
         route_imports: ctx

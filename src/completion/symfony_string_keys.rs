@@ -30,7 +30,7 @@
 //! edited records it, and is the default domain while the call does not
 //! parse yet.
 
-use tower_lsp_server::gen_lsp_types::{CompletionResponse, Position};
+use tower_lsp_server::gen_lsp_types::{CompletionItem, CompletionResponse, Position};
 
 use crate::Backend;
 use crate::completion::eloquent_string::detect_string_call_context;
@@ -370,7 +370,39 @@ impl Backend {
             } else {
                 let (start, kind) = crate::twig::callables::callable_name_start(content, cursor)?;
                 let names = self.twig_callable_names(kind);
-                return self.symfony_names_response(kind, names, content, start, cursor, position);
+                if kind == StringKeyKind::TwigFilter {
+                    return self
+                        .symfony_names_response(kind, names, content, start, cursor, position);
+                }
+                // Where an expression starts, a variable is as likely as a
+                // function, and comes first.
+                let variables = self.twig_variable_names(uri, content, cursor);
+                let responses = [
+                    self.symfony_names_response(
+                        StringKeyKind::TwigVariable,
+                        variables,
+                        content,
+                        start,
+                        cursor,
+                        position,
+                    ),
+                    self.symfony_names_response(kind, names, content, start, cursor, position),
+                ];
+                let items: Vec<CompletionItem> = responses
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|response| match response {
+                        CompletionResponse::CompletionItemList(items) => items,
+                        CompletionResponse::CompletionList(list) => list.items,
+                    })
+                    .enumerate()
+                    .map(|(index, item)| CompletionItem {
+                        sort_text: Some(format!("{index:05}")),
+                        ..item
+                    })
+                    .collect();
+                return (!items.is_empty())
+                    .then_some(CompletionResponse::CompletionItemList(items));
             }
         } else if !is_symfony {
             return None;

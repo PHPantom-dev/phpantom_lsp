@@ -192,9 +192,9 @@ return [
   (`#[RenderElement('details')]`, `#[FormElement('textfield')]`).
 - **Libraries** in `#attached` name entries in `<module>.libraries.yml`.
 
-The Twig support already finds templates outside Symfony; the
-template's variables are the same problem as
-[F37](lsp-features.md#f37-twig-template-variables).
+The Twig support already finds templates outside Symfony, and a
+template's variables from the renders that name it; a theme hook's
+variables would be one more source of them (see `src/twig/variables.rs`).
 
 ---
 

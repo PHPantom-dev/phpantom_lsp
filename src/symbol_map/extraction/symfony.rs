@@ -31,7 +31,8 @@ const CONFIGURATOR_NS: &str = SYMFONY_CONTAINER_CONFIGURATOR_NS;
 const DEFINITION: &str = "Symfony\\Component\\DependencyInjection\\Definition";
 const CHILD_DEFINITION: &str = "Symfony\\Component\\DependencyInjection\\ChildDefinition";
 const AUTOWIRE_ATTRIBUTE: &str = "Symfony\\Component\\DependencyInjection\\Attribute\\Autowire";
-const TEMPLATE_ATTRIBUTE: &str = "Symfony\\Bridge\\Twig\\Attribute\\Template";
+pub(in crate::symbol_map::extraction) const TEMPLATE_ATTRIBUTE: &str =
+    "Symfony\\Bridge\\Twig\\Attribute\\Template";
 const TRANSLATABLE_MESSAGE: &str = "Symfony\\Component\\Translation\\TranslatableMessage";
 const TRANSLATE_FUNCTION: &str = "Symfony\\Component\\Translation\\t";
 const AS_EVENT_LISTENER: &str = "Symfony\\Component\\EventDispatcher\\Attribute\\AsEventListener";
@@ -122,6 +123,7 @@ pub(crate) fn symfony_receiver_method(
         {
             Some((ReceiverClass::TemplateRenderer, false))
         }
+        0 if is("addGlobal") => Some((ReceiverClass::TwigGlobals, true)),
         0 if is("htmlTemplate") || is("textTemplate") => {
             Some((ReceiverClass::TemplatedEmail, false))
         }
@@ -166,6 +168,10 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         record_route_name_prefix(object, argument_list, ctx);
         return;
     }
+    if member_name.eq_ignore_ascii_case("context") {
+        record_twig_email_context(object, argument_list, ctx);
+        return;
+    }
     if ctx.symfony {
         record_configurator_placeholders(member_name, argument_list, ctx);
         if member_name.eq_ignore_ascii_case("parent") {
@@ -183,7 +189,7 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         // Outside Symfony, only the calls of the framework the project uses
         // are left: Twig's own `render()`, or Yii's URL generator.
         let records = |kind: StringKeyKind| {
-            if kind == StringKeyKind::TwigTemplate {
+            if kind.is_twig() {
                 ctx.twig
             } else if kind.is_yii() {
                 ctx.yii
@@ -210,6 +216,8 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         if key.is_empty()
             || (receiver.names_twig_templates()
                 && !crate::twig::templates::looks_like_template_name(key))
+            || (receiver == ReceiverClass::TwigGlobals
+                && !crate::twig::variables::is_twig_variable_name(key))
         {
             continue;
         }
@@ -240,6 +248,9 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             is_optional: false,
             receiver,
         });
+        if receiver.names_twig_templates() {
+            record_twig_render_context(receiver, object, member_name, argument_list, start, ctx);
+        }
         if is_write {
             record_declared_value(receiver, member_name, start as u32, argument_list, ctx);
         }

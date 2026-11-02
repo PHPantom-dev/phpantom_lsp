@@ -537,11 +537,9 @@ recognises as rendering a template.
 
 ---
 
-## F37. Twig template variables
+## F60. Twig template variable types
 
-**Impact: Medium-High · Complexity: Medium-High**
-
-Blocks full Twig support: the README keeps Twig marked as partial until this lands.
+**Impact: Medium · Complexity: High**
 
 ```php
 return $this->render('post/show.html.twig', ['post' => $post]);
@@ -551,17 +549,21 @@ return $this->render('post/show.html.twig', ['post' => $post]);
 {{ post.title }}
 ```
 
-The variables a template receives come from the keys every `render()`
-of it passes, the names a `#[Template]` action returns, Twig's globals,
-and the `{% types %}` tag. Completing and hovering those names is feasible
-from the call sites alone, the way Blade's call-site inference collects a
-template's variables (`blade/call_site_inference.rs`). Typing what follows
-(`post.title` as the `Post` class's `getTitle()`) is a much larger
-project: TwigStan does it by compiling templates to PHP and analysing
-that. Start with the names; decide on types separately.
+A template's variables complete, navigate, and hover by name, from the
+keys its renders pass, the templates that include or extend it, the
+project's globals, and its `{% types %}` tag (see `src/twig/variables.rs`).
+Nothing types them: `post.` completes nothing, `post.title` does not
+lead to the `Post` class's `getTitle()`, and a hover does not say what
+`post` holds. TwigStan does it by compiling templates to PHP and
+analysing that; resolving each passed value with the type engine at its
+render, the way Blade's call-site inference does, would answer the
+common cases. The same resolution would read a context the render builds
+in a variable (`$params = [...]; render('…', $params)`), whose names are
+not found today, and a `types` tag's declared type is already read.
 
-**Where to look:** `src/blade/call_site_inference.rs`,
-`src/symbol_map/extraction/symfony.rs` (the render sites).
+**Where to look:** `src/twig/variables.rs`,
+`src/symbol_map/extraction/twig_context.rs` (the render contexts),
+`src/blade/call_site_inference.rs`.
 
 ---
 
@@ -1044,7 +1046,7 @@ renames, and a name the class does not declare is not reported. Only a
 writable prop can be bound by `data-model`, and only a `#[LiveAction]`
 method can be called, so completion should offer just those. The template
 also sees the component's public properties and methods as `this.…` and
-bare variables, which F37's template variables would type. Builds on F38's
+bare variables, which [F60](#f60-twig-template-variable-types) would type. Builds on F38's
 link between a component class and its template.
 
 **Where to look:** `src/twig/templates.rs`, `src/blade/component_tags/`

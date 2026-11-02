@@ -121,6 +121,14 @@ impl Backend {
             } if self.is_twig_project() => {
                 self.twig_block_definitions(uri, Some(span.start as usize), &key)
             }
+            // So is a template variable, which is the template's own.
+            SymbolKind::StringKey {
+                kind: StringKeyKind::TwigVariable,
+                key,
+                ..
+            } if self.is_twig_project() => {
+                self.twig_variable_definitions(uri, Some(span.start as usize), &key)
+            }
             SymbolKind::StringKey { kind, key, .. } if self.string_key_kind_enabled(kind) => {
                 crate::virtual_members::laravel::resolve_laravel_string_key(self, &kind, &key, uri)
             }
@@ -337,8 +345,8 @@ impl Backend {
 
 impl Backend {
     /// The spans of a Twig template: the names it is loaded by, the
-    /// templates, blocks, filters, and functions it names, and in a Symfony
-    /// project the route names and translation keys it reads.
+    /// templates, blocks, filters, functions, and variables it names, and in
+    /// a Symfony project the route names and translation keys it reads.
     fn twig_template_spans(&self, uri: &str, content: &str, is_symfony: bool) -> Vec<SymbolSpan> {
         let roots = self.twig_roots();
         let names = crate::util::uri_to_path(uri)
@@ -367,6 +375,15 @@ impl Backend {
             })
             .collect();
         spans.extend(callables);
+        let variables: Vec<SymbolSpan> = crate::twig::variables::twig_variable_spans(content)
+            .into_iter()
+            .filter(|variable| {
+                !spans
+                    .iter()
+                    .any(|span| span.start < variable.end && variable.start < span.end)
+            })
+            .collect();
+        spans.extend(variables);
         spans.sort_by_key(|span| span.start);
         spans
     }

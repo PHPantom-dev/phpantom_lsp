@@ -297,6 +297,7 @@ mod symfony_translations;
 mod twig_blocks;
 mod twig_callables;
 mod twig_templates;
+mod twig_variables;
 mod type_definition;
 mod type_hierarchy;
 mod watched_files;

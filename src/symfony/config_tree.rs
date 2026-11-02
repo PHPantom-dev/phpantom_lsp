@@ -481,15 +481,29 @@ pub(crate) fn config_key_spans(content: &str) -> Vec<SymbolSpan> {
         let Some(key) = walk.path().filter(|path| !path.is_empty()) else {
             continue;
         };
-        spans.push(SymbolSpan {
-            start: start as u32,
-            end: end as u32,
-            kind: SymbolKind::StringKey {
+        // A key under `twig.globals` declares a variable every template
+        // receives.
+        let global = key
+            .strip_prefix("twig.globals.")
+            .filter(|name| crate::twig::variables::is_twig_variable_name(name));
+        let kind = match global {
+            Some(name) => SymbolKind::StringKey {
+                kind: StringKeyKind::TwigVariable,
+                key: name.to_string(),
+                is_write: true,
+                is_optional: false,
+            },
+            None => SymbolKind::StringKey {
                 kind: StringKeyKind::SymfonyConfigKey,
                 key,
                 is_write: false,
                 is_optional: false,
             },
+        };
+        spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind,
         });
     }
     spans
