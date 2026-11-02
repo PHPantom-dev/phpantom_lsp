@@ -45,6 +45,10 @@ final class DemoController extends AbstractController
         // Try: go-to-definition on a translation key, or complete one inside
         // trans(''). A key is looked up in the domain the call names, so
         // 'user.invalid_email' is found in translations/validators.en.xlf.
+        // Try: misspell 'demo.title'. A key nothing declares is reported in
+        // a domain the project's own catalogues hold, but not in one an
+        // installed package ships (validators), nor when it reads like a
+        // message that is its own translation, such as 'Save'.
         $title = $this->translator->trans('demo.title');
         $this->translator->trans('user.invalid_email', [], 'validators');
         // Try: go-to-definition on the event name. It lists every listener

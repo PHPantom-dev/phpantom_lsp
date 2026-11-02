@@ -409,36 +409,6 @@ of the same design: `src/symbol_map/extraction/yii_routes.rs`, `src/yii/routes.r
 
 ---
 
-## F29. Report Symfony translation keys nothing declares
-
-**Impact: Medium-High · Complexity: Medium**
-
-Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.
-
-```php
-$translator->trans('demo.titel'); // a typo of demo.title
-```
-
-Translation keys complete and navigate within their domain, but one that no
-catalogue declares is not reported. Service IDs are only judged under the
-application's own `app.` prefix, and routes by following the routing
-configuration into the bundles it imports; translation keys have neither,
-so judging needs a fuller picture of what is declared:
-
-- the catalogues installed bundles ship (`validators`, `security`, and any
-  bundle's own domain), which a key in the same domain may come from;
-- the project's messages that are their own translation (`trans('Save')`
-  with no catalogue entry translates to `Save`), which only a domain the
-  project declares keys in, and keys that look like keys, can tell apart.
-
-A starting point is to judge only domains no installed package ships a
-catalogue for, and only keys spelled like dotted identifiers.
-
-**Where to look:** `src/diagnostics/laravel_string_keys.rs`
-(`CheckedStringKind::of`), `src/symfony/translations.rs`.
-
----
-
 ## F30. Symfony translations outside YAML, XLIFF, and the `trans` filter
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -460,6 +430,13 @@ Catalogues are read when they are YAML or XLIFF files under a
   clause.
 - Keys in other domains by convention: validation constraint messages
   (`validators`) and form labels under a form's `translation_domain`.
+
+An undeclared key is only reported in a domain whose every catalogue the
+translator loads is read, and that no installed package ships, so each
+catalogue read here lets more domains be judged. Where the translator loads
+from is read from `framework.translator` in the YAML under
+`config/packages/`; a configuration in PHP or XML that names the translator
+leaves every domain unjudged.
 
 **Where to look:** `src/symfony/translations.rs`,
 `src/symbol_map/extraction/symfony.rs` (`push_translatable_spans`).
@@ -1172,15 +1149,15 @@ link between a component class and its template.
 
 ## F57. "Add translation" quick fix for an undeclared Symfony key
 
-**Impact: Medium · Complexity: Medium** (depends on F29)
+**Impact: Medium · Complexity: Medium**
 
 ```php
 $translator->trans('checkout.confirm'); // not in any catalogue
 ```
 
 Laravel offers to add a missing translation to each locale's language file
-(`insert_translation_key.rs`). Symfony keys get no such fix. Once F29
-reports an undeclared key, offer one action per catalogue of the key's
+(`insert_translation_key.rs`). Symfony keys get no such fix. For an
+`invalid_symfony_translation` diagnostic, offer one action per catalogue of the key's
 domain (`messages.en.yaml`, `messages.da.xlf`, …) that inserts the key with
 an empty or source-text value: nested under its dotted parents in YAML,
 or flat when the file already spells its keys flat, and as a new

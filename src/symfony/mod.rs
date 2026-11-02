@@ -112,6 +112,8 @@ pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
     /// The routing files of dependencies, read from disk.
     foreign_routing: route_world::ForeignRoutingFiles,
+    /// The translation domains an undeclared key is reported in.
+    judged_translation_domains: translations::JudgedDomains,
 }
 
 /// Whether `map` declares a service ID, a container parameter, a route, a

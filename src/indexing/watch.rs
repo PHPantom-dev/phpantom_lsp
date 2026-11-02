@@ -88,6 +88,13 @@ impl Backend {
     ) -> bool {
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let changes = self.spell_changes_as_indexed(&params.changes);
+        if self.is_symfony_project()
+            && changes.iter().any(|change| {
+                crate::symfony::translations::is_translation_setup_uri(change.uri.as_str())
+            })
+        {
+            self.forget_symfony_judged_translation_domains();
+        }
         let mut batch = self.classify_watched_changes(&changes, root, is_laravel);
         if batch.is_empty() {
             return false;

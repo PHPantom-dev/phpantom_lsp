@@ -192,6 +192,8 @@ check('demo.title is declared in the messages domain', $translator->trans('demo.
 check('demo.card is declared in the messages domain', $translator->trans('demo.card') === 'Every string links back to its declaration');
 check('user.invalid_email is declared in the validators domain', $translator->trans('user.invalid_email', [], 'validators') === 'Please enter a valid email address.');
 check('user.invalid_email is not in the messages domain', $translator->trans('user.invalid_email') === 'user.invalid_email');
+check('A message no catalogue declares is its own translation', $translator->trans('Save') === 'Save');
+check('symfony/validator ships a catalogue of the validators domain', is_file(__DIR__ . '/vendor/symfony/validator/Resources/translations/validators.en.xlf'));
 
 // ─── Templates ──────────────────────────────────────────────────────────────
 

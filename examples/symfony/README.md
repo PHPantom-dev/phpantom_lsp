@@ -35,7 +35,9 @@ catalogues together, the way a real Symfony project does.
   `translations/` and the PHP and Twig that translate them, within the
   domain each call names. In `DemoController`, go to the definition of
   `demo.title` or `user.invalid_email`, or complete a key inside
-  `trans('')`.
+  `trans('')`. A key spelled like one (`demo.titel`) that nothing declares
+  is reported, in a domain the project's own catalogues hold and no
+  installed package ships a catalogue for.
 - Template names navigate between the controllers and templates that render,
   extend, or include them and the files in `templates/`. In
   `DemoController`, go to the definition of `demo/index.html.twig`, or
