@@ -221,6 +221,13 @@ class Demo
         Bakery::whereFlour('rye')->whereApricot(true)->get();
         Bakery::where('open', true)->whereFlour('spelt')->freshlyBaked()->first();
 
+        // Try: change freshlyBaked() to freshlyBakd() on either line. Eloquent
+        // throws for a name its builder does not answer, so the typo is
+        // reported even though models and builders have __call(). Any
+        // where...() call stays valid: the builder treats it as a column filter.
+        (new Bakery())->freshlyBaked();
+        Bakery::query()->freshlyBaked();
+
         // Conditionable when()/unless() chain continuation
         BlogAuthor::where('active', 1)->when(true, fn($q) => $q)->get();
         BlogAuthor::where('active', 1)->unless(false, fn($q) => $q)->first();

@@ -757,41 +757,6 @@ resolves to (`resources/views/components/alert.blade.php`, honouring
 anonymous component namespaces and nested names), and as a second option
 the class-backed pair (`app/View/Components/Alert.php` plus its view).
 
-#### L68. Unknown methods on Eloquent models and builders
-
-**Impact: High · Complexity: Medium**
-
-```php
-$order->getTotl();          // BadMethodCallException at runtime, reported by nothing
-Order::whereStatsu('paid'); // fine: a dynamic where on a column
-```
-
-A method call on a class with `__call` is never reported
-(`diagnostics/unknown_members/member_check.rs` returns `MagicFallback`),
-which is right for a proxy that accepts any name but wrong for Eloquent.
-`Model::__call` forwards to the model's query builder, and the builder's
-`__call` accepts only a closed set: its own and the base query builder's
-methods, scopes, macros registered on the builder, and dynamic
-`where{Column}` calls. Anything else throws. So a typo in any model method
-call, in PHP or in a Blade template, goes unreported, while Larastan and
-Laravel Idea both report it.
-
-Judge an Eloquent receiver against that set instead of letting `__call`
-accept everything. The set is what completion already offers on a model
-and its builder, so the work is in the open-world edges: a project that
-registers macros we cannot read, `resolveRelationUsing()` dynamic
-relations, and a model or builder that overrides `__call` itself. In
-each of those, stay silent. Properties are a different case:
-`Model::__get` returns `null` for an unknown attribute instead of
-throwing, unless the application enables
-`Model::preventAccessingMissingAttributes()`, so property reports should
-follow that setting. An application that turns it on (directly or through
-`Model::shouldBeStrict()`) makes an unknown attribute a
-`MissingAttributeException`, so there the report belongs on by default
-rather than behind `report-magic-properties`. A production Laravel app
-used for comparison does exactly this, and its attribute typos go
-unreported unless the opt-in is set.
-
 #### L66. Related-file navigation for models, events, and listeners
 
 **Impact: Medium · Complexity: Medium**

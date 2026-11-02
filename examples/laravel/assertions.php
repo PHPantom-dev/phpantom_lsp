@@ -2067,6 +2067,31 @@ check(
 );
 \Illuminate\Database\Eloquent\Relations\Relation::morphMap($previousMorphMap, false);
 
+// ─── Eloquent rejects names its builder does not answer ─────────────────────
+// Demo::eloquentQuery() claims a typo in a model or builder call throws, and
+// that any where...() call is a column filter instead.
+
+$throwsBadMethodCall = function (callable $call): bool {
+    try {
+        $call();
+    } catch (BadMethodCallException) {
+        return true;
+    }
+    return false;
+};
+check(
+    'An unknown method on a model throws',
+    $throwsBadMethodCall(fn () => (new \App\Models\Bakery())->freshlyBakd())
+);
+check(
+    'An unknown method on a model builder throws',
+    $throwsBadMethodCall(fn () => \App\Models\Bakery::query()->freshlyBakd())
+);
+check(
+    'A where...() call on a model builder is a column filter',
+    !$throwsBadMethodCall(fn () => \App\Models\Bakery::query()->whereFreshlyBakd(true))
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

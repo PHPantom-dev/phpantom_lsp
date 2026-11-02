@@ -160,6 +160,7 @@ mod diagnostics_destructuring_offsets;
 mod diagnostics_discarded_results;
 mod diagnostics_docblock_native_mismatch;
 mod diagnostics_dynamic_member_names;
+mod diagnostics_eloquent_unknown_members;
 mod diagnostics_enum_errors;
 mod diagnostics_implementation_errors;
 mod diagnostics_incompatible_override;

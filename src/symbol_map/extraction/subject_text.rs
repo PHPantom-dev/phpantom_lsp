@@ -118,7 +118,7 @@ pub(super) fn expr_to_subject_expr<'a>(expr: &'a Expression<'a>) -> Option<Subje
     let mut lowered = lower_spine_base(current)?;
     for link in links.iter().rev() {
         lowered = match link {
-            SpineLink::Property(property) => lower_property(lowered, property),
+            SpineLink::Property(property) => lower_property(lowered, property)?,
             SpineLink::Method(method, args) => lower_method_call(lowered, method, args),
         };
     }
@@ -382,17 +382,20 @@ fn member_selector_name(selector: &ClassLikeMemberSelector<'_>) -> Option<String
 }
 
 /// Add a property access (`base->property` or `base?->property`) to an
-/// already-lowered base.  A non-identifier selector (dynamic property name)
-/// drops to the base expression, matching the original serialiser.
-fn lower_property(base: SubjectExpr, property: &ClassLikeMemberSelector<'_>) -> SubjectExpr {
-    if let ClassLikeMemberSelector::Identifier(ident) = property {
-        SubjectExpr::PropertyChain {
-            base: Box::new(base),
-            property: bytes_to_str(ident.value).to_string(),
-        }
-    } else {
-        base
-    }
+/// already-lowered base.  A dynamic property name (`$obj->{$name}`,
+/// `$obj->$name`) has no subject representation: the value is whichever
+/// property the name picks, not the base object.
+fn lower_property(
+    base: SubjectExpr,
+    property: &ClassLikeMemberSelector<'_>,
+) -> Option<SubjectExpr> {
+    let ClassLikeMemberSelector::Identifier(ident) = property else {
+        return None;
+    };
+    Some(SubjectExpr::PropertyChain {
+        base: Box::new(base),
+        property: bytes_to_str(ident.value).to_string(),
+    })
 }
 
 /// Add an instance method call (`base->method(args)` or the null-safe form)

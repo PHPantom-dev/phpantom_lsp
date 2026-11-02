@@ -133,6 +133,34 @@ class Consumer {
     );
 }
 
+/// A member read through a dynamic property name is whichever property the
+/// name picks, not the object the property is read from.
+#[test]
+fn member_on_dynamic_property_is_not_checked_against_the_holder() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Money {
+    public function equals($other): bool { return true; }
+}
+class Holder {
+    public Money $price;
+}
+function compare(Holder $holder, string $column): void {
+    $holder->{$column}->equals(1);
+    $holder->$column->equals(1);
+    $holder->price->missing();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
+    assert_eq!(
+        messages,
+        vec!["Method 'missing' not found on class 'Money'"],
+        "only the access on a known property should be checked"
+    );
+}
+
 /// A plain `/* … */` comment above a method is not its docblock, so the
 /// method does not read an earlier method's `@param` through it.
 #[test]

@@ -185,10 +185,10 @@ pub(crate) use gates::{
     LaravelGateIndex, enumerate_gate_abilities, model_policy_abilities, scan_gate_registrations,
 };
 pub(crate) use macros::{
-    LaravelMacroIndex, MacroRegistration, extract_date_factory_class, extract_macro_registrations,
-    extract_mixin_registrations, inject_macros, macro_closure_this_target,
-    parse_installed_providers, parse_provider_class_list, parse_provider_referenced_classes,
-    synthesize_mixin_macros,
+    LaravelMacroIndex, MacroRegistration, OpenCallName, extract_date_factory_class,
+    extract_macro_registrations, extract_mixin_registrations, extract_open_call_names,
+    extract_strict_attributes, inject_macros, macro_closure_this_target, parse_installed_providers,
+    parse_provider_class_list, parse_provider_referenced_classes, synthesize_mixin_macros,
 };
 pub(crate) use model_extraction::{
     attribute_entry_offset, extract_laravel_metadata, extract_laravel_trait_metadata,
@@ -217,7 +217,7 @@ pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,
 };
-pub(crate) use table_names::model_table_name;
+pub(crate) use table_names::{model_schema_is_known, model_table_name};
 pub(crate) use trans_catalog::TranslationCatalog;
 pub(crate) use trans_json::find_json_trans_references;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};

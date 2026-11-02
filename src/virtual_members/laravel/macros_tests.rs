@@ -866,3 +866,82 @@ CarbonImmutable::mixin(TimezoneMixin::class);
     assert_eq!(regs[0].target, "Carbon\\CarbonImmutable");
     assert_eq!(regs[0].mixin_fqn, "App\\Mixins\\TimezoneMixin");
 }
+
+#[test]
+fn open_call_names_cover_registrations_the_scan_cannot_type() {
+    let content = r#"<?php
+use App\Models\User;
+use App\Support\Helpers;
+use Illuminate\Database\Eloquent\Builder;
+
+Builder::macro('typed', fn () => $this);
+Builder::macro('fromCallable', [Helpers::class, 'run']);
+Builder::macro($name, fn () => $this);
+Builder::mixin($helpers);
+Builder::mixin(new Helpers());
+User::resolveRelationUsing('orders', fn (User $user) => null);
+static::macro('relative', [Helpers::class, 'run']);
+"#;
+    let open = |target: &str, name: Option<&str>| OpenCallName {
+        target: target.to_string(),
+        name: name.map(str::to_string),
+    };
+    let builder = "Illuminate\\Database\\Eloquent\\Builder";
+    assert_eq!(
+        extract_open_call_names(content),
+        vec![
+            open(builder, Some("fromCallable")),
+            open(builder, None),
+            open(builder, None),
+            open("App\\Models\\User", Some("orders")),
+        ],
+    );
+}
+
+#[test]
+fn macro_index_answers_open_call_names_by_target() {
+    let mut index = LaravelMacroIndex::default();
+    index.open_call_files.set_file(
+        "file:///provider.php".to_string(),
+        vec![
+            OpenCallName {
+                target: "App\\Models\\User".to_string(),
+                name: Some("orders".to_string()),
+            },
+            OpenCallName {
+                target: "Illuminate\\Database\\Query\\Builder".to_string(),
+                name: None,
+            },
+        ],
+    );
+    index.rebuild();
+    assert!(index.may_answer_call("App\\Models\\User", "orders"));
+    assert!(!index.may_answer_call("App\\Models\\User", "Orders"));
+    assert!(!index.may_answer_call("App\\Models\\Post", "orders"));
+    assert!(index.may_answer_call("Illuminate\\Database\\Query\\Builder", "anything"));
+}
+
+#[test]
+fn strict_attributes_follow_the_last_call() {
+    let file = |body: &str| format!("<?php\nuse Illuminate\\Database\\Eloquent\\Model;\n{body}\n");
+    assert_eq!(extract_strict_attributes(&file("")), None);
+    assert_eq!(
+        extract_strict_attributes(&file("Model::preventAccessingMissingAttributes();")),
+        Some(true)
+    );
+    assert_eq!(
+        extract_strict_attributes(&file("Model::shouldBeStrict(! app()->isProduction());")),
+        Some(true)
+    );
+    assert_eq!(
+        extract_strict_attributes(&file(
+            "Model::shouldBeStrict();\nModel::preventAccessingMissingAttributes(false);"
+        )),
+        Some(false)
+    );
+    // Another class's method of the same name is not Eloquent's switch.
+    assert_eq!(
+        extract_strict_attributes(&file("Other::shouldBeStrict();")),
+        None
+    );
+}

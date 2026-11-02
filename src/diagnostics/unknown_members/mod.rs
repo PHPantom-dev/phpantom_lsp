@@ -16,7 +16,10 @@
 //!   `partial-union-members` setting reports the branches that lack it.
 //! - Any resolved class has `__call` / `__callStatic` (for method calls)
 //!   or `__get` (for property access) magic methods — these accept
-//!   arbitrary member names at runtime.
+//!   arbitrary member names at runtime.  Eloquent models and builders are
+//!   the exception for method calls: their `__call` accepts a closed set
+//!   (see `eloquent.rs`), and for properties when the app turns on
+//!   `Model::preventAccessingMissingAttributes()`.
 //! - Any resolved class is `stdClass` — it is a universal object
 //!   container that accepts arbitrary properties at runtime.
 //! - The member name is `class` (the magic `::class` constant).
@@ -71,6 +74,7 @@
 
 mod access;
 mod chains;
+mod eloquent;
 mod member_check;
 
 use std::collections::HashMap;
@@ -141,6 +145,9 @@ struct UnknownMemberPass<'a> {
     report_unresolved: bool,
     /// Whether the opt-in `partial-union-members` diagnostic is on.
     report_partial_union: bool,
+    /// Whether the app makes a missing Eloquent attribute throw
+    /// (`Model::preventAccessingMissingAttributes()`).
+    strict_attributes: bool,
 }
 
 impl Backend {
@@ -183,6 +190,10 @@ impl Backend {
             report_magic: config.diagnostics.report_magic_properties_enabled(),
             report_unresolved: config.diagnostics.unresolved_member_access_enabled(),
             report_partial_union: config.diagnostics.partial_union_members_enabled(),
+            strict_attributes: self
+                .laravel
+                .strict_attributes
+                .load(std::sync::atomic::Ordering::Relaxed),
         };
         let filters = AccessFilters {
             source,
@@ -331,7 +342,16 @@ impl UnknownMemberPass<'_> {
                 // type that admits every value. Saying so points at
                 // the annotation that is missing from the codebase
                 // instead of implying a gap in the type engine.
-                let message = if matches!(outcome, SubjectOutcome::Mixed) {
+                let message = if subject_display.is_empty() {
+                    // The subject is an expression with no text the type
+                    // engine can resolve (a dynamic property name, an
+                    // arithmetic result), so there is nothing to quote.
+                    format!(
+                        "Cannot verify {} '{}' — the type of its subject could not be resolved",
+                        access.kind_label(),
+                        access.member_name,
+                    )
+                } else if matches!(outcome, SubjectOutcome::Mixed) {
                     format!(
                         "Cannot verify {} '{}' — type of '{}' is 'mixed'",
                         access.kind_label(),
@@ -354,9 +374,11 @@ impl UnknownMemberPass<'_> {
                     out,
                 )
             }
-            SubjectOutcome::Resolved { classes, branches } => {
-                self.report_on_resolved(access, classes, branches, out)
-            }
+            SubjectOutcome::Resolved {
+                classes,
+                branches,
+                types,
+            } => self.report_on_resolved(access, classes, branches, types, out),
         }
     }
 

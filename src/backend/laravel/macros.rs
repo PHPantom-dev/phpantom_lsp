@@ -59,21 +59,29 @@ impl Backend {
                             content: &str| {
             let has_macro = memchr::memmem::find(content.as_bytes(), b"macro(").is_some();
             let has_mixin = memchr::memmem::find(content.as_bytes(), b"mixin(").is_some();
-            if !has_macro && !has_mixin {
+            let has_resolver =
+                memchr::memmem::find(content.as_bytes(), b"resolveRelationUsing(").is_some();
+            if !has_macro && !has_mixin && !has_resolver {
                 return;
             }
+            let mut open_calls = crate::virtual_members::laravel::extract_open_call_names(content);
             let mut regs = if has_macro {
                 crate::virtual_members::laravel::extract_macro_registrations(content, php_version)
             } else {
                 Vec::new()
             };
             if has_mixin {
-                for reg in self.synthesize_mixin_registrations(content, php_version) {
+                for reg in
+                    self.synthesize_mixin_registrations(content, php_version, &mut open_calls)
+                {
                     if let Some(mixin_uri) = &reg.definition_uri {
                         mixin_uris.insert(mixin_uri.clone());
                     }
                     regs.push(reg);
                 }
+            }
+            if !open_calls.is_empty() {
+                index.open_call_files.set_file(uri.clone(), open_calls);
             }
             if regs.is_empty() {
                 return;
@@ -187,18 +195,26 @@ impl Backend {
     /// returned closure.  Each resulting registration records the mixin file's
     /// URI as its go-to-definition target.  Returns an empty vector when the
     /// file registers no mixins or the mixin classes cannot be located.
+    ///
+    /// A mixin whose class cannot be read adds methods nothing can list, so
+    /// its target is recorded in `open_calls` as accepting any name.
     fn synthesize_mixin_registrations(
         &self,
         content: &str,
         php_version: Option<crate::types::PhpVersion>,
+        open_calls: &mut Vec<crate::virtual_members::laravel::OpenCallName>,
     ) -> Vec<crate::virtual_members::laravel::MacroRegistration> {
         let mixins = crate::virtual_members::laravel::extract_mixin_registrations(content);
         let mut out = Vec::new();
         for mixin in mixins {
-            let Some(uri) = self.resolve_class_uri(&mixin.mixin_fqn) else {
-                continue;
-            };
-            let Some(mixin_source) = self.get_file_content(&uri) else {
+            let Some((uri, mixin_source)) = self
+                .resolve_class_uri(&mixin.mixin_fqn)
+                .and_then(|uri| Some((uri.clone(), self.get_file_content(&uri)?)))
+            else {
+                open_calls.push(crate::virtual_members::laravel::OpenCallName {
+                    target: mixin.target,
+                    name: None,
+                });
                 continue;
             };
             out.extend(crate::virtual_members::laravel::synthesize_mixin_macros(
@@ -267,13 +283,18 @@ impl Backend {
                 return;
             }
         }
-        let had = self.laravel.macros.read().files.has_uri(uri);
-        let has_token = memchr::memmem::find(content.as_bytes(), b"macro(").is_some();
+        let had = {
+            let index = self.laravel.macros.read();
+            index.files.has_uri(uri) || index.open_call_files.has_uri(uri)
+        };
+        let has_token = memchr::memmem::find(content.as_bytes(), b"macro(").is_some()
+            || memchr::memmem::find(content.as_bytes(), b"resolveRelationUsing(").is_some();
         if !had && !has_token {
             return;
         }
 
         let php_version = Some(*self.workspace.php_version.lock());
+        let open_calls = crate::virtual_members::laravel::extract_open_call_names(content);
         let mut regs =
             crate::virtual_members::laravel::extract_macro_registrations(content, php_version);
         self.infer_laravel_macro_return_types(&mut regs, uri, content);
@@ -287,6 +308,7 @@ impl Backend {
             // this edit removed is also evicted below.
             let mut targets = index.target_fqns();
             index.files.set_file(uri.to_string(), regs);
+            index.open_call_files.set_file(uri.to_string(), open_calls);
             index.rebuild();
             self.laravel.macros.set_has_any(!index.is_empty());
             targets.extend(index.target_fqns());
