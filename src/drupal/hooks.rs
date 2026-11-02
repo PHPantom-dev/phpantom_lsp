@@ -253,6 +253,92 @@ impl Backend {
     }
 }
 
+/// Whether a documented hook name has placeholders, written in uppercase
+/// (`form_FORM_ID_alter`): it stands for every hook that fills them in.
+pub(crate) fn is_hook_pattern(name: &str) -> bool {
+    name.bytes().any(|byte| byte.is_ascii_uppercase())
+}
+
+/// One piece of a hook name pattern.
+enum Piece<'a> {
+    Text(&'a str),
+    /// An uppercase run, such as `FORM_ID` or `ENTITY_TYPE`.
+    Placeholder(&'a str),
+}
+
+/// A pattern split into text and placeholders: an uppercase run starts a
+/// placeholder at the start of the pattern or after an underscore, and goes
+/// on through underscores followed by more uppercase.
+fn pieces(pattern: &str) -> Vec<Piece<'_>> {
+    let bytes = pattern.as_bytes();
+    let mut pieces = Vec::new();
+    let (mut text_start, mut i) = (0, 0);
+    while i < bytes.len() {
+        let starts = bytes[i].is_ascii_uppercase() && (i == 0 || bytes[i - 1] == b'_');
+        if !starts {
+            i += 1;
+            continue;
+        }
+        let mut end = i;
+        loop {
+            while end < bytes.len()
+                && (bytes[end].is_ascii_uppercase() || bytes[end].is_ascii_digit())
+            {
+                end += 1;
+            }
+            if end + 1 < bytes.len() && bytes[end] == b'_' && bytes[end + 1].is_ascii_uppercase() {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+        if text_start < i {
+            pieces.push(Piece::Text(&pattern[text_start..i]));
+        }
+        pieces.push(Piece::Placeholder(&pattern[i..end]));
+        text_start = end;
+        i = end;
+    }
+    if text_start < bytes.len() {
+        pieces.push(Piece::Text(&pattern[text_start..]));
+    }
+    pieces
+}
+
+/// Whether `hook` is one the documented `pattern` stands for: `ENTITY_TYPE`
+/// is an entity type ID `is_entity_type` accepts, `N` digits, and any other
+/// placeholder a run of lowercase letters, digits, and underscores.
+pub(crate) fn matches_hook_pattern(
+    pattern: &str,
+    hook: &str,
+    is_entity_type: &dyn Fn(&str) -> bool,
+) -> bool {
+    fn rest(pieces: &[Piece<'_>], hook: &str, is_entity_type: &dyn Fn(&str) -> bool) -> bool {
+        let Some((first, others)) = pieces.split_first() else {
+            return hook.is_empty();
+        };
+        match first {
+            Piece::Text(text) => hook
+                .strip_prefix(text)
+                .is_some_and(|after| rest(others, after, is_entity_type)),
+            Piece::Placeholder(name) => (1..=hook.len())
+                .filter(|length| hook.is_char_boundary(*length))
+                .any(|length| {
+                    let (value, after) = hook.split_at(length);
+                    let fits = match *name {
+                        "ENTITY_TYPE" => is_entity_type(value),
+                        "N" => value.bytes().all(|byte| byte.is_ascii_digit()),
+                        _ => value.bytes().all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                        }),
+                    };
+                    fits && rest(others, after, is_entity_type)
+                }),
+        }
+    }
+    rest(&pieces(pattern), hook, is_entity_type)
+}
+
 /// Where a hook is named, and as what.
 #[derive(Debug, Clone)]
 struct HookOccurrence {
@@ -401,7 +487,9 @@ impl Backend {
     /// Where go-to-definition on the hook `key`, named at `start` in `uri`,
     /// leads: from an invocation, the implementations it reaches; from an
     /// implementation, the invocations that reach it; from the
-    /// documentation, the implementations; then the documentation.
+    /// documentation, the implementations, those of every hook a documented
+    /// pattern stands for included; then the documentation, the patterns
+    /// the hook matches when none documents it by name.
     pub(crate) fn drupal_hook_definitions(
         &self,
         uri: &str,
@@ -416,7 +504,23 @@ impl Backend {
         else {
             return Vec::new();
         };
-        let mut targets: Vec<&HookOccurrence> = occurrences
+        if here == Occurrence::Documentation {
+            let implemented: Vec<HookOccurrence> = if is_hook_pattern(key) {
+                self.hooks_matching(key)
+                    .iter()
+                    .flat_map(|hook| self.hook_occurrences(hook))
+                    .collect()
+            } else {
+                occurrences
+            };
+            let targets: Vec<&HookOccurrence> = implemented
+                .iter()
+                .filter(|other| matches!(other.role, Occurrence::Implementation { .. }))
+                .collect();
+            return self.hook_locations(&targets);
+        }
+        let docs = self.hook_documentation_occurrences(key, &occurrences);
+        let targets: Vec<&HookOccurrence> = occurrences
             .iter()
             .filter(|other| match (&here, &other.role) {
                 (Occurrence::Invocation { .. }, Occurrence::Implementation { .. }) => {
@@ -425,27 +529,123 @@ impl Backend {
                 (Occurrence::Implementation { .. }, Occurrence::Invocation { .. }) => {
                     Occurrence::reaches(&other.role, &here)
                 }
-                (Occurrence::Documentation, Occurrence::Implementation { .. }) => true,
                 _ => false,
             })
+            .chain(docs.iter())
             .collect();
-        targets.extend(occurrences.iter().filter(|other| {
-            other.role == Occurrence::Documentation && here != Occurrence::Documentation
-        }));
         self.hook_locations(&targets)
     }
 
-    /// The documentation of the hook `key`.
+    /// The documentation of the hook `key`: its own, or that of every
+    /// documented pattern it matches.
     pub(crate) fn drupal_hook_documentation(
         &self,
         key: &str,
     ) -> Vec<tower_lsp_server::gen_lsp_types::Location> {
         let occurrences = self.hook_occurrences(key);
-        let docs: Vec<&HookOccurrence> = occurrences
+        let docs = self.hook_documentation_occurrences(key, &occurrences);
+        self.hook_locations(&docs.iter().collect::<Vec<_>>())
+    }
+
+    /// Every place the hook `key` is named, and for a documented pattern
+    /// every place a hook it stands for is, with the documentation of the
+    /// patterns a hook matches when `include_declaration` asks for it.
+    pub(crate) fn drupal_hook_references(
+        &self,
+        key: &str,
+        include_declaration: bool,
+    ) -> Vec<tower_lsp_server::gen_lsp_types::Location> {
+        let mut found = self.hook_occurrences(key);
+        if is_hook_pattern(key) {
+            for hook in self.hooks_matching(key) {
+                found.extend(self.hook_occurrences(&hook));
+            }
+        } else if include_declaration && !found.iter().any(|o| o.role == Occurrence::Documentation)
+        {
+            found.extend(self.hook_documentation_occurrences(key, &[]));
+        }
+        if !include_declaration {
+            found.retain(|occurrence| {
+                !matches!(
+                    occurrence.role,
+                    Occurrence::Documentation | Occurrence::Invocation { .. }
+                )
+            });
+        }
+        found.sort_by(|a, b| (&a.uri, a.start).cmp(&(&b.uri, b.start)));
+        found.dedup_by(|a, b| a.uri == b.uri && a.start == b.start);
+        self.hook_locations(&found.iter().collect::<Vec<_>>())
+    }
+
+    /// The documentation among `occurrences` of `key`, else that of every
+    /// documented pattern `key` matches.
+    fn hook_documentation_occurrences(
+        &self,
+        key: &str,
+        occurrences: &[HookOccurrence],
+    ) -> Vec<HookOccurrence> {
+        let own: Vec<HookOccurrence> = occurrences
             .iter()
             .filter(|occurrence| occurrence.role == Occurrence::Documentation)
+            .cloned()
             .collect();
-        self.hook_locations(&docs)
+        if !own.is_empty() || is_hook_pattern(key) {
+            return own;
+        }
+        let is_entity_type = |id: &str| !self.drupal_entity_types(id).is_empty();
+        self.documented_hook_patterns()
+            .iter()
+            .filter(|pattern| matches_hook_pattern(pattern, key, &is_entity_type))
+            .flat_map(|pattern| self.hook_occurrences(pattern))
+            .filter(|occurrence| occurrence.role == Occurrence::Documentation)
+            .collect()
+    }
+
+    /// The documented hook names with placeholders, sorted.
+    fn documented_hook_patterns(&self) -> Vec<String> {
+        use crate::symbol_map::{StringKeyKind, SymbolKind};
+        let mut patterns = Vec::new();
+        self.visit_declaring_symbol_maps(|_, map| {
+            for span in &map.spans {
+                if let SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalHook,
+                    key,
+                    is_write: true,
+                    ..
+                } = &span.kind
+                    && is_hook_pattern(key)
+                {
+                    patterns.push(key.clone());
+                }
+            }
+        });
+        patterns.sort_unstable();
+        patterns.dedup();
+        patterns
+    }
+
+    /// Every hook the workspace names, implemented or documented, that the
+    /// documented `pattern` stands for.
+    fn hooks_matching(&self, pattern: &str) -> Vec<String> {
+        use crate::symbol_map::{StringKeyKind, SymbolKind};
+        let is_entity_type = |id: &str| !self.drupal_entity_types(id).is_empty();
+        let mut hooks: Vec<String> = Vec::new();
+        for (_, map) in self.user_file_symbol_maps() {
+            for span in &map.spans {
+                if let SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalHook,
+                    key,
+                    ..
+                } = &span.kind
+                    && !is_hook_pattern(key)
+                    && !hooks.contains(key)
+                    && matches_hook_pattern(pattern, key, &is_entity_type)
+                {
+                    hooks.push(key.clone());
+                }
+            }
+        }
+        hooks
     }
 
     fn hook_locations(
@@ -473,6 +673,40 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn patterns_fill_their_placeholders() {
+        let entity = |id: &str| matches!(id, "node" | "taxonomy_term");
+        assert!(matches_hook_pattern(
+            "form_FORM_ID_alter",
+            "form_user_login_form_alter",
+            &entity
+        ));
+        assert!(matches_hook_pattern(
+            "ENTITY_TYPE_presave",
+            "taxonomy_term_presave",
+            &entity
+        ));
+        assert!(!matches_hook_pattern(
+            "ENTITY_TYPE_presave",
+            "acme_presave",
+            &entity
+        ));
+        assert!(matches_hook_pattern("update_N", "update_10001", &entity));
+        assert!(!matches_hook_pattern("update_N", "update_last", &entity));
+        assert!(matches_hook_pattern(
+            "entity_query_tag__ENTITY_TYPE__TAG_alter",
+            "entity_query_tag__node__acme_alter",
+            &entity
+        ));
+        assert!(!matches_hook_pattern(
+            "form_FORM_ID_alter",
+            "form_alter",
+            &entity
+        ));
+        assert!(is_hook_pattern("preprocess_HOOK"));
+        assert!(!is_hook_pattern("preprocess_page"));
+    }
 
     #[test]
     fn hook_classes_belong_to_the_extension_of_their_namespace() {

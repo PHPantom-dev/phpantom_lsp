@@ -358,3 +358,58 @@ async fn invocations_and_implementations_lead_to_each_other() {
     );
     assert_eq!(found, vec![(php, 10), (api, 1)]);
 }
+
+const PATTERN_API: &str = "<?php\nfunction hook_form_FORM_ID_alter(&$form, $form_state, $form_id) {\n}\nfunction hook_ENTITY_TYPE_presave($entity) {\n}\n";
+const PATTERN_MODULE: &str = "<?php\nfunction acme_form_user_login_form_alter(&$form, $form_state, $form_id) {\n}\nfunction acme_node_presave($node) {\n}\nfunction acme_widget_presave($widget) {\n}\n";
+
+/// A hook named with parts filled in links to the documented pattern it
+/// matches, and the pattern lists the hooks it stands for.
+#[tokio::test]
+async fn computed_hook_names_reach_their_documented_pattern() {
+    let node = "<?php\nnamespace Drupal\\node\\Entity;\n/**\n * @ContentEntityType(\n *   id = \"node\",\n * )\n */\nclass Node {}\n";
+    let (backend, dir) = drupal(
+        &[
+            ("web/core/lib/Drupal/Core/Form/form.api.php", PATTERN_API),
+            ("web/core/modules/node/src/Entity/Node.php", node),
+        ],
+        &[("web/modules/custom/acme/acme.module", PATTERN_MODULE)],
+    )
+    .await;
+    let module = uri_for(&dir, "web/modules/custom/acme/acme.module");
+    let api = uri_for(&dir, "web/core/lib/Drupal/Core/Form/form.api.php");
+    references_at(
+        &backend,
+        &module,
+        position_in(PATTERN_MODULE, "acme_node", 6),
+    )
+    .await;
+
+    for (needle, line) in [
+        ("acme_form_user_login_form_alter", 1),
+        ("acme_node_presave", 3),
+    ] {
+        let found = definitions_at(&backend, &module, position_in(PATTERN_MODULE, needle, 6)).await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!(
+            (&found[0].uri, found[0].range.start.line),
+            (&api, line),
+            "{needle}"
+        );
+    }
+    // `widget` is no entity type.
+    let found = definitions_at(
+        &backend,
+        &module,
+        position_in(PATTERN_MODULE, "acme_widget_presave", 6),
+    )
+    .await;
+    assert!(found.is_empty(), "{found:?}");
+
+    let found = references_at(
+        &backend,
+        &api,
+        position_in(PATTERN_API, "ENTITY_TYPE_presave", 1),
+    )
+    .await;
+    assert_eq!(found, vec![(api, 3), (module, 3)], "{found:?}");
+}
