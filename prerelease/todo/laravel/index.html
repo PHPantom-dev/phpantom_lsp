@@ -1161,6 +1161,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#l70-read-only-accessors-are-offered-as-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L70. Read-only accessors are offered as columns
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l71-model-level-attributes-as-column-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L71. Model-level attributes as column sources
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1287,17 +1309,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L29. Livewire and Volt component names
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l30-eloquent-attribute-array-key-completion" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L30. Eloquent attribute-array key completion
       </span>
     </span>
   </a>
@@ -1934,6 +1945,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#l70-read-only-accessors-are-offered-as-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L70. Read-only accessors are offered as columns
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l71-model-level-attributes-as-column-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L71. Model-level attributes as column sources
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2060,17 +2093,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L29. Livewire and Volt component names
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l30-eloquent-attribute-array-key-completion" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L30. Eloquent attribute-array key completion
       </span>
     </span>
   </a>
@@ -2672,6 +2694,42 @@ declaratively like <code>$casts</code> is today.</p>
 <p>Until then the properties stay, so this is a precision gap rather
 than a missing feature. Reported as a follow-up on
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/issues/312">#312</a>.</p>
+<h4 id="l70-read-only-accessors-are-offered-as-columns">L70. Read-only accessors are offered as columns<a class="headerlink" href="#l70-read-only-accessors-are-offered-as-columns" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p><code>collect_column_names</code> reads the fully resolved model, so every virtual
+property counts as a column, including an accessor with no backing
+column and no mutator (a legacy <code>getDisplayNameAttribute()</code>, or an
+<code>Attribute::make(get: ...)</code> with no <code>set:</code>). <code>display_name</code> then
+completes in <code>where('…')</code>, <code>orderBy('…')</code> and <code>create([...])</code>. None of
+these work at runtime: the query hits a column that does not exist, and
+mass assignment of a computed-only attribute does nothing. <code>$appends</code>
+entries are counted as columns for the same reason, though they only
+name accessors to serialize.</p>
+<p>Skip <code>PropertySource::Accessor { column: None, mutator: None }</code> and
+<code>ComputedProperty { mutator: None }</code> in <code>collect_column_names</code>, and stop
+treating <code>$appends</code> as a column source there. An accessor that
+overrides a real column (one that <code>$casts</code>, <code>$fillable</code> or the
+migration schema also declares) stays. <code>create()</code> and <code>fill()</code> still
+want accessors that have a mutator.</p>
+<p><strong>Where to look:</strong> <code>collect_column_names</code> in
+<code>virtual_members/laravel/where_property.rs</code> and its callers in
+<code>completion/eloquent_string.rs</code>; <code>extract_column_names</code> in
+<code>virtual_members/laravel/model_extraction/</code> for <code>$appends</code>.</p>
+<h4 id="l71-model-level-attributes-as-column-sources">L71. Model-level attributes as column sources<a class="headerlink" href="#l71-model-level-attributes-as-column-sources" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<p>Laravel models can declare their column lists with class attributes
+instead of properties: <code>#[Fillable(['name'])]</code>, <code>#[Guarded([...])]</code>,
+<code>#[Hidden([...])]</code>, <code>#[Visible([...])]</code> and <code>#[Appends([...])]</code> from
+<code>Illuminate\Database\Eloquent\Attributes</code>, which the framework merges
+into the matching property when the model boots. PHPantom reads only the
+properties. A model that uses the attributes gets no column completion
+from them, no fillable-first ordering in <code>create([...])</code>, and none of
+the column names they list. Read their <code>columns</code> argument alongside the
+property it stands in for, so the two forms behave the same. L49 needs
+the same read for <code>#[Fillable]</code>, <code>#[Guarded]</code> and <code>#[Unguarded]</code>.</p>
+<p><strong>Where to look:</strong> <code>extract_column_names</code> and the <code>$fillable</code>/<code>$guarded</code>
+reads in <code>virtual_members/laravel/model_extraction/</code>, which already
+reads the <code>#[Table]</code> attribute.</p>
 <h4 id="l8-withsum-withavg-withmin-withmax-aggregate-properties">L8. <code>withSum()</code> / <code>withAvg()</code> / <code>withMin()</code> / <code>withMax()</code> aggregate properties<a class="headerlink" href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>Less common than <code>withCount</code>; only affects codebases using aggregate
@@ -2886,21 +2944,6 @@ in its view are implemented (<code>blade/discovery.rs</code>). Three gaps remain
   Neither value completes, navigates, or reports a name the component
   does not declare. Laravel Idea reports an unknown <code>wire:click</code> action.</li>
 </ul>
-<h4 id="l30-eloquent-attribute-array-key-completion">L30. Eloquent attribute-array key completion<a class="headerlink" href="#l30-eloquent-attribute-array-key-completion" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: High · Complexity: Medium</strong></p>
-<p>Our Eloquent string completion covers where-style column arguments and
-relation names, but not <strong>attribute-array keys</strong>: <code>User::create(['name'
-=&gt; …])</code>, <code>fill()</code>, <code>make()</code>, <code>update()</code>, <code>updateOrCreate()</code>,
-<code>firstOrCreate()</code>, <code>firstOrNew()</code>, <code>createOrFirst()</code> should complete
-array keys from the model's column sources (preferring fillable
-columns, skipping keys already present in the literal). Also extend the
-scalar column list with <code>firstWhere()</code>, <code>whereColumn()</code>, and the
-aggregate methods (<code>min</code>/<code>max</code>/<code>sum</code>/<code>avg</code>), and cover the model-level
-PHP attributes that take column-name arguments where the installed
-framework version has them. The Laravel LSP gets its column list from
-<code>artisan model:show --json</code> (live DB required); ours comes from the
-same static sources the model provider already uses (casts, fillable,
-accessors, <code>@property</code> tags) — no database needed.</p>
 <h4 id="l31-string-key-rename-highlight-and-semantic-tokens">L31. String-key rename, highlight, and semantic tokens<a class="headerlink" href="#l31-string-key-rename-highlight-and-semantic-tokens" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>References and go-to-definition already work for indexed Laravel
@@ -2997,9 +3040,9 @@ individually) and whose target model declares neither <code>$fillable</code> nor
 <code>$guarded</code>, nor the <code>#[Fillable]</code>/<code>#[Guarded]</code>/<code>#[Unguarded]</code> model
 attributes, and the project never calls <code>Model::unguard()</code>, on <code>create()</code>, <code>fill()</code>, <code>update()</code>,
 <code>updateOrCreate()</code>, <code>firstOrCreate()</code>, and <code>firstOrNew()</code>. The model
-resolution and column-source machinery L30 already needs (and the
-diagnostic's model-argument matching) share the same receiver-typing
-path, so build them together.</p>
+resolution and column-source machinery used by attribute-array key
+completion shares the same receiver-typing path as the diagnostic's
+model-argument matching, so reuse it.</p>
 <p><strong>Where to look:</strong> <code>virtual_members/laravel/model_extraction/</code> for
 existing <code>$fillable</code>/<code>$guarded</code> reads; <code>diagnostics/</code> for the
 call-site diagnostic pattern used by similarly-shaped checks.</p>
