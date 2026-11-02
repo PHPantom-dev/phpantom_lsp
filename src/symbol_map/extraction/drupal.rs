@@ -966,6 +966,7 @@ pub(in crate::symbol_map::extraction) fn record_drupal_hook_invocations(
     ctx: &mut ExtractionCtx<'_>,
 ) {
     if !ctx.drupal
+        || ctx.drupal_file == crate::drupal::hooks::DrupalFile::Test
         || !matches!(
             member_name.as_bytes().first(),
             Some(b'i' | b'a' | b'I' | b'A')

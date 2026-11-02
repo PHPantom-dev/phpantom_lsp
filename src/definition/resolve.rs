@@ -87,7 +87,7 @@ impl Backend {
     ) -> Option<crate::symbol_map::SymbolSpan> {
         let map = self.symbol_map_for(uri)?;
         if let Some(span) = map.lookup(offset) {
-            return Some(span.clone());
+            return Some(self.drupal_hook_or_function(&map, span).clone());
         }
         if map
             .morph_column_sites

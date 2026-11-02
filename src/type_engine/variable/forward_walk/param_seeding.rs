@@ -158,6 +158,7 @@ pub(crate) fn seed_params<'b>(
 
         if native_type.is_none()
             && let Some(backend) = ctx.file.backend
+            && backend.is_drupal_project()
             && super::super::resolution::declared_param_docblock_type(
                 ctx.file.content,
                 method_span_start as usize,

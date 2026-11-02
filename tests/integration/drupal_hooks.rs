@@ -403,14 +403,18 @@ async fn computed_hook_names_reach_their_documented_pattern() {
             "{needle}"
         );
     }
-    // `widget` is no entity type.
+    // `widget` is no entity type, so the function is a helper and leads to
+    // nothing but itself.
     let found = definitions_at(
         &backend,
         &module,
         position_in(PATTERN_MODULE, "acme_widget_presave", 6),
     )
     .await;
-    assert!(found.is_empty(), "{found:?}");
+    assert!(
+        found.iter().all(|location| location.uri == module),
+        "{found:?}"
+    );
 
     let found = references_at(
         &backend,
@@ -752,4 +756,45 @@ async fn computed_hooks_reach_the_core_call_that_fires_them() {
         vec![(uri_for(&dir, STORAGES[0].0), 4), (api, 3)],
         "only the content storage stores nodes"
     );
+}
+
+/// A function named after its module that no documentation and no
+/// invocation backs is a helper: its whole name is the function's.  Hover
+/// on an implementation names its documentation, a pattern's included, and
+/// a hook matching two patterns is documented by the one that writes out
+/// more of it.
+#[tokio::test]
+async fn helpers_stay_functions_and_hooks_reach_their_most_specific_documentation() {
+    let api = "<?php\nfunction hook_theme_suggestions_HOOK(array $variables) {\n}\nfunction hook_theme_suggestions_HOOK_alter(array &$suggestions, array $variables, $hook) {\n}\nfunction hook_cron() {\n}\n";
+    let api_path = "web/core/lib/Drupal/Core/Render/theme.api.php";
+    let module = "<?php\nfunction acme_helper() {\n}\nfunction acme_cron() {\n    acme_helper();\n}\nfunction acme_theme_suggestions_node_alter(array &$suggestions, $variables, $hook) {\n}\n";
+    let (backend, dir) = drupal(
+        &[(api_path, api)],
+        &[("web/modules/custom/acme/acme.module", module)],
+    )
+    .await;
+    let php = uri_for(&dir, "web/modules/custom/acme/acme.module");
+    let api_uri = uri_for(&dir, api_path);
+    references_at(&backend, &php, position_in(module, "acme_cron", 6)).await;
+
+    let found = references_at(&backend, &php, position_in(module, "acme_helper()", 7)).await;
+    assert_eq!(found, vec![(php.clone(), 1), (php.clone(), 4)], "{found:?}");
+
+    let found = definitions_at(
+        &backend,
+        &php,
+        position_in(module, "acme_theme_suggestions_node_alter", 6),
+    )
+    .await;
+    let lines: Vec<_> = found
+        .iter()
+        .map(|l| (l.uri.clone(), l.range.start.line))
+        .collect();
+    assert_eq!(lines, vec![(api_uri, 3)]);
+
+    let position = position_in(module, "acme_theme_suggestions_node_alter", 7);
+    let hover = hover_text_at(&backend, &php, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(hover.contains("theme.api.php"), "{hover}");
 }

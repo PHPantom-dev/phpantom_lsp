@@ -325,18 +325,73 @@ pub(crate) fn matches_hook_pattern(
                 .filter(|length| hook.is_char_boundary(*length))
                 .any(|length| {
                     let (value, after) = hook.split_at(length);
-                    let fits = match *name {
-                        "ENTITY_TYPE" => is_entity_type(value),
+                    let shaped = match *name {
                         "N" => value.bytes().all(|byte| byte.is_ascii_digit()),
                         _ => value.bytes().all(|byte| {
                             byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
                         }),
                     };
-                    fits && rest(others, after, is_entity_type)
+                    // The rest of the name is cheaper to check than whether
+                    // a run is a declared entity type.
+                    shaped
+                        && rest(others, after, is_entity_type)
+                        && (*name != "ENTITY_TYPE" || is_entity_type(value))
                 }),
         }
     }
     rest(&pieces(pattern), hook, is_entity_type)
+}
+
+/// How much of `pattern` is written out: its length without its
+/// placeholders.  Of the patterns a hook matches, the ones that write out
+/// the most are the ones that document it (`theme_suggestions_HOOK_alter`
+/// over `theme_suggestions_HOOK` for `theme_suggestions_node_alter`).
+fn written_out(pattern: &str) -> usize {
+    pieces(pattern)
+        .iter()
+        .map(|piece| match piece {
+            Piece::Text(text) => text.len(),
+            Piece::Placeholder(_) => 0,
+        })
+        .sum()
+}
+
+/// What the documentation of the workspace's hooks says, read once and
+/// kept until a file that declares hooks or entity types changes.
+#[derive(Default)]
+pub(crate) struct HookIndex {
+    /// Every documented hook, patterns included, sorted.
+    documented: Vec<String>,
+    /// The documented hooks with placeholders, sorted.
+    patterns: Vec<String>,
+    /// Every declared entity type ID.
+    entity_types: std::collections::HashSet<String>,
+}
+
+impl HookIndex {
+    /// The documented patterns `hook` matches that write out the most.
+    fn best_patterns(&self, hook: &str) -> Vec<&str> {
+        let is_entity_type = |id: &str| self.entity_types.contains(id);
+        let matching: Vec<&str> = self
+            .patterns
+            .iter()
+            .filter(|pattern| matches_hook_pattern(pattern, hook, &is_entity_type))
+            .map(String::as_str)
+            .collect();
+        let best = matching.iter().map(|pattern| written_out(pattern)).max();
+        matching
+            .into_iter()
+            .filter(|pattern| Some(written_out(pattern)) == best)
+            .collect()
+    }
+
+    /// Whether `hook` is documented, by name or by a pattern.
+    fn documents(&self, hook: &str) -> bool {
+        self.documented
+            .binary_search_by(|known| known.as_str().cmp(hook))
+            .is_ok()
+            || !self.best_patterns(hook).is_empty()
+    }
 }
 
 /// Where a hook is named, and as what.
@@ -393,7 +448,6 @@ impl Backend {
         let reference_key =
             crate::reference_index::string_key_reference_key(StringKeyKind::DrupalHook, key);
         let snapshot = self.user_file_symbol_maps_for_reference_keys(&[reference_key]);
-        let extensions = self.drupal.extensions.read();
         let mut found = Vec::new();
         for (uri, map) in &snapshot {
             let typed = if map
@@ -433,7 +487,7 @@ impl Backend {
                     }) => Occurrence::Implementation {
                         extension: *extension,
                         is_theme: is_theme
-                            .or_else(|| extensions.is_theme(extension))
+                            .or_else(|| self.drupal.extensions.read().is_theme(extension))
                             .unwrap_or(false),
                         collected: *collected,
                     },
@@ -471,12 +525,18 @@ impl Backend {
         found
     }
 
-    /// Whether the type engine confirms `site` of the file at `uri`.
+    /// Whether the type engine confirms `site` of the file at `uri`, read
+    /// in isolation from whatever pass is running, as the declarations of
+    /// another file are.
     fn confirms_typed_receiver_site(
         &self,
         uri: &str,
         site: &crate::symbol_map::TypedReceiverSite,
     ) -> bool {
+        let _isolated = (
+            crate::type_engine::variable::forward_walk::suspend_diagnostic_scope(),
+            crate::type_engine::resolver::with_isolated_chain_cache(),
+        );
         self.get_file_content_arc(uri).is_some_and(|content| {
             !self
                 .confirm_typed_receiver_sites(uri, &content, std::slice::from_ref(site))
@@ -587,12 +647,7 @@ impl Backend {
             found.extend(self.hook_documentation_occurrences(key, &[]));
         }
         if !include_declaration {
-            found.retain(|occurrence| {
-                !matches!(
-                    occurrence.role,
-                    Occurrence::Documentation | Occurrence::Invocation { .. }
-                )
-            });
+            found.retain(|occurrence| occurrence.role != Occurrence::Documentation);
         }
         found.sort_by(|a, b| (&a.uri, a.start).cmp(&(&b.uri, b.start)));
         found.dedup_by(|a, b| a.uri == b.uri && a.start == b.start);
@@ -614,45 +669,128 @@ impl Backend {
         if !own.is_empty() || is_hook_pattern(key) {
             return own;
         }
-        let is_entity_type = |id: &str| !self.drupal_entity_types(id).is_empty();
-        self.documented_hook_patterns()
-            .iter()
-            .filter(|pattern| matches_hook_pattern(pattern, key, &is_entity_type))
+        self.hook_index()
+            .best_patterns(key)
+            .into_iter()
             .flat_map(|pattern| self.hook_occurrences(pattern))
             .filter(|occurrence| occurrence.role == Occurrence::Documentation)
             .collect()
     }
 
-    /// The documented hook names with placeholders, sorted.
-    fn documented_hook_patterns(&self) -> Vec<String> {
-        let mut patterns = self.drupal_documented_hooks();
-        patterns.retain(|hook| is_hook_pattern(hook));
-        patterns
-    }
-
     /// Every hook an `*.api.php` file documents, patterns included, sorted.
     pub(crate) fn drupal_documented_hooks(&self) -> Vec<String> {
+        self.hook_index().documented.clone()
+    }
+
+    /// What the documentation of the workspace's hooks says, read once
+    /// until a declaring file changes (see
+    /// [`Backend::forget_drupal_hook_index`]).
+    fn hook_index(&self) -> std::sync::Arc<HookIndex> {
         use crate::symbol_map::{StringKeyKind, SymbolKind};
-        let mut hooks = Vec::new();
+        if let Some(index) = self.drupal.hook_index.read().as_ref() {
+            return std::sync::Arc::clone(index);
+        }
+        let mut index = HookIndex::default();
         // The documentation is a plain span; an invocation, the other kind
         // of declaration, is a call the type engine confirms, and is left
         // out.
         self.visit_declaring_symbol_maps(|_, map| {
             for span in &map.spans {
                 if let SymbolKind::StringKey {
-                    kind: StringKeyKind::DrupalHook,
+                    kind,
                     key,
                     is_write: true,
                     ..
                 } = &span.kind
                 {
-                    hooks.push(key.clone());
+                    match kind {
+                        StringKeyKind::DrupalHook => index.documented.push(key.clone()),
+                        StringKeyKind::DrupalEntityType => {
+                            index.entity_types.insert(key.clone());
+                        }
+                        _ => {}
+                    }
                 }
             }
         });
-        hooks.sort_unstable();
-        hooks.dedup();
-        hooks
+        index.documented.sort_unstable();
+        index.documented.dedup();
+        index.patterns = index
+            .documented
+            .iter()
+            .filter(|hook| is_hook_pattern(hook))
+            .cloned()
+            .collect();
+        let index = std::sync::Arc::new(index);
+        *self.drupal.hook_index.write() = Some(std::sync::Arc::clone(&index));
+        index
+    }
+
+    /// Forget what [`Backend::hook_index`] read, once a file that declares
+    /// hooks or entity types may have changed.
+    pub(crate) fn forget_drupal_hook_index(&self) {
+        if self.drupal.hook_index.read().is_some() {
+            *self.drupal.hook_index.write() = None;
+        }
+    }
+
+    /// The span the cursor means at `span`: the function itself, when
+    /// `span` is the hook part of a procedural function's name and nothing
+    /// but the function backs that hook, which makes it a helper named
+    /// after its extension rather than a hook implementation.
+    pub(crate) fn drupal_hook_or_function<'m>(
+        &self,
+        map: &'m crate::symbol_map::SymbolMap,
+        span: &'m crate::symbol_map::SymbolSpan,
+    ) -> &'m crate::symbol_map::SymbolSpan {
+        use crate::symbol_map::{HookRole, StringKeyKind, SymbolKind};
+        let SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalHook,
+            key,
+            is_write: false,
+            ..
+        } = &span.kind
+        else {
+            return span;
+        };
+        let procedural = map
+            .drupal_hooks
+            .binary_search_by_key(&span.start, |site| site.start)
+            .ok()
+            .is_some_and(|at| {
+                matches!(
+                    map.drupal_hooks[at].role,
+                    HookRole::Implementation {
+                        is_theme: Some(_),
+                        ..
+                    }
+                )
+            });
+        if !procedural || self.drupal_hook_is_backed(key) {
+            return span;
+        }
+        // The function's own span starts before the hook part and ends with
+        // it.
+        let at = map.spans.partition_point(|other| other.start < span.start);
+        map.spans[..at]
+            .iter()
+            .rev()
+            .find(|other| {
+                other.end == span.end && matches!(other.kind, SymbolKind::FunctionCall { .. })
+            })
+            .unwrap_or(span)
+    }
+
+    /// Whether the hook `key` is backed by anything but its implementations:
+    /// documented, by name or by a pattern, or invoked.  A procedural
+    /// function named after its extension whose hook nothing backs is
+    /// read as the function it is.
+    pub(crate) fn drupal_hook_is_backed(&self, key: &str) -> bool {
+        self.hook_index().documents(key)
+            || self
+                .hook_occurrences(key)
+                .iter()
+                .any(|occurrence| matches!(occurrence.role, Occurrence::Invocation { .. }))
     }
 
     /// The documentation function of the hook the function or method
@@ -712,22 +850,26 @@ impl Backend {
                 } => Some(key.clone()),
                 _ => None,
             })?;
-        let exact = format!("hook_{hook}");
-        if let Some(function) = self.find_or_load_function(&[exact.as_str()]) {
-            return Some(function);
-        }
-        let is_entity_type = |id: &str| !self.drupal_entity_types(id).is_empty();
-        self.documented_hook_patterns()
-            .iter()
-            .filter(|pattern| matches_hook_pattern(pattern, &hook, &is_entity_type))
-            .find_map(|pattern| self.find_or_load_function(&[format!("hook_{pattern}").as_str()]))
+        let index = self.hook_index();
+        let documented = if index
+            .documented
+            .binary_search_by(|known| known.as_str().cmp(&hook))
+            .is_ok()
+        {
+            hook
+        } else {
+            index.best_patterns(&hook).first()?.to_string()
+        };
+        self.find_or_load_function(&[format!("hook_{documented}").as_str()])
     }
 
     /// Every hook the workspace names, implemented or documented, that the
-    /// documented `pattern` stands for.
+    /// documented `pattern` stands for, and that no pattern writing out
+    /// more documents.
     fn hooks_matching(&self, pattern: &str) -> Vec<String> {
         use crate::symbol_map::{StringKeyKind, SymbolKind};
-        let is_entity_type = |id: &str| !self.drupal_entity_types(id).is_empty();
+        let index = self.hook_index();
+        let is_entity_type = |id: &str| index.entity_types.contains(id);
         let mut hooks: Vec<String> = Vec::new();
         for (_, map) in self.user_file_symbol_maps() {
             for span in &map.spans {
@@ -739,6 +881,7 @@ impl Backend {
                     && !is_hook_pattern(key)
                     && !hooks.contains(key)
                     && matches_hook_pattern(pattern, key, &is_entity_type)
+                    && index.best_patterns(key).contains(&pattern)
                 {
                     hooks.push(key.clone());
                 }
@@ -776,6 +919,22 @@ mod tests {
     #[test]
     fn patterns_fill_their_placeholders() {
         let entity = |id: &str| matches!(id, "node" | "taxonomy_term");
+        let index = HookIndex {
+            documented: Vec::new(),
+            patterns: vec![
+                "theme_suggestions_HOOK".to_string(),
+                "theme_suggestions_HOOK_alter".to_string(),
+            ],
+            entity_types: Default::default(),
+        };
+        assert_eq!(
+            index.best_patterns("theme_suggestions_node_alter"),
+            ["theme_suggestions_HOOK_alter"]
+        );
+        assert_eq!(
+            index.best_patterns("theme_suggestions_node"),
+            ["theme_suggestions_HOOK"]
+        );
         assert!(matches_hook_pattern(
             "form_FORM_ID_alter",
             "form_user_login_form_alter",

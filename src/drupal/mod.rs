@@ -42,6 +42,8 @@ pub(crate) struct DrupalState {
     hook_php_files: RwLock<Vec<PathBuf>>,
     /// The modules, install profiles, and themes of every web root.
     extensions: RwLock<hooks::ExtensionIndex>,
+    /// What the hook documentation says, until a declaring file changes.
+    hook_index: RwLock<Option<std::sync::Arc<hooks::HookIndex>>>,
 }
 
 /// A kind of file Drupal reads declarations from.

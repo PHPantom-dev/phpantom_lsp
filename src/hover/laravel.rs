@@ -303,7 +303,11 @@ impl Backend {
                     StringKeyKind::SymfonyTranslation => "Translation",
                     _ => "Translation domain",
                 };
-                let declared = self.symfony_declaration_locations(*kind, key);
+                let declared = if *kind == StringKeyKind::DrupalHook {
+                    self.drupal_hook_documentation(key)
+                } else {
+                    self.symfony_declaration_locations(*kind, key)
+                };
                 let mut detail = match declared
                     .first()
                     .and_then(|location| self.workspace_relative_path(location.uri.as_str()))

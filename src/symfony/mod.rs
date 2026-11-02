@@ -213,8 +213,12 @@ impl Backend {
                 .iter()
                 .any(|prefix| uri.starts_with(prefix.as_str()));
         self.note_drupal_routes(uri, Some(map));
+        let was_declaring = self.symfony.declaring_uris.read().contains(uri);
+        if was_declaring || declares {
+            self.forget_drupal_hook_index();
+        }
         // Only take the write lock when the answer changes.
-        if self.symfony.declaring_uris.read().contains(uri) == declares {
+        if was_declaring == declares {
             return;
         }
         let mut uris = self.symfony.declaring_uris.write();
@@ -229,6 +233,7 @@ impl Backend {
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
         self.note_drupal_routes(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
+            self.forget_drupal_hook_index();
             self.symfony.declaring_uris.write().remove(uri);
         }
     }
@@ -282,10 +287,11 @@ impl Backend {
         let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
         uris.sort_unstable();
         // Only Symfony declares names through calls the type engine has to
-        // confirm, and Drupal its hooks, which the calls that invoke them
-        // declare; Drupal's other names never are.
+        // confirm.  A Drupal project records the calls that invoke its
+        // hooks, but hooks have an index of their own (see
+        // `crate::drupal::hooks`), which is not read here.
         let needs_typed = match kind.framework() {
-            KeyFramework::Drupal => kind == StringKeyKind::DrupalHook,
+            KeyFramework::Drupal => false,
             KeyFramework::ServiceContainer => self.is_symfony_project(),
             KeyFramework::Laravel
             | KeyFramework::Symfony
