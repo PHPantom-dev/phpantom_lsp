@@ -258,7 +258,17 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_builder_spans(
         }
         _ => false,
     };
-    let mut names: Vec<&Expression<'_>> = found.added;
+    // A route collection's `add()` takes the route second: a `new Route`,
+    // or a variable holding one, a parameter included, which the file
+    // alone cannot type.  Any other `add()` adds something else.
+    let mut names: Vec<&Expression<'_>> = found
+        .added
+        .into_iter()
+        .filter(|(_, route)| {
+            holds_route(route) || matches!(route, Expression::Variable(Variable::Direct(_)))
+        })
+        .map(|(name, _)| name)
+        .collect();
     names.extend(
         found
             .keyed
@@ -300,8 +310,8 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_builder_spans(
 /// that may add a route.
 #[derive(Default)]
 struct BuilderSites<'ast, 'arena> {
-    /// The first argument of each `->add()` with two or more arguments.
-    added: Vec<&'ast Expression<'arena>>,
+    /// The first two arguments of each `->add()` with two or more.
+    added: Vec<(&'ast Expression<'arena>, &'ast Expression<'arena>)>,
     /// The key and the value of each `$routes[KEY] = VALUE` and each
     /// `KEY => VALUE` array entry.
     keyed: Vec<(&'ast Expression<'arena>, &'ast Expression<'arena>)>,
@@ -324,10 +334,10 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BuilderSites<'ast, 
         };
         let arguments = &call.argument_list.arguments;
         if name.value.eq_ignore_ascii_case(b"add")
-            && arguments.len() >= 2
-            && let Some(Argument::Positional(first)) = arguments.first()
+            && let (Some(Argument::Positional(first)), Some(Argument::Positional(second))) =
+                (arguments.first(), arguments.get(1))
         {
-            found.added.push(first.value);
+            found.added.push((first.value, second.value));
         }
     }
 
@@ -727,6 +737,8 @@ class SearchPageRoutes {
         $collection->add($name, new Route('/z'));
         $routes['not_a_route'] = new \ArrayObject();
         $form->add('not_a_route_either');
+        $bag->add('nor_this', 1);
+        $bag->add($id . '.nor_this', [1]);
         return $routes;
     }
 }
