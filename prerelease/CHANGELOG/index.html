@@ -5207,6 +5207,8 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Arguments to a variadic parameter are type-checked.</strong> Each argument collected by a <code>...$rest</code> parameter is now checked against the type the parameter declares, the same as any other argument. Mockery's <code>Mockery::mock(Foo::class, [...])</code> and <code>spy()</code> accept the mocked class's constructor arguments.</li>
+<li><strong>A template named twice in one parameter checks its bound.</strong> A parameter typed <code>T|class-string&lt;T&gt;</code>, as <code>new ReflectionClass()</code> takes, now reports a plain <code>string</code> argument instead of accepting anything.</li>
 <li><strong><code>array_udiff()</code> and its siblings accept their callback.</strong> Passing the comparison callback to <code>array_udiff()</code>, <code>array_diff_ukey()</code>, <code>array_uintersect()</code> and the rest of the family is no longer reported as an argument that should be an array, and hover and signature help no longer list parameters PHP 8 removed from built-in functions.</li>
 <li><strong>Hover on a <code>global</code> statement's variable.</strong> Hovering the variable in <code>global $x;</code> now shows the type it imports, instead of nothing.</li>
 <li><strong>WordPress's <code>__()</code> returns a string.</strong> Outside a Laravel project, <code>__()</code> and <code>trans()</code> keep the return type their own declaration gives, instead of Laravel's <code>string|array</code>, so passing a translated string to WordPress functions is no longer reported.</li>

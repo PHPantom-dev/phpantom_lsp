@@ -1006,23 +1006,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b723-arguments-passed-to-a-variadic-parameter-are-never-type-checked" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B723. Arguments passed to a variadic parameter are never type-checked
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1669,23 +1652,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b723-arguments-passed-to-a-variadic-parameter-are-never-type-checked" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B723. Arguments passed to a variadic parameter are never type-checked
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1793,21 +1759,7 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b723-arguments-passed-to-a-variadic-parameter-are-never-type-checked">B723. Arguments passed to a variadic parameter are never type-checked<a class="headerlink" href="#b723-arguments-passed-to-a-variadic-parameter-are-never-type-checked" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">function tags(string ...$tags): void {}</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">tags('a', new stdClass());   // not reported</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">array_udiff($a, 'nope', fn($x, $y) =&gt; $x &lt;=&gt; $y);   // not reported</span>
-</code></pre></div>
-<p>The argument check skips every argument that lands on a variadic
-parameter, so nothing after the last fixed parameter is compared with the
-declared type. Each such argument should be checked against the
-variadic's element type, the same as a fixed parameter. Before turning
-this on, the standard-library variadics that mix types need their stubs
-corrected: phpstorm-stubs declare <code>array ...$rest</code> for <code>array_udiff()</code>,
-<code>array_diff_ukey()</code> and the rest of that family, whose trailing arguments
-end with one or two callbacks, so the rest would need to read as
-<code>array|callable</code>.</p>
+<p>No outstanding items.</p>
 
 
 
