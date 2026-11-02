@@ -1020,17 +1020,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b723-a-route-alias-a-php-routing-configurator-declares-is-not-read" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B723. A route alias a PHP routing configurator declares is not read
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1694,17 +1683,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b723-a-route-alias-a-php-routing-configurator-declares-is-not-read" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B723. A route alias a PHP routing configurator declares is not read
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1834,23 +1812,6 @@ the rest of the family behave the same, with or without a PHP version in
 does not change it, so the parameter comes from somewhere other than the
 version-filtered list.</p>
 <p>Found in Contact Form 7's HTML formatter (<code>array_diff_ukey()</code>).</p>
-<h3 id="b723-a-route-alias-a-php-routing-configurator-declares-is-not-read">B723. A route alias a PHP routing configurator declares is not read<a class="headerlink" href="#b723-a-route-alias-a-php-routing-configurator-declares-is-not-read" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">return static function (RoutingConfigurator $routes): void {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    $routes-&gt;alias('home', 'app_home');</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">};</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">$this-&gt;generateUrl('home'); // Unknown route: 'home'</span>
-</code></pre></div>
-<p><code>alias()</code> on a routing configurator declares a route name, but
-<code>symfony_receiver_method</code> maps <code>alias()</code> only to the services
-configurator, so the call is confirmed as a service alias or not at all.
-A route alias declared in YAML, XML, or a <code>#[Route]</code>'s <code>alias:</code> is read.
-Now that every route name is judged, not only the <code>app_</code> ones, a name only
-a PHP <code>alias()</code> declares is reported. The receiver class decides which
-kind the call declares, so the call wants one receiver whose targets hold
-both configurators, gated on either configurator namespace, with the
-second argument a route the alias reads.</p>
 
 
 
