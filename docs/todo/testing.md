@@ -3,10 +3,11 @@
 Known gaps in PHPantom's support for test code. What works today:
 PHPUnit's assertions narrow types; data providers, `@depends`, and
 coverage metadata navigate, rename, and report a name that matches
-nothing; a data provider PHPUnit cannot call is reported; a class
-shows a lens listing the tests that cover it or are named after it, and
-a test one back to its class; Pest closures know the test case
-`Pest.php` binds them to; and Mockery mocks keep the mocked class.
+nothing; a data provider PHPUnit cannot call and a `setUp()` or
+`tearDown()` that skips the parent's are reported; a class shows a lens
+listing the tests that cover it or are named after it, and a test one
+back to its class; Pest closures know the test case `Pest.php` binds
+them to; and Mockery mocks keep the mocked class.
 
 PHPStan's PHPUnit extension (`phpstan/phpstan-phpunit`) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
@@ -105,18 +106,6 @@ them. Add an assertion fixture per library covering the common forms
 
 ---
 
-## TS6. `setUp()` and `tearDown()` that skip the parent
-
-**Impact: Low · Complexity: Low**
-
-An overridden `setUp()`, `tearDown()`, `setUpBeforeClass()`, or
-`tearDownAfterClass()` that never calls the parent's breaks test cases
-whose base class does work there (Laravel's and Symfony's both do).
-PHPStan reports it as `phpunit.callParent`. Report it, with a quick fix
-that inserts the call.
-
----
-
 ## TS7. Prophecy
 
 **Impact: Low · Complexity: Low-Medium**
@@ -155,7 +144,7 @@ by `tests/assert_type_runner.rs`, the rule tests as `.fixture` files,
 and slices of `phpunit/phpunit` and `mockery/mockery` copied by
 `scripts/extract-framework-stubs.php` as the stubs. File every
 gap as a `// SKIP: reason` in this document or `docs/todo/`; rule tests
-TS1 or TS6 already cover point at it.
+TS1 already covers point at it.
 
 ---
 

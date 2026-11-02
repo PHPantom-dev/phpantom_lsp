@@ -151,6 +151,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_data_provider_diagnostics_with_context,
     ),
     always(
+        "missing_parent_call",
+        Backend::collect_parent_call_diagnostics_with_context,
+    ),
+    always(
         "invalid_member_name",
         Backend::collect_dynamic_member_name_diagnostics_with_context,
     ),

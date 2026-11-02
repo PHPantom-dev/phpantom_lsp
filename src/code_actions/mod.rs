@@ -81,6 +81,9 @@
 //!   `public` (or, from PHPUnit 10, not `static`), offer to add the
 //!   modifier; when the provider a test names does not exist, offer to
 //!   create it on the test class.
+//! - **Parent call fixes** — when a PHPUnit `setUp()`, `tearDown()`,
+//!   `setUpBeforeClass()`, or `tearDownAfterClass()` never calls the
+//!   parent's, offer to insert the call.
 //!
 //! ## Deferred edit computation (`codeAction/resolve`)
 //!
@@ -124,6 +127,7 @@ mod inline_variable;
 mod insert_translation_key;
 mod mago;
 mod naming;
+mod parent_call_fixes;
 pub(crate) mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;

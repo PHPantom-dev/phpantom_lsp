@@ -138,6 +138,7 @@ static COLLECTORS: &[Collector] = &[
     offer(QUICKFIX, Backend::collect_replace_deprecated_actions),
     skip_in_template(QUICKFIX, Backend::collect_phpstan_actions),
     skip_in_template(QUICKFIX, Backend::collect_data_provider_actions),
+    skip_in_template(QUICKFIX, Backend::collect_parent_call_actions),
     skip_in_template(QUICKFIX, Backend::collect_mago_fix_actions),
     offer(
         &["quickfix", "refactor.rewrite"],
