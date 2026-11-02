@@ -203,6 +203,7 @@ jobs:
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
             --bench symfony_completion --bench yii_completion \
+            --bench wordpress_completion \
             -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         shell: bash
@@ -267,6 +268,7 @@ jobs:
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
             --bench symfony_completion --bench yii_completion \
+            --bench wordpress_completion \
             --no-run --message-format=json \
             > benchmark-build.jsonl
           python3 benches/ci_benchmarks.py prepare \

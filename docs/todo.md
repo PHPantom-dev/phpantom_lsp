@@ -120,7 +120,6 @@ ships, remove every row that names it.
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | WP5 | [Hook callback parameter and return types](todo/wordpress.md#wp5-hook-callback-parameter-and-return-types) | Medium-High | Medium-High |
 | WP8 | [Sage view composers](todo/wordpress.md#wp8-sage-view-composers) | Medium      | Medium      |
-| WP16 | [Benchmark for WordPress hook names and stubs](todo/wordpress.md#wp16-benchmark-for-wordpress-hook-names-and-stubs) | Low-Medium | Low |
 | WP10 | [Hook docblocks that do not match the call](todo/wordpress.md#wp10-hook-docblocks-that-do-not-match-the-call) (depends on WP5) | Low-Medium  | Medium      |
 | WP12 | [Constants `wp-config.php` defines keep the value of one install](todo/wordpress.md#wp12-constants-wp-configphp-defines-keep-the-value-of-one-install) | Low         | Low-Medium  |
 | WP11 | [`assertWPError()` and `assertNotWPError()` narrow](todo/wordpress.md#wp11-assertwperror-and-assertnotwperror-narrow) | Low         | Low         |
