@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 use parking_lot::RwLock;
 
 pub(crate) mod links;
+pub(crate) mod routing;
 pub(crate) mod types;
 
 use crate::Backend;

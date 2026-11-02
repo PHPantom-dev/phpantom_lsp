@@ -417,3 +417,70 @@ async fn a_route_builder_declares_the_routes_it_names() {
         (&uri_for(&dir, BUILDER_PATH), 8)
     );
 }
+
+const VALUES_ROUTING: &str = "acme.note_edit:\n  path: '/note/{acme_note}/edit'\n  defaults:\n    _entity_form: acme_note.edit\n    _controller: acme.greeter:greet\n    _title_callback: '\\Drupal\\acme\\Greeter::greet'\n";
+
+/// A route's defaults name the entity type of an entity form, the service
+/// of a `service:method` controller, and the method of a `Class::method`.
+#[tokio::test]
+async fn routing_defaults_navigate_to_entity_types_services_and_methods() {
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in [
+        (".git/HEAD", "ref: refs/heads/main\n"),
+        (".gitignore", "/web/core/\n"),
+        (
+            "web/core/modules/acme_core/acme_core.routing.yml",
+            VALUES_ROUTING,
+        ),
+    ] {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let note = "<?php\nnamespace Drupal\\acme\\Entity;\nuse Drupal\\Core\\Entity\\Attribute\\ContentEntityType;\n#[ContentEntityType(id: 'acme_note')]\nclass Note {}\n";
+    let (backend, dir) = workspace_in(
+        dir,
+        &files(&[
+            (
+                "web/modules/custom/acme/acme.services.yml",
+                "services:\n  acme.greeter:\n    class: Drupal\\acme\\Greeter\n",
+            ),
+            ("web/modules/custom/acme/src/Entity/Note.php", note),
+            (
+                "web/core/modules/acme_core/acme_core.routing.yml",
+                VALUES_ROUTING,
+            ),
+        ]),
+    )
+    .await;
+    let yaml = uri_for(&dir, "web/core/modules/acme_core/acme_core.routing.yml");
+    for (needle, inside, target, line) in [
+        (
+            "acme_note.edit",
+            2,
+            "web/modules/custom/acme/src/Entity/Note.php",
+            3,
+        ),
+        (
+            "acme.greeter:greet",
+            2,
+            "web/modules/custom/acme/acme.services.yml",
+            1,
+        ),
+        (
+            "Greeter::greet'",
+            10,
+            "web/modules/custom/acme/src/Greeter.php",
+            3,
+        ),
+    ] {
+        let found =
+            definitions_at(&backend, &yaml, position_in(VALUES_ROUTING, needle, inside)).await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!(
+            (&found[0].uri, found[0].range.start.line),
+            (&uri_for(&dir, target), line),
+            "{needle}"
+        );
+    }
+}

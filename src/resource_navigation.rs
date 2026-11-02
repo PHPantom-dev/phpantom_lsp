@@ -290,6 +290,7 @@ impl Backend {
                 }
                 crate::drupal::DeclarationFile::Routing => {
                     spans = crate::symfony::routes::drupal_routing_spans(content);
+                    spans.extend(crate::drupal::routing::routing_value_spans(content));
                 }
                 crate::drupal::DeclarationFile::Links => {
                     spans = crate::drupal::links::links_route_spans(content);
