@@ -178,6 +178,7 @@ ships, remove every row that names it.
 | L64 | [Routes on controller methods](todo/laravel.md#l64-routes-on-controller-methods) | Medium-High | Medium |
 | L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
 | L69 | [Benchmarks for Laravel string names and Blade](todo/laravel.md#l69-benchmarks-for-laravel-string-names-and-blade) | Medium | Low-Medium |
+| L71 | [Model-level attributes as column sources](todo/laravel.md#l71-model-level-attributes-as-column-sources) | Medium | Low-Medium |
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L56 | [Typed Laravel connection names](todo/laravel.md#l56-typed-laravel-connection-names)                                                                                        | Medium      | Medium      |
 | L58 | [Laravel rate limiter names](todo/laravel.md#l58-laravel-rate-limiter-names)                                                                                                | Medium      | Medium      |
@@ -186,6 +187,7 @@ ships, remove every row that names it.
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (assets, Inertia) | Medium | Medium |
 | BL20 | [Port Bladestan's tests](todo/blade.md#bl20-port-bladestans-tests) | Medium | Medium |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
+| L70 | [Read-only accessors are offered as columns](todo/laravel.md#l70-read-only-accessors-are-offered-as-columns) | Low-Medium | Low |
 | L59 | [Typed controller middleware names](todo/laravel.md#l59-typed-controller-middleware-names)                                                                                  | Low-Medium  | Medium      |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |
 | L50 | ["Create route" quick-fix for an unresolved route name](todo/laravel.md#l50-create-route-quick-fix-for-an-unresolved-route-name)                                            | Low-Medium  | Medium      |
