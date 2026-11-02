@@ -5399,6 +5399,14 @@ function globalKeywordDemo(): void {
     $globalPen->write();                  // Scaffolding\Pen — resolved from top-level scope via `global`
 }
 
+/**
+ * @global Scaffolding\Pencil $globalPencil Assigned in scaffolding/scaffolding.php.
+ */
+function globalTagDemo(): string {
+    global $globalPencil;
+    return $globalPencil->sketch();       // Scaffolding\Pencil — typed by the `@global` tag
+}
+
 // ── Method-Tag Template ─────────────────────────────────────────────────────
 
 class MethodTagTemplateDemo

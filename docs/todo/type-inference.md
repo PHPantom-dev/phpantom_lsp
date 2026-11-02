@@ -628,48 +628,6 @@ The fixtures are `tests/phpstan_doctrine/data/DBAL/pdo/` and
 
 ---
 
-## T57. A `global` variable is untyped unless a `@var` sits above it
-
-**Impact: High · Complexity: Medium**
-
-```php
-/**
- * @global wpdb $wpdb WordPress database abstraction object.
- */
-function acme_count_orders(): int {
-    global $wpdb;
-    return (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}acme_orders");
-}
-```
-
-PhpStorm types `$wpdb` as `wpdb` in a theme once it is pointed at a
-WordPress install, and reports an unknown method on it; we leave it
-untyped. `$wpdb` is how WordPress code reaches the database, so it is
-one of the most used variables in any plugin or theme.
-
-`global $x` takes its type from the same file's top-level scope, or from
-a `@var` docblock directly above the statement. Two more sources are
-ignored:
-
-- **`@global Type $name`** on the enclosing function's docblock, the
-  phpDocumentor tag WordPress core and most plugins use for exactly
-  this. Reading it is the cheap half.
-- **An assignment in another file**, such as the ones WordPress core
-  makes to `$wp_query` and `$wpdb` (directly or through `$GLOBALS`)
-  during bootstrap, or a globals stub file that declares them with `@var`. PhpStorm types
-  globals this way. It needs an index of global variable assignments,
-  which must stay cheap: decide which files may feed it (stubs, and
-  files the project includes at top level) before building it.
-
-WordPress is the biggest user (`$wpdb`, `$post`, `$wp_query`), but the
-gap is in the generic engine.
-
-**Where to look:** `src/type_engine/variable/forward_walk/statements.rs`
-(`Statement::Global`), `apply_global_var_docblocks` in
-`src/type_engine/variable/forward_walk/var_docblocks.rs`.
-
----
-
 ## T58. `new<T>` is not supported
 
 **Impact: Low-Medium · Complexity: Low-Medium**
@@ -746,3 +704,41 @@ maybe_serialize(0.0);   // want 0.0, get float
 Integer, string and boolean literals keep their value as their type;
 float literals become `float`. A template bound to one, or a condition
 over one, loses the value. 2 assertions of the WordPress stubs fixtures.
+
+---
+
+## T61. A `global` variable is untyped without a type in the same file
+
+**Impact: Medium-High · Complexity: Medium-High**
+
+```php
+function acme_count_orders(): int {
+    global $wpdb;
+    return (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}acme_orders");
+}
+```
+
+`global $x` takes its type from a `@global Type $x` tag on the enclosing
+function, a `@var` docblock directly above the statement, or the same
+file's top-level scope. Plugin and theme code often writes `global $wpdb;`
+with none of those, and then `$wpdb` is untyped. PhpStorm types it once it
+is pointed at a WordPress install, from the assignments core makes in
+other files.
+
+WordPress core assigns its globals during bootstrap, at the top level of
+`wp-settings.php` through `$GLOBALS['wp_query'] = new WP_Query();` (each
+with a `@global` docblock above it), and inside functions such as
+`require_wp_db()` through `global $wpdb; $wpdb = new wpdb(...);`.
+`php-stubs/wordpress-stubs` declares no globals at all, so a project that
+has only the stubs needs either core indexed (WP3) or a globals stub file
+that declares them with `@var`.
+
+This needs an index of global variable assignments, which must stay
+cheap: decide which files may feed it (stubs, and files the project
+includes at top level) before building it, and whether a `@global` tag on
+one function may type the same global in another.
+
+**Where to look:** `src/type_engine/variable/forward_walk/statements.rs`
+(`Statement::Global`), `declared_global_types` and
+`apply_global_var_docblocks` in
+`src/type_engine/variable/forward_walk/var_docblocks.rs`.

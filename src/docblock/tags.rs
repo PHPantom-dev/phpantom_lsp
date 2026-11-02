@@ -196,6 +196,32 @@ pub fn extract_removed_version(docblock: &str) -> Option<PhpVersion> {
     PhpVersion::from_composer_constraint(desc)
 }
 
+/// The `@global Type $name` tags of a function's docblock: the global
+/// variables it documents, each with the type it declares.
+///
+/// This is the phpDocumentor tag WordPress core and most plugins write
+/// above a function that imports a global with `global $name;`.  The name
+/// keeps its `$`.  A tag without a variable or a parsable type is skipped.
+pub fn extract_global_tags(docblock: &str) -> Vec<(String, PhpType)> {
+    if !docblock.contains("@global") {
+        return Vec::new();
+    }
+    let Some(info) = parse_docblock_for_tags(docblock) else {
+        return Vec::new();
+    };
+    // `@global` is not a tag the parser models, so it arrives as
+    // `TagKind::Other`.  We match by name instead.
+    info.tags
+        .iter()
+        .filter(|t| t.name == "global")
+        .filter_map(|tag| {
+            let variable = tag.variable()?;
+            let php_type = sanitise_and_parse_docblock_type(&tag.type_text()?)?;
+            Some((variable.into_owned(), php_type))
+        })
+        .collect()
+}
+
 /// Extract all `@see` references from a PHPDoc block.
 ///
 /// Returns the raw text after each `@see` tag, which may be:

@@ -35,8 +35,10 @@ class Carbon {
 ";
 
 /// Reports member accesses on a subject whose type is unknown, so a column
-/// that loses its type is caught.
-const PHPANTOM_TOML: &str = "[diagnostics]\nunresolved-member-access = true\n";
+/// that loses its type is caught, and a mismatch only `null` causes, so a
+/// nullable column that loses its `null` is caught.
+const PHPANTOM_TOML: &str =
+    "[diagnostics]\nunresolved-member-access = true\npossibly-empty-mismatches = true\n";
 
 /// Analyse `consumer` on its own and return the process exit code (`0`
 /// clean, `1` diagnostics found).
@@ -57,6 +59,7 @@ async fn analyse_consumer(consumer: &str) -> i32 {
         workspace_root: dir.path().to_path_buf(),
         path_filters: vec![dir.path().join("src/Consumer.php")],
         severity_filter: phpantom_lsp::analyse::SeverityFilter::All,
+        code_filter: phpantom_lsp::analyse::CodeFilter::default(),
         use_colour: false,
         output_format: phpantom_lsp::analyse::OutputFormat::Json,
         // Suppresses the progress bar, which has no terminal to draw on here.

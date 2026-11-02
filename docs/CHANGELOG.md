@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@global` tags type the globals a function imports.** A `@global wpdb $wpdb` tag on a function or method docblock types `$wpdb` after `global $wpdb;`, so WordPress code gets completion and diagnostics on `$wpdb`, `$wp_query` and the rest.
 - **Filter `analyze` by diagnostic code.** `--code unused_import` reports only that code and `--exclude-code unused_import` leaves it out. Both are repeatable and work with `--severity` and every output format. Contributed by @stubbedev.
 - **Go to declaration.** On a method call or a method's own declaration, go-to-declaration jumps to the interface or abstract method it implements. Where there is none, it lands where go-to-definition does.
 - **Morph aliases and config keys complete as array keys.** Registered aliases are suggested for the keys of `Relation::morphMap([...])`, and config keys for the keys of `Config::set([...])` and `config([...])`. Contributed by @shuvroroy.

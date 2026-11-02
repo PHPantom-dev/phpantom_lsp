@@ -13,9 +13,10 @@ Most WordPress typing lives in `php-stubs/wordpress-stubs`, so the
 external stubs are the foundation for everything here. Installed with
 Composer, the package is a stub source with no configuration, as is
 `php-stubs/woocommerce-stubs`; a project without Composer can list
-either under `[stubs] paths`. `global $wpdb;` being untyped is
-a gap in the generic engine, tracked as
-[T57](type-inference.md#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it).
+either under `[stubs] paths`. `global $wpdb;` takes its type from a
+`@global` tag on the function; without one it is untyped, a gap in the
+generic engine tracked as
+[T61](type-inference.md#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file).
 PHPStan's WordPress extension
 (`szepeviktor/phpstan-wordpress`) is the checklist of what a WordPress
 developer expects from types; PhpStorm's built-in WordPress support and

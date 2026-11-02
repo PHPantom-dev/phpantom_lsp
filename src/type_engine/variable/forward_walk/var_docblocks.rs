@@ -452,6 +452,15 @@ fn opens_control_structure_body(before: &str) -> bool {
         .any(|kw| keyword_ends_at(head, head.len(), kw.as_bytes()))
 }
 
+/// The globals the docblock of the function or method being walked
+/// declares with `@global Type $name`, as written.
+pub(crate) fn declared_global_types(ctx: &ForwardWalkCtx<'_>) -> Vec<(String, PhpType)> {
+    ctx.declaration_start
+        .and_then(|start| docblock_above(ctx.file.content, start as usize))
+        .map(crate::docblock::extract_global_tags)
+        .unwrap_or_default()
+}
+
 /// Apply the `@var` docblocks above a `global` statement to the variables
 /// it imports.
 ///

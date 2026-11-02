@@ -2928,3 +2928,10 @@ class ScaffoldingFieldLabel
         return 'title';
     }
 }
+
+
+// ── @global tag scaffolding ─────────────────────────────────────────────────
+
+// The global `globalTagDemo()` in completion.php imports. It is assigned in
+// this file, not that one, so only the function's `@global` tag types it.
+$globalPencil = new Pencil();

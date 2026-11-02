@@ -128,11 +128,15 @@ pub(crate) fn process_statement<'b>(
         }
         Statement::Global(global) => {
             let mut imported: Vec<&str> = Vec::with_capacity(global.variables.len());
+            let declared = declared_global_types(ctx);
             for var in global.variables.iter() {
                 if let Variable::Direct(dv) = var {
                     let var_name = bytes_to_str(dv.name);
                     imported.push(var_name);
-                    if let Some(top_scope) = &ctx.top_level_scope {
+                    if let Some((_, php_type)) = declared.iter().find(|(name, _)| name == var_name)
+                    {
+                        scope.set(var_name, resolve_type_to_resolved_types(php_type, ctx));
+                    } else if let Some(top_scope) = &ctx.top_level_scope {
                         if let Some(types) = top_scope.get(&atom(var_name)) {
                             scope.set(var_name, types.clone());
                         } else {
