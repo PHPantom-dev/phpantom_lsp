@@ -1257,17 +1257,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ts3-create-a-test-for-a-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        TS3. Create a test for a class
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#ts5-assertion-libraries" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1354,10 +1343,11 @@ coverage metadata navigate, rename, and report a name that matches
 nothing; a data provider PHPUnit cannot call and a <code>setUp()</code> or
 <code>tearDown()</code> that skips the parent's are reported; a class shows a lens
 listing the tests that cover it or are named after it, and a test one
-back to its class; Pest closures know the test case <code>Pest.php</code> binds
-them to; Mockery mocks keep the mocked class; and the method a PHPUnit
-or Mockery expectation names by string completes, navigates, renames,
-and is reported when the mocked class has no such method.</p>
+back to its class, and a class without a test can have one created;
+Pest closures know the test case <code>Pest.php</code> binds them to; Mockery mocks
+keep the mocked class; and the method a PHPUnit or Mockery expectation
+names by string completes, navigates, renames, and is reported when the
+mocked class has no such method.</p>
 <p>PHPStan's PHPUnit extension (<code>phpstan/phpstan-phpunit</code>) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
 PHPUnit support and Phpactor's PHPUnit and Prophecy integrations are
@@ -1389,18 +1379,6 @@ one data set are what PHP Tools and PhpStorm offer, but LSP has no
 request for them. They belong in the editor extensions (the VS Code
 Testing API, Zed runnables), which is a separate decision from anything
 in this document.</p>
-<hr />
-<h2 id="ts3-create-a-test-for-a-class">TS3. Create a test for a class<a class="headerlink" href="#ts3-create-a-test-for-a-class" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<p>A code action on a class (or one of its methods) that writes the test
-class at the path the class's test lens looks for (its path under its
-<code>autoload</code> root, mirrored under an <code>autoload-dev</code> root with a <code>Test</code>
-suffix): the right namespace, the project's
-base test case, a <code>#[CoversClass]</code> attribute, and a test method per
-public method chosen. PhpStorm and Phpactor both offer it. It shares the
-file-creation path with
-<a href="../actions/#a41-create-class-from-non-existing-name">A41</a>. For a Pest
-project, write a Pest file instead.</p>
 <hr />
 <h2 id="ts5-assertion-libraries">TS5. Assertion libraries<a class="headerlink" href="#ts5-assertion-libraries" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
