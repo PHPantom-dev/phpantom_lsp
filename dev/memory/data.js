@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793615522583,
+  "lastUpdate": 1793615799144,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8469,6 +8469,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 95.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2dd63ae18b2f06c418bcd3a38838c294198f914c",
+          "message": "Fix the possibly-empty changelog wording and docs table row\n\nThe changelog headline described a value that can only be null or false,\nwhich is still reported; it now names a mismatch that only a possible\nnull or false causes. The `string|false` in the configuration table is\nescaped so the row keeps its columns, and the argument, return and\nproperty passes read the flag without copying the whole config.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+          "timestamp": "2026-11-02T11:12:06+01:00",
+          "tree_id": "a41d8a73e3ebc310da0cc92b565aa86773676ee9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2dd63ae18b2f06c418bcd3a38838c294198f914c"
+        },
+        "date": 1793615786974,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 44.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 88.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 97.6,
             "unit": "MiB"
           }
         ]
