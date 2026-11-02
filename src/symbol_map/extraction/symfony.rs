@@ -1623,9 +1623,10 @@ fn route_docblock<'a>(span: mago_span::Span, ctx: &ExtractionCtx<'a>) -> Option<
 }
 
 /// What one argument of an annotation is: a string, by the byte range of
-/// its text, or anything else.
+/// its text, a map (`{"en": "/contact", …}`), by its keys, or anything else.
 enum AnnotationValue {
     Str(usize, usize),
+    Map(Vec<String>),
     Other,
 }
 
@@ -1650,6 +1651,9 @@ fn annotation_value(doc: &[u8], pos: usize) -> (AnnotationValue, usize) {
             None => (AnnotationValue::Other, doc.len()),
         };
     }
+    if doc.get(pos) == Some(&b'{') {
+        return annotation_map(doc, pos);
+    }
     let mut depth = 0usize;
     while let Some(&byte) = doc.get(pos) {
         match byte {
@@ -1664,6 +1668,65 @@ fn annotation_value(doc: &[u8], pos: usize) -> (AnnotationValue, usize) {
         pos += 1;
     }
     (AnnotationValue::Other, pos)
+}
+
+/// The annotation map or list whose `{` is at `pos`, by the keys of its
+/// entries (`"en": …`, `"en" = …`, or `en = …`), and where it ends.  A list
+/// has no keys.
+fn annotation_map(doc: &[u8], mut pos: usize) -> (AnnotationValue, usize) {
+    let mut keys = Vec::new();
+    let mut depth = 0usize;
+    // Whether the entry of the map itself that starts next can be a key.
+    let mut at_entry = false;
+    while let Some(&byte) = doc.get(pos) {
+        let key = match byte {
+            b'"' => {
+                let Some(len) = memchr::memchr(b'"', &doc[pos + 1..]) else {
+                    break;
+                };
+                let key = (pos + 1, pos + 1 + len);
+                pos += len + 2;
+                Some(key)
+            }
+            b'_' | b'a'..=b'z' | b'A'..=b'Z' => {
+                let start = pos;
+                pos += doc[pos..]
+                    .iter()
+                    .take_while(|byte| byte.is_ascii_alphanumeric() || **byte == b'_')
+                    .count();
+                Some((start, pos))
+            }
+            _ => None,
+        };
+        if let Some((start, end)) = key {
+            let after = skip_annotation_blank(doc, pos);
+            if depth == 1 && at_entry && matches!(doc.get(after), Some(b':' | b'=')) {
+                // Cut at a quote or an ASCII name, so always UTF-8.
+                if let Ok(key) = std::str::from_utf8(&doc[start..end]) {
+                    keys.push(key.to_string());
+                }
+            }
+            at_entry = false;
+            continue;
+        }
+        match byte {
+            b'{' | b'(' => {
+                depth += 1;
+                at_entry = depth == 1;
+            }
+            b'}' | b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return (AnnotationValue::Map(keys), pos + 1);
+                }
+            }
+            b',' if depth == 1 => at_entry = true,
+            byte if byte.is_ascii_whitespace() || byte == b'*' => {}
+            _ => at_entry = false,
+        }
+        pos += 1;
+    }
+    (AnnotationValue::Map(keys), doc.len())
 }
 
 /// The `@Route(…)` annotations of a docblock that starts at `offset`.
@@ -1724,6 +1787,7 @@ fn annotation_routes(doc: &str, offset: usize) -> Vec<RouteDeclaration> {
                 ("path" | "value", AnnotationValue::Str(start, end)) => {
                     route.at = (offset + start, offset + end);
                 }
+                ("path" | "value", AnnotationValue::Map(locales)) => route.locales = locales,
                 ("name", AnnotationValue::Str(start, end)) => {
                     route.name = RouteName::Literal(
                         doc[start..end].to_string(),
@@ -2740,6 +2804,24 @@ mod tests {
                 ("contact.en".to_string(), "contact".to_string()),
                 ("contact.nl".to_string(), "contact".to_string()),
                 ("contact".to_string(), "contact".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_localized_route_annotation_is_declared_per_locale() {
+        let php = "<?php\nnamespace App\\Controller;\nuse Symfony\\Component\\Routing\\Annotation\\Route;\nclass ContactController {\n    /**\n     * @Route({\"en\": \"/contact\", \"nl\": \"/contact-nl\"}, name=\"contact\")\n     */\n    public function contact() {}\n    /**\n     * @Route(path={\n     *     en=\"/about\",\n     *     \"de\" = \"/{a}\"\n     * }, requirements={\"a\": \"x\"}, name=\"about\")\n     */\n    public function about() {}\n    /** @Route({\"/a\", \"/b\"}, name=\"list\") */\n    public function list() {}\n}\n";
+        // A path written as a list is not localized.
+        assert_eq!(
+            declared_routes(&map_of(php), php),
+            vec![
+                ("contact.en".to_string(), "contact".to_string()),
+                ("contact.nl".to_string(), "contact".to_string()),
+                ("contact".to_string(), "contact".to_string()),
+                ("about.en".to_string(), "about".to_string()),
+                ("about.de".to_string(), "about".to_string()),
+                ("about".to_string(), "about".to_string()),
+                ("list".to_string(), "list".to_string()),
             ]
         );
     }

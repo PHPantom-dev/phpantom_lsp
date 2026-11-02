@@ -83,24 +83,7 @@ No outstanding items.
 
 ## Framework names in strings
 
-### B713. A localized `@Route` annotation declares no per-locale names
-
-**Impact: Low · Complexity: Low**
-
-```php
-/**
- * @Route({"en": "/contact", "nl": "/contact-nl"}, name="contact")
- */
-public function contact(): Response { … }
-
-$this->generateUrl('contact.en');   // reported unknown
-```
-
-A localized `#[Route]` attribute declares `contact.en` and `contact.nl`
-beside `contact`, but the `@Route` annotation reader
-(`annotation_routes` in `symbol_map/extraction/symfony.rs`) reads a path
-written as a mapping as no path at all, so its locales are lost. Read the
-locale keys of an annotation's path the way the attribute's are read.
+No outstanding items.
 
 ## Name resolution
 
