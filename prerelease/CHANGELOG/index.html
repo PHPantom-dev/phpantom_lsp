@@ -5207,6 +5207,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Hover on a <code>global</code> statement's variable.</strong> Hovering the variable in <code>global $x;</code> now shows the type it imports, instead of nothing.</li>
 <li><strong>WordPress's <code>__()</code> returns a string.</strong> Outside a Laravel project, <code>__()</code> and <code>trans()</code> keep the return type their own declaration gives, instead of Laravel's <code>string|array</code>, so passing a translated string to WordPress functions is no longer reported.</li>
 <li><strong>Nullable columns stay nullable through a cast.</strong> A model attribute cast to <code>boolean</code>, <code>integer</code>, a date, an enum or another cast that hands <code>null</code> back untouched is now nullable when its column is, and so is a nullable <code>updated_at</code> or other timestamp column. A null check on a nullable date column, the soft-delete column included, leaves the date class with all its members.</li>
 <li><strong>Relations whose model comes from config.</strong> A relation that reads its related class from <code>config()</code>, like the <code>roles</code> and <code>permissions</code> relations of spatie/laravel-permission, now loads the model the config file names instead of the base <code>Model</code>.</li>

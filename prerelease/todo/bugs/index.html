@@ -1031,17 +1031,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b724-hovering-the-variable-of-a-global-statement-shows-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B724. Hovering the variable of a <code>global</code> statement shows nothing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1716,17 +1705,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b724-hovering-the-variable-of-a-global-statement-shows-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B724. Hovering the variable of a <code>global</code> statement shows nothing
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1873,20 +1851,6 @@ a PHP <code>alias()</code> declares is reported. The receiver class decides whic
 kind the call declares, so the call wants one receiver whose targets hold
 both configurators, gated on either configurator namespace, with the
 second argument a route the alias reads.</p>
-<h3 id="b724-hovering-the-variable-of-a-global-statement-shows-nothing">B724. Hovering the variable of a <code>global</code> statement shows nothing<a class="headerlink" href="#b724-hovering-the-variable-of-a-global-statement-shows-nothing" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @global Foo $x */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function f(): void</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">{</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    global $x;   // hover $x: nothing</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    $x;          // hover $x: Foo</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>The variable a <code>global</code> statement imports has a type from the next
-statement on, whether it comes from the function's <code>@global</code> tag, a <code>@var</code>
-above the statement, the file's top level, or the stubs' <code>@global</code> tags.
-Hovering it in the statement itself shows no hover at all, where an
-assignment's target or a parameter shows the type it gets.</p>
 
 
 
