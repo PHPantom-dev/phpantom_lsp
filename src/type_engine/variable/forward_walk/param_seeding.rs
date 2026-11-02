@@ -65,6 +65,7 @@ pub(crate) fn seed_body_scope<'b>(
         span_start,
         owner.method_name,
         owner.has_scope_attr,
+        true,
         ctx,
     );
     seed_superglobals(&mut scope);
@@ -87,6 +88,7 @@ pub(crate) fn seed_params<'b>(
     method_span_start: u32,
     method_name: Option<&str>,
     has_scope_attr: bool,
+    can_implement_hook: bool,
     ctx: &ForwardWalkCtx<'_>,
 ) {
     // While a body is being read for its return type, the call site that
@@ -157,6 +159,7 @@ pub(crate) fn seed_params<'b>(
         }
 
         if native_type.is_none()
+            && can_implement_hook
             && let Some(backend) = ctx.file.backend
             && backend.is_drupal_project()
             && super::super::resolution::declared_param_docblock_type(
@@ -369,6 +372,7 @@ pub(crate) fn seed_property_hook_scope(
             params.parameters.iter(),
             hook.span().start.offset,
             None,
+            false,
             false,
             ctx,
         );

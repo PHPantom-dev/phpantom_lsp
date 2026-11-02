@@ -260,7 +260,7 @@ pub(crate) fn is_hook_pattern(name: &str) -> bool {
 }
 
 /// One piece of a hook name pattern.
-enum Piece<'a> {
+pub(crate) enum Piece<'a> {
     Text(&'a str),
     /// An uppercase run, such as `FORM_ID` or `ENTITY_TYPE`.
     Placeholder(&'a str),
@@ -269,7 +269,7 @@ enum Piece<'a> {
 /// A pattern split into text and placeholders: an uppercase run starts a
 /// placeholder at the start of the pattern or after an underscore, and goes
 /// on through underscores followed by more uppercase.
-fn pieces(pattern: &str) -> Vec<Piece<'_>> {
+pub(crate) fn pieces(pattern: &str) -> Vec<Piece<'_>> {
     let bytes = pattern.as_bytes();
     let mut pieces = Vec::new();
     let (mut text_start, mut i) = (0, 0);
@@ -811,6 +811,12 @@ impl Backend {
         }
         let rest = content.get(decl_start as usize..)?;
         let keyword = rest.find("function")?;
+        // The declaration's own keyword, after nothing but its attributes
+        // and modifiers.
+        let before = &rest[..keyword];
+        if before.contains(['{', ';', '(']) && !before.trim_start().starts_with("#[") {
+            return None;
+        }
         let after = &rest[keyword + "function".len()..];
         let name_from = after.len() - after.trim_start().len();
         let name_start = decl_start as usize + keyword + "function".len() + name_from;
@@ -870,6 +876,7 @@ impl Backend {
         use crate::symbol_map::{StringKeyKind, SymbolKind};
         let index = self.hook_index();
         let is_entity_type = |id: &str| index.entity_types.contains(id);
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut hooks: Vec<String> = Vec::new();
         for (_, map) in self.user_file_symbol_maps() {
             for span in &map.spans {
@@ -879,7 +886,7 @@ impl Backend {
                     ..
                 } = &span.kind
                     && !is_hook_pattern(key)
-                    && !hooks.contains(key)
+                    && seen.insert(key.clone())
                     && matches_hook_pattern(pattern, key, &is_entity_type)
                     && index.best_patterns(key).contains(&pattern)
                 {

@@ -798,3 +798,23 @@ async fn helpers_stay_functions_and_hooks_reach_their_most_specific_documentatio
         .unwrap_or_default();
     assert!(hover.contains("theme.api.php"), "{hover}");
 }
+
+/// Only a function or a method implements a hook: a property hook's
+/// parameter keeps no type when a hook implementation follows it.
+#[tokio::test]
+async fn a_property_hook_is_no_hook_implementation() {
+    let api = "<?php\n/**\n * @param array $form\n */\nfunction hook_form_alter(&$form, $form_state, $form_id) {\n}\n";
+    let module = "<?php\nclass AcmeCounter {\n    public int $count {\n        set($value) {\n            $value;\n            $this->count = 1;\n        }\n    }\n}\nfunction acme_form_alter(&$form, $form_state, $form_id) {\n}\n";
+    let (backend, dir) = drupal(
+        &[(FORM_API_PATH, api)],
+        &[("web/modules/custom/acme/acme.module", module)],
+    )
+    .await;
+    let php = uri_for(&dir, "web/modules/custom/acme/acme.module");
+    references_at(&backend, &php, position_in(module, "acme_form_alter", 6)).await;
+    let position = position_in(module, "$value;", 2);
+    let hover = hover_text_at(&backend, &php, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(!hover.contains("array"), "{hover}");
+}

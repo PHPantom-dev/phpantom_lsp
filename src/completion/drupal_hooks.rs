@@ -64,31 +64,14 @@ fn snippet_text(text: &str) -> String {
 fn hook_snippet(hook: &str) -> (String, usize) {
     let mut snippet = String::new();
     let mut stops = 0;
-    let bytes = hook.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let starts = bytes[i].is_ascii_uppercase() && (i == 0 || bytes[i - 1] == b'_');
-        if !starts {
-            snippet.push(bytes[i] as char);
-            i += 1;
-            continue;
-        }
-        let mut end = i;
-        loop {
-            while end < bytes.len()
-                && (bytes[end].is_ascii_uppercase() || bytes[end].is_ascii_digit())
-            {
-                end += 1;
-            }
-            if end + 1 < bytes.len() && bytes[end] == b'_' && bytes[end + 1].is_ascii_uppercase() {
-                end += 1;
-            } else {
-                break;
+    for piece in crate::drupal::hooks::pieces(hook) {
+        match piece {
+            crate::drupal::hooks::Piece::Text(text) => snippet.push_str(text),
+            crate::drupal::hooks::Piece::Placeholder(name) => {
+                stops += 1;
+                snippet.push_str(&format!("${{{stops}:{name}}}"));
             }
         }
-        stops += 1;
-        snippet.push_str(&format!("${{{stops}:{}}}", &hook[i..end]));
-        i = end;
     }
     (snippet, stops)
 }
