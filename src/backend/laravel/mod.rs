@@ -24,7 +24,9 @@ mod string_key_cache;
 
 pub(crate) use class_loading::CLASS_LOAD_HOOKS;
 pub(crate) use state::LaravelState;
-pub(crate) use string_key_cache::{LaravelStringKeyBuildLocks, LaravelStringKeyCache};
+pub(crate) use string_key_cache::{
+    LaravelStringKeyBuildLocks, LaravelStringKeyCache, has_validation_registration,
+};
 
 use crate::Backend;
 use crate::virtual_members::laravel::file_contributions::{Contribution, FileContributions};

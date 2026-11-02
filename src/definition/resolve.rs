@@ -59,6 +59,10 @@ impl Backend {
             return vec![loc];
         }
 
+        if let Some(location) = self.validation_string_definition(uri, content, position) {
+            return vec![location];
+        }
+
         // Request input keys: jump to the validation rule that declares them.
         if let Some(loc) = laravel::resolve_request_field_definition(self, uri, content, position) {
             return vec![loc];

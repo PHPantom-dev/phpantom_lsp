@@ -62,6 +62,14 @@ impl Backend {
         // `ensure_workspace_indexed` → `update_ast` → write lock.
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         if is_laravel
+            && matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_validation_string_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
+        if is_laravel
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_translation_argument_completion(content, position, code, ctx)
