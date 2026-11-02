@@ -6,6 +6,9 @@ namespace Drupal\acme\Controller;
 
 use Drupal\acme\Greeter;
 use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\Link;
+use Drupal\Core\Url;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 
 /**
  * Shows the greeting for the acme.greeting route.
@@ -30,5 +33,27 @@ final class GreetingController extends ControllerBase
             '#name' => $name,
             '#greeting' => $this->greeter->greet($name),
         ];
+    }
+
+    /**
+     * Sends the visitor to the greeting for the world.
+     */
+    public function greetTheWorld(): RedirectResponse
+    {
+        // Try: go to the definition of 'acme.greeting', which lands on its key
+        // in acme.routing.yml, or complete a route name inside redirect('').
+        return $this->redirect('acme.greeting', ['name' => 'World']);
+    }
+
+    /**
+     * A link to the greeting for the world.
+     */
+    public function worldLink(): Link
+    {
+        // Try: find the references of 'acme.greeting' to see every place that
+        // links or redirects to it, the links and Twig files included.
+        $url = Url::fromRoute('acme.greeting', ['name' => 'World']);
+
+        return Link::createFromRoute($this->t('Greet the world'), 'acme.greeting', $url->getRouteParameters());
     }
 }

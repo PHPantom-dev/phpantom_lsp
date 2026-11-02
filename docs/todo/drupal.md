@@ -3,9 +3,10 @@
 Known gaps and missing features in PHPantom's Drupal support. The web
 root is detected, core, contrib, and the Drupal file extensions
 (`.module`, `.install`, `.theme`, …) are indexed past `.gitignore`, and
-the services the `*.services.yml` files declare and the entity types
-entity classes declare are read. Nothing reads Drupal's other
-declarations yet: fields, routes, or hooks.
+the services the `*.services.yml` files declare, the entity types
+entity classes declare, and the routes the routing files, route
+attributes, and route builders declare are read. Nothing reads Drupal's
+other declarations yet: fields or hooks.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the

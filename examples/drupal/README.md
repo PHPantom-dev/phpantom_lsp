@@ -40,6 +40,16 @@ Run `composer install` here first. Composer puts core and contrib into
   `$count`: an entity query gives the IDs of its entity type, or their
   number once it counts, and the ID inside `\Drupal::entityQuery('')`
   navigates and completes too.
+- Route names navigate between the routing file that declares them and the
+  code, links files, and templates that name them. In
+  `web/modules/custom/acme/src/Controller/GreetingController.php`, go to the
+  definition of `'acme.greeting'` in `greetTheWorld()` or `worldLink()`,
+  which lands on its key in `acme.routing.yml`, or find its references from
+  there, `acme.links.menu.yml` and the `path()` in
+  `templates/acme-greeting.html.twig` included. Complete a route name inside
+  `redirect('')`, `Url::fromRoute('')`, or after `route_name:` in a links
+  file; core's routes are offered too. A route name nothing declares is
+  reported.
 
 ## What the Symfony support already reads
 

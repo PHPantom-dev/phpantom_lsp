@@ -32,6 +32,8 @@ use Drupal\Core\Entity\EntityTypeManager;
 use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
 use Drupal\Core\Hook\Attribute\Hook;
+use Drupal\Core\Link;
+use Drupal\Core\Url;
 
 $passed = 0;
 $failed = 0;
@@ -119,6 +121,21 @@ check('acme.greeting points at GreetingController::greet()', $controllerClass ==
 check('The _controller string names a public method', (new ReflectionMethod($controllerClass, $controllerMethod))->isPublic());
 check('acme.greeting declares the {name} the controller takes', str_contains($routes['acme.greeting']['path'], '{name}') && (new ReflectionMethod(GreetingController::class, 'greet'))->getParameters()[0]->getName() === 'name');
 check('GreetingController inherits the helpers of ControllerBase', is_subclass_of(GreetingController::class, ControllerBase::class));
+check('ControllerBase::redirect(), which greetTheWorld() calls, takes a route name first', (new ReflectionMethod(ControllerBase::class, 'redirect'))->getParameters()[0]->getName() === 'route_name');
+check('Url::fromRoute() takes a route name first', (new ReflectionMethod(Url::class, 'fromRoute'))->getParameters()[0]->getName() === 'route_name');
+check('Link::createFromRoute() takes a route name second', (new ReflectionMethod(Link::class, 'createFromRoute'))->getParameters()[1]->getName() === 'route_name');
+
+// Every route the demo names is one the routing file declares.
+$controllerSource = (string) file_get_contents("$module/src/Controller/GreetingController.php");
+preg_match_all("/(?:redirect|fromRoute)\\('([^']+)'|createFromRoute\\([^,]+, '([^']+)'/", $controllerSource, $named);
+$namedInPhp = array_values(array_filter(array_merge($named[1], $named[2])));
+check('GreetingController names routes in redirect(), fromRoute() and createFromRoute()', count($namedInPhp) === 3);
+check('every route GreetingController names is declared', array_diff($namedInPhp, array_keys($routes)) === []);
+$menuLinks = Yaml::decode((string) file_get_contents("$module/acme.links.menu.yml"));
+check('the acme.greeting menu link points at a declared route', isset($routes[$menuLinks['acme.greeting']['route_name'] ?? '']));
+check("the menu link's parameters are the ones the route's path declares", array_keys($menuLinks['acme.greeting']['route_parameters'] ?? []) === ['name']);
+preg_match_all("/path\\('([^']+)'/", (string) file_get_contents("$module/templates/acme-greeting.html.twig"), $namedInTwig);
+check('the acme_greeting template links to a declared route', $namedInTwig[1] !== [] && array_diff($namedInTwig[1], array_keys($routes)) === []);
 
 // ─── Entity types ───────────────────────────────────────────────────────────
 
