@@ -17,7 +17,7 @@
 
 mod class;
 mod constants;
-mod formatting;
+pub(crate) mod formatting;
 mod function;
 mod laravel;
 mod laravel_trans;
@@ -111,6 +111,17 @@ impl Backend {
         // runner, in-process tests) gets the same caches a request does.
         let _scope = self.enter_request_scope_borrowed(uri, content);
         let offset = crate::text_position::position_to_offset(content, position);
+
+        // An attribute read off a Twig variable is no span of the
+        // template's map: what it reads depends on the variable's type.
+        if self.is_twig_template_uri(uri)
+            && let Some(Some(hover)) =
+                crate::util::catch_panic_unwind_safe("hover", uri, Some(position), || {
+                    self.twig_attribute_hover(uri, content, offset as usize)
+                })
+        {
+            return Some(hover);
+        }
 
         if let Some(symbol) = self.lookup_symbol_map(uri, offset)
             && let Some(Some(mut hover)) =

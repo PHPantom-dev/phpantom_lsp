@@ -227,7 +227,12 @@ $twig->addExtension(new AttributeExtension(Badges::class));
 foreach (Yaml::parseFile("$config/packages/twig.yaml")['twig']['globals'] as $name => $value) {
     $twig->addGlobal($name, $value);
 }
-$html = $twig->render('demo/index.html.twig', ['sender' => 'PHPantom', 'support' => '', 'title' => '']);
+$html = $twig->render('demo/index.html.twig', [
+    'sender' => 'PHPantom',
+    'support' => '',
+    'title' => '',
+    'user' => new User('ada@example.com', 'Ada'),
+]);
 
 check('demo/index.html.twig extends base.html.twig', str_contains($html, '<!doctype html>'));
 check("demo/index.html.twig's title block overrides base.html.twig's, and parent() renders it", str_contains($html, '<title>Demo · Symfony demo</title>'));
@@ -240,6 +245,7 @@ check("The template's path('_preview_error', ...) resolves", str_contains($html,
 check("The template's |initials filter is AppExtension::initials()", str_contains($html, '<p>P <span class="badge">demo</span> PHPANTOM</p>'));
 check('demo/_card.html.twig is handed the sender demo/index.html.twig is rendered with', str_contains($html, 'Every string links back to its declaration, PHPantom'));
 check('config/packages/twig.yaml declares support_url as a global', str_contains($html, 'href="https://example.com/support"'));
+check("The template's user.displayName and user.email read User's getters", str_contains($html, '<p>Ada &lt;ada@example.com&gt;</p>'));
 
 // ─── Forms ──────────────────────────────────────────────────────────────────
 

@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Entity\User;
 use App\Event\OrderPlaced;
 use App\Message\SendWelcomeEmail;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -69,6 +70,7 @@ final class DemoController extends AbstractController
             'sender' => $this->senderName,
             'support' => $supportEmail,
             'title' => $title,
+            'user' => new User('ada@example.com', 'Ada'),
         ]);
     }
 

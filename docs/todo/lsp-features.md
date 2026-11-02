@@ -529,41 +529,21 @@ the directory it prepends). That could be a docblock type in the spirit
 of Laravel's `view-string`, or a `.phpantom.toml` entry for wrappers a
 project does not own (OpenCart's `Loader::view()`).
 
+A name built around a variable at the render itself is the same gap
+from the other side. The official Symfony demo renders
+`'blog/index.'.$_format.'.twig'`, with `$_format` limited to `html` and
+`xml` by the route, so `blog/index.html.twig` and `blog/index.xml.twig`
+get no render context: their `paginator` and `tagName` read as "not
+passed by any render", and the PhpStorm Symfony plugin misses them too.
+The literal parts already narrow it to the templates that fit
+`blog/index.*.twig`; the route's `_format` requirement narrows it to the
+exact two.
+
 **Where to look:** `src/symbol_map/extraction/symfony.rs`
 (`symfony_receiver_method`), how `view-string` parameters are read for
 Laravel views. TwigStan's context collectors (the ones that find
 `render()` calls and `#[Template]` returns) show which call shapes it
 recognises as rendering a template.
-
----
-
-## F60. Twig template variable types
-
-**Impact: Medium · Complexity: High**
-
-```php
-return $this->render('post/show.html.twig', ['post' => $post]);
-```
-
-```twig
-{{ post.title }}
-```
-
-A template's variables complete, navigate, and hover by name, from the
-keys its renders pass, the templates that include or extend it, the
-project's globals, and its `{% types %}` tag (see `src/twig/variables.rs`).
-Nothing types them: `post.` completes nothing, `post.title` does not
-lead to the `Post` class's `getTitle()`, and a hover does not say what
-`post` holds. TwigStan does it by compiling templates to PHP and
-analysing that; resolving each passed value with the type engine at its
-render, the way Blade's call-site inference does, would answer the
-common cases. The same resolution would read a context the render builds
-in a variable (`$params = [...]; render('…', $params)`), whose names are
-not found today, and a `types` tag's declared type is already read.
-
-**Where to look:** `src/twig/variables.rs`,
-`src/symbol_map/extraction/twig_context.rs` (the render contexts),
-`src/blade/call_site_inference.rs`.
 
 ---
 
@@ -1046,7 +1026,7 @@ renames, and a name the class does not declare is not reported. Only a
 writable prop can be bound by `data-model`, and only a `#[LiveAction]`
 method can be called, so completion should offer just those. The template
 also sees the component's public properties and methods as `this.…` and
-bare variables, which [F60](#f60-twig-template-variable-types) would type. Builds on F38's
+bare variables, typed by the class. Builds on F38's
 link between a component class and its template.
 
 **Where to look:** `src/twig/templates.rs`, `src/blade/component_tags/`

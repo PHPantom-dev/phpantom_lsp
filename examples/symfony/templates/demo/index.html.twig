@@ -38,4 +38,9 @@
      config/packages/twig.yaml declares. Hover one to see where it comes
      from, and complete a variable where an expression starts. #}
   <p>{{ sender }} <a href="{{ support_url }}">Support</a></p>
+  {# Try: hover user, which holds the App\Entity\User DemoController::index()
+     passes, or go-to-definition on displayName, which Twig reads with
+     getDisplayName(). Complete after a new user. to see the attributes the
+     class has, by the names Twig reads them by. #}
+  <p>{{ user.displayName }} &lt;{{ user.email }}&gt;</p>
 {% endblock %}

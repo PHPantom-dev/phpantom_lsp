@@ -437,6 +437,9 @@ pub(crate) struct TwigContextSite {
     pub template_start: u32,
     /// The names passed, each with the byte range it is written at.
     pub vars: Vec<TwigContextVar>,
+    /// The byte range of a context no literal spells out (`render('…',
+    /// $params)`), whose names only its type tells.
+    pub shape: Option<(u32, u32)>,
 }
 
 /// One variable a [`TwigContextSite`] passes.
@@ -445,6 +448,17 @@ pub(crate) struct TwigContextVar {
     pub name: Atom,
     pub start: u32,
     pub end: u32,
+    pub value: TwigContextValue,
+}
+
+/// Where the value a [`TwigContextVar`] passes is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TwigContextValue {
+    /// The expression spanning `start..end`.
+    Expression { start: u32, end: u32 },
+    /// The PHP variable of the same name, as it stands at `offset`: what a
+    /// `compact()` copies, and an action's argument.
+    Variable { offset: u32 },
 }
 
 // ─── Container declarations ─────────────────────────────────────────────────

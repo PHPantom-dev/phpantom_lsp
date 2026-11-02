@@ -13,7 +13,9 @@
 //! extension's `getGlobals()`.
 
 use super::*;
-use crate::symbol_map::{ReceiverClass, StringKeyKind, TwigContextSite, TwigContextVar};
+use crate::symbol_map::{
+    ReceiverClass, StringKeyKind, TwigContextSite, TwigContextValue, TwigContextVar,
+};
 use crate::twig::variables::is_twig_variable_name;
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 
@@ -51,16 +53,23 @@ fn argument_at<'e, 'a>(
         })
 }
 
-/// The variables a context expression spells out: the string keys of an
-/// array literal, or the names a `compact()` takes.
-fn context_vars(expression: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Vec<TwigContextVar> {
+/// What a context expression hands a template: the string keys of an array
+/// literal with their values, the names a `compact()` copies, or else the
+/// expression itself, whose type alone tells its names.
+struct Context {
+    vars: Vec<TwigContextVar>,
+    shape: Option<(u32, u32)>,
+}
+
+fn context_of(expression: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Context {
     let mut vars = Vec::new();
-    let mut push = |text: &str, start: usize, end: usize| {
+    let mut push = |text: &str, start: usize, end: usize, value: TwigContextValue| {
         if is_twig_variable_name(text) {
             vars.push(TwigContextVar {
                 name: crate::atom::atom(text),
                 start: start as u32,
                 end: end as u32,
+                value,
             });
         }
     };
@@ -69,7 +78,12 @@ fn context_vars(expression: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Vec<Twi
             if let ArrayElement::KeyValue(entry) = element
                 && let Some((key, start, end)) = resolved_string_literal(entry.key, ctx.content)
             {
-                push(key, start, end);
+                let span = entry.value.span();
+                let value = TwigContextValue::Expression {
+                    start: span.start.offset,
+                    end: span.end.offset,
+                };
+                push(key, start, end, value);
             }
         }
     } else if let Expression::Call(Call::Function(call)) = expression
@@ -78,23 +92,33 @@ fn context_vars(expression: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Vec<Twi
             .trim_start_matches('\\')
             .eq_ignore_ascii_case("compact")
     {
+        let value = TwigContextValue::Variable {
+            offset: call.span().start.offset,
+        };
         for argument in call.argument_list.arguments.iter() {
             if let Argument::Positional(positional) = argument
                 && let Some((name, start, end)) =
                     resolved_string_literal(positional.value, ctx.content)
             {
-                push(name, start, end);
+                push(name, start, end, value);
             }
         }
+    } else if !matches!(expression, Expression::Literal(_)) {
+        let span = expression.span();
+        return Context {
+            vars,
+            shape: Some((span.start.offset, span.end.offset)),
+        };
     }
-    vars
+    Context { vars, shape: None }
 }
 
-fn push_context(template_start: usize, vars: Vec<TwigContextVar>, ctx: &mut ExtractionCtx<'_>) {
-    if !vars.is_empty() {
+fn push_context(template_start: usize, context: Context, ctx: &mut ExtractionCtx<'_>) {
+    if !context.vars.is_empty() || context.shape.is_some() {
         ctx.twig_contexts.push(TwigContextSite {
             template_start: template_start as u32,
-            vars,
+            vars: context.vars,
+            shape: context.shape,
         });
     }
 }
@@ -130,13 +154,13 @@ pub(in crate::symbol_map::extraction) fn record_twig_render_context(
     template_start: usize,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    let vars = match receiver {
+    let contexts: Vec<Context> = match receiver {
         ReceiverClass::TemplateRenderer => {
             let Some((index, names)) = context_argument(member_name) else {
                 return;
             };
             match argument_at(argument_list, index, names) {
-                Some(context) => context_vars(context, ctx),
+                Some(context) => vec![context_of(context, ctx)],
                 None => return,
             }
         }
@@ -144,11 +168,13 @@ pub(in crate::symbol_map::extraction) fn record_twig_render_context(
             .into_iter()
             .filter(|call| method_named(call, "context"))
             .filter_map(|call| argument_at(&call.argument_list, 0, &["context"]))
-            .flat_map(|context| context_vars(context, ctx))
+            .map(|context| context_of(context, ctx))
             .collect(),
         _ => return,
     };
-    push_context(template_start, vars, ctx);
+    for context in contexts {
+        push_context(template_start, context, ctx);
+    }
 }
 
 /// Record the context a templated email's `context([…])` hands the
@@ -173,9 +199,9 @@ pub(in crate::symbol_map::extraction) fn record_twig_email_context(
     if templates.is_empty() {
         return;
     }
-    let vars = context_vars(context, ctx);
     for template_start in templates {
-        push_context(template_start, vars.clone(), ctx);
+        let context = context_of(context, ctx);
+        push_context(template_start, context, ctx);
     }
 }
 
@@ -213,50 +239,56 @@ pub(in crate::symbol_map::extraction) fn record_template_action_context(
         .filter(|value| !matches!(value, Expression::Literal(Literal::Null(_))))
         .collect();
     // Symfony renders the arguments only when the action returns nothing.
-    let vars = if values.is_empty() {
-        let named = arguments
-            .iter()
-            .find(|(parameter, _)| *parameter == "vars")
-            .map(|(_, value)| *value);
-        match named {
-            Some(list) => crate::parser::array_literal_elements(list)
-                .into_iter()
-                .flat_map(|elements| elements.iter())
-                .filter_map(|element| match element {
-                    ArrayElement::Value(value) => resolved_string_literal(value.value, ctx.content),
-                    _ => None,
-                })
-                .filter(|(name, _, _)| is_twig_variable_name(name))
-                .map(|(name, start, end)| TwigContextVar {
-                    name: crate::atom::atom(name),
-                    start: start as u32,
-                    end: end as u32,
-                })
-                .collect(),
-            None => method
-                .parameter_list
-                .parameters
-                .iter()
-                .map(|parameter| {
-                    let span = parameter.variable.span;
-                    TwigContextVar {
-                        name: crate::atom::atom(
-                            bytes_to_str(parameter.variable.name).trim_start_matches('$'),
-                        ),
-                        // The name, without its `$`.
-                        start: span.start.offset + 1,
-                        end: span.end.offset,
-                    }
-                })
-                .collect(),
+    if !values.is_empty() {
+        for value in values {
+            let context = context_of(value, ctx);
+            push_context(template_start, context, ctx);
         }
-    } else {
-        values
-            .into_iter()
-            .flat_map(|value| context_vars(value, ctx))
-            .collect()
+        return;
+    }
+    // An argument is read as it stands where the body starts.
+    let argument = TwigContextValue::Variable {
+        offset: body.left_brace.end.offset,
     };
-    push_context(template_start, vars, ctx);
+    let named = arguments
+        .iter()
+        .find(|(parameter, _)| *parameter == "vars")
+        .map(|(_, value)| *value);
+    let vars = match named {
+        Some(list) => crate::parser::array_literal_elements(list)
+            .into_iter()
+            .flat_map(|elements| elements.iter())
+            .filter_map(|element| match element {
+                ArrayElement::Value(value) => resolved_string_literal(value.value, ctx.content),
+                _ => None,
+            })
+            .filter(|(name, _, _)| is_twig_variable_name(name))
+            .map(|(name, start, end)| TwigContextVar {
+                name: crate::atom::atom(name),
+                start: start as u32,
+                end: end as u32,
+                value: argument,
+            })
+            .collect(),
+        None => method
+            .parameter_list
+            .parameters
+            .iter()
+            .map(|parameter| {
+                let span = parameter.variable.span;
+                TwigContextVar {
+                    name: crate::atom::atom(
+                        bytes_to_str(parameter.variable.name).trim_start_matches('$'),
+                    ),
+                    // The name, without its `$`.
+                    start: span.start.offset + 1,
+                    end: span.end.offset,
+                    value: argument,
+                }
+            })
+            .collect(),
+    };
+    push_context(template_start, Context { vars, shape: None }, ctx);
 }
 
 /// Declare the globals an extension's `getGlobals()` returns the keys of.
@@ -291,7 +323,7 @@ pub(in crate::symbol_map::extraction) fn emit_twig_global_declarations(
         let mut returns = Vec::new();
         crate::return_collection::collect_returns(body.statements.iter(), &mut returns);
         for value in returns.iter().filter_map(|(value, ..)| *value) {
-            for var in context_vars(value, ctx) {
+            for var in context_of(value, ctx).vars {
                 ctx.spans.push(SymbolSpan {
                     start: var.start,
                     end: var.end,
@@ -335,7 +367,10 @@ mod tests {
                         var.name.to_string()
                     })
                     .collect();
-                format!("{}: {}", &php[start..end], names.join(", "))
+                let shape = site.shape.map_or(String::new(), |(start, end)| {
+                    format!(" + {}", &php[start as usize..end as usize])
+                });
+                format!("{}: {}{shape}", &php[start..end], names.join(", "))
             })
             .collect()
     }
@@ -350,6 +385,7 @@ class C {
         $twig->renderView('post/list.html.twig', compact('post'));
         $twig->renderBlock('post/show.html.twig', 'body', parameters: ['block' => 1]);
         $twig->render('post/none.html.twig');
+        $twig->render('post/params.html.twig', $params);
         (new TemplatedEmail())->htmlTemplate('mail/a.html.twig')->context(['user' => 1]);
         (new TemplatedEmail())->context(['code' => 1])->textTemplate('mail/b.txt.twig');
     }
@@ -362,6 +398,7 @@ class C {
                 "post/show.html.twig: post, title",
                 "post/list.html.twig: post",
                 "post/show.html.twig: block",
+                "post/params.html.twig:  + $params",
                 "mail/a.html.twig: user",
                 "mail/b.txt.twig: code",
             ]
@@ -388,7 +425,8 @@ class C {
         assert_eq!(
             contexts(&map, php),
             [
-                "a.html.twig: post, missing",
+                "a.html.twig: post",
+                "a.html.twig: missing",
                 "b.html.twig: id, slug",
                 "c.html.twig: slug",
             ]

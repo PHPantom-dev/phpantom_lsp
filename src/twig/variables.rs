@@ -30,11 +30,12 @@ use super::callables::{
     is_identifier_byte, is_identifier_start, opens_raw_text, skip_test, tag_at, word_at,
 };
 use crate::Backend;
-use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolSpan};
+use crate::php_type::PhpType;
+use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolSpan, TwigContextValue};
 use crate::symfony::translations::{for_each_twig_block, skip_whitespace, string_end};
 
 /// The words of Twig's expression language that are never a variable.
-const KEYWORDS: [&str; 24] = [
+pub(super) const KEYWORDS: [&str; 24] = [
     "and",
     "or",
     "not",
@@ -79,16 +80,19 @@ pub(crate) fn is_twig_variable_name(name: &str) -> bool {
 /// How a template defines a variable itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DefinitionKind {
-    /// `{% set name = … %}`.
-    Set,
-    /// The targets of a `{% for key, value in … %}`.
-    Loop,
+    /// `{% set name = … %}`, with the byte range of the value it is set
+    /// to, when the tag sets it to one.
+    Set { value: Option<(usize, usize)> },
+    /// A target of a `{% for key, value in … %}`: the byte range of what the
+    /// loop iterates, and whether the target is the key.
+    Loop { iterable: (usize, usize), key: bool },
     /// The argument of a `{% macro name(argument) %}`.
     MacroArgument,
     /// The name an `{% import '…' as name %}` gives the macros it imports.
     Import,
-    /// A key of a `{% with {name: …} %}` hash.
-    With,
+    /// A key of a `{% with {name: …} %}` hash, with the byte range of its
+    /// value.
+    With { value: Option<(usize, usize)> },
     /// A `{% types {name: 'type'} %}` entry: the type it declares, and
     /// whether the template does without it.
     Types { declared: String, optional: bool },
@@ -116,8 +120,15 @@ pub(crate) struct Load {
     /// Whether the loaded template gets this one's context: an `include` or
     /// an `embed` without `only`, and the template this one `extends`.
     pub(crate) forwards: bool,
-    /// The byte ranges of the keys of the `with` hash.
-    pub(crate) with: Vec<(usize, usize)>,
+    /// The entries of the `with` hash.
+    pub(crate) with: Vec<Passed>,
+}
+
+/// A key a hash passes on, and the byte range of its value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Passed {
+    pub(crate) key: (usize, usize),
+    pub(crate) value: Option<(usize, usize)>,
 }
 
 /// What a template's text says about its variables.
@@ -260,8 +271,15 @@ impl Scanner<'_> {
         match tag {
             "set" => {
                 let assignment = assignment_at(self.bytes, after, end);
-                for (start, word_end) in self.words(after, assignment.unwrap_or(end)) {
-                    self.define(start, word_end, DefinitionKind::Set);
+                let targets = self.words(after, assignment.unwrap_or(end));
+                // `{% set a, b = 1, 2 %}` sets each target to its own value.
+                let values = assignment
+                    .map(|assignment| top_level_parts(self.bytes, assignment + 1, end))
+                    .filter(|values| values.len() == targets.len())
+                    .unwrap_or_default();
+                for (index, (start, word_end)) in targets.into_iter().enumerate() {
+                    let value = values.get(index).copied();
+                    self.define(start, word_end, DefinitionKind::Set { value });
                 }
                 if let Some(assignment) = assignment {
                     self.expression(assignment + 1, end, false, &[]);
@@ -273,8 +291,17 @@ impl Scanner<'_> {
                 else {
                     return;
                 };
-                for (start, word_end) in &words[..position] {
-                    self.define(*start, *word_end, DefinitionKind::Loop);
+                let iterable_start = words[position].1;
+                // A Twig 2 `for … in … if …` filters what it iterates.
+                let iterable_end = words[position..]
+                    .iter()
+                    .find(|(s, e)| &content[*s..*e] == "if")
+                    .map_or(end, |(s, _)| *s);
+                let iterable = trim_range(self.bytes, iterable_start, iterable_end);
+                let targets = &words[..position];
+                for (index, (start, word_end)) in targets.iter().enumerate() {
+                    let key = targets.len() > 1 && index == 0;
+                    self.define(*start, *word_end, DefinitionKind::Loop { iterable, key });
                 }
                 self.expression(words[position].1, end, false, &[]);
             }
@@ -320,7 +347,8 @@ impl Scanner<'_> {
             "with" => {
                 let open = skip_whitespace(self.bytes, after, end);
                 for entry in hash_entries(self.bytes, open, end) {
-                    self.define(entry.key.0, entry.key.1, DefinitionKind::With);
+                    let value = entry.value_range;
+                    self.define(entry.key.0, entry.key.1, DefinitionKind::With { value });
                 }
                 self.expression(after, end, false, &["only"]);
             }
@@ -383,10 +411,7 @@ impl Scanner<'_> {
             match &self.content[start..word_end] {
                 "with" => {
                     let open = skip_whitespace(self.bytes, word_end, end);
-                    with = hash_entries(self.bytes, open, end)
-                        .into_iter()
-                        .map(|entry| entry.key)
-                        .collect();
+                    with = passed(self.bytes, open, end);
                 }
                 "only" => only = true,
                 _ => {}
@@ -416,10 +441,7 @@ impl Scanner<'_> {
         let mut arguments_end = after_name;
         if self.bytes.get(after_name) == Some(&b',') {
             let hash = skip_whitespace(self.bytes, after_name + 1, end);
-            with = hash_entries(self.bytes, hash, end)
-                .into_iter()
-                .map(|entry| entry.key)
-                .collect();
+            with = passed(self.bytes, hash, end);
             arguments_end = match self.bytes.get(hash) {
                 Some(b'{') => matching_close(self.bytes, hash, end).map_or(end, |close| close + 1),
                 _ => hash,
@@ -658,6 +680,57 @@ struct HashEntry {
     optional: bool,
     /// The byte range of the value's contents, when it is a string.
     value: Option<(usize, usize)>,
+    /// The byte range of the value.
+    value_range: Option<(usize, usize)>,
+}
+
+/// The entries of the hash literal whose `{` is at `open`, as a `with` hash
+/// passes them on.
+fn passed(bytes: &[u8], open: usize, end: usize) -> Vec<Passed> {
+    hash_entries(bytes, open, end)
+        .into_iter()
+        .map(|entry| Passed {
+            key: entry.key,
+            value: entry.value_range,
+        })
+        .collect()
+}
+
+/// `start..end` without the whitespace around it.
+pub(crate) fn trim_range(bytes: &[u8], start: usize, end: usize) -> (usize, usize) {
+    let start = skip_whitespace(bytes, start, end);
+    let mut trimmed_end = end;
+    while trimmed_end > start && bytes[trimmed_end - 1].is_ascii_whitespace() {
+        trimmed_end -= 1;
+    }
+    (start, trimmed_end)
+}
+
+/// The parts of `start..end` the commas outside its brackets and strings
+/// separate, each trimmed.
+fn top_level_parts(bytes: &[u8], start: usize, end: usize) -> Vec<(usize, usize)> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut part_start = start;
+    let mut cursor = start;
+    while cursor < end {
+        match bytes[cursor] {
+            quote @ (b'\'' | b'"') => match string_end(bytes, cursor + 1, quote) {
+                Some(close) => cursor = close,
+                None => break,
+            },
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                parts.push(trim_range(bytes, part_start, cursor));
+                part_start = cursor + 1;
+            }
+            _ => {}
+        }
+        cursor += 1;
+    }
+    parts.push(trim_range(bytes, part_start, end));
+    parts
 }
 
 /// The entries of the hash literal whose `{` is at `open`.
@@ -700,13 +773,15 @@ fn hash_entries(bytes: &[u8], open: usize, end: usize) -> Vec<HashEntry> {
                 .map(|value_end| (value_start + 1, value_end)),
             _ => None,
         };
-        if let Some(key) = key {
+        let entry_index = key.map(|key| {
             entries.push(HashEntry {
                 key,
                 optional,
                 value,
+                value_range: None,
             });
-        }
+            entries.len() - 1
+        });
         // On to the `,` after the value.
         let mut depth = 0usize;
         while cursor < close {
@@ -721,6 +796,12 @@ fn hash_entries(bytes: &[u8], open: usize, end: usize) -> Vec<HashEntry> {
                 _ => {}
             }
             cursor += 1;
+        }
+        if has_value
+            && let Some(index) = entry_index
+            && value_start < cursor
+        {
+            entries[index].value_range = Some(trim_range(bytes, value_start, cursor));
         }
         cursor += 1;
     }
@@ -750,11 +831,31 @@ pub(crate) struct Origin {
     pub(crate) uri: String,
     pub(crate) start: u32,
     pub(crate) end: u32,
+    /// Where the value it holds is written.
+    pub(crate) value: OriginValue,
+}
+
+/// Where the value a variable a template receives holds is written, which
+/// is what its type is read from (see [`super::types`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OriginValue {
+    /// Nowhere that can be read, as for a global a YAML file declares.
+    Unknown,
+    /// A value of a PHP render's context.
+    Php(TwigContextValue),
+    /// The value written beside the key in a PHP file: a global's.
+    PhpBeside,
+    /// An entry of a PHP context only its type names, already read off it.
+    Type(PhpType),
+    /// The expression spanning `start..end` of the template that passes it.
+    Twig { start: usize, end: usize },
+    /// The variable as the template that passes it on defines it.
+    TwigDefinition,
 }
 
 /// What a variable written in a template is.
 #[derive(Debug)]
-enum Resolved {
+pub(super) enum Resolved {
     /// The template defines it, in the scope it is written in.
     Local(Vec<Definition>),
     /// It is received: declared by the template's `types` tag, passed by
@@ -768,7 +869,7 @@ enum Resolved {
 }
 
 impl Backend {
-    fn twig_template_text(&self, uri: &str) -> Option<Arc<String>> {
+    pub(super) fn twig_template_text(&self, uri: &str) -> Option<Arc<String>> {
         self.get_file_content_arc(uri).or_else(|| {
             crate::util::uri_to_path(uri)
                 .and_then(|path| std::fs::read_to_string(path).ok())
@@ -777,15 +878,21 @@ impl Backend {
     }
 
     /// The globals the project declares.
-    fn twig_global_origins(&self) -> Vec<Origin> {
+    pub(super) fn twig_global_origins(&self) -> Vec<Origin> {
         let mut origins = Vec::new();
         self.visit_symfony_declarations(StringKeyKind::TwigVariable, |uri, _, start, end, key| {
+            let value = if uri.ends_with(".php") {
+                OriginValue::PhpBeside
+            } else {
+                OriginValue::Unknown
+            };
             origins.push(Origin {
                 name: key.to_string(),
                 kind: OriginKind::Global,
                 uri: uri.to_string(),
                 start,
                 end,
+                value,
             });
         });
         origins
@@ -870,13 +977,17 @@ impl Backend {
                 let mut forwards = false;
                 for load in analysed.loads.iter().filter(|load| names_this(&load.name)) {
                     forwards |= load.forwards;
-                    for (start, end) in &load.with {
+                    for passed in &load.with {
+                        let (start, end) = passed.key;
                         origins.push(Origin {
-                            name: content[*start..*end].to_string(),
+                            name: content[start..end].to_string(),
                             kind: OriginKind::Template,
                             uri: file_uri.clone(),
-                            start: *start as u32,
-                            end: *end as u32,
+                            start: start as u32,
+                            end: end as u32,
+                            value: passed.value.map_or(OriginValue::Unknown, |(start, end)| {
+                                OriginValue::Twig { start, end }
+                            }),
                         });
                     }
                 }
@@ -888,6 +999,7 @@ impl Backend {
                             uri: file_uri.clone(),
                             start: definition.start as u32,
                             end: definition.end as u32,
+                            value: OriginValue::TwigDefinition,
                         });
                     }
                     self.collect_twig_received(&file_uri, visited, origins);
@@ -926,18 +1038,37 @@ impl Backend {
                 })
                 .map(|span| span.start)
                 .collect();
-            for site in map
+            let sites: Vec<&crate::symbol_map::TwigContextSite> = map
                 .twig_contexts
                 .iter()
                 .filter(|site| starts.contains(&site.template_start))
-            {
+                .collect();
+            for site in &sites {
                 origins.extend(site.vars.iter().map(|var| Origin {
                     name: var.name.to_string(),
                     kind: OriginKind::Render,
                     uri: file_uri.clone(),
                     start: var.start,
                     end: var.end,
+                    value: OriginValue::Php(var.value),
                 }));
+            }
+            // A context passed as a whole names its entries by its type.
+            let shapes: Vec<(u32, u32)> = sites.iter().filter_map(|site| site.shape).collect();
+            if !shapes.is_empty() {
+                for ((start, end), entries) in shapes
+                    .iter()
+                    .zip(self.twig_context_shapes(&file_uri, &shapes))
+                {
+                    origins.extend(entries.into_iter().map(|(name, ty)| Origin {
+                        name,
+                        kind: OriginKind::Render,
+                        uri: file_uri.clone(),
+                        start: *start,
+                        end: *end,
+                        value: OriginValue::Type(ty),
+                    }));
+                }
             }
         }
     }
@@ -945,7 +1076,12 @@ impl Backend {
     /// What the variable `name`, written at `offset` in the template at
     /// `uri`, is.  Without an offset, it is read as written in the
     /// template's own scope rather than a macro's.
-    fn resolve_twig_variable(&self, uri: &str, offset: Option<usize>, name: &str) -> Resolved {
+    pub(super) fn resolve_twig_variable(
+        &self,
+        uri: &str,
+        offset: Option<usize>,
+        name: &str,
+    ) -> Resolved {
         let analysed = self
             .twig_template_text(uri)
             .map(|content| {
@@ -1098,6 +1234,19 @@ impl Backend {
         offset: Option<usize>,
         name: &str,
     ) -> String {
+        let detail = self.twig_variable_origin_detail(uri, offset, name);
+        let ty = offset
+            .filter(|_| self.is_twig_template_uri(uri))
+            .and_then(|offset| self.twig_variable_type(uri, offset, name));
+        match ty {
+            Some(ty) => format!("`{}`\n\n{detail}", super::types::display_type(&ty)),
+            None => detail,
+        }
+    }
+
+    /// Where the variable `name` written at `offset` in the file at `uri`
+    /// comes from, as its hover says it.
+    fn twig_variable_origin_detail(&self, uri: &str, offset: Option<usize>, name: &str) -> String {
         if !self.is_twig_template_uri(uri) {
             return "A global every template receives".to_string();
         }
@@ -1110,11 +1259,11 @@ impl Backend {
                 let mut lines: Vec<&str> = definitions
                     .iter()
                     .map(|definition| match definition.kind {
-                        DefinitionKind::Set => "Set by this template",
-                        DefinitionKind::Loop => "Set by a `for` loop of this template",
+                        DefinitionKind::Set { .. } => "Set by this template",
+                        DefinitionKind::Loop { .. } => "Set by a `for` loop of this template",
                         DefinitionKind::MacroArgument => "An argument of the macro",
                         DefinitionKind::Import => "The macros this template imports",
-                        DefinitionKind::With => "Set by a `with` tag of this template",
+                        DefinitionKind::With { .. } => "Set by a `with` tag of this template",
                         DefinitionKind::Types { .. } => "Declared by this template",
                     })
                     .collect();
@@ -1218,7 +1367,11 @@ mod tests {
                     DefinitionKind::Types { declared, optional } => {
                         format!("{name}{}: {declared}", if *optional { "?" } else { "" })
                     }
-                    kind => format!("{name} {kind:?} {}", d.scope),
+                    kind => {
+                        let kind = format!("{kind:?}");
+                        let kind = kind.split(' ').next().unwrap_or_default();
+                        format!("{name} {kind} {}", d.scope)
+                    }
                 }
             })
             .collect()
@@ -1308,7 +1461,7 @@ mod tests {
                 (
                     load.name.clone(),
                     load.forwards,
-                    load.with.iter().map(|(s, e)| &twig[*s..*e]).collect(),
+                    load.with.iter().map(|p| &twig[p.key.0..p.key.1]).collect(),
                 )
             })
             .collect();

@@ -65,8 +65,10 @@ catalogues together, the way a real Symfony project does.
   the key `DemoController` renders the template with, or of `support_url` to
   reach the global `config/packages/twig.yaml` declares. In
   `templates/demo/_card.html.twig`, `sender` comes through the template that
-  includes it. Hover a variable to see where it comes from, and complete one
-  where an expression starts.
+  includes it. Hover a variable to see where it comes from and what it
+  holds, and complete one where an expression starts. Go to the definition
+  of `displayName` in `user.displayName` to reach `User::getDisplayName()`,
+  and complete after `user.` to see what else the class has.
 - Form fields and validation mappings name the properties of the class they
   map. In `src/Form/RegistrationType.php` or `config/validator/User.yaml`, go
   to the definition of `email`, find the references of `$displayName` in

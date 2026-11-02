@@ -14,6 +14,7 @@ pub(crate) mod blocks;
 pub(crate) mod callables;
 pub(crate) mod roots;
 pub(crate) mod templates;
+pub(crate) mod types;
 pub(crate) mod variables;
 
 use std::collections::HashMap;

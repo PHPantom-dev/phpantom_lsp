@@ -108,6 +108,15 @@ impl Backend {
         if let Some(location) = self.resolve_resource_symbol_definition(content, position) {
             return vec![location];
         }
+        // An attribute read off a Twig variable leads to the member it reads,
+        // which only the variable's type tells.
+        if self.is_twig_template_uri(uri) && self.is_twig_project() {
+            let offset = crate::text_position::position_to_offset(content, position);
+            let members = self.twig_attribute_definitions(uri, content, offset as usize);
+            if !members.is_empty() {
+                return members;
+            }
+        }
         let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
             return Vec::new();
         };

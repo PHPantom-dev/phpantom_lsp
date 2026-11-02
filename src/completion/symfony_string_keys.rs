@@ -360,6 +360,9 @@ impl Backend {
                     position,
                 );
             }
+            if let Some(response) = self.twig_attribute_completion(uri, content, cursor, position) {
+                return Some(response);
+            }
             if let Some(start) = crate::twig::templates::twig_template_name_start(content, cursor) {
                 (StringKeyKind::TwigTemplate, start)
             } else if let Some(start) = is_symfony
