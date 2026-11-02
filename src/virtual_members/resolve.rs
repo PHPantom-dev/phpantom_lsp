@@ -74,19 +74,34 @@ impl Drop for PendingGuard<'_> {
     }
 }
 
+/// RAII guard that ends the wait [`PendingClaim::OwnedByOtherThread`]
+/// recorded for the current thread.
+struct PendingWaitGuard<'a> {
+    cache: &'a ResolvedClassCache,
+}
+
+impl Drop for PendingWaitGuard<'_> {
+    fn drop(&mut self) {
+        self.cache
+            .write()
+            .end_pending_wait(std::thread::current().id());
+    }
+}
+
 /// Bound on how long a thread waits for another thread's first-time
 /// resolution of the same not-yet-cached class before giving up and
 /// resolving it independently.
 ///
 /// A single resolution takes a fraction of a millisecond in the common
 /// case (see [`MAX_POPULATE_WORKERS`]), so this is orders of magnitude
-/// above normal contention and only fires if the owning thread is
-/// abnormally stuck — mirroring `ParseInflight`'s escape hatch in
-/// `resolution/inflight.rs`.
+/// above normal contention.  Waits between claims never form a cycle
+/// (see [`PendingClaim::OwnedByThreadWaitingOnCaller`]), so this only
+/// fires if the owning thread is abnormally stuck — mirroring
+/// `ParseInflight`'s escape hatch in `resolution/inflight.rs`.
 pub(super) const PENDING_WAIT_ESCAPE_HATCH: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Wait for another thread's first-time resolution of `key` to land in
-/// the cache.
+/// the cache, ending the wait the claim recorded.
 ///
 /// Returns `None` when the caller should give up waiting and resolve
 /// the class itself instead: either the owning thread released its
@@ -97,6 +112,7 @@ fn wait_for_pending(
     cache: &ResolvedClassCache,
     key: &ResolvedClassCacheKey,
 ) -> Option<Arc<ClassInfo>> {
+    let _wait = PendingWaitGuard { cache };
     // The owner may be waiting for the auth model this thread is computing.
     if laravel::is_computing_auth_model() {
         return None;
@@ -736,13 +752,17 @@ fn resolve_class_fully_inner(
     // lives for the whole expression, and the `OwnedByOtherThread` arm
     // below takes its own `cache.read()` inside `wait_for_pending` —
     // holding the write guard that long would self-deadlock.
-    let claim = cache.write().claim_pending(&cache_key);
+    let claim = cache
+        .write()
+        .claim_pending(std::thread::current().id(), &cache_key);
     let pending_guard = match claim {
         PendingClaim::Fresh => Some(PendingGuard {
             cache,
             key: cache_key.clone(),
         }),
-        PendingClaim::AlreadyOwnedByThisThread => None,
+        // The owner needs a claim this thread holds, so it cannot finish
+        // until this thread does.  Resolving here lets both proceed.
+        PendingClaim::AlreadyOwnedByThisThread | PendingClaim::OwnedByThreadWaitingOnCaller => None,
         PendingClaim::OwnedByOtherThread => {
             if let Some(result) = wait_for_pending(cache, &cache_key) {
                 return result;
@@ -1205,4 +1225,70 @@ fn build_implements_substitution_map(
     };
 
     build_generic_subs(iface, type_args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_fixtures::{make_class, make_method};
+    use crate::virtual_members::new_resolved_class_cache;
+    use std::sync::Barrier;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn interface_extending(name: &str, parent: &str, method: &str) -> Arc<ClassInfo> {
+        let mut class = make_class(name);
+        class.interfaces.push(atom(parent));
+        class
+            .methods
+            .push(Arc::new(make_method(method, Some("void"))));
+        Arc::new(class)
+    }
+
+    /// Resolve `class` once its thread and the other thread both hold
+    /// their claims, by pausing at the first lookup of the class the other
+    /// thread is resolving.
+    fn resolve_after_both_claimed(
+        class: &Arc<ClassInfo>,
+        other: &Arc<ClassInfo>,
+        both_claimed: &Barrier,
+        cache: &ResolvedClassCache,
+    ) -> Arc<ClassInfo> {
+        let paused = AtomicBool::new(false);
+        let loader = |name: Fqn<'_>| {
+            if name.as_str() == other.fqn().as_str() {
+                if !paused.swap(true, Ordering::Relaxed) {
+                    both_claimed.wait();
+                }
+                return Some(Arc::clone(other));
+            }
+            (name.as_str() == class.fqn().as_str()).then(|| Arc::clone(class))
+        };
+        resolve_class_fully_cached(class, &loader, cache)
+    }
+
+    #[test]
+    fn threads_needing_each_others_claims_finish_without_the_timeout() {
+        let a = interface_extending("A", "B", "fromA");
+        let b = interface_extending("B", "A", "fromB");
+        let cache = new_resolved_class_cache();
+        let both_claimed = Barrier::new(2);
+
+        let started = std::time::Instant::now();
+        let (resolved_a, resolved_b) = std::thread::scope(|scope| {
+            let first = scope.spawn(|| resolve_after_both_claimed(&a, &b, &both_claimed, &cache));
+            let second = scope.spawn(|| resolve_after_both_claimed(&b, &a, &both_claimed, &cache));
+            (first.join().unwrap(), second.join().unwrap())
+        });
+
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < PENDING_WAIT_ESCAPE_HATCH,
+            "the threads waited for the timeout: {elapsed:?}"
+        );
+        assert!(resolved_a.methods.iter().any(|m| &*m.name == "fromA"));
+        assert!(resolved_b.methods.iter().any(|m| &*m.name == "fromB"));
+        let inner = cache.read();
+        assert!(!inner.is_pending(&resolved_key(atom("A"), Vec::new())));
+        assert!(!inner.is_pending(&resolved_key(atom("B"), Vec::new())));
+    }
 }
