@@ -521,6 +521,39 @@ fn canonicalize_literal_quotes(ty: &str) -> String {
     result
 }
 
+/// `ty` with each `\\` and `\'` inside a single-quoted literal replaced by
+/// a control character, so a scan that ends the literal at the next `'`
+/// finds its real end. Both sides of a comparison go through this, so the
+/// placeholders never need to be put back.
+fn hide_single_quoted_escapes(ty: &str) -> String {
+    let mut out = String::with_capacity(ty.len());
+    let mut quote: Option<char> = None;
+    let mut chars = ty.chars();
+    while let Some(ch) = chars.next() {
+        match quote {
+            Some('\'') if ch == '\\' => match chars.next() {
+                Some('\\') => out.push('\u{2}'),
+                Some('\'') => out.push('\u{1}'),
+                Some(other) => {
+                    out.push(ch);
+                    out.push(other);
+                }
+                None => out.push(ch),
+            },
+            Some(q) if ch == q => {
+                quote = None;
+                out.push(ch);
+            }
+            None if ch == '\'' || ch == '"' => {
+                quote = Some(ch);
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Normalize a type string for comparison.
 ///
 /// PHPStan and PHPantom may format the same type differently. This
@@ -529,6 +562,10 @@ fn canonicalize_literal_quotes(ty: &str) -> String {
 /// literal quote style) don't cause spurious failures.
 fn normalize_type(ty: &str) -> String {
     let mut s = canonicalize_literal_quotes(ty.trim());
+
+    // Hide the escapes inside single-quoted literals (`'foo\'s bar'`) from
+    // the scanners below, which end a literal at the next quote character.
+    s = hide_single_quoted_escapes(&s);
 
     // Strip leading backslash from FQN types.
     if s.starts_with('\\') {

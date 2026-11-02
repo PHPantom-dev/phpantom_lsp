@@ -18,7 +18,7 @@ assertType('string', $path);
 
 $path = Faker::lowercaseString();
 if (wp_is_stream($path)) {
-    assertType('lowercase-string&non-falsy-string', $path); // SKIP: `@phpstan-assert` narrowing intersects refined string types wrongly
+    assertType('lowercase-string&non-falsy-string', $path);
 }
 assertType('lowercase-string', $path);
 

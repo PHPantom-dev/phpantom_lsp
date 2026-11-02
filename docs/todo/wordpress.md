@@ -3,11 +3,16 @@
 Known gaps and missing features in PHPantom's WordPress support. Today
 WordPress gets the generic engine, plus the output constants (`OBJECT`,
 `ARRAY_A`, …) its stubs leave out and the return types an argument
-decides that they declare too wide (`src/wordpress/`). Core's functions
+decides that they declare too wide (`src/wordpress/`), or that no PHPDoc
+type can spell (`src/type_engine/type_ops/call_site_returns/wordpress.rs`).
+Core's functions
 and classes resolve only when the project indexes WordPress itself or a
 stub package for it. The stubs' own type tests run in
 `tests/wordpress_stubs/`, and what the engine reads wrongly in them is
-filed under "Conditional return types" in [bugs.md](bugs.md).
+filed under "Conditional return types" in [bugs.md](bugs.md). The
+return types `src/wordpress/overrides.php` gives the stubs that hold for
+every WordPress version the stubs cover are worth offering to
+`php-stubs/wordpress-stubs` as well.
 
 Most WordPress typing lives in `php-stubs/wordpress-stubs`, so the
 external stubs are the foundation for everything here. Installed with
@@ -207,43 +212,6 @@ and the Twig template-name support.
 
 ---
 
-## WP13. Return types no conditional `@return` can express
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-$args = wp_parse_args($args, ['before' => '', 'echo' => true]);
-$args['echo'];   // mixed, want bool
-```
-
-`src/wordpress/overrides.php` gives the WordPress stubs the conditional
-return types an argument decides. What is left of PHPStan's WordPress
-extension needs the engine, since no PHPDoc type can say it. Its
-fixtures are ported in `tests/wordpress_stubs/data/phpstan-wordpress/`,
-each gap marked `// SKIP`:
-
-- **Merged shapes.** `wp_parse_args($args, $defaults)` of an array is
-  `array_merge($defaults, $args)`, which the array function rules
-  (`src/type_engine/variable/array_func_rules.rs`) already type.
-  `shortcode_atts($pairs, $atts)` keeps the keys of `$pairs`, each value
-  its default's type or `string`. 23 assertions.
-- **`esc_sql()` keeps the shape** of the array it escapes, each scalar
-  value a `string` and anything else `''`. 11 assertions.
-- **`wp_slash()` keeps the shape** of the array it slashes, each string
-  value slashed. The stubs' conditional gives `array<key-of<T>, …>`, which
-  loses the keys each value belongs to. 6 assertions.
-- **Calls on literal arguments.** `wp_slash('foo')`,
-  `trailingslashit('foo')`, `normalize_whitespace(' 0 ')`,
-  `stripslashes_from_strings_only('foo')` and
-  `wp_parse_url('http://example.com', PHP_URL_HOST)` give the literal
-  WordPress would return, the way `scalar_fold.rs` folds PHP's own string
-  functions. 33 assertions.
-
-The overrides that hold for every WordPress version the stubs cover are
-worth offering to `php-stubs/wordpress-stubs` as well.
-
----
-
 ## WP8. Sage view composers
 
 **Impact: Medium · Complexity: Medium**
@@ -339,3 +307,24 @@ value differs between installs, so its type is the general one (`string`,
 other `bool` constants already widen to `bool`; the string and integer
 ones do not. Widen every constant `wp-config.php` (or
 `wp-config-sample.php`) defines, rather than keeping a list of names.
+
+---
+
+## WP14. `wp_parse_args()` of an object
+
+**Impact: Low · Complexity: Medium**
+
+```php
+$args = wp_parse_args($post, ['extra' => 1]);   // array, want an array with an `extra` key
+```
+
+`wp_parse_args()` reads an object through `get_object_vars()`, called
+from inside WordPress, so the result holds the object's public
+properties merged under the defaults. PHPStan's WordPress extension
+types it `non-empty-array<mixed>&hasOffset('extra')` outside a class,
+and keeps the declared `array` inside one, where the caller sees more
+properties than WordPress does. PHPantom keeps the declared `array`
+everywhere: it has no `hasOffset()` type, and does not type
+`get_object_vars()` by the scope it is called from. The fixture is
+ported in `tests/wordpress_stubs/data/phpstan-wordpress/`, marked
+`// SKIP`.

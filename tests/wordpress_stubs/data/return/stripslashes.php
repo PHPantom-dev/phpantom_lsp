@@ -16,7 +16,7 @@ assertType('int', stripslashes_from_strings_only(Faker::int()));
 assertType('1.23', stripslashes_from_strings_only(1.23)); // SKIP: a float literal is typed `float`, not its value
 assertType('float', stripslashes_from_strings_only(Faker::float()));
 assertType("''", stripslashes_from_strings_only(''));
-assertType('string', stripslashes_from_strings_only('value'));
+assertType("'value'", stripslashes_from_strings_only('value')); // PHPantom folds a call on a literal to the literal WordPress returns
 assertType('string', stripslashes_from_strings_only(Faker::string()));
 assertType("array{key: 'value'}", stripslashes_from_strings_only(['key' => 'value']));
 assertType('array<array-key, mixed>', stripslashes_from_strings_only(Faker::array())); // PHPantom spells `array<mixed>` with its key type

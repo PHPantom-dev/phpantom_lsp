@@ -257,9 +257,9 @@ fn named_function_call<'b>(
     // A return type the call site decides (a conditional keyed on an
     // argument, or a builtin whose arguments decide its result) is
     // authoritative, so it is tried before the declared type.
-    if func_info.conditional_return.is_some()
-        || crate::type_engine::type_ops::call_site_returns::has_call_site_return(name)
-    {
+    let call_site_name =
+        crate::type_engine::type_ops::call_site_returns::call_site_name(&func_info);
+    if func_info.conditional_return.is_some() || call_site_name.is_some() {
         let var_resolver = build_var_resolver_from_ctx(ctx);
         let rctx = ctx.as_resolution_ctx();
         // `is <Type>` conditions on an argument that isn't a literal
@@ -269,7 +269,25 @@ fn named_function_call<'b>(
         let arg_ty_resolver = |t: &str| Backend::resolve_arg_text_to_type(t, &rctx);
         let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         let text_args = arg_texts.join(", ");
-        let resolved_type = func_info.conditional_return.as_ref().and_then(|cond| {
+        // A function whose arguments decide its result (`json_encode(…,
+        // JSON_THROW_ON_ERROR)` never returning `false`, `filter_var()`
+        // returning what its filter produces, `wp_parse_args()` merging two
+        // shapes) is decided at the call site, more closely than its
+        // conditional can say. The arguments are read through the walker
+        // first, which types an inline options array as its shape where
+        // the text resolver only sees `array`.
+        let call_site = call_site_name.and_then(|name| {
+            let walker_types = walker_arg_types(argument_list, ctx);
+            let arg_ty_resolver = |t: &str| walker_types(t).or_else(|| arg_ty_resolver(t));
+            crate::type_engine::type_ops::call_site_returns::call_site_return_type(
+                name,
+                &func_info.parameters,
+                &text_args,
+                func_info.return_type.as_ref(),
+                Some(&arg_ty_resolver),
+            )
+        });
+        let resolved_type = call_site.or_else(|| func_info.conditional_return.as_ref().and_then(|cond| {
             // A condition over a template is judged by what the arguments
             // bound it to, so the bindings are read before it is decided.
             let subs = (!func_info.template_bindings.is_empty()).then(|| {
@@ -301,24 +319,7 @@ fn named_function_call<'b>(
                 ctx.file.class_loader,
                 &tpl,
             )
-        })
-        // A builtin whose arguments decide its result (`json_encode(…,
-        // JSON_THROW_ON_ERROR)` never returning `false`, `filter_var()`
-        // returning what its filter produces) is decided the same way:
-        // at the call site. The arguments are read through the walker
-        // first, which types an inline options array as its shape where
-        // the text resolver only sees `array`.
-        .or_else(|| {
-            let walker_types = walker_arg_types(argument_list, ctx);
-            let arg_ty_resolver = |t: &str| walker_types(t).or_else(|| arg_ty_resolver(t));
-            crate::type_engine::type_ops::call_site_returns::call_site_return_type(
-                name,
-                &func_info.parameters,
-                &text_args,
-                func_info.return_type.as_ref()?,
-                Some(&arg_ty_resolver),
-            )
-        });
+        }));
         if let Some(ty) = resolved_type {
             // The winning branch can name a function-level `@template`
             // (`tap()` returns `TValue`), which only the call-site

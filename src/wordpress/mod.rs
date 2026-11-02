@@ -9,7 +9,10 @@
 //! Others leave a return type an argument decides at the type every
 //! argument shares: `get_post_meta($id, $key, true)` is declared `mixed`
 //! whether `$single` asks for one value or for all of them. `overrides.php`
-//! declares the narrower types, and they replace the stubs' own.
+//! declares the narrower types, and they replace the stubs' own. A return
+//! type no PHPDoc type can spell (the shape `wp_parse_args()` merges, the
+//! literal `trailingslashit('foo')` returns) is read off the call's
+//! arguments in `type_engine::type_ops::call_site_returns`.
 
 use std::path::{Path, PathBuf};
 
