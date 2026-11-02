@@ -20,10 +20,8 @@ external stubs are the foundation for everything here. Installed with
 Composer, the package is a stub source with no configuration, as is
 `php-stubs/woocommerce-stubs`; a project without Composer can list
 either under `[stubs] paths`. `global $wpdb;` takes its type from a
-`@global` tag on the function, else from the stubs' own `@global` tags;
-core indexed without the stubs does not type it, a gap in the generic
-engine tracked as
-[T62](type-inference.md#t62-global-tags-in-library-code-do-not-type-a-global).
+`@global` tag on the function, else from the `@global` tags of the stubs,
+else from those of core and any other indexed code.
 PHPStan's WordPress extension
 (`szepeviktor/phpstan-wordpress`) is the checklist of what a WordPress
 developer expects from types; PhpStorm's built-in WordPress support and

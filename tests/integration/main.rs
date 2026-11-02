@@ -199,6 +199,7 @@ mod folding_ranges;
 mod formatting_blade;
 mod formatting_range;
 mod framework_resources;
+mod global_tags;
 mod hover;
 mod implementation;
 mod include_variables;

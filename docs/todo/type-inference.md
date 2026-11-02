@@ -704,38 +704,3 @@ maybe_serialize(0.0);   // want 0.0, get float
 Integer, string and boolean literals keep their value as their type;
 float literals become `float`. A template bound to one, or a condition
 over one, loses the value. 2 assertions of the WordPress stubs fixtures.
-
----
-
-## T62. `@global` tags in library code do not type a global
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-function acme_count_orders(): int {
-    global $wpdb; // untyped when core is indexed instead of the stubs
-    return (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}acme_orders");
-}
-```
-
-A `global $x;` with no type of its own takes the type the `@global` tags of
-the stub files give `$x` (`ExternalStubIndex::globals`). Tags anywhere else
-are not read: WordPress core indexed as library code (WP3, or a whole
-install opened as the workspace) writes the same tags on its functions, and
-on the top-level `$GLOBALS['wp_query'] = new WP_Query();` assignments of
-`wp-settings.php`, but a project that has core without the stubs leaves
-`$wpdb` untyped. A plugin's own global documented on one function and
-imported untagged in another is untyped the same way.
-
-The stub index is rebuilt whole, so its tags are read once per rebuild.
-Library and project files are discovered by several scans and merged
-incrementally (`SymbolIndex::merge_scan`, `replace_tree`, the watcher's
-`reindex`), so feeding them in means carrying a name-to-files map through
-each of those, and deciding which files may count: a project file a
-Composer project autoloads by class is only parsed on demand, and reading
-its tags only once it happens to be parsed would make a type depend on
-what was opened first.
-
-**Where to look:** `load_external_stub_global` in
-`src/resolution/external_stubs.rs`, `scan_global_tags` in
-`src/classmap_scanner/discovery.rs`.

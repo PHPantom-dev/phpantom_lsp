@@ -145,9 +145,9 @@ pub(crate) fn process_statement<'b>(
                     } else if let Some(php_type) = ctx
                         .file
                         .backend
-                        .and_then(|backend| backend.load_external_stub_global(var_name))
+                        .and_then(|backend| backend.load_global_tag_type(var_name))
                     {
-                        // Already qualified against the stub file it is
+                        // Already qualified against the file it is
                         // written in.
                         scope.set(var_name, ctx.resolved_types_for(php_type));
                     } else {

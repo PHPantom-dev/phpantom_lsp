@@ -236,7 +236,7 @@ fn scan_files_parallel_psr4(
     )
 }
 
-/// Merge one scanned file's symbols into `result`.
+/// Merge one scanned file's symbols and `@global` tags into `result`.
 ///
 /// The first file to declare a name wins, except that a later file whose
 /// stem matches the class's short name displaces one whose stem does not:
@@ -250,6 +250,9 @@ fn merge_scanned_file(
     path: &Path,
     origin: crate::ClassCompletionOrigin,
 ) {
+    if !scan.globals.is_empty() {
+        result.globals.push((path.to_path_buf(), scan.globals));
+    }
     for fqcn in scan.classes {
         let class_short_name = crate::util::short_name(&fqcn).to_owned();
         let mut origin_wins = false;
@@ -312,9 +315,12 @@ pub(super) fn scan_files_parallel_full(
         |(path, origin)| {
             progress_add_done(progress);
             let content = read_for_scan(path).ok()?;
-            let scan = super::find_symbols(&content);
-            (!scan.classes.is_empty() || !scan.functions.is_empty() || !scan.constants.is_empty())
-                .then_some((scan, path, *origin))
+            let scan = super::find_symbols_and_global_tags(&content);
+            (!scan.classes.is_empty()
+                || !scan.functions.is_empty()
+                || !scan.constants.is_empty()
+                || !scan.globals.is_empty())
+            .then_some((scan, path, *origin))
         },
     );
 
@@ -514,34 +520,6 @@ pub(crate) fn scan_stub_paths(
     result
 }
 
-/// The global variables `files` document with an `@global Type $name` tag,
-/// each with the files that do, in the order of `files`.
-///
-/// Only the names are read here. The types are written against each
-/// file's own imports, which only a parse of it knows.
-pub(crate) fn scan_global_tags(files: &[PathBuf]) -> HashMap<String, Vec<PathBuf>> {
-    let scanned =
-        crate::parallel::map_in_blocks("scan_global_tags", files, SCAN_BLOCK_FILES, |path| {
-            let content = crate::util::read_php_source(path)?;
-            let mut names: Vec<String> = Vec::new();
-            for (_, doc) in crate::docblock::docblocks_with_global_tags(&content) {
-                for (name, _) in crate::docblock::extract_global_tags(doc) {
-                    if !names.contains(&name) {
-                        names.push(name);
-                    }
-                }
-            }
-            (!names.is_empty()).then_some((path, names))
-        });
-    let mut globals: HashMap<String, Vec<PathBuf>> = HashMap::new();
-    for (path, names) in scanned {
-        for name in names {
-            globals.entry(name).or_default().push(path.clone());
-        }
-    }
-    globals
-}
-
 /// Remove from `scan` every declaration whose file marks it `@removed` at
 /// or before `php_version`.
 fn drop_removed_declarations(
@@ -631,6 +609,7 @@ fn read_phpstorm_stubs_map(
         constant_index,
         constant_origins,
         package_roots: Vec::new(),
+        globals: Vec::new(),
     })
 }
 

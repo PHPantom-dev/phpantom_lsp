@@ -385,7 +385,7 @@ impl Backend {
                 // without building a full AST.  The classes go into
                 // `fqn_uri_index` so find_or_load_class can lazily parse
                 // them later.
-                let scan = classmap_scanner::find_symbols(&content);
+                let scan = classmap_scanner::find_symbols_and_global_tags(&content);
                 self.symbols
                     .merge_scan(WorkspaceScanResult::from_file(scan, &canonical));
 

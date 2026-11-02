@@ -108,6 +108,8 @@ impl Backend {
             .autoload_constant_index
             .write()
             .retain(|_, v| !path_set.contains(v));
+        self.symbols
+            .withdraw_global_tags(|path| path_set.contains(path));
         self.withdraw_functions_for_uris(&uri_set);
         self.symbols
             .global_defines

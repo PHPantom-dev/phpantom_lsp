@@ -10,19 +10,16 @@
 //! stub file is never analysed, renamed into, or searched for references,
 //! whether or not it sits inside the workspace.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-
-use parking_lot::Mutex;
 
 use super::path_aliases;
 use crate::Backend;
 use crate::ci_map::CiMap;
 use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::config;
-use crate::php_type::PhpType;
 use crate::workspace_env::LibraryClaimant;
 
 /// Where each name the stub paths declare is declared, in priority order:
@@ -45,13 +42,6 @@ pub(crate) struct ExternalStubIndex {
     pub(crate) constants: HashMap<String, PathBuf>,
     /// The stub file that declares WordPress, when one does.
     pub(crate) wordpress: Option<crate::wordpress::WordPressStubs>,
-    /// The stub files that document each global variable with an
-    /// `@global` tag, keyed by the variable's name with its `$`.
-    pub(crate) globals: HashMap<String, Vec<PathBuf>>,
-    /// The type each global variable looked up so far was found to have,
-    /// `None` when its tags declare none.  Held here so that a rebuild of
-    /// the index starts it afresh.
-    pub(crate) global_types: Mutex<HashMap<String, Option<PhpType>>>,
 }
 
 impl ExternalStubIndex {
@@ -89,8 +79,6 @@ impl ExternalStubIndex {
             functions,
             constants: scan.constant_index.clone(),
             wordpress: None,
-            globals: HashMap::new(),
-            global_types: Mutex::default(),
         }
     }
 
@@ -201,7 +189,6 @@ impl Backend {
         let scan = classmap_scanner::scan_stub_paths(&roots, &filters, self.php_version());
         let mut index = ExternalStubIndex::new(roots, &scan);
         index.wordpress = self.wordpress_stubs(&index.classes);
-        index.globals = classmap_scanner::scan_global_tags(&global_tag_candidates(&index, &scan));
         let symbol_count = index.classes.len() + index.functions.len() + index.constants.len();
 
         let trees: Vec<PathBuf> = previous.trees.iter().chain(&index.trees).cloned().collect();
@@ -238,23 +225,6 @@ impl Backend {
         self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
     }
-}
-
-/// The stub files whose `@global` tags may type a global variable: every
-/// file the scan found a declaration in, sorted, except phpstorm-stubs
-/// source, which describes PHP itself and documents no globals.
-fn global_tag_candidates(index: &ExternalStubIndex, scan: &WorkspaceScanResult) -> Vec<PathBuf> {
-    let files: BTreeSet<&PathBuf> = scan
-        .classmap
-        .values()
-        .chain(scan.function_index.values())
-        .chain(scan.constant_index.values())
-        .collect();
-    files
-        .into_iter()
-        .filter(|path| !index.is_phpstorm_stubs_uri(&crate::util::path_to_uri(path)))
-        .cloned()
-        .collect()
 }
 
 #[cfg(test)]

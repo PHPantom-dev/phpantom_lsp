@@ -42,6 +42,9 @@ struct WatchedChangeBatch {
     pest_dirs: Vec<String>,
     /// Whether a file under a stub path changed.
     stubs_changed: bool,
+    /// The PHP files left out of `php_changes` whose `@global` tags may
+    /// still have changed.
+    global_tag_changes: Vec<PathBuf>,
 }
 
 impl WatchedChangeBatch {
@@ -55,6 +58,7 @@ impl WatchedChangeBatch {
             && !self.schema_full_rebuild
             && self.migration_changes.is_empty()
             && self.pest_dirs.is_empty()
+            && self.global_tag_changes.is_empty()
             && !self.stubs_changed
     }
 }
@@ -122,6 +126,10 @@ impl Backend {
 
         if !batch.php_changes.is_empty() {
             self.reindex_watched_php_files(&batch.php_changes);
+        }
+
+        if !batch.global_tag_changes.is_empty() {
+            self.symbols.rescan_global_tags(&batch.global_tag_changes);
         }
 
         if batch.stubs_changed {
@@ -324,8 +332,15 @@ impl Backend {
 
             self.note_yii_config_change(&uri_str);
 
-            // Open files are already tracked via did_open/did_change.
+            // Open files are already tracked via did_open/did_change, except
+            // for the `@global` tags discovery reads from disk.
             if is_open(&uri_str) {
+                if change.kind == FileChangeType::Changed
+                    && (self.symbols.global_tags.read().documents_any(&file_path)
+                        || !crate::classmap_scanner::scan_global_tags(&file_path).is_empty())
+                {
+                    batch.global_tag_changes.push(file_path);
+                }
                 continue;
             }
 
@@ -344,6 +359,11 @@ impl Backend {
                 let loaded = parsed.contains(&uri_str) || parsed.contains(canonical_uri.as_str());
                 drop(parsed);
                 if !loaded {
+                    // Only a file already known to hold tags is read again,
+                    // for the same reason the others are left alone.
+                    if self.symbols.global_tags.read().documents_any(&file_path) {
+                        batch.global_tag_changes.push(file_path);
+                    }
                     continue;
                 }
             }
