@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use crate::Backend;
 use crate::symbol_map::{
-    ClassRefContext, MappedSource, SelfStaticParentKind, SymbolKind, VarDefSite,
+    ClassRefContext, DocblockMemberRef, MappedSource, SelfStaticParentKind, SymbolKind, VarDefSite,
 };
 use crate::types::FileContext;
 
@@ -160,7 +160,19 @@ pub(super) fn export_span(
                 source: &source.source,
                 memo: &mut output.member_targets,
             }
-            .resolve(subject, *is_static, span.start, member_name, kind);
+            .resolve(
+                subject,
+                *is_static,
+                span.start,
+                member_name,
+                kind,
+                *docblock_ref == DocblockMemberRef::MockedMethod,
+            );
+            // A string naming no method of a mock is an ordinary argument
+            // (`$gate->allows('update')`), not an occurrence of anything.
+            if target.is_none() && *docblock_ref == DocblockMemberRef::MockedMethod {
+                return;
+            }
             output.occurrences.push(ExportOccurrence {
                 kind,
                 range,

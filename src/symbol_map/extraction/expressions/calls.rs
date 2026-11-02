@@ -470,6 +470,7 @@ fn extract_method_call<'a>(
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
         record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
+        emit_mock_method_spans(object, &member_name, argument_list, ctx);
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
         emit_call_site(
@@ -537,6 +538,12 @@ fn extract_static_method_call<'a>(
                 &mut ctx.spans,
             );
         }
+        emit_facade_mock_method_spans(
+            static_call.class,
+            &member_name,
+            &static_call.argument_list,
+            ctx,
+        );
         emit_call_site(
             format!("{}::{}", subject_text, member_name),
             &static_call.argument_list,

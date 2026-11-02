@@ -19,7 +19,7 @@ use tower_lsp_server::gen_lsp_types::Range;
 use crate::atom::Atom;
 use crate::references::member_scope::MemberScope;
 use crate::symbol_map::SymbolMap;
-use crate::symbol_map::{SelfStaticParentKind, SubjectText, SymbolKind};
+use crate::symbol_map::{DocblockMemberRef, SelfStaticParentKind, SubjectText, SymbolKind};
 use crate::text_position::LineIndex;
 
 /// Whether a receiver of this text resolves without the file's content.
@@ -115,6 +115,30 @@ pub(super) enum ReceiverWalk<'a> {
 }
 
 impl Backend {
+    /// The classes a member access's receiver resolves to, as the member
+    /// search reads them: for the method a mock expectation names, the
+    /// class the receiver mocks (see [`crate::mock_methods`]).
+    pub(super) fn member_receiver_fqns(
+        &self,
+        subject_text: &str,
+        is_static: bool,
+        docblock_ref: DocblockMemberRef,
+        ctx: &crate::types::FileContext,
+        access_offset: u32,
+        content: &str,
+    ) -> Vec<String> {
+        let fqns =
+            self.resolve_subject_to_fqns(subject_text, is_static, ctx, access_offset, content);
+        if docblock_ref != DocblockMemberRef::MockedMethod || fqns.is_empty() {
+            return fqns;
+        }
+        crate::mock_methods::mocked_class_names(
+            fqns,
+            is_static,
+            &self.resolved_class_loader_with(&ctx.classes),
+        )
+    }
+
     /// Whether what is already in memory answers "no reference here" for
     /// `uri`, so the file never has to be read.
     ///
@@ -177,16 +201,23 @@ impl Backend {
                     return false;
                 };
                 let span = &symbol_map.spans[span_index];
-                let SymbolKind::MemberAccess { is_static, .. } = &span.kind else {
+                let SymbolKind::MemberAccess {
+                    is_static,
+                    docblock_ref,
+                    ..
+                } = &span.kind
+                else {
                     continue;
                 };
+                let file_ctx = file_ctx.get_or_init(|| self.file_context(uri));
                 // The content argument is unused for these subjects: every
                 // one of them resolves from the enclosing class or the
                 // import table, which is precisely what makes them settled.
-                let subject_fqns = self.resolve_subject_to_fqns(
+                let subject_fqns = self.member_receiver_fqns(
                     &subject_text,
                     *is_static,
-                    file_ctx.get_or_init(|| self.file_context(uri)),
+                    *docblock_ref,
+                    file_ctx,
                     span.start,
                     "",
                 );
@@ -427,15 +458,17 @@ impl Backend {
                 let SymbolKind::MemberAccess {
                     subject_text,
                     is_static,
+                    docblock_ref,
                     ..
                 } = &span.kind
                 else {
                     return None;
                 };
                 let targets: Vec<Atom> = self
-                    .resolve_subject_to_fqns(
+                    .member_receiver_fqns(
                         subject_text.as_str(source),
                         *is_static,
+                        *docblock_ref,
                         &file_ctx,
                         span.start,
                         content,

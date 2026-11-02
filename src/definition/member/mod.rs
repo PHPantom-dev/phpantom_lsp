@@ -64,6 +64,10 @@ pub(super) struct MemberDefinitionCtx<'a> {
     pub access_kind: AccessKind,
     /// Hint about whether the site looks like a method call or property access.
     pub access_hint: MemberAccessHint,
+    /// Whether the member is the method a mock expectation names, which
+    /// is looked up on the mocked class rather than on the subject
+    /// itself (see [`crate::mock_methods`]).
+    pub mock_expectation: bool,
 }
 
 /// The kind of class member being resolved.
@@ -216,12 +220,19 @@ impl Backend {
 
         // When a variable is assigned different types in conditional
         // branches (e.g. if/else), the subject has several candidates.
-        let candidates =
+        let mut candidates =
             ResolvedType::into_arced_classes(crate::type_engine::resolver::resolve_target_classes(
                 mctx.subject,
                 mctx.access_kind,
                 &loaders.resolution_ctx_at(content, cursor_offset),
             ));
+        if mctx.mock_expectation {
+            candidates = crate::mock_methods::mocked_classes(
+                candidates,
+                mctx.access_kind == AccessKind::DoubleColon,
+                class_loader,
+            );
+        }
         let first = candidates.first()?;
 
         let lookup = MemberLookup {

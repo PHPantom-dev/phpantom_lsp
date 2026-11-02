@@ -7,7 +7,9 @@ nothing; a data provider PHPUnit cannot call and a `setUp()` or
 `tearDown()` that skips the parent's are reported; a class shows a lens
 listing the tests that cover it or are named after it, and a test one
 back to its class; Pest closures know the test case `Pest.php` binds
-them to; and Mockery mocks keep the mocked class.
+them to; Mockery mocks keep the mocked class; and the method a PHPUnit
+or Mockery expectation names by string completes, navigates, renames,
+and is reported when the mocked class has no such method.
 
 PHPStan's PHPUnit extension (`phpstan/phpstan-phpunit`) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
@@ -31,48 +33,6 @@ one data set are what PHP Tools and PhpStorm offer, but LSP has no
 request for them. They belong in the editor extensions (the VS Code
 Testing API, Zed runnables), which is a separate decision from anything
 in this document.
-
----
-
-## TS1. Mock method names
-
-**Impact: High · Complexity: Medium**
-
-```php
-$repo = $this->createMock(OrderRepository::class);
-$repo->method('findOpen')->willReturn([]);
-
-$mailer = Mockery::mock(Mailer::class);
-$mailer->shouldReceive('send')->once();
-
-Cache::shouldReceive('get')->andReturn('value');
-```
-
-The method a mock is told to expect is a string naming a method of the
-mocked class, and nothing reads it today: it does not complete,
-navigate, rename with the method, or get reported when the class has no
-such method. Every test suite that uses mocks has these.
-
-- **PHPUnit**: `method()` on a value typed as the mocked class
-  intersected with `MockObject` (or `Stub`), including through
-  `expects(…)->method(…)`. The mocked class is the non-mock part of the
-  intersection that `createMock()`, `createStub()`, and
-  `getMockBuilder(…)->getMock()` return through PHPUnit's own
-  `@template` declarations; confirm each resolves that way first.
-- **Mockery**: `shouldReceive()`, `shouldNotReceive()`, `allows()`,
-  `expects()`, and `shouldHaveReceived()` on a Mockery mock, and the
-  `['method' => $return]` array form of `shouldReceive()` and
-  `allows()`. Laravel's `Facade::shouldReceive()` names a method of the
-  facade's target.
-- **Features**: completion from the mocked class's methods, go-to-definition,
-  find references and rename from the method, and an unknown-method
-  diagnostic (PHPStan's `phpunit.mockMethod`). A class with `__call` takes
-  any name, so the diagnostic must not fire for one.
-
-**Where to look:** the string-key machinery Laravel and Symfony names
-use (`src/virtual_members/laravel/string_keys.rs`), the Mockery patches
-in `src/virtual_members/laravel/patches.rs`, and phpstan-phpunit's
-`MockMethodCallRule`.
 
 ---
 
@@ -143,8 +103,7 @@ providers, coverage metadata, and `setUp()` that skips the parent. Port them int
 by `tests/assert_type_runner.rs`, the rule tests as `.fixture` files,
 and slices of `phpunit/phpunit` and `mockery/mockery` copied by
 `scripts/extract-framework-stubs.php` as the stubs. File every
-gap as a `// SKIP: reason` in this document or `docs/todo/`; rule tests
-TS1 already covers point at it.
+gap as a `// SKIP: reason` in this document or `docs/todo/`.
 
 ---
 

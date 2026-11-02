@@ -81,6 +81,7 @@ impl Backend {
                 member_name,
                 is_static,
                 is_method_call,
+                docblock_ref,
                 ..
             } => {
                 let access_kind = AccessKind::of_member_access(*is_static);
@@ -88,13 +89,21 @@ impl Backend {
                 let rctx = loaders.resolution_ctx_at(content, offset);
 
                 let source = self.symbol_map_source(uri, content)?;
-                let candidates = ResolvedType::into_arced_classes(
+                let mut candidates = ResolvedType::into_arced_classes(
                     crate::type_engine::resolver::resolve_target_classes(
                         subject_text.as_str(source),
                         access_kind,
                         &rctx,
                     ),
                 );
+
+                if *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod {
+                    candidates = crate::mock_methods::mocked_classes(
+                        candidates,
+                        *is_static,
+                        &resolved_class_loader,
+                    );
+                }
 
                 // Resolve the member's return type / property type.
                 self.resolve_member_type(

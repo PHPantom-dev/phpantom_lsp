@@ -283,6 +283,7 @@ mod lsp_dispatch;
 mod mago;
 #[cfg(feature = "mem-audit")]
 mod mem_audit;
+mod mock_methods;
 pub mod move_cli;
 pub(crate) mod names;
 mod parallel;

@@ -67,6 +67,41 @@ impl UnknownMemberPass<'_> {
         result
     }
 
+    /// Check the method a mock expectation names on the class the
+    /// receiver mocks, and push what the check reports.
+    ///
+    /// The receiver's own type also includes the mocking framework's
+    /// interfaces, whose methods (`expects()`, `shouldReceive()`) are not
+    /// methods of the mocked class, so neither the union report nor the
+    /// narrowing re-resolution of [`Self::report_on_resolved`], which both
+    /// look at the whole type, applies.  The expectation ends no chain.
+    pub(super) fn report_on_mocked(
+        &self,
+        access: &MemberAccessSite,
+        classes: &[Arc<ClassInfo>],
+        types: &[PhpType],
+        out: &mut Vec<Diagnostic>,
+    ) -> MemberCheckResult {
+        let mocked = crate::mock_methods::mocked_classes(
+            classes.to_vec(),
+            access.is_static,
+            self.class_loader(),
+        );
+        if mocked.is_empty() {
+            return MemberCheckResult::Ok;
+        }
+        let mocked_types: Vec<PhpType> = classes
+            .iter()
+            .zip(types)
+            .filter(|(class, _)| mocked.iter().any(|m| Arc::ptr_eq(m, class)))
+            .map(|(_, ty)| ty.clone())
+            .collect();
+        let (_, diagnostics) =
+            self.check_member_on_resolved_classes(access, &mocked, &mocked_types);
+        out.extend(diagnostics);
+        MemberCheckResult::Ok
+    }
+
     /// Report the alternatives of a union that lack a member another
     /// alternative declares (the opt-in `partial-union-members`
     /// diagnostic).

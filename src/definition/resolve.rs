@@ -24,7 +24,7 @@ use super::{class_keyword_location, point_location};
 use crate::Backend;
 use crate::composer;
 use crate::references::MemberRefKind;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan};
+use crate::symbol_map::{DocblockMemberRef, SelfStaticParentKind, SymbolKind, SymbolSpan};
 use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, ClassInfo};
 use crate::util::short_name;
@@ -283,6 +283,7 @@ impl Backend {
                 subject_text,
                 member_name,
                 is_static,
+                docblock_ref,
                 ..
             } => {
                 let access_kind = AccessKind::of_member_access(*is_static);
@@ -298,6 +299,7 @@ impl Backend {
                     subject: subject_text.as_str(self.symbol_map_source(uri, content)?),
                     access_kind,
                     access_hint,
+                    mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
                 };
 
                 self.resolve_member_definition_with(uri, content, position, &mctx)
@@ -373,6 +375,7 @@ impl Backend {
                             MemberKind::Method => MemberAccessHint::MethodCall,
                             _ => MemberAccessHint::PropertyAccess,
                         },
+                        mock_expectation: false,
                     };
                     if let Some(loc) =
                         self.resolve_member_definition_with(uri, content, position, &mctx)

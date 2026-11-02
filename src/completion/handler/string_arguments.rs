@@ -3,7 +3,8 @@
 //! route and command parameters, request input), Symfony service IDs and
 //! container parameters, Yii views, WordPress hook names, Eloquent relation and
 //! column names, the strings a parameter's declared type asks for, and
-//! method names in route-controller groups and array callables.
+//! method names in mock expectations, route-controller groups and array
+//! callables.
 
 use tower_lsp_server::gen_lsp_types::CompletionResponse;
 
@@ -238,6 +239,18 @@ impl Backend {
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_request_input_key_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
+        // ── Mock expectation method names ────────────────────────
+        // `$mock->method('|')`, `$mock->shouldReceive('|')`,
+        // `Facade::shouldReceive('|')` and the rest name a method of the
+        // mocked class.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_mock_method_completion(uri, content, position, ctx, code)
         {
             return Some(response);
         }

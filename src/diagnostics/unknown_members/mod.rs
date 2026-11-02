@@ -287,6 +287,16 @@ impl UnknownMemberPass<'_> {
         outcome: &SubjectOutcome,
         out: &mut Vec<Diagnostic>,
     ) -> MemberCheckResult {
+        if access.mock_expectation {
+            // Only a mock has mocked methods: on anything else the string
+            // is an ordinary argument, and not this check's business.
+            return match outcome {
+                SubjectOutcome::Resolved { classes, types, .. } => {
+                    self.report_on_mocked(access, classes, types, out)
+                }
+                _ => MemberCheckResult::Ok,
+            };
+        }
         match outcome {
             // `?->` short-circuits to `null` without touching the
             // member when its subject is `null` — it never crashes,

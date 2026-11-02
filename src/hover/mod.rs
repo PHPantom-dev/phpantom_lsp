@@ -250,6 +250,7 @@ impl Backend {
                 subject_text,
                 member_name,
                 is_static,
+                docblock_ref,
                 ..
             } => self.hover_member_access(
                 &site,
@@ -257,6 +258,7 @@ impl Backend {
                 member_name,
                 *is_static,
                 MemberRefKind::of_access(symbol)?,
+                *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod,
             ),
             SymbolKind::ClassReference {
                 name,

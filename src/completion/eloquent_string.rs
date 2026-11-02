@@ -355,7 +355,7 @@ fn accepts_column_argument(method: &str, kind: EloquentStringKind, arg: &StringA
 
 /// Extract an identifier (method name) scanning backwards from the end of `text`.
 /// Returns (identifier, text_before_identifier).
-fn extract_identifier_backwards(text: &str) -> Option<(&str, &str)> {
+pub(super) fn extract_identifier_backwards(text: &str) -> Option<(&str, &str)> {
     let trimmed = text.trim_end();
     let bytes = trimmed.as_bytes();
     let mut end = bytes.len();
@@ -381,7 +381,7 @@ fn extract_identifier_backwards(text: &str) -> Option<(&str, &str)> {
 /// operator is put back right after it.  That hands the member-completion
 /// subject extractor the same shape it sees after a typed `->`, chains and
 /// multi-line continuations included.
-fn extract_receiver_subject(content: &str, op: &Operator) -> Option<String> {
+pub(super) fn extract_receiver_subject(content: &str, op: &Operator) -> Option<String> {
     let mut lines: Vec<&str> = content.get(..op.code_before)?.lines().collect();
     let receiver_line = format!("{}{}", lines.pop()?, if op.is_static { "::" } else { "->" });
     lines.push(&receiver_line);

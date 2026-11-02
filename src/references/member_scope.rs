@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use crate::class_lookup::{Fqn, ResolvedClassLoader, find_class_at_offset};
 use crate::inheritance::ancestry::find_declaring_ancestor;
 use crate::names::resolve_to_fqn;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{DocblockMemberRef, SymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
 
 /// The class a member declared at `offset` belongs to.
@@ -117,6 +117,13 @@ pub(crate) struct ContractConflict {
     pub(crate) contract_renameable: bool,
 }
 
+/// The receiver of a `MemberAccess` span, as a member search resolves it.
+pub(super) struct AccessReceiver<'a> {
+    pub(super) subject_text: &'a str,
+    pub(super) is_static: bool,
+    pub(super) docblock_ref: DocblockMemberRef,
+}
+
 impl Backend {
     /// Resolve the class hierarchy for a `MemberAccess` subject.
     ///
@@ -130,18 +137,28 @@ impl Backend {
     pub(super) fn resolve_member_access_scopes(
         &self,
         uri: &str,
-        subject_text: &str,
-        is_static: bool,
+        receiver: AccessReceiver<'_>,
         span_start: u32,
         member_name: &str,
         mode: ReferenceSearchMode,
     ) -> (Option<MemberScope>, Option<MemberScope>) {
+        let AccessReceiver {
+            subject_text,
+            is_static,
+            docblock_ref,
+        } = receiver;
         let ctx = self.file_context(uri);
         let Some(content) = self.reference_file_content(uri) else {
             return (None, None);
         };
-        let fqns =
-            self.resolve_subject_to_fqns(subject_text, is_static, &ctx, span_start, &content);
+        let fqns = self.member_receiver_fqns(
+            subject_text,
+            is_static,
+            docblock_ref,
+            &ctx,
+            span_start,
+            &content,
+        );
         if fqns.is_empty() {
             return (None, None);
         }
@@ -252,13 +269,17 @@ impl Backend {
                 member_name,
                 is_static,
                 is_method_call: true,
+                docblock_ref,
                 ..
             } => {
                 let source = self.symbol_map_source(uri, content)?;
                 let (_, scope) = self.resolve_member_access_scopes(
                     uri,
-                    subject_text.as_str(source),
-                    *is_static,
+                    AccessReceiver {
+                        subject_text: subject_text.as_str(source),
+                        is_static: *is_static,
+                        docblock_ref: *docblock_ref,
+                    },
                     span_start,
                     member_name,
                     ReferenceSearchMode::Rename,

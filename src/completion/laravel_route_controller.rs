@@ -260,7 +260,7 @@ impl Backend {
             uri,
             ctx,
             position_to_offset(content, position),
-            class_info,
+            &[class_info],
             &rc_ctx.prefix,
         )
     }

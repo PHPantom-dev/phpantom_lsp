@@ -211,11 +211,12 @@ impl Backend {
                 .find_map(|rt| load(Fqn::new(rt.type_string.base_name()?)))?
         };
 
-        self.string_method_name_completions(uri, ctx, cursor_offset, class_info, &ac_ctx.prefix)
+        self.string_method_name_completions(uri, ctx, cursor_offset, &[class_info], &ac_ctx.prefix)
     }
 
-    /// The methods of `class_info` offered for a method name being typed
-    /// inside a string literal (an array callable's, a route action's),
+    /// The methods of `classes` offered for a method name being typed
+    /// inside a string literal (an array callable's, a route action's, a
+    /// mock expectation's),
     /// filtered by the `prefix` already typed.
     ///
     /// Reuses the standard member-completion builder so that items have
@@ -236,11 +237,11 @@ impl Backend {
         uri: &str,
         ctx: &FileContext,
         cursor_offset: u32,
-        class_info: Arc<ClassInfo>,
+        classes: &[Arc<ClassInfo>],
         prefix: &str,
     ) -> Option<CompletionResponse> {
         let mut items = super::builder::build_union_completion_items(
-            &[class_info],
+            classes,
             AccessKind::Arrow,
             crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset),
             &self.resolved_class_loader(ctx),

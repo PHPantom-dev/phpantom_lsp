@@ -36,7 +36,6 @@ contributor even though it's short.
 | DR9 | [Drupal directories outside `contrib` and `custom`](todo/drupal.md#dr9-drupal-directories-outside-contrib-and-custom) | Medium-High | Low-Medium |
 | L62 | [Validation rule strings](todo/laravel.md#l62-validation-rule-strings) | High | Medium |
 | DR2 | [Service IDs from `*.services.yml`](todo/drupal.md#dr2-service-ids-from-servicesyml) | High        | Medium      |
-| TS1 | [Mock method names](todo/testing.md#ts1-mock-method-names) | High        | Medium      |
 | L63 | [Middleware alias names](todo/laravel.md#l63-middleware-alias-names) | Medium-High | Medium |
 | L64 | [Routes on controller methods](todo/laravel.md#l64-routes-on-controller-methods) | Medium-High | Medium |
 | DR5 | [Route names](todo/drupal.md#dr5-route-names) | Medium-High | Medium      |
@@ -162,7 +161,6 @@ ships, remove every row that names it.
 | TS8 | [Port PHPStan's PHPUnit and Mockery extension tests](todo/testing.md#ts8-port-phpstans-phpunit-and-mockery-extension-tests) | Medium | Low-Medium |
 | TS9 | [PHPUnit and Pest demo project](todo/testing.md#ts9-phpunit-and-pest-demo-project) | Medium | Low-Medium |
 | TS7 | [Prophecy](todo/testing.md#ts7-prophecy) | Low         | Low-Medium  |
-| TS1 | [Mock method names](todo/testing.md#ts1-mock-method-names) | High        | Medium      |
 | TS3 | [Create a test for a class](todo/testing.md#ts3-create-a-test-for-a-class) | Medium      | Medium-High |
 
 ## Laravel & Blade

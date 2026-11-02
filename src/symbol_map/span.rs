@@ -143,6 +143,16 @@ pub(crate) enum DocblockMemberRef {
     /// a hasser as readily as through a property, so a field with no
     /// property of its name is not an error.
     PropertyPath,
+    /// The method a mock expectation names: PHPUnit's
+    /// `$mock->method('name')`, Mockery's `$mock->shouldReceive('name')`
+    /// and its siblings, and Laravel's `Facade::shouldReceive('name')`.
+    ///
+    /// The span's subject is the expectation's receiver, but the
+    /// extractor cannot tell a mock from any other object with a method
+    /// of the same name (`$gate->allows('update')`), so a consumer that
+    /// resolves the subject keeps only what [`crate::mock_methods`]
+    /// accepts as a mock, and drops the span otherwise.
+    MockedMethod,
 }
 
 impl DocblockMemberRef {
