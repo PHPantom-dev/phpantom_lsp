@@ -105,6 +105,7 @@ struct ExtractionCtx<'a> {
     /// The entity types the file's entity classes declare.
     entity_types: Vec<crate::symbol_map::EntityTypeSite>,
     drupal_route_patterns: Vec<String>,
+    drupal_route_aliases: Vec<String>,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -479,6 +480,7 @@ fn extract_symbol_map_inner(
         container_values: Vec::new(),
         entity_types: Vec::new(),
         drupal_route_patterns: Vec::new(),
+        drupal_route_aliases: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
@@ -673,6 +675,7 @@ fn extract_symbol_map_inner(
         container_values: ctx.container_values,
         entity_types: ctx.entity_types,
         drupal_route_patterns: ctx.drupal_route_patterns,
+        drupal_route_aliases: ctx.drupal_route_aliases,
         routes: ctx.routes,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx

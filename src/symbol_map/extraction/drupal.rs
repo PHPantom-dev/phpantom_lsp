@@ -111,20 +111,30 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
 /// namespace.  A route on a method is named by its `name:`, after the name
 /// of the class's own first `#[Route]`; one without a name is rejected.  A
 /// class with no routes on its methods and an `__invoke()` is a single
-/// action, and its own `#[Route]`s are its routes.
+/// action, and its own `#[Route]`s are its routes.  A method with exactly
+/// one route is also reachable as `Class::method`, and a single-action
+/// class with one route as `Class` and `Class::__invoke`: those aliases
+/// have no text of their own, so they are kept beside the spans.
+///
+/// Drupal skips an abstract class but reads the routes its subclasses
+/// inherit, so an abstract controller's routes are declared where they are
+/// written, under its own prefix, and without aliases, whose class name
+/// would be the subclass's.
 pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
     class: &Class<'_>,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    if !ctx.drupal || class.modifiers.contains_abstract() {
+    if !ctx.drupal {
         return;
     }
-    let is_controller = ctx
+    let Some(fqn) = ctx
         .resolved_name_at(class.name.span.start.offset)
-        .is_some_and(is_controller_class);
-    if !is_controller {
+        .map(|fqn| fqn.trim_start_matches('\\'))
+        .filter(|fqn| is_controller_class(fqn))
+    else {
         return;
-    }
+    };
+    let is_abstract = class.modifiers.contains_abstract();
     // Drupal's discovery reads attributes only, never `@Route` annotations.
     let class_routes = route_declarations(&class.attribute_lists, None, class, ctx);
     let prefix = match class_routes.first().map(|route| &route.name) {
@@ -133,15 +143,26 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
     };
     let is_named = |route: &&RouteDeclaration| matches!(route.name, RouteName::Literal(..));
     let mut spans = Vec::new();
+    let mut aliases = Vec::new();
+    let mut route_count = 0usize;
     let mut any_method_route = false;
     let mut invokable = false;
+    let mut fqcn_alias = false;
     for member in class.members.iter() {
         let ClassLikeMember::Method(method) = member else {
             continue;
         };
-        invokable |= bytes_to_str(method.name.value).eq_ignore_ascii_case("__invoke");
+        let method_name = bytes_to_str(method.name.value);
+        let is_invoke = method_name.eq_ignore_ascii_case("__invoke");
+        invokable |= is_invoke;
         let routes = route_declarations(&method.attribute_lists, None, class, ctx);
         any_method_route |= !routes.is_empty();
+        let named = routes.iter().filter(is_named).count();
+        route_count += named;
+        fqcn_alias |= is_invoke && named > 0;
+        if named == 1 {
+            aliases.push(format!("{fqn}::{method_name}"));
+        }
         for route in routes.iter().filter(is_named) {
             push_route_spans(
                 route,
@@ -153,9 +174,22 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_attribute_spans(
             );
         }
     }
-    if !any_method_route && invokable {
+    if !any_method_route && invokable && !is_abstract {
         for route in class_routes.iter().filter(is_named) {
+            route_count += 1;
+            fqcn_alias = true;
             push_route_spans(route, "", None, StringKeyKind::DrupalRoute, &[], &mut spans);
+        }
+    }
+    if fqcn_alias && route_count == 1 {
+        aliases.push(fqn.to_string());
+        aliases.push(format!("{fqn}::__invoke"));
+    }
+    if !is_abstract {
+        for alias in aliases {
+            if !ctx.drupal_route_aliases.contains(&alias) {
+                ctx.drupal_route_aliases.push(alias);
+            }
         }
     }
     ctx.spans.extend(spans);
@@ -178,41 +212,61 @@ enum BuiltName {
     Pattern(String),
 }
 
-/// Record the routes a route builder adds: a class whose file uses
-/// Symfony's `Route` or `RouteCollection`, as the classes a routing file's
-/// `route_callbacks` name, route subscribers, and entity route providers
-/// do.  `$collection->add(NAME, $route)` and `$routes[NAME] = new Route(…)`
-/// add the route `NAME`: written out, it is declared; built from parts, its
-/// shape is kept as a pattern, and a name with no part written out stands
-/// for any route under the extension's own prefix.
+/// Record the routes a route builder adds: a class or trait whose file
+/// uses Symfony's routing component, as the classes a routing file's
+/// `route_callbacks` name, route subscribers, entity route providers, and
+/// the traits they share do.  `$collection->add(NAME, $route)`,
+/// `$routes[NAME] = new Route(…)` (or a variable holding one), and an
+/// array literal's `NAME => new Route(…)` add the route `NAME`: written
+/// out, it is declared; built from parts, its shape is kept as a pattern.
+/// A shape that does not start with written-out text stands for any route
+/// under the extension's own prefix, which is where Drupal's own builders
+/// put such routes.
 pub(in crate::symbol_map::extraction) fn emit_drupal_route_builder_spans(
-    class: &Class<'_>,
+    members: &Sequence<'_, ClassLikeMember<'_>>,
+    name_offset: u32,
     ctx: &mut ExtractionCtx<'_>,
 ) {
-    if !ctx.drupal || !ctx.content.contains("Symfony\\Component\\Routing\\Route") {
+    if !ctx.drupal || !ctx.content.contains("Symfony\\Component\\Routing\\") {
         return;
     }
     let mut found = BuilderSites::default();
-    for member in class.members.iter() {
+    for member in members.iter() {
         if let ClassLikeMember::Method(method) = member {
             mago_syntax::walker::Walker::walk_method(&BuilderWalker, method, &mut found);
         }
     }
-    let mut names: Vec<&Expression<'_>> = found.added;
-    for (name, class_expr) in found.assigned {
-        let Expression::Identifier(identifier) = class_expr else {
-            continue;
+    let is_route_class = |class: &Expression<'_>| {
+        let Expression::Identifier(identifier) = class else {
+            return false;
         };
-        let resolved = ctx
-            .resolved_name_at(identifier.span().start.offset)
-            .unwrap_or_else(|| bytes_to_str(identifier.value()));
-        if resolved
+        ctx.resolved_name_at(identifier.span().start.offset)
+            .unwrap_or_else(|| bytes_to_str(identifier.value()))
             .trim_start_matches('\\')
             .eq_ignore_ascii_case("Symfony\\Component\\Routing\\Route")
-        {
-            names.push(name);
+    };
+    let route_variables: Vec<&[u8]> = found
+        .route_variables
+        .iter()
+        .filter(|(_, class)| is_route_class(class))
+        .map(|(name, _)| *name)
+        .collect();
+    let holds_route = |value: &Expression<'_>| match value {
+        Expression::Instantiation(instantiation) => is_route_class(instantiation.class),
+        Expression::Variable(Variable::Direct(variable)) => {
+            route_variables.contains(&variable.name)
         }
-    }
+        _ => false,
+    };
+    let mut names: Vec<&Expression<'_>> = found.added;
+    names.extend(
+        found
+            .keyed
+            .into_iter()
+            .filter(|(_, value)| holds_route(value))
+            .map(|(name, _)| name),
+    );
+    let extension = ctx.resolved_name_at(name_offset).and_then(extension_of);
     for name in names {
         match built_name(name, ctx.content) {
             BuiltName::Literal(key, start, end) => ctx.spans.push(SymbolSpan {
@@ -226,14 +280,11 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_builder_spans(
                 },
             }),
             BuiltName::Pattern(pattern) => {
-                let pattern = if pattern.bytes().all(|byte| byte == b'*') {
-                    let Some(prefix) = ctx
-                        .resolved_name_at(class.name.span.start.offset)
-                        .and_then(extension_of)
-                    else {
+                let pattern = if pattern.starts_with('*') {
+                    let Some(extension) = extension else {
                         continue;
                     };
-                    format!("{prefix}.*")
+                    format!("{extension}.*")
                 } else {
                     pattern
                 };
@@ -245,14 +296,17 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_route_builder_spans(
     }
 }
 
-/// The calls and assignments of a route builder's methods that may add a
-/// route.
+/// The calls, assignments, and array entries of a route builder's methods
+/// that may add a route.
 #[derive(Default)]
 struct BuilderSites<'ast, 'arena> {
     /// The first argument of each `->add()` with two or more arguments.
     added: Vec<&'ast Expression<'arena>>,
-    /// The index of each `$routes[NAME] = new Class(…)`, with the class.
-    assigned: Vec<(&'ast Expression<'arena>, &'ast Expression<'arena>)>,
+    /// The key and the value of each `$routes[KEY] = VALUE` and each
+    /// `KEY => VALUE` array entry.
+    keyed: Vec<(&'ast Expression<'arena>, &'ast Expression<'arena>)>,
+    /// Each variable assigned a `new Class(…)`, with the class.
+    route_variables: Vec<(&'arena [u8], &'ast Expression<'arena>)>,
 }
 
 struct BuilderWalker;
@@ -282,10 +336,41 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BuilderSites<'ast, 
         assignment: &'ast Assignment<'arena>,
         found: &mut BuilderSites<'ast, 'arena>,
     ) {
-        if let Expression::ArrayAccess(access) = assignment.lhs
-            && let Expression::Instantiation(instantiation) = assignment.rhs
-        {
-            found.assigned.push((access.index, instantiation.class));
+        match (assignment.lhs, assignment.rhs) {
+            (Expression::ArrayAccess(access), value) => found.keyed.push((access.index, value)),
+            (
+                Expression::Variable(Variable::Direct(variable)),
+                Expression::Instantiation(instantiation),
+            ) => found
+                .route_variables
+                .push((variable.name, instantiation.class)),
+            _ => {}
+        }
+    }
+
+    fn walk_in_array(&self, array: &'ast Array<'arena>, found: &mut BuilderSites<'ast, 'arena>) {
+        push_keyed_entries(array.elements.iter(), found);
+    }
+
+    fn walk_in_legacy_array(
+        &self,
+        array: &'ast LegacyArray<'arena>,
+        found: &mut BuilderSites<'ast, 'arena>,
+    ) {
+        push_keyed_entries(array.elements.iter(), found);
+    }
+}
+
+/// Record each `KEY => VALUE` entry of an array literal.
+fn push_keyed_entries<'ast, 'arena>(
+    elements: impl Iterator<Item = &'ast ArrayElement<'arena>>,
+    found: &mut BuilderSites<'ast, 'arena>,
+) where
+    'arena: 'ast,
+{
+    for element in elements {
+        if let ArrayElement::KeyValue(entry) = element {
+            found.keyed.push((entry.key, entry.value));
         }
     }
 }
@@ -650,9 +735,111 @@ class SearchPageRoutes {
         declared.sort();
         patterns.sort();
         assert_eq!(declared, ["search.literal", "search.view"]);
+        // `"{$name}.bc"` and `$name` start with no written-out text, so
+        // they stand for the extension's own routes.
+        assert_eq!(patterns, ["search.*", "search.help_*", "search.view_*"]);
+    }
+
+    #[test]
+    fn routes_held_in_variables_array_literals_and_traits_are_built() {
+        let php = r#"<?php
+namespace Drupal\layout_builder\Routing;
+use Symfony\Component\Routing\{Route, RouteCollection};
+trait LayoutRoutes {
+    protected function build(RouteCollection $collection, string $prefix): array {
+        $route = new Route('/x');
+        $routes['layout_builder.held'] = $route;
+        $collection->add("$prefix.view", $route);
+        $options['not_a_route'] = $prefix;
+        return ['layout_builder.literal' => new Route('/y'), 'not_either' => [1]];
+    }
+}
+"#;
+        let (mut declared, patterns) = built(php);
+        declared.sort();
+        assert_eq!(declared, ["layout_builder.held", "layout_builder.literal"]);
+        assert_eq!(patterns, ["layout_builder.*"]);
+    }
+
+    /// The route names and aliases `php`'s controllers declare.
+    fn attribute_routes(php: &str) -> (Vec<String>, Vec<String>) {
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: true,
+                twig: false,
+            },
+            None,
+        );
+        let mut declared: Vec<String> = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalRoute,
+                    key,
+                    is_write: true,
+                    ..
+                } => Some(key.clone()),
+                _ => None,
+            })
+            .collect();
+        declared.sort();
+        let mut aliases = map.drupal_route_aliases.clone();
+        aliases.sort();
+        (declared, aliases)
+    }
+
+    #[test]
+    fn controllers_alias_single_routes_by_class_and_method() {
+        let php = r#"<?php
+namespace Drupal\acme\Controller;
+use Symfony\Component\Routing\Attribute\Route;
+#[Route(path: '/notes', name: 'acme.notes.')]
+final class Notes {
+    #[Route(path: '/list', name: 'list')]
+    public function list(): array { return []; }
+    #[Route(path: '/a', name: 'a')]
+    #[Route(path: '/b', name: 'b')]
+    public function twice(): array { return []; }
+    public function none(): array { return []; }
+}
+#[Route('/about', name: 'acme.about')]
+final class About {
+    public function __invoke(): array { return []; }
+}
+abstract class Base {
+    #[Route(path: '/base', name: 'acme.base')]
+    public function base(): array { return []; }
+}
+"#;
+        let (declared, aliases) = attribute_routes(php);
         assert_eq!(
-            patterns,
-            ["*.bc", "search.*", "search.help_*", "search.view_*"]
+            declared,
+            [
+                "acme.about",
+                "acme.base",
+                "acme.notes.a",
+                "acme.notes.b",
+                "acme.notes.list"
+            ]
+        );
+        assert_eq!(
+            aliases,
+            [
+                "Drupal\\acme\\Controller\\About",
+                "Drupal\\acme\\Controller\\About::__invoke",
+                "Drupal\\acme\\Controller\\Notes::list",
+            ]
         );
     }
 

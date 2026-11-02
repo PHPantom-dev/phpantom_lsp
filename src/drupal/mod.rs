@@ -299,6 +299,18 @@ impl Backend {
         patterns
     }
 
+    /// The `Class::method` and `Class` names Drupal's attribute route
+    /// discovery gives the project's controller routes, sorted.
+    pub(crate) fn drupal_route_aliases(&self) -> Vec<String> {
+        let mut aliases = Vec::new();
+        self.visit_declaring_symbol_maps(|_, map| {
+            aliases.extend(map.drupal_route_aliases.iter().cloned());
+        });
+        aliases.sort_unstable();
+        aliases.dedup();
+        aliases
+    }
+
     /// Whether `uri` is test code of a Drupal project: a file under a
     /// `tests` folder of one of its web roots.
     pub(crate) fn is_drupal_test_code(&self, uri: &str) -> bool {

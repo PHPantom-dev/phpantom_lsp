@@ -519,8 +519,9 @@ final class Checked {
         Url::fromRoute('acme.greting');
         Url::fromRoute('acme.dyn_42');
         Url::fromRoute('acme.built');
+        Url::fromRoute('Drupal\acme\Controller\AboutController');
+        Url::fromRoute('Drupal\acme\Controller\NoteController::list');
         Url::fromRoute('Drupal\acme\Routing\Routes::routes');
-        Url::fromRoute('Drupal\acme\Routing\Routes::nope');
     }
 }
 "#;
@@ -546,6 +547,8 @@ async fn an_undeclared_route_name_is_reported() {
     let path = "web/modules/custom/acme/src/Checked.php";
     let reported = unknown_routes(
         &[
+            ROUTE_ATTRIBUTE,
+            (ATTRIBUTE_PATH, ATTRIBUTE_CONTROLLER),
             (ROUTING_PATH, ROUTING),
             (BUILDER_PATH, DYNAMIC_BUILDER),
             (path, CHECKED),
@@ -553,11 +556,14 @@ async fn an_undeclared_route_name_is_reported() {
         path,
     )
     .await;
+    // A route builder's own method is no route: only a controller method
+    // with one `#[Route]`, or a single-action controller, is aliased by its
+    // class name.
     assert_eq!(
         reported,
         [
             "Unknown route: 'acme.greting'",
-            "Unknown route: 'Drupal\\acme\\Routing\\Routes::nope'",
+            "Unknown route: 'Drupal\\acme\\Routing\\Routes::routes'",
         ]
     );
 }

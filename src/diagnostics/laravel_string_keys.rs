@@ -173,6 +173,9 @@ struct DeclaredKeys<'a> {
     /// The shapes of the route names Drupal's route builders give the
     /// routes they build from parts (`search.view_*`).
     drupal_route_patterns: Vec<String>,
+    /// The `Class::method` and `Class` names Drupal gives attribute routes,
+    /// sorted.
+    drupal_route_aliases: Vec<String>,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -370,13 +373,14 @@ impl<'a> DeclaredKeys<'a> {
             Vec::new()
         };
 
-        let (drupal_routes, drupal_route_patterns) = if has_drupal_route {
+        let (drupal_routes, drupal_route_patterns, drupal_route_aliases) = if has_drupal_route {
             (
                 backend.symfony_declared_names(crate::symbol_map::StringKeyKind::DrupalRoute),
                 backend.drupal_route_patterns(),
+                backend.drupal_route_aliases(),
             )
         } else {
-            (Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), Vec::new())
         };
 
         Self {
@@ -404,6 +408,7 @@ impl<'a> DeclaredKeys<'a> {
             yii_routes,
             drupal_routes,
             drupal_route_patterns,
+            drupal_route_aliases,
         }
     }
 
@@ -534,33 +539,19 @@ impl<'a> DeclaredKeys<'a> {
     /// `entity.<type>.canonical`, and those Views builds for a display
     /// (`view.<view_id>.<display_id>`) cannot be told missing, and a project
     /// whose routing files were not read declares none at all.
-    /// A route attribute's `Class::method` alias names a method, which has
-    /// to exist.
+    /// A `Class::method` or `Class` name is one of the aliases attribute
+    /// route discovery gives a controller's routes.
     fn judge_drupal_route(&self, key: &str) -> Verdict {
         const VERDICT: (&str, &str) = ("route", "invalid_drupal_route");
         if self.drupal_routes.is_empty() || crate::drupal::is_views_route_name(key) {
             return None;
         }
-        if key.contains('\\') {
-            let (class, method) = match key.split_once("::") {
-                Some((class, method)) => (class, Some(method)),
-                None => (key, None),
-            };
-            let exists = self.backend.find_or_load_class(class).is_some_and(|class| {
-                method.is_none_or(|method| {
-                    class
-                        .methods
-                        .iter()
-                        .any(|candidate| candidate.name.eq_ignore_ascii_case(method))
-                })
-            });
-            return Some((exists, VERDICT.0, VERDICT.1));
-        }
-        if self
-            .drupal_routes
-            .binary_search_by(|name| name.as_str().cmp(key))
-            .is_ok()
-        {
+        let declares = |names: &[String]| {
+            names
+                .binary_search_by(|name| name.as_str().cmp(key))
+                .is_ok()
+        };
+        if declares(&self.drupal_routes) || declares(&self.drupal_route_aliases) {
             return Some((true, VERDICT.0, VERDICT.1));
         }
         if self
@@ -869,6 +860,7 @@ impl Backend {
         let symbol_map = &ctx.symbol_map;
         let extra = self.typed_receiver_spans_for(uri, symbol_map);
         let morph_columns = self.morph_column_spans_for(uri, symbol_map);
+        let is_drupal_test_code = self.is_drupal_test_code(uri);
         let key_spans: Vec<CheckedKeySpan> = symbol_map
             .spans
             .iter()
@@ -903,9 +895,7 @@ impl Backend {
                     return None;
                 }
                 // Test code passes invented route names to mocks.
-                if *kind == crate::symbol_map::StringKeyKind::DrupalRoute
-                    && self.is_drupal_test_code(uri)
-                {
+                if *kind == crate::symbol_map::StringKeyKind::DrupalRoute && is_drupal_test_code {
                     return None;
                 }
                 Some((

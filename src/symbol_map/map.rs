@@ -312,6 +312,11 @@ pub(crate) struct SymbolMap {
     /// written out (`search.view_*`).  Empty for every file that builds
     /// none.
     pub drupal_route_patterns: Vec<String>,
+    /// The `Class::method` and `Class` names Drupal's attribute route
+    /// discovery gives the file's controller routes besides their own,
+    /// which no text of the file spells out.  Empty for every file that
+    /// declares none.
+    pub drupal_route_aliases: Vec<String>,
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,

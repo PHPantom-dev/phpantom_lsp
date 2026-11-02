@@ -1403,8 +1403,13 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             );
             sym.add(sm.entity_types.capacity() * size_of::<crate::symbol_map::EntityTypeSite>());
             sym.add(sm.drupal_route_patterns.capacity() * size_of::<String>());
-            for pattern in &sm.drupal_route_patterns {
-                sym.add(pattern.capacity());
+            sym.add(sm.drupal_route_aliases.capacity() * size_of::<String>());
+            for name in sm
+                .drupal_route_patterns
+                .iter()
+                .chain(&sm.drupal_route_aliases)
+            {
+                sym.add(name.capacity());
             }
             sym.add(sm.routes.capacity() * size_of::<crate::symbol_map::RouteSite>());
             for route in &sm.routes {

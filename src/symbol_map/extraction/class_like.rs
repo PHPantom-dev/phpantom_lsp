@@ -25,7 +25,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_yii_route_argument_spans(class, ctx);
     emit_drupal_entity_type_spans(class, ctx);
     emit_drupal_route_attribute_spans(class, ctx);
-    emit_drupal_route_builder_spans(class, ctx);
+    emit_drupal_route_builder_spans(&class.members, class.name.span.start.offset, ctx);
 
     if let Some(ref extends) = class.extends {
         for ident in extends.types.iter() {
@@ -199,6 +199,7 @@ pub(super) fn extract_from_trait<'a>(trait_def: &'a Trait<'a>, ctx: &mut Extract
     });
 
     extract_from_attribute_lists(&trait_def.attribute_lists, ctx, 0);
+    emit_drupal_route_builder_spans(&trait_def.members, trait_def.name.span.start.offset, ctx);
 
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, trait_def)
