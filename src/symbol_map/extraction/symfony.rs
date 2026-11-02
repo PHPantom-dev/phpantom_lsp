@@ -89,10 +89,10 @@ pub(crate) fn symfony_receiver_method(
         }
         0 if is("setParameter") => Some((ReceiverClass::ParameterHolder, true)),
         0 if is("set") => Some((ReceiverClass::ConfiguratorSet, true)),
-        // `alias('app.mailer', 'app.smtp_mailer')` declares the first ID
-        // as another name for the second.
-        0 if is("alias") => Some((ReceiverClass::ServicesConfigurator, true)),
-        1 if is("alias") => Some((ReceiverClass::ServicesConfigurator, false)),
+        // `alias('app.mailer', 'app.smtp_mailer')` declares the first name
+        // as another one for the second, a service or a route.
+        0 if is("alias") => Some((ReceiverClass::ConfiguratorAlias, true)),
+        1 if is("alias") => Some((ReceiverClass::ConfiguratorAlias, false)),
         0 if is("decorate") => Some((ReceiverClass::ServiceConfigurator, false)),
         0 if is("trans") => Some((ReceiverClass::Translator, false)),
         2 if is("trans") => Some((ReceiverClass::TranslatorDomain, false)),
@@ -171,8 +171,11 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         if !receiver.names_any(records) {
             continue;
         }
-        if let Some(namespace) = receiver.configurator_namespace()
-            && !uses_configurators(namespace, ctx)
+        let namespaces = receiver.configurator_namespaces();
+        if !namespaces.is_empty()
+            && !namespaces
+                .iter()
+                .any(|namespace| uses_configurators(namespace, ctx))
         {
             continue;
         }
@@ -187,13 +190,19 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         {
             continue;
         }
-        // A route added to a collection takes the collection's name
-        // prefix.
-        let key = if receiver == ReceiverClass::RoutingConfigurator {
+        // A route added or aliased on a collection takes the collection's
+        // name prefix.  The route an alias reads takes it only when the
+        // collection declares that route, which is not told here, so under a
+        // prefix it is left unread.
+        let key = if receiver.declares_routes() {
             match route_name_prefix(object, ctx) {
-                Some(prefix) => format!("{prefix}{key}"),
+                Some(prefix) if is_write => format!("{prefix}{key}"),
+                Some(prefix) if prefix.is_empty() => key.to_string(),
+                Some(_) => continue,
                 None => {
-                    record_unreadable_routes(String::new(), ctx);
+                    if is_write {
+                        record_unreadable_routes(String::new(), ctx);
+                    }
                     continue;
                 }
             }
@@ -228,7 +237,7 @@ fn record_declared_value(
     };
     let value = match receiver {
         ReceiverClass::ConfiguratorSet => configured_value(value.value, ctx),
-        ReceiverClass::ServicesConfigurator => resolved_string_literal(value.value, ctx.content)
+        ReceiverClass::ConfiguratorAlias => resolved_string_literal(value.value, ctx.content)
             .filter(|(target, _, _)| !target.is_empty())
             .map(|(target, _, _)| ContainerValue::Alias(crate::atom::atom(target))),
         _ => None,
@@ -1839,8 +1848,8 @@ mod tests {
             vec![
                 ("app.mailer", ReceiverClass::ConfiguratorSet, true),
                 ("app.base", ReceiverClass::ServiceConfigurator, false),
-                ("app.alias", ReceiverClass::ServicesConfigurator, true),
-                ("app.mailer", ReceiverClass::ServicesConfigurator, false),
+                ("app.alias", ReceiverClass::ConfiguratorAlias, true),
+                ("app.mailer", ReceiverClass::ConfiguratorAlias, false),
             ]
         );
     }

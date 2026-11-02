@@ -141,25 +141,3 @@ does not change it, so the parameter comes from somewhere other than the
 version-filtered list.
 
 Found in Contact Form 7's HTML formatter (`array_diff_ukey()`).
-
-### B723. A route alias a PHP routing configurator declares is not read
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-return static function (RoutingConfigurator $routes): void {
-    $routes->alias('home', 'app_home');
-};
-
-$this->generateUrl('home'); // Unknown route: 'home'
-```
-
-`alias()` on a routing configurator declares a route name, but
-`symfony_receiver_method` maps `alias()` only to the services
-configurator, so the call is confirmed as a service alias or not at all.
-A route alias declared in YAML, XML, or a `#[Route]`'s `alias:` is read.
-Now that every route name is judged, not only the `app_` ones, a name only
-a PHP `alias()` declares is reported. The receiver class decides which
-kind the call declares, so the call wants one receiver whose targets hold
-both configurators, gated on either configurator namespace, with the
-second argument a route the alias reads.

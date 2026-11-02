@@ -37,11 +37,11 @@ const STUBS: &[(&str, &str)] = &[
     ),
     (
         "stubs/routing/Loader/Configurator/RoutingConfigurator.php",
-        "<?php\nnamespace Symfony\\Component\\Routing\\Loader\\Configurator;\nclass RoutingConfigurator {\n    public function add(string $name, string|array $path): RouteConfigurator {}\n    public function collection(string $name = ''): CollectionConfigurator {}\n    public function import(string|array $resource, ?string $type = null): ImportConfigurator {}\n}\n",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Loader\\Configurator;\nclass RoutingConfigurator {\n    public function add(string $name, string|array $path): RouteConfigurator {}\n    public function alias(string $name, string $alias): object {}\n    public function collection(string $name = ''): CollectionConfigurator {}\n    public function import(string|array $resource, ?string $type = null): ImportConfigurator {}\n}\n",
     ),
     (
         "stubs/routing/Loader/Configurator/CollectionConfigurator.php",
-        "<?php\nnamespace Symfony\\Component\\Routing\\Loader\\Configurator;\nclass CollectionConfigurator {\n    public function add(string $name, string|array $path): RouteConfigurator {}\n    public function collection(string $name = ''): self {}\n}\n",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Loader\\Configurator;\nclass CollectionConfigurator {\n    public function add(string $name, string|array $path): RouteConfigurator {}\n    public function alias(string $name, string $alias): object {}\n    public function collection(string $name = ''): self {}\n}\n",
     ),
     (
         "stubs/routing/Loader/Configurator/RouteConfigurator.php",
@@ -431,6 +431,58 @@ final class CheckController extends AbstractController
             "Unknown route: '_profiler'".to_string(),
         ]
     );
+}
+
+#[tokio::test]
+async fn a_routing_configurator_alias_declares_a_route() {
+    let routes_php = r#"<?php
+use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
+
+return static function (RoutingConfigurator $routes, \ArrayObject $other): void {
+    $routes->add('app_legacy', '/legacy');
+    $routes->alias('home', 'app_legacy');
+    $routes->collection('blog_')->alias('start', 'app_legacy');
+    $other->offsetSet('not_a_route', '/x');
+};
+"#;
+    let consumer = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class LinkController extends AbstractController
+{
+    public function links(): void
+    {
+        $this->generateUrl('home');
+        $this->generateUrl('blog_start');
+        $this->generateUrl('start');
+    }
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/routes.php", routes_php),
+        ("src/Controller/LinkController.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+    let routes_uri = uri_for(&dir, "config/routes.php");
+
+    // The alias declared on a collection takes its name prefix.
+    assert_eq!(
+        route_problems(&backend, &consumer_uri, consumer),
+        vec!["Unknown route: 'start'".to_string()]
+    );
+    let found = definitions(&backend, &consumer_uri, position_in(consumer, "'home'", 2)).await;
+    assert_eq!(found, vec![(routes_uri.clone(), 5)]);
+    // The route the alias reads is a reference to it.
+    let found = references(
+        &backend,
+        &routes_uri,
+        position_in(routes_php, "'app_legacy'", 2),
+    )
+    .await;
+    assert!(found.contains(&(routes_uri.clone(), 5)), "{found:?}");
 }
 
 #[tokio::test]

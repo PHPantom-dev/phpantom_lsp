@@ -27,7 +27,7 @@ use std::time::SystemTime;
 use parking_lot::RwLock;
 
 use crate::Backend;
-use crate::symbol_map::{ReceiverClass, RouteImport, StringKeyKind, SymbolKind, SymbolMap};
+use crate::symbol_map::{RouteImport, StringKeyKind, SymbolKind, SymbolMap};
 
 /// The service that loads the logout route of every firewall, which it
 /// names `_logout_` and the firewall's name.
@@ -188,7 +188,7 @@ fn holds_routes(map: &SymbolMap) -> bool {
         || map
             .typed_receiver_sites
             .iter()
-            .any(|site| site.is_write && site.receiver == ReceiverClass::RoutingConfigurator)
+            .any(|site| site.is_write && site.receiver.declares_routes())
 }
 
 /// What a routing file read from disk declares and imports.  Its
@@ -213,7 +213,7 @@ fn read_routing_file(path: &Path, content: &str) -> Option<SymbolMap> {
         spans.extend(
             map.typed_receiver_sites
                 .iter()
-                .filter(|site| site.is_write && site.receiver == ReceiverClass::RoutingConfigurator)
+                .filter(|site| site.is_write && site.receiver.declares_routes())
                 .map(|site| site.to_span(StringKeyKind::SymfonyRoute)),
         );
         spans.sort_by_key(|span| span.start);

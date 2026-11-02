@@ -528,9 +528,10 @@ pub(crate) enum ReceiverClass {
     /// A PHP configurator's `set()`, which declares a service on the
     /// services configurator and a parameter on the parameters one.
     ConfiguratorSet,
-    /// The services configurator, whose `alias()` declares a service ID
-    /// for another one.
-    ServicesConfigurator,
+    /// A PHP configurator's `alias()`, which declares another name for a
+    /// service on the services configurator and for a route on a routing
+    /// one.
+    ConfiguratorAlias,
     /// One service's configurator, whose `decorate()` names the service it
     /// replaces.
     ServiceConfigurator,
@@ -600,9 +601,12 @@ impl ReceiverClass {
                 (SYMFONY_SERVICES_CONFIGURATOR, ServiceId),
                 (SYMFONY_ABSTRACT_SERVICE_CONFIGURATOR, ServiceId),
             ],
-            Self::ServicesConfigurator => &[
+            Self::ConfiguratorAlias => &[
                 (SYMFONY_SERVICES_CONFIGURATOR, ServiceId),
                 (SYMFONY_ABSTRACT_SERVICE_CONFIGURATOR, ServiceId),
+                (SYMFONY_ROUTING_CONFIGURATOR, SymfonyRoute),
+                (SYMFONY_COLLECTION_CONFIGURATOR, SymfonyRoute),
+                (SYMFONY_ROUTE_CONFIGURATOR, SymfonyRoute),
             ],
             Self::ServiceConfigurator => &[(SYMFONY_SERVICE_CONFIGURATOR, ServiceId)],
             Self::ControllerRouting => &[(SYMFONY_ABSTRACT_CONTROLLER, SymfonyRoute)],
@@ -638,17 +642,27 @@ impl ReceiverClass {
         }
     }
 
-    /// The namespace of the configurators the receiver has to be one of,
-    /// when it is one of the configurators a PHP configuration file builds
-    /// the container or the routes with.
-    pub(crate) fn configurator_namespace(self) -> Option<&'static str> {
+    /// The namespaces of the configurators the receiver can be one of, when
+    /// it is one of the configurators a PHP configuration file builds the
+    /// container or the routes with.  Empty for any other receiver.
+    pub(crate) fn configurator_namespaces(self) -> &'static [&'static str] {
         match self {
-            Self::ConfiguratorSet | Self::ServicesConfigurator | Self::ServiceConfigurator => {
-                Some(SYMFONY_CONTAINER_CONFIGURATOR_NS)
+            Self::ConfiguratorSet | Self::ServiceConfigurator => {
+                &[SYMFONY_CONTAINER_CONFIGURATOR_NS]
             }
-            Self::RoutingConfigurator => Some(SYMFONY_ROUTING_CONFIGURATOR_NS),
-            _ => None,
+            Self::RoutingConfigurator => &[SYMFONY_ROUTING_CONFIGURATOR_NS],
+            Self::ConfiguratorAlias => &[
+                SYMFONY_CONTAINER_CONFIGURATOR_NS,
+                SYMFONY_ROUTING_CONFIGURATOR_NS,
+            ],
+            _ => &[],
         }
+    }
+
+    /// Whether a call on the receiver that declares a name can declare a
+    /// route: a routing configurator's `add()` and `alias()`.
+    pub(crate) fn declares_routes(self) -> bool {
+        matches!(self, Self::RoutingConfigurator | Self::ConfiguratorAlias)
     }
 
     /// Whether a call on a class of the project's own that passes the
