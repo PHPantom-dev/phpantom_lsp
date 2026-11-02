@@ -1257,17 +1257,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ts1-mock-method-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        TS1. Mock method names
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#ts3-create-a-test-for-a-class" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1366,7 +1355,9 @@ nothing; a data provider PHPUnit cannot call and a <code>setUp()</code> or
 <code>tearDown()</code> that skips the parent's are reported; a class shows a lens
 listing the tests that cover it or are named after it, and a test one
 back to its class; Pest closures know the test case <code>Pest.php</code> binds
-them to; and Mockery mocks keep the mocked class.</p>
+them to; Mockery mocks keep the mocked class; and the method a PHPUnit
+or Mockery expectation names by string completes, navigates, renames,
+and is reported when the mocked class has no such method.</p>
 <p>PHPStan's PHPUnit extension (<code>phpstan/phpstan-phpunit</code>) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
 PHPUnit support and Phpactor's PHPUnit and Prophecy integrations are
@@ -1399,42 +1390,6 @@ request for them. They belong in the editor extensions (the VS Code
 Testing API, Zed runnables), which is a separate decision from anything
 in this document.</p>
 <hr />
-<h2 id="ts1-mock-method-names">TS1. Mock method names<a class="headerlink" href="#ts1-mock-method-names" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$repo = $this-&gt;createMock(OrderRepository::class);</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$repo-&gt;method('findOpen')-&gt;willReturn([]);</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">$mailer = Mockery::mock(Mailer::class);</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">$mailer-&gt;shouldReceive('send')-&gt;once();</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">Cache::shouldReceive('get')-&gt;andReturn('value');</span>
-</code></pre></div>
-<p>The method a mock is told to expect is a string naming a method of the
-mocked class, and nothing reads it today: it does not complete,
-navigate, rename with the method, or get reported when the class has no
-such method. Every test suite that uses mocks has these.</p>
-<ul>
-<li><strong>PHPUnit</strong>: <code>method()</code> on a value typed as the mocked class
-  intersected with <code>MockObject</code> (or <code>Stub</code>), including through
-  <code>expects(…)-&gt;method(…)</code>. The mocked class is the non-mock part of the
-  intersection that <code>createMock()</code>, <code>createStub()</code>, and
-  <code>getMockBuilder(…)-&gt;getMock()</code> return through PHPUnit's own
-  <code>@template</code> declarations; confirm each resolves that way first.</li>
-<li><strong>Mockery</strong>: <code>shouldReceive()</code>, <code>shouldNotReceive()</code>, <code>allows()</code>,
-  <code>expects()</code>, and <code>shouldHaveReceived()</code> on a Mockery mock, and the
-  <code>['method' =&gt; $return]</code> array form of <code>shouldReceive()</code> and
-  <code>allows()</code>. Laravel's <code>Facade::shouldReceive()</code> names a method of the
-  facade's target.</li>
-<li><strong>Features</strong>: completion from the mocked class's methods, go-to-definition,
-  find references and rename from the method, and an unknown-method
-  diagnostic (PHPStan's <code>phpunit.mockMethod</code>). A class with <code>__call</code> takes
-  any name, so the diagnostic must not fire for one.</li>
-</ul>
-<p><strong>Where to look:</strong> the string-key machinery Laravel and Symfony names
-use (<code>src/virtual_members/laravel/string_keys.rs</code>), the Mockery patches
-in <code>src/virtual_members/laravel/patches.rs</code>, and phpstan-phpunit's
-<code>MockMethodCallRule</code>.</p>
-<hr />
 <h2 id="ts3-create-a-test-for-a-class">TS3. Create a test for a class<a class="headerlink" href="#ts3-create-a-test-for-a-class" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>A code action on a class (or one of its methods) that writes the test
@@ -1459,9 +1414,9 @@ them. Add an assertion fixture per library covering the common forms
 <hr />
 <h2 id="ts7-prophecy">TS7. Prophecy<a class="headerlink" href="#ts7-prophecy" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$repo = $this-&gt;prophesize(OrderRepository::class);</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$repo-&gt;findOpen()-&gt;willReturn([]);</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">$service = new Billing($repo-&gt;reveal());</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$repo = $this-&gt;prophesize(OrderRepository::class);</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$repo-&gt;findOpen()-&gt;willReturn([]);</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">$service = new Billing($repo-&gt;reveal());</span>
 </code></pre></div>
 <p>Phpactor completes the mocked class's methods on an <code>ObjectProphecy</code>.
 Check what PHPantom does with current Prophecy, which declares
@@ -1486,8 +1441,7 @@ providers, coverage metadata, and <code>setUp()</code> that skips the parent. Po
 by <code>tests/assert_type_runner.rs</code>, the rule tests as <code>.fixture</code> files,
 and slices of <code>phpunit/phpunit</code> and <code>mockery/mockery</code> copied by
 <code>scripts/extract-framework-stubs.php</code> as the stubs. File every
-gap as a <code>// SKIP: reason</code> in this document or <code>docs/todo/</code>; rule tests
-TS1 already covers point at it.</p>
+gap as a <code>// SKIP: reason</code> in this document or <code>docs/todo/</code>.</p>
 <hr />
 <h2 id="ts9-phpunit-and-pest-demo-project">TS9. PHPUnit and Pest demo project<a class="headerlink" href="#ts9-phpunit-and-pest-demo-project" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
