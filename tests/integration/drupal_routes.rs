@@ -484,3 +484,201 @@ async fn routing_defaults_navigate_to_entity_types_services_and_methods() {
         );
     }
 }
+
+/// The unknown-route messages the diagnostics of `path` report.
+async fn unknown_routes(files_in: &[(&str, &str)], path: &str) -> Vec<String> {
+    let (backend, dir) = workspace(&files(files_in)).await;
+    let content = files_in
+        .iter()
+        .find(|(file, _)| *file == path)
+        .map(|(_, content)| *content)
+        .unwrap();
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri_for(&dir, path).as_str(), content, &mut diagnostics);
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(tower_lsp_server::gen_lsp_types::Code::String(code))
+                    if code == "invalid_drupal_route"
+            )
+        })
+        .map(|diagnostic| crate::common::message_text(&diagnostic.message).to_string())
+        .collect()
+}
+
+const CHECKED: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Url;
+
+final class Checked {
+    public function run(): void {
+        Url::fromRoute('acme.greeting');
+        Url::fromRoute('acme.greting');
+        Url::fromRoute('acme.dyn_42');
+        Url::fromRoute('acme.built');
+        Url::fromRoute('Drupal\acme\Routing\Routes::routes');
+        Url::fromRoute('Drupal\acme\Routing\Routes::nope');
+    }
+}
+"#;
+
+const DYNAMIC_BUILDER: &str = r#"<?php
+namespace Drupal\acme\Routing;
+
+use Symfony\Component\Routing\Route;
+
+final class Routes {
+    public function routes(string $id): array {
+        $routes['acme.built'] = new Route('/built');
+        $routes["acme.dyn_$id"] = new Route('/dyn');
+        return $routes;
+    }
+}
+"#;
+
+/// A route name nothing declares is reported, unless it has the shape of a
+/// name a route builder builds from parts.
+#[tokio::test]
+async fn an_undeclared_route_name_is_reported() {
+    let path = "web/modules/custom/acme/src/Checked.php";
+    let reported = unknown_routes(
+        &[
+            (ROUTING_PATH, ROUTING),
+            (BUILDER_PATH, DYNAMIC_BUILDER),
+            (path, CHECKED),
+        ],
+        path,
+    )
+    .await;
+    assert_eq!(
+        reported,
+        [
+            "Unknown route: 'acme.greting'",
+            "Unknown route: 'Drupal\\acme\\Routing\\Routes::nope'",
+        ]
+    );
+}
+
+const ENTITY_ROUTE_PROVIDER: &str = r#"<?php
+namespace Drupal\Core\Entity\Routing;
+
+use Symfony\Component\Routing\Route;
+use Symfony\Component\Routing\RouteCollection;
+
+class DefaultHtmlRouteProvider {
+    public function getRoutes($entity_type) {
+        $collection = new RouteCollection();
+        $entity_type_id = $entity_type->id();
+        if ($canonical_route = $this->getCanonicalRoute($entity_type)) {
+            $collection->add("entity.{$entity_type_id}.canonical", $canonical_route);
+        }
+        if ($edit_route = $this->getEditFormRoute($entity_type)) {
+            $collection->add("entity.{$entity_type_id}.edit_form", $edit_route);
+        }
+        return $collection;
+    }
+
+    protected function getCanonicalRoute($entity_type): ?Route {
+        return new Route('/canonical');
+    }
+
+    protected function getEditFormRoute($entity_type): ?Route {
+        return new Route('/edit');
+    }
+}
+"#;
+
+const ENTITY_AND_VIEWS: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Url;
+
+final class EntityAndViews {
+    public function run(): void {
+        Url::fromRoute('entity');
+        Url::fromRoute('entity.nod');
+        Url::fromRoute('entity.node.canonical');
+        Url::fromRoute('entity.node.edit_form');
+        Url::fromRoute('entity.user.canonical');
+        Url::fromRoute('view');
+        Url::fromRoute('view.content');
+        Url::fromRoute('view.content.page_1');
+        Url::fromRoute('view.frontpage.page_1');
+    }
+}
+"#;
+
+/// The routes core's entity route providers build from parts are read from
+/// the providers, which the `.gitignore` leaves out, and a Views route has
+/// the shape `view.<view_id>.<display_id>`: a name of neither shape is
+/// reported.
+#[tokio::test]
+async fn entity_and_views_routes_are_judged_by_their_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    for (path, content) in [
+        (".git/HEAD", "ref: refs/heads/main\n"),
+        (".gitignore", "/web/core/\n"),
+        (
+            "web/core/lib/Drupal/Core/Entity/Routing/DefaultHtmlRouteProvider.php",
+            ENTITY_ROUTE_PROVIDER,
+        ),
+    ] {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
+    let path = "web/modules/custom/acme/src/EntityAndViews.php";
+    let (backend, dir) = workspace_in(
+        dir,
+        &files(&[(ROUTING_PATH, ROUTING), (path, ENTITY_AND_VIEWS)]),
+    )
+    .await;
+    let php = uri_for(&dir, path);
+    // Finding references indexes the workspace, core's route providers
+    // included.
+    references_at(
+        &backend,
+        &php,
+        position_in(ENTITY_AND_VIEWS, "'entity.nod'", 3),
+    )
+    .await;
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(php.as_str(), ENTITY_AND_VIEWS, &mut diagnostics);
+    let reported: Vec<&str> = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(tower_lsp_server::gen_lsp_types::Code::String(code))
+                    if code == "invalid_drupal_route"
+            )
+        })
+        .map(|diagnostic| crate::common::message_text(&diagnostic.message))
+        .collect();
+    assert_eq!(
+        reported,
+        [
+            "Unknown route: 'entity'",
+            "Unknown route: 'entity.nod'",
+            "Unknown route: 'view'",
+            "Unknown route: 'view.content'",
+        ]
+    );
+}
+
+/// Test code passes invented route names to mocks, and a project whose
+/// routing files were not read has nothing to judge against.
+#[tokio::test]
+async fn test_code_and_unread_projects_are_not_judged() {
+    let test_path = "web/modules/custom/acme/tests/src/Unit/CheckedTest.php";
+    assert!(
+        unknown_routes(&[(ROUTING_PATH, ROUTING), (test_path, CHECKED)], test_path)
+            .await
+            .is_empty()
+    );
+    let path = "web/modules/custom/acme/src/Checked.php";
+    assert!(unknown_routes(&[(path, CHECKED)], path).await.is_empty());
+}

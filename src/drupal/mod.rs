@@ -136,6 +136,27 @@ pub(crate) fn is_url_class(class: &str) -> bool {
         .eq_ignore_ascii_case("Drupal\\Core\\Url")
 }
 
+/// Whether the route name `name` has the shape `pattern`, in which each `*`
+/// stands for any run of characters.
+pub(crate) fn matches_route_pattern(pattern: &str, name: &str) -> bool {
+    let mut parts = pattern.split('*');
+    let first = parts.next().unwrap_or_default();
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let parts: Vec<&str> = parts.collect();
+    let Some((last, middle)) = parts.split_last() else {
+        return rest.is_empty();
+    };
+    for part in middle {
+        match rest.find(part) {
+            Some(at) => rest = &rest[at + part.len()..],
+            None => return false,
+        }
+    }
+    rest.len() >= last.len() && rest.ends_with(last)
+}
+
 /// Whether `path` is a file Drupal reads declarations from.
 pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
     path.file_name()
@@ -143,6 +164,17 @@ pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
         .is_some_and(|name| declaration_file_kind(name).is_some())
         && !is_test_fixture(path, web_root)
         && !is_unloaded(path, web_root)
+}
+
+/// Whether `name` has the shape of the route Views builds for a display of
+/// a view: `view.<view_id>.<display_id>`, neither ID holding a dot.
+pub(crate) fn is_views_route_name(name: &str) -> bool {
+    let mut parts = name.split('.');
+    parts.next() == Some("view")
+        && matches!(
+            (parts.next(), parts.next(), parts.next()),
+            (Some(view), Some(display), None) if !view.is_empty() && !display.is_empty()
+        )
 }
 
 /// Whether `path` lies under a `tests` folder of the web root: it belongs to
@@ -253,6 +285,34 @@ impl Backend {
             }
         });
         found
+    }
+
+    /// The shapes of the route names the project's route builders give the
+    /// routes they build from parts, sorted.
+    pub(crate) fn drupal_route_patterns(&self) -> Vec<String> {
+        let mut patterns = Vec::new();
+        self.visit_declaring_symbol_maps(|_, map| {
+            patterns.extend(map.drupal_route_patterns.iter().cloned());
+        });
+        patterns.sort_unstable();
+        patterns.dedup();
+        patterns
+    }
+
+    /// Whether `uri` is test code of a Drupal project: a file under a
+    /// `tests` folder of one of its web roots.
+    pub(crate) fn is_drupal_test_code(&self, uri: &str) -> bool {
+        if !self.is_drupal_project() {
+            return false;
+        }
+        let Some(path) = crate::util::uri_to_path(uri) else {
+            return false;
+        };
+        self.drupal
+            .web_roots
+            .read()
+            .iter()
+            .any(|root| path.starts_with(root) && is_test_fixture(&path, root))
     }
 
     /// Whether `uri` belongs to a test module of a Drupal project and is not

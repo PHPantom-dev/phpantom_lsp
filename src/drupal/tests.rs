@@ -321,3 +321,29 @@ fn a_namespace_a_vendor_package_shares_is_renamed_outside_drupal() {
     assert!(edit.contains("src/Shared/Mine.php"), "{edit}");
     assert!(!edit.contains("vendor/acme"), "{edit}");
 }
+
+#[test]
+fn route_patterns_match_any_run_for_each_star() {
+    use super::matches_route_pattern;
+    assert!(matches_route_pattern(
+        "search.view_*",
+        "search.view_node_search"
+    ));
+    assert!(matches_route_pattern(
+        "*.bc",
+        "entity.block_content.edit_form.bc"
+    ));
+    assert!(matches_route_pattern(
+        "layout_builder.*.view",
+        "layout_builder.overrides.node.view"
+    ));
+    assert!(matches_route_pattern("acme.*", "acme."));
+    assert!(!matches_route_pattern("search.view_*", "search.help_x"));
+    assert!(!matches_route_pattern(
+        "layout_builder.*.view",
+        "layout_builder.overrides.node.edit"
+    ));
+    assert!(!matches_route_pattern("a*a", "a"));
+    assert!(matches_route_pattern("exact", "exact"));
+    assert!(!matches_route_pattern("exact", "exactly"));
+}

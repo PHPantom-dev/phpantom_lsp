@@ -47,6 +47,7 @@ enum CheckedStringKind {
     YiiView,
     YiiRoute,
     YiiRouteArgument,
+    DrupalRoute,
 }
 
 impl CheckedStringKind {
@@ -76,6 +77,7 @@ impl CheckedStringKind {
             StringKeyKind::YiiView => Self::YiiView,
             StringKeyKind::YiiRoute => Self::YiiRoute,
             StringKeyKind::YiiRouteArgument => Self::YiiRouteArgument,
+            StringKeyKind::DrupalRoute => Self::DrupalRoute,
             // A section or stack name is judged against the templates that
             // render the one it is written in, which the Blade pass has and
             // this one does not.  And anything at all can be bound at
@@ -95,7 +97,6 @@ impl CheckedStringKind {
             // an entity type in PHP, through `hook_entity_type_build()`.
             StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
-            | StringKeyKind::DrupalRoute
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack
@@ -167,6 +168,11 @@ struct DeclaredKeys<'a> {
     messenger_buses: Vec<String>,
     /// The Yii route names the project declares, sorted.
     yii_routes: Vec<String>,
+    /// The Drupal route names the project declares, sorted.
+    drupal_routes: Vec<String>,
+    /// The shapes of the route names Drupal's route builders give the
+    /// routes they build from parts (`search.view_*`).
+    drupal_route_patterns: Vec<String>,
 }
 
 impl<'a> DeclaredKeys<'a> {
@@ -201,6 +207,7 @@ impl<'a> DeclaredKeys<'a> {
         });
         let has_messenger_bus = names(|kind| kind == CheckedStringKind::MessengerBus);
         let has_yii_route = names(|kind| kind == CheckedStringKind::YiiRoute);
+        let has_drupal_route = names(|kind| kind == CheckedStringKind::DrupalRoute);
 
         // A package with no routes of its own, whose names are registered
         // by the host application, cannot be judged: the valid set is
@@ -363,6 +370,15 @@ impl<'a> DeclaredKeys<'a> {
             Vec::new()
         };
 
+        let (drupal_routes, drupal_route_patterns) = if has_drupal_route {
+            (
+                backend.symfony_declared_names(crate::symbol_map::StringKeyKind::DrupalRoute),
+                backend.drupal_route_patterns(),
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
         Self {
             backend,
             routes,
@@ -386,6 +402,8 @@ impl<'a> DeclaredKeys<'a> {
             twig_callables,
             messenger_buses,
             yii_routes,
+            drupal_routes,
+            drupal_route_patterns,
         }
     }
 
@@ -468,6 +486,7 @@ impl<'a> DeclaredKeys<'a> {
                 .map(|exists| (exists, "view", "invalid_yii_view")),
             CheckedStringKind::YiiRoute => self.judge_yii_route(key),
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
+            CheckedStringKind::DrupalRoute => self.judge_drupal_route(key),
         }
     }
 
@@ -507,6 +526,51 @@ impl<'a> DeclaredKeys<'a> {
             .binary_search_by(|declared| declared.as_str().cmp(key))
             .is_ok();
         Some((valid, "translation key", "invalid_symfony_translation"))
+    }
+
+    /// A Drupal route is declared by a routing file, a route attribute, or
+    /// a route builder that writes its name out.  Those a route builder
+    /// builds from parts, as core's entity route providers build
+    /// `entity.<type>.canonical`, and those Views builds for a display
+    /// (`view.<view_id>.<display_id>`) cannot be told missing, and a project
+    /// whose routing files were not read declares none at all.
+    /// A route attribute's `Class::method` alias names a method, which has
+    /// to exist.
+    fn judge_drupal_route(&self, key: &str) -> Verdict {
+        const VERDICT: (&str, &str) = ("route", "invalid_drupal_route");
+        if self.drupal_routes.is_empty() || crate::drupal::is_views_route_name(key) {
+            return None;
+        }
+        if key.contains('\\') {
+            let (class, method) = match key.split_once("::") {
+                Some((class, method)) => (class, Some(method)),
+                None => (key, None),
+            };
+            let exists = self.backend.find_or_load_class(class).is_some_and(|class| {
+                method.is_none_or(|method| {
+                    class
+                        .methods
+                        .iter()
+                        .any(|candidate| candidate.name.eq_ignore_ascii_case(method))
+                })
+            });
+            return Some((exists, VERDICT.0, VERDICT.1));
+        }
+        if self
+            .drupal_routes
+            .binary_search_by(|name| name.as_str().cmp(key))
+            .is_ok()
+        {
+            return Some((true, VERDICT.0, VERDICT.1));
+        }
+        if self
+            .drupal_route_patterns
+            .iter()
+            .any(|pattern| crate::drupal::matches_route_pattern(pattern, key))
+        {
+            return None;
+        }
+        Some((false, VERDICT.0, VERDICT.1))
     }
 
     /// No package Yii installs declares routes of its own, so the
@@ -835,6 +899,12 @@ impl Backend {
                 // them by.
                 if kind.framework() == crate::symbol_map::KeyFramework::ServiceContainer
                     && !self.is_symfony_project()
+                {
+                    return None;
+                }
+                // Test code passes invented route names to mocks.
+                if *kind == crate::symbol_map::StringKeyKind::DrupalRoute
+                    && self.is_drupal_test_code(uri)
                 {
                     return None;
                 }
