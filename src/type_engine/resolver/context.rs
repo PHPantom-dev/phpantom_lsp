@@ -192,9 +192,10 @@ pub(crate) type ConstantLoaderFn<'a> = Option<&'a dyn Fn(&str, u32) -> Option<Op
 pub(crate) type ConfigResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<crate::php_type::PhpType>>;
 
 /// Type alias for the optional translation-key resolver closure.  Given a
-/// translation key (e.g. `"messages.welcome"`), returns `Some(string)`
-/// when the key names a scalar translation entry, or `None` when it names
-/// a group or cannot be resolved.
+/// translation key (e.g. `"messages.welcome"`), returns the type of the
+/// entry it names, or the type any translation can have when no entry
+/// matches.  Returns `None` outside a Laravel project, where `__()` and
+/// `trans()` are some other function (WordPress declares `__()` too).
 pub(crate) type TransResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<crate::php_type::PhpType>>;
 
 /// Type alias for the optional scope-based variable resolver from the
@@ -237,9 +238,9 @@ pub(crate) struct Loaders<'a> {
     /// to the inferred type of its static value.  Used by the
     /// `config()` return-type interception in function call resolution.
     pub config_resolver: ConfigResolverFn<'a>,
-    /// Resolve a translation key to `string` when it names a scalar
-    /// entry.  Used by the `__()`/`trans()`/`Lang::get()` return-type
-    /// interception in function/static-call resolution.
+    /// Resolve a translation key to the type of the entry it names.  Used
+    /// by the `__()`/`trans()`/`Lang::get()` return-type interception in
+    /// function/static-call resolution.
     pub trans_resolver: TransResolverFn<'a>,
 }
 

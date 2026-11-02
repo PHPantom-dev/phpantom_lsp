@@ -117,4 +117,27 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B722. `array_udiff()` and its siblings reject their callback as the third argument
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+array_udiff($a, $b, fn($x, $y) => $x <=> $y);
+// Argument 3 ($array2) expects array, got Closure(mixed, mixed): int
+array_udiff($a, $b, $c, fn($x, $y) => $x <=> $y);   // not reported
+```
+
+Since PHP 8.0 phpstorm-stubs declare these as `array $array, ...$rest`,
+keeping the PHP 7 `array $array2, callable $data_compare_func` behind
+`#[PhpStormStubsElementAvailable(to: '7.4')]`. With exactly three
+arguments, the third is checked against `array` under the name
+`$array2`, a parameter PHP 8 does not have, so the callback is reported.
+With four arguments nothing is reported, and the second argument is
+never checked. `array_diff_ukey()`, `array_diff_uassoc()`,
+`array_intersect_ukey()`, `array_udiff_assoc()`, `array_uintersect()` and
+the rest of the family behave the same, with or without a PHP version in
+`composer.json`. Widening `$rest` in `src/stub_patches/functions.rs`
+does not change it, so the parameter comes from somewhere other than the
+version-filtered list.
+
+Found in Contact Form 7's HTML formatter (`array_diff_ukey()`).

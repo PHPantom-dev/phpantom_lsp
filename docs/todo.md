@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| WP1 | [WordPress demo project and a real-world baseline](todo/wordpress.md#wp1-wordpress-demo-project-and-a-real-world-baseline) | High        | Low-Medium  |
 | L62 | [Validation rule strings](todo/laravel.md#l62-validation-rule-strings) | High | Medium |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | High        | Medium      |
 | L68 | [Unknown methods on Eloquent models and builders](todo/laravel.md#l68-unknown-methods-on-eloquent-models-and-builders) | High | Medium |
@@ -118,11 +117,11 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| WP1 | [WordPress demo project and a real-world baseline](todo/wordpress.md#wp1-wordpress-demo-project-and-a-real-world-baseline) | High        | Low-Medium  |
 | WP9 | [The argument types the WordPress stubs declare](todo/wordpress.md#wp9-the-argument-types-the-wordpress-stubs-declare) | Medium      | Low-Medium  |
 | WP4 | [Hook names](todo/wordpress.md#wp4-hook-names) | High        | Medium      |
 | T61 | [A `global` variable is untyped without a type in the same file](todo/type-inference.md#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file) | Medium-High | Medium-High |
 | WP3 | [WordPress core for a plugin or theme opened on its own](todo/wordpress.md#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own) | Medium-High | Medium      |
+| WP15 | [`analyze` leaves out a plugin's files outside its PSR-4 roots](todo/wordpress.md#wp15-analyze-leaves-out-a-plugins-files-outside-its-psr-4-roots) | Medium      | Low         |
 | WP6 | [Template parts](todo/wordpress.md#wp6-template-parts) | Medium      | Medium      |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | WP5 | [Hook callback parameter and return types](todo/wordpress.md#wp5-hook-callback-parameter-and-return-types) (depends on WP4) | Medium-High | Medium-High |

@@ -186,9 +186,11 @@ edit and must be fixed before moving on.
 (a standalone project with `composer.json`, models, config, routes,
 views, and translations), Symfony demos in `examples/symfony/` (a
 standalone project with `composer.json`, controllers, YAML/XML/PHP
-configuration, Twig templates, and translation catalogues), and Yii 3
-demos in `examples/yii/` (an application generated from `yiisoft/app`).
-`vendor/` is git-ignored in all three, so run `composer install` there before
+configuration, Twig templates, and translation catalogues), Yii 3
+demos in `examples/yii/` (an application generated from `yiisoft/app`), and
+WordPress demos in `examples/wordpress/` (a plugin and a theme under
+`wp-content/`, with core's declarations from `php-stubs/wordpress-stubs`).
+`vendor/` is git-ignored in all four, so run `composer install` there before
 verifying framework demos on a fresh clone. Put new
 framework-specific features in the matching `examples/<framework>/`
 project, not in `examples/php/`. If a feature affects Laravel-specific
@@ -229,6 +231,16 @@ make. Add a check there for each new one, run
 `phpantom_lsp analyze --project-root examples/yii --no-colour`, which must
 report `[OK] No errors`. A "Try:" comment only claims what PHPantom does
 today.
+
+WordPress support follows the same pattern in `examples/wordpress/`: a "Try:" comment at the site and a line in its
+`README.md`. Lint with
+`find examples/wordpress/wp-content -name '*.php' -print0 | xargs -0 -n1 php -l`.
+`examples/wordpress/assertions.php` installs WordPress from `vendor/` into
+a throwaway SQLite database, loads the plugin and theme, and checks every
+claim the "Try:" comments make. Add a check there for each new one, run
+`php examples/wordpress/assertions.php`, then
+`phpantom_lsp analyze --project-root examples/wordpress --no-colour`, which
+must report `[OK] No errors`.
 
 ## Updating docs/todo.md
 

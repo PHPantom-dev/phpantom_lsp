@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster diagnostics while editing.** After an edit inside a function or method, only that function is type-checked again, and the rest of the file keeps its diagnostics, moved along with the text. In a 1,500-line class the type checking after such an edit is around 70 times cheaper. Saving still checks the whole file.
 - **Faster analysis of methods that check many properties.** Narrowing a property or a call's result no longer walks the method again from its first line.
 - **Pull diagnostics are advertised to every client.** Editors and tools that check the server's capabilities now see pull diagnostic support even when they don't declare it themselves, and a pull returns the diagnostics last published. Editors without pull support still receive pushed diagnostics as before.
+- **Stub packages are read once.** A large stub package such as `php-stubs/wordpress-stubs` is parsed once for its classes, functions and constants together, instead of again the first time a function is looked up. Analysing a WordPress plugin or theme takes about a quarter less time, and less memory.
 - **Faster analysis of by-reference parameters.** Working out what a function leaves in a variable passed by reference reads the function once, instead of once per `return` in it. Analysing WordPress takes about 6% less CPU time.
 - **Faster analysis of loops.** A loop body is no longer walked again once its types have settled.
 - **Faster analysis of `switch` lookup tables.** A `switch` that assigns a different literal in each case, such as a table of country or currency names, no longer slows down out of proportion to its length. One with 8,000 cases is checked in about a tenth of a second.
@@ -83,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **WordPress's `__()` returns a string.** Outside a Laravel project, `__()` and `trans()` keep the return type their own declaration gives, instead of Laravel's `string|array`, so passing a translated string to WordPress functions is no longer reported.
 - **Nullable columns stay nullable through a cast.** A model attribute cast to `boolean`, `integer`, a date, an enum or another cast that hands `null` back untouched is now nullable when its column is, and so is a nullable `updated_at` or other timestamp column. A null check on a nullable date column, the soft-delete column included, leaves the date class with all its members.
 - **Relations whose model comes from config.** A relation that reads its related class from `config()`, like the `roles` and `permissions` relations of spatie/laravel-permission, now loads the model the config file names instead of the base `Model`.
 - **`analyze` reads the database schema.** Model columns are typed from the schema dumps and migrations on the command line too, so `analyze` and `fix` agree with the editor about a column's type.

@@ -27,6 +27,17 @@ PHPStan's WordPress extension
 developer expects from types; PhpStorm's built-in WordPress support and
 PHP Tools' hook navigation are what they expect from an editor.
 
+`examples/wordpress/` is the demo project: a plugin and a theme with core
+from the stubs, and an `assertions.php` that checks their claims against
+WordPress installed on SQLite. The real-world baseline is Contact Form 7
+(a plugin) and GeneratePress (a classic theme), analysed with the stubs
+installed. Of their 104 and 232 diagnostics (2026-11-02), most are what
+the stubs or the projects' own docblocks declare, and PHPStan reports
+them too. What they show PHPantom getting wrong is filed below under
+WP3, WP9 and WP15. Hooks and template parts produce no diagnostics
+today, so the baseline cannot rank WP4 to WP6; they rank by what an
+editor user compares first.
+
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
 
@@ -34,31 +45,6 @@ within the same impact tier.
 | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
 | **Impact** | **Critical**, **High**, **Medium-High**, **Medium**, **Low-Medium**, **Low**                                           |
 | **Complexity** | **Low** (mechanical/boilerplate, no design decisions), **Medium** (self-contained, follows an existing pattern), **Medium-High** (spans modules, some new design), **High** (shared/core subsystem, correctness or performance tradeoffs), **Very High** (cross-cutting architecture, wide blast radius) |
-
----
-
-## WP1. WordPress demo project and a real-world baseline
-
-**Impact: High · Complexity: Low-Medium**
-
-Every other WordPress item is measured against this one. Without a demo
-project and a baseline from real code, WordPress support would be built
-untested and could regress silently.
-
-- **`examples/wordpress/`**: a small plugin and a theme, in the same
-  shape as `examples/laravel/` and `examples/symfony/`, with "Try:"
-  comments at each site and a README listing what to try. It installs
-  `php-stubs/wordpress-stubs` through Composer, which is how most typed
-  WordPress projects get core's declarations.
-- **Runtime assertions**: an `assertions.php` that checks the demo's
-  claims against real WordPress, as `examples/laravel/assertions.php`
-  does for Eloquent. Decide whether that boots WordPress (core from
-  Composer plus the SQLite database drop-in, so no server is needed) or
-  only checks what can be read without booting.
-- **A real-world baseline**: run `analyze` on an actively maintained
-  open-source plugin and theme, bucket the diagnostics by cause, and
-  file what WordPress-specific gaps they show. That ranks the rest of
-  this document by what actually breaks.
 
 ---
 
@@ -82,6 +68,40 @@ does for the Symfony extension's rule tests), extending the slice of the
 stubs `scripts/extract-wordpress-stubs.php` copies, and file every call
 the argument-type check judges differently.
 
+The baseline also found parameters the stubs declare narrower than core
+accepts. `wp_hash()` takes `'auth'|'logged_in'|'nonce'|'secure_auth'` as
+its scheme, but `wp_salt()` makes a salt for any scheme, and Contact
+Form 7 hashes with its own. `the_title_attribute()` and its siblings take
+only an array shape, though core runs `wp_parse_args()` on a query string
+like `'echo=0'` too. `WP_Customize_Manager::add_control()` and
+`add_section()` close their `$args` shapes, but the control or section
+class reads keys of its own (GeneratePress passes `pro_text` and
+`pro_url`), and `settings` is a setting ID as often as an array. Correct
+these in `src/wordpress/overrides.php`, which replaces only return types
+today, and offer them to the stubs.
+
+---
+
+## WP15. `analyze` leaves out a plugin's files outside its PSR-4 roots
+
+**Impact: Medium · Complexity: Low**
+
+```json
+{ "autoload": { "psr-4": { "Acme\\Shop\\": "src/" } } }
+```
+
+A plugin that autoloads its classes with Composer keeps the rest of its
+code outside the PSR-4 root: the main file with the `Plugin Name:`
+header, `uninstall.php`, `templates/`, `views/`. `analyze` walks only
+the PSR-4 roots when a `composer.json` declares any, so none of those
+files are checked, and a theme next to the plugin is skipped as a whole.
+The editor still reports them when they are open. Analyse a plugin's or
+theme's whole directory (one holding a file with a `Plugin Name:` or
+`Theme Name:` header, minus `vendor/` and `node_modules/`), the way
+Blade view directories are added today.
+
+**Where to look:** `discover_user_files` in `src/analyse/run.rs`.
+
 ---
 
 ## WP3. WordPress core for a plugin or theme opened on its own
@@ -104,6 +124,12 @@ tree or only what the workspace references.
 This follows the rule in `external-stubs.md`: Drupal's web root and
 sibling editor folders are detected, never typed by the user, and every
 new source of PHP maps onto an existing role.
+
+Contact Form 7 shows what a sibling plugin that is not installed costs
+today. It calls Akismet behind `is_callable(['Akismet', 'get_api_key'])`,
+which still reports `Akismet` as an unknown class, and Really Simple
+CAPTCHA behind `class_exists('ReallySimpleCaptcha')`, which is accepted
+but leaves 18 members "could not be resolved" on the object it builds.
 
 **Where to look:** `src/classmap_scanner/discovery.rs`
 (`scan_drupal_directories` is the closest precedent),
