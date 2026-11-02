@@ -1290,17 +1290,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ts6-setup-and-teardown-that-skip-the-parent" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        TS6. <code>setUp()</code> and <code>tearDown()</code> that skip the parent
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#ts7-prophecy" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1373,10 +1362,11 @@
 <p>Known gaps in PHPantom's support for test code. What works today:
 PHPUnit's assertions narrow types; data providers, <code>@depends</code>, and
 coverage metadata navigate, rename, and report a name that matches
-nothing; a data provider PHPUnit cannot call is reported; a class
-shows a lens listing the tests that cover it or are named after it, and
-a test one back to its class; Pest closures know the test case
-<code>Pest.php</code> binds them to; and Mockery mocks keep the mocked class.</p>
+nothing; a data provider PHPUnit cannot call and a <code>setUp()</code> or
+<code>tearDown()</code> that skips the parent's are reported; a class shows a lens
+listing the tests that cover it or are named after it, and a test one
+back to its class; Pest closures know the test case <code>Pest.php</code> binds
+them to; and Mockery mocks keep the mocked class.</p>
 <p>PHPStan's PHPUnit extension (<code>phpstan/phpstan-phpunit</code>) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
 PHPUnit support and Phpactor's PHPUnit and Prophecy integrations are
@@ -1467,14 +1457,6 @@ them. Add an assertion fixture per library covering the common forms
 <code>Assert::allIsInstanceOf()</code> and the <code>nullOr*</code> variants,
 <code>Psl\Type\shape()-&gt;coerce()</code>), and file each one that fails as a bug.</p>
 <hr />
-<h2 id="ts6-setup-and-teardown-that-skip-the-parent">TS6. <code>setUp()</code> and <code>tearDown()</code> that skip the parent<a class="headerlink" href="#ts6-setup-and-teardown-that-skip-the-parent" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>An overridden <code>setUp()</code>, <code>tearDown()</code>, <code>setUpBeforeClass()</code>, or
-<code>tearDownAfterClass()</code> that never calls the parent's breaks test cases
-whose base class does work there (Laravel's and Symfony's both do).
-PHPStan reports it as <code>phpunit.callParent</code>. Report it, with a quick fix
-that inserts the call.</p>
-<hr />
 <h2 id="ts7-prophecy">TS7. Prophecy<a class="headerlink" href="#ts7-prophecy" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$repo = $this-&gt;prophesize(OrderRepository::class);</span>
@@ -1505,7 +1487,7 @@ by <code>tests/assert_type_runner.rs</code>, the rule tests as <code>.fixture</c
 and slices of <code>phpunit/phpunit</code> and <code>mockery/mockery</code> copied by
 <code>scripts/extract-framework-stubs.php</code> as the stubs. File every
 gap as a <code>// SKIP: reason</code> in this document or <code>docs/todo/</code>; rule tests
-TS1 or TS6 already cover point at it.</p>
+TS1 already covers point at it.</p>
 <hr />
 <h2 id="ts9-phpunit-and-pest-demo-project">TS9. PHPUnit and Pest demo project<a class="headerlink" href="#ts9-phpunit-and-pest-demo-project" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
