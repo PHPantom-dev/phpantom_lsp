@@ -257,51 +257,46 @@ impl Backend {
         mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
         let written = |name: &str| ctx.written_names().resolve_class(name);
-        let owner_class = if class.starts_with('$') {
+        let all_owners: Vec<Arc<ClassInfo>> = if class.starts_with('$') {
             // Variable holding a class-string (e.g. `$cls::make()`).
             // May resolve to multiple classes for union class-strings.
-            let all_owners: Vec<Arc<ClassInfo>> = ResolvedType::into_arced_classes(
-                crate::type_engine::resolver::resolve_target_classes(
-                    class,
-                    AccessKind::DoubleColon,
-                    ctx,
-                ),
-            );
-            // When there are multiple possible classes, resolve the
-            // method return type through each and union the results.
-            if all_owners.len() > 1 {
-                let mut union_results: Vec<Arc<ClassInfo>> = Vec::new();
-                for owner in &all_owners {
-                    let split_args = split_top_level_commas(text_args);
-                    let arg_refs = split_args.to_vec();
-                    let template_subs =
-                        Self::build_method_template_subs(owner, method_name, &arg_refs, ctx);
-                    let var_resolver = build_var_resolver(ctx);
-                    let mr_ctx = MethodReturnCtx::for_call(
-                        ctx,
-                        &template_subs,
-                        &var_resolver,
-                        &written,
-                        true,
-                    );
-                    ClassInfo::extend_unique_arc(
-                        &mut union_results,
-                        Self::resolve_method_return_types_with_args(
-                            owner,
-                            method_name,
-                            text_args,
-                            &mr_ctx,
-                        ),
-                    );
-                }
-                if !union_results.is_empty() {
-                    return union_results;
-                }
-            }
-            all_owners.into_iter().next()
+            ResolvedType::into_arced_classes(crate::type_engine::resolver::resolve_target_classes(
+                class,
+                AccessKind::DoubleColon,
+                ctx,
+            ))
         } else {
-            crate::type_engine::resolver::resolve_static_owner_class(class, ctx)
+            // `self::`/`static::` inside a closure bound to a union names
+            // every alternative.
+            crate::type_engine::resolver::resolve_static_owner_classes(class, ctx)
         };
+        // When there are multiple possible classes, resolve the method
+        // return type through each and union the results.
+        if all_owners.len() > 1 {
+            let mut union_results: Vec<Arc<ClassInfo>> = Vec::new();
+            for owner in &all_owners {
+                let split_args = split_top_level_commas(text_args);
+                let arg_refs = split_args.to_vec();
+                let template_subs =
+                    Self::build_method_template_subs(owner, method_name, &arg_refs, ctx);
+                let var_resolver = build_var_resolver(ctx);
+                let mr_ctx =
+                    MethodReturnCtx::for_call(ctx, &template_subs, &var_resolver, &written, true);
+                ClassInfo::extend_unique_arc(
+                    &mut union_results,
+                    Self::resolve_method_return_types_with_args(
+                        owner,
+                        method_name,
+                        text_args,
+                        &mr_ctx,
+                    ),
+                );
+            }
+            if !union_results.is_empty() {
+                return union_results;
+            }
+        }
+        let owner_class = all_owners.into_iter().next();
 
         if let Some(ref owner) = owner_class {
             // A static call through a Laravel facade is typed by the
@@ -938,7 +933,8 @@ impl Backend {
         } = callee
             && let SubjectExpr::StaticMethodCall { class, method } = from_callable.as_ref()
             && method.eq_ignore_ascii_case("fromCallable")
-            && crate::type_engine::resolver::resolve_static_owner_class(class, ctx)
+            && crate::type_engine::resolver::resolve_static_owner_classes(class, ctx)
+                .first()
                 .is_some_and(|owner| owner.fqn() == "Closure")
             && let Some(classes) = Self::return_types_of_invoked_first_arg(
                 args_text,

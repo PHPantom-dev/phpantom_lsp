@@ -17194,3 +17194,46 @@ $result = $box->get();
         "string"
     );
 }
+
+#[test]
+fn hover_param_closure_this_union() {
+    let backend = create_test_backend();
+    let content = "<?php\nclass FirstContext {}\nclass SecondContext {}\n/** @param-closure-this FirstContext|SecondContext $callback */\nfunction bindContext(\\Closure $callback): void {}\nbindContext(function () { $this; });\n";
+    let hover = hover_at(&backend, "file:///closure_union_hover.php", content, 5, 27)
+        .expect("expected hover on union-bound $this");
+    let text = hover_text(&hover);
+    assert!(text.contains("FirstContext|SecondContext"), "{text}");
+}
+
+#[test]
+fn hover_param_closure_this_intersection() {
+    let backend = create_test_backend();
+    let content = "<?php\nclass FirstContext {}\ninterface SecondContext {}\n/** @param-closure-this FirstContext&SecondContext $callback */\nfunction bindContext(\\Closure $callback): void {}\nbindContext(function () { $this; });\n";
+    let hover = hover_at(
+        &backend,
+        "file:///closure_intersection_hover.php",
+        content,
+        5,
+        27,
+    )
+    .expect("expected hover on intersection-bound $this");
+    let text = hover_text(&hover);
+    assert!(text.contains("FirstContext&SecondContext"), "{text}");
+}
+
+#[test]
+fn hover_static_call_assigned_in_bound_closure_binds_static_to_the_bound_class() {
+    let backend = create_test_backend();
+    let content = "<?php\nclass Foo { public static function make(): static { return new static(); } }\nclass Host { public function run(): void {\n bindContext(function () { $made = static::make(); $made; });\n} }\n/** @param-closure-this Foo $callback */\nfunction bindContext(\\Closure $callback): void {}\n";
+    let hover = hover_at(
+        &backend,
+        "file:///closure_this_static_assign.php",
+        content,
+        3,
+        53,
+    )
+    .expect("expected hover on $made");
+    let text = hover_text(&hover);
+    assert!(text.contains("Foo"), "{text}");
+    assert!(!text.contains("Host"), "{text}");
+}

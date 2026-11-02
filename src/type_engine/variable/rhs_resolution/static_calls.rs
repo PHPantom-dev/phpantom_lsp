@@ -55,6 +55,26 @@ pub(super) fn resolve_rhs_static_call(
     };
     let method_name = method_name.as_str();
 
+    // Inside a closure a `@param-closure-this` call binds, `self::` and
+    // `static::` name the bound classes rather than the lexical one.
+    if matches!(
+        static_call.class,
+        Expression::Self_(_) | Expression::Static(_)
+    ) && let Some(bound) =
+        crate::type_engine::variable::closure_resolution::find_closure_this_types(
+            &ctx.as_resolution_ctx(),
+        )
+    {
+        let targets = ResolvedType::into_arced_classes(bound);
+        match targets.as_slice() {
+            [] => {}
+            // The call is made from the bound class, so late static binding
+            // and `@extends` arguments come from it, not the lexical class.
+            [only] => return static_call_on_class(only, only, method_name, &static_call, ctx),
+            _ => return static_call_on_class_strings(&targets, method_name, &static_call, ctx),
+        }
+    }
+
     let class_name = match static_call.class {
         Expression::Self_(_)
         | Expression::Static(_)
@@ -84,7 +104,9 @@ pub(super) fn resolve_rhs_static_call(
             );
             return match targets.as_slice() {
                 [] => static_call_on_object(&static_call, resolved, ctx),
-                [only] => static_call_on_class(only, method_name, &static_call, ctx),
+                [only] => {
+                    static_call_on_class(only, ctx.current_class, method_name, &static_call, ctx)
+                }
                 _ => static_call_on_class_strings(&targets, method_name, &static_call, ctx),
             };
         }
@@ -97,12 +119,15 @@ pub(super) fn resolve_rhs_static_call(
     }) else {
         return vec![];
     };
-    static_call_on_class(&owner, method_name, &static_call, ctx)
+    static_call_on_class(&owner, ctx.current_class, method_name, &static_call, ctx)
 }
 
 /// `ClassName::method()` once the class the call names is known.
+/// `caller` is the class the call is made from: the enclosing class, or
+/// the class a closure's `$this` is bound to.
 fn static_call_on_class(
     owner: &ClassInfo,
+    caller: &ClassInfo,
     method_name: &str,
     static_call: &StaticCallParts<'_>,
     ctx: &VarResolutionCtx<'_>,
@@ -119,7 +144,7 @@ fn static_call_on_class(
     // class that `@extends Foo<Dog>` reads the parent's `T` as the
     // `Dog` the child bound it to, just as `$this->get()` does.
     let bound_owner = (!owner.template_params.is_empty())
-        .then(|| crate::inheritance::extends_type_args(ctx.current_class, owner))
+        .then(|| crate::inheritance::extends_type_args(caller, owner))
         .flatten()
         .map(|args| {
             crate::virtual_members::resolve_class_fully_with_type_args(
@@ -175,8 +200,8 @@ fn static_call_on_class(
     // from, so it does not apply outside any class (global-scope
     // code has no enclosing class to bind `static` open over).
     let target_is_static = method_is_static(owner, method_name, ctx);
-    let lsb_class = (!ctx.current_class.name.is_empty() && (forwards_lsb || !target_is_static))
-        .then(|| ctx.current_class.fqn());
+    let lsb_class =
+        (!caller.name.is_empty() && (forwards_lsb || !target_is_static)).then(|| caller.fqn());
     let self_replace = |ty: &PhpType| ty.replace_self_bound(&owner_key, lsb_class.as_deref());
 
     let mut results = resolve_owner_method_call(

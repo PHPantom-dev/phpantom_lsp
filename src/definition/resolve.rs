@@ -306,9 +306,9 @@ impl Backend {
                     .map(|loc| vec![loc])
             }
 
-            SymbolKind::SelfStaticParent(ssp_kind) => self
-                .resolve_self_static_parent(uri, content, position, *ssp_kind)
-                .map(|loc| vec![loc]),
+            SymbolKind::SelfStaticParent(ssp_kind) => {
+                self.resolve_self_static_parent(uri, content, position, *ssp_kind)
+            }
 
             SymbolKind::ClassReference { name, is_fqn, .. } => self
                 .resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
@@ -665,14 +665,34 @@ impl Backend {
     ///
     /// - `self` / `static` → jump to the enclosing class declaration.
     /// - `parent` → jump to the parent class declaration (from `extends`).
+    /// - `$this` inside a closure bound to a union → every alternative.
     fn resolve_self_static_parent(
         &self,
         uri: &str,
         content: &str,
         position: Position,
         ssp_kind: SelfStaticParentKind,
-    ) -> Option<Location> {
+    ) -> Option<Vec<Location>> {
         let cursor_offset = position_to_offset(content, position);
+
+        // For `$this`, check `@param-closure-this` override first: when
+        // the cursor is inside a closure whose enclosing call site
+        // declares `@param-closure-this`, jump to the overridden class
+        // definitions instead of the lexical class.  Such a closure may
+        // sit outside any class.
+        if ssp_kind == SelfStaticParentKind::This {
+            let locations: Vec<Location> = self
+                .resolve_closure_this_types(uri, content, cursor_offset)
+                .iter()
+                .filter_map(|rt| rt.class_info.as_ref())
+                .filter_map(|cls| {
+                    self.resolve_class_reference(uri, content, &cls.fqn(), true, cursor_offset)
+                })
+                .collect();
+            if !locations.is_empty() {
+                return Some(locations);
+            }
+        }
 
         let current_class = self.class_at_offset(uri, cursor_offset)?;
 
@@ -680,29 +700,14 @@ impl Backend {
             ssp_kind,
             SelfStaticParentKind::Self_ | SelfStaticParentKind::Static | SelfStaticParentKind::This
         ) {
-            // For `$this`, check `@param-closure-this` override first:
-            // when the cursor is inside a closure whose enclosing call
-            // site declares `@param-closure-this`, jump to the
-            // overridden class definition instead of the lexical class.
-            if ssp_kind == SelfStaticParentKind::This
-                && let Some(override_cls) =
-                    self.resolve_closure_this_override(uri, content, cursor_offset)
-            {
-                let fqn = override_cls.fqn();
-                if let Some(loc) =
-                    self.resolve_class_reference(uri, content, &fqn, true, cursor_offset)
-                {
-                    return Some(loc);
-                }
-            }
-
             // Jump to the enclosing class definition in the current file.
-            return class_keyword_location(&current_class, uri, content);
+            return class_keyword_location(&current_class, uri, content).map(|loc| vec![loc]);
         }
 
         // The parser has already resolved `parent_class` to an FQN.
         let parent_name = current_class.parent_class?;
         self.resolve_class_reference(uri, content, &parent_name, true, cursor_offset)
+            .map(|loc| vec![loc])
     }
 }
 

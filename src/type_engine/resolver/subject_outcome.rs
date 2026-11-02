@@ -14,7 +14,8 @@ use crate::virtual_members::resolve_class_fully_maybe_cached;
 
 use super::context::resolved_to_arcs;
 use super::{
-    ResolutionCtx, resolve_static_owner_class, resolve_target_classes, resolve_target_classes_expr,
+    ResolutionCtx, resolve_static_owner_classes, resolve_target_classes,
+    resolve_target_classes_expr,
 };
 
 /// Whether every non-null member of `ty` is the bare `string` type.
@@ -419,8 +420,8 @@ fn declared_call_return_type(
         }
         // Static method call: Foo::getInt()
         SubjectExpr::StaticMethodCall { class, method } => {
-            let cls = resolve_static_owner_class(class, ctx);
-            declared_return_type_of(cls.as_slice(), method, ctx, accept)
+            let classes = resolve_static_owner_classes(class, ctx);
+            declared_return_type_of(&classes, method, ctx, accept)
         }
         _ => None,
     }

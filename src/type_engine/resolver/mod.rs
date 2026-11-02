@@ -221,10 +221,7 @@ fn resolve_target_classes_expr_inner(
     match expr {
         // ── Keywords that always mean "current class" ────────────
         SubjectExpr::This => resolve_this_subject(ctx),
-        SubjectExpr::SelfKw | SubjectExpr::StaticKw => resolve_self_static_class(ctx)
-            .map(ResolvedType::from_arc)
-            .into_iter()
-            .collect(),
+        SubjectExpr::SelfKw | SubjectExpr::StaticKw => resolve_self_static_types(ctx),
 
         // ── `parent::` — resolve to the current class's parent ──
         SubjectExpr::Parent => {
@@ -358,7 +355,7 @@ fn resolve_static_access_subject(
     // class names, so find_class_by_name / class_loader won't
     // find them.
     let owner_classes: Vec<Arc<ClassInfo>> = if is_self_or_static(class) {
-        resolve_self_static_class(ctx).into_iter().collect()
+        resolve_self_static_classes(ctx)
     } else if let Some(parent_name) = resolve_class_keyword(class, current_class) {
         // `parent`, whose name the parser already resolved.
         crate::class_lookup::find_or_load_resolved(&parent_name, all_classes, class_loader)
@@ -603,7 +600,7 @@ fn resolve_property_chain_subject(
 
 // ── Static owner class resolution ───────────────────────────────────
 
-/// Resolve the class that a bare `self`/`static` keyword refers to at
+/// Resolve the classes that a bare `self`/`static` keyword refers to at
 /// the cursor position.
 ///
 /// Normally this is the lexically enclosing class, but inside a
@@ -612,46 +609,63 @@ fn resolve_property_chain_subject(
 /// runtime binds the closure with the target class as its scope
 /// (`Closure::bind`), so `self::` and `static::` refer to the bound
 /// target rather than the class that lexically encloses the closure.
-fn resolve_self_static_class(ctx: &ResolutionCtx<'_>) -> Option<Arc<ClassInfo>> {
-    super::variable::closure_resolution::find_closure_this_override(ctx).or_else(|| {
-        let current = ctx.current_class?;
-        // The enclosing class is normally one of the file's own, already
-        // behind an `Arc`.
-        Some(
-            ctx.file
-                .all_classes
-                .iter()
-                .find(|cls| std::ptr::eq(cls.as_ref(), current))
-                .cloned()
-                .unwrap_or_else(|| Arc::new(current.clone())),
-        )
-    })
+/// A union binding names one class per alternative.
+fn resolve_self_static_types(ctx: &ResolutionCtx<'_>) -> Vec<ResolvedType> {
+    if let Some(bound) = super::variable::closure_resolution::find_closure_this_types(ctx)
+        && bound.iter().any(|rt| rt.class_info.is_some())
+    {
+        return bound;
+    }
+    let Some(current) = ctx.current_class else {
+        return Vec::new();
+    };
+    // The enclosing class is normally one of the file's own, already
+    // behind an `Arc`.
+    vec![ResolvedType::from_arc(
+        ctx.file
+            .all_classes
+            .iter()
+            .find(|cls| std::ptr::eq(cls.as_ref(), current))
+            .cloned()
+            .unwrap_or_else(|| Arc::new(current.clone())),
+    )]
+}
+
+fn resolve_self_static_classes(ctx: &ResolutionCtx<'_>) -> Vec<Arc<ClassInfo>> {
+    ResolvedType::into_arced_classes(resolve_self_static_types(ctx))
 }
 
 /// Resolve a static class reference (`self`, `static`, `parent`, or a
-/// class name) to its `ClassInfo`.
+/// class name) to the classes it names.
 ///
 /// Handles the `self`/`static`/`parent` keywords and falls back to
 /// `class_loader` then `resolve_target_classes` for named classes.
-pub(in crate::type_engine) fn resolve_static_owner_class(
+/// Only `self`/`static` inside a closure bound to a union or an
+/// intersection name more than one class.
+pub(in crate::type_engine) fn resolve_static_owner_classes(
     class: &str,
     rctx: &ResolutionCtx<'_>,
-) -> Option<Arc<ClassInfo>> {
+) -> Vec<Arc<ClassInfo>> {
     if is_self_or_static(class) {
-        resolve_self_static_class(rctx)
+        resolve_self_static_classes(rctx)
     } else if let Some(resolved_name) = resolve_class_keyword(class, rctx.current_class) {
         // parent — load via class_loader so we get the full parent ClassInfo
         (rctx.file.class_loader)(Fqn::new(&resolved_name))
+            .into_iter()
+            .collect()
     } else {
         let fqn = rctx.written_names().resolve_class(class);
-        (rctx.file.class_loader)(Fqn::new(&fqn)).or_else(|| {
-            resolved_to_arcs(resolve_target_classes(
-                class,
-                crate::AccessKind::DoubleColon,
-                rctx,
-            ))
+        (rctx.file.class_loader)(Fqn::new(&fqn))
+            .or_else(|| {
+                resolved_to_arcs(resolve_target_classes(
+                    class,
+                    crate::AccessKind::DoubleColon,
+                    rctx,
+                ))
+                .into_iter()
+                .next()
+            })
             .into_iter()
-            .next()
-        })
+            .collect()
     }
 }

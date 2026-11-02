@@ -39,29 +39,18 @@ pub(super) fn resolve_this_subject(ctx: &ResolutionCtx<'_>) -> Vec<ResolvedType>
     // so a narrowing proof inside the body still refines it — a
     // `assert($this instanceof AppTestCase)` in a Pest closure whose
     // `test()` parameter declares `@param-closure-this TestCase`
-    // means `$this` is the subclass.  The scope only wins when it is
-    // strictly narrower; otherwise it holds the lexically captured
-    // `$this` the tag is there to replace.
+    // means `$this` is the subclass, and an `instanceof` check on a
+    // `FirstContext|SecondContext` binding drops the other
+    // alternative.  The scope only wins when it is strictly narrower;
+    // otherwise it holds the lexically captured `$this` the tag is
+    // there to replace.
     if let Some(bound) =
         crate::type_engine::variable::closure_resolution::find_closure_this_types(ctx)
     {
-        let narrowed = from_scope.filter(|types| {
-            !types.is_empty()
-                && types.iter().all(|rt| {
-                    rt.class_info.as_ref().is_some_and(|ci| {
-                        bound.iter().any(|b| {
-                            b.class_info.as_ref().is_some_and(|bound_cls| {
-                                crate::class_lookup::is_subclass_of(
-                                    &ci.fqn(),
-                                    &bound_cls.fqn(),
-                                    class_loader,
-                                )
-                            })
-                        })
-                    })
-                })
-        });
-        return narrowed.unwrap_or(bound);
+        return match from_scope {
+            Some(scope) if narrows_closure_binding(&scope, &bound, class_loader) => scope,
+            _ => bound,
+        };
     }
 
     let mut this_types = if let Some(scope_types) = from_scope {
@@ -89,6 +78,53 @@ pub(super) fn resolve_this_subject(ctx: &ResolutionCtx<'_>) -> Vec<ResolvedType>
     }
 
     this_types
+}
+
+/// Whether the scope's `$this` is strictly narrower than the classes a
+/// closure binding names.
+///
+/// Every scope entry has to fall under some bound alternative, either as
+/// that class or as a subclass of it.  The scope is narrower when one
+/// entry is a proper subclass, or when it leaves out an alternative of a
+/// union binding.  Members of an intersection binding share one type
+/// string, so they count as a single alternative: a scope naming just one
+/// of them is not narrower.
+fn narrows_closure_binding(
+    scope: &[ResolvedType],
+    bound: &[ResolvedType],
+    class_loader: &crate::class_lookup::ResolvedClassLoader<'_>,
+) -> bool {
+    if scope.is_empty() {
+        return false;
+    }
+    let mut covered: Vec<&crate::php_type::PhpType> = Vec::new();
+    let mut proper_subclass = false;
+    for rt in scope {
+        let Some(ci) = rt.class_info.as_ref() else {
+            return false;
+        };
+        let fqn = ci.fqn();
+        let mut falls_under = false;
+        for b in bound {
+            let Some(bound_cls) = b.class_info.as_ref() else {
+                continue;
+            };
+            let bound_fqn = bound_cls.fqn();
+            let same = fqn.eq_ignore_ascii_case(&bound_fqn);
+            if !same && !crate::class_lookup::is_subclass_of(&fqn, &bound_fqn, class_loader) {
+                continue;
+            }
+            falls_under = true;
+            proper_subclass |= !same;
+            if !covered.contains(&&b.type_string) {
+                covered.push(&b.type_string);
+            }
+        }
+        if !falls_under {
+            return false;
+        }
+    }
+    proper_subclass || bound.iter().any(|b| !covered.contains(&&b.type_string))
 }
 
 /// Resolve `$this` from the forward-walk scope when it carries a
