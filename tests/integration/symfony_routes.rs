@@ -550,6 +550,100 @@ class Kernel extends BaseKernel
 }
 
 #[tokio::test]
+async fn routes_a_router_resource_set_in_php_configuration_loads_are_not_judged() {
+    let consumer = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class LinkController extends AbstractController
+{
+    public function links(): void
+    {
+        $this->generateUrl('from_the_custom_loader');
+    }
+}
+"#;
+    let fluent = r#"<?php
+use Symfony\Config\FrameworkConfig;
+
+return static function (FrameworkConfig $framework): void {
+    $framework->router()->resource('app.route_loader')->type('service');
+};
+"#;
+    let fluent_array = r#"<?php
+use Symfony\Config\FrameworkConfig;
+
+return static function (FrameworkConfig $framework): void {
+    $framework->router(['resource' => 'app.route_loader', 'type' => 'service']);
+};
+"#;
+    let extension = r#"<?php
+use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+
+return static function (ContainerConfigurator $container): void {
+    $container->extension('framework', [
+        'router' => ['resource' => 'app.route_loader', 'type' => 'service'],
+    ]);
+};
+"#;
+    let app_config = r#"<?php
+use Symfony\Component\DependencyInjection\Loader\Configurator\App;
+
+return App::config([
+    'when@prod' => [
+        'framework' => [
+            'router' => ['resource' => 'app.route_loader', 'type' => 'service'],
+        ],
+    ],
+]);
+"#;
+    for routing in [fluent, fluent_array, extension, app_config] {
+        let (backend, dir) = workspace(&[
+            ("config/routes.yaml", ROUTES_YAML),
+            ("config/packages/routing.php", routing),
+            ("src/Controller/LinkController.php", consumer),
+        ])
+        .await;
+        let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+        assert!(
+            route_problems(&backend, &consumer_uri, consumer).is_empty(),
+            "{routing}"
+        );
+    }
+
+    // The kernel's own route loading, or a router configured without a
+    // resource, loads the routing files.
+    let kernel_resource = r#"<?php
+use Symfony\Config\FrameworkConfig;
+
+return static function (FrameworkConfig $framework): void {
+    $framework->router()->resource('kernel::loadRoutes')->utf8(true);
+    $framework->router()->strictRequirements(null);
+};
+"#;
+    let other_key = r#"<?php
+return [
+    'framework' => ['router' => ['utf8' => true], 'assets' => ['resource' => 'x']],
+];
+"#;
+    for routing in [kernel_resource, other_key] {
+        let (backend, dir) = workspace(&[
+            ("config/routes.yaml", ROUTES_YAML),
+            ("config/packages/routing.php", routing),
+            ("src/Controller/LinkController.php", consumer),
+        ])
+        .await;
+        let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+        assert_eq!(
+            route_problems(&backend, &consumer_uri, consumer),
+            vec!["Unknown route: 'from_the_custom_loader'".to_string()],
+            "{routing}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_route_looked_up_where_it_may_be_missing_is_not_judged() {
     let consumer = r#"<?php
 namespace App\Controller;

@@ -560,6 +560,25 @@ impl Backend {
                 yii_dir.as_deref(),
             )
         };
+        // A router that loads its routes from somewhere else than the
+        // routing files is a loader whose routes cannot be read (see
+        // `resource_symbol_map` for the YAML and XML counterpart).
+        if self.is_symfony_project()
+            && uri.contains("/config/packages/")
+            && crate::symfony::config_tree::php_configures_foreign_router_resource(
+                program,
+                content,
+                &owned_resolved,
+            )
+        {
+            symbol_map
+                .route_imports
+                .push(crate::symbol_map::RouteImport {
+                    resource: None,
+                    loader: None,
+                    name_prefix: String::new(),
+                });
+        }
         // An open file's slow diagnostics are built on the previous
         // pass's, which is only sound if that pass read an index built
         // from exactly the text it diagnosed.

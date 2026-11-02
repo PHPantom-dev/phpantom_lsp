@@ -83,27 +83,6 @@ No outstanding items.
 
 ## Framework names in strings
 
-### B712. A router resource set in PHP configuration still lets route names be judged
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-// config/packages/routing.php
-return static function (FrameworkConfig $framework): void {
-    $framework->router()->resource('app.route_loader');
-};
-```
-
-A `framework.router.resource` that points anywhere but
-`kernel::loadRoutes` means the routing files are not what Symfony
-loads, so no route name can be told missing. That is noticed in
-`config/packages/` YAML and XML (`config_tree::configures_foreign_router_resource`),
-but PHP package configuration is not read at all, whether written with
-the fluent `FrameworkConfig` builders, `$container->extension('framework', [...])`,
-or the array shape `App::config()` takes. Every route name the custom
-loader defines is still reported unknown. Read the router's resource from
-PHP configuration too.
-
 ### B713. A localized `@Route` annotation declares no per-locale names
 
 **Impact: Low · Complexity: Low**

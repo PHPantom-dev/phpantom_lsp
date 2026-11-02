@@ -557,6 +557,143 @@ pub(crate) fn configures_foreign_router_resource(uri: &str, content: &str) -> bo
     }
 }
 
+/// The fluent builder `config/packages/` PHP files configure the framework
+/// bundle with.
+const FRAMEWORK_CONFIG: &str = "Symfony\\Config\\FrameworkConfig";
+
+/// Whether a router resource, as written in PHP, points anywhere but the
+/// kernel's own route loading.  A resource that is not a literal cannot be
+/// told to be the kernel's.
+fn is_foreign_php_resource(value: &Expression<'_>, content: &str) -> bool {
+    match crate::virtual_members::laravel::helpers::resolved_string_literal(value, content) {
+        Some((resource, _, _)) => {
+            let resource = resource.trim();
+            !resource.is_empty() && resource != KERNEL_ROUTE_RESOURCE
+        }
+        None => !matches!(value, Expression::Literal(Literal::String(_))),
+    }
+}
+
+/// The value of the literal key `key` in an array expression.
+fn array_entry<'e, 'a>(array: &'e Expression<'a>, key: &str) -> Option<&'e Expression<'a>> {
+    let elements = match array {
+        Expression::Array(array) => &array.elements,
+        Expression::LegacyArray(array) => &array.elements,
+        _ => return None,
+    };
+    elements.iter().find_map(|element| match element {
+        ArrayElement::KeyValue(entry)
+            if matches!(entry.key, Expression::Literal(Literal::String(literal))
+                if literal.value.and_then(crate::atom::literal_bytes_to_str) == Some(key)) =>
+        {
+            Some(entry.value)
+        }
+        _ => None,
+    })
+}
+
+/// Whether the framework bundle's configuration array `framework` sets a
+/// foreign `router.resource`.
+fn framework_array_has_foreign_resource(framework: &Expression<'_>, content: &str) -> bool {
+    array_entry(framework, "router")
+        .and_then(|router| array_entry(router, "resource"))
+        .is_some_and(|resource| is_foreign_php_resource(resource, content))
+}
+
+/// Whether one `config/packages/` PHP file points `framework.router.resource`
+/// (in any environment) anywhere but the kernel's own route loading: with
+/// the fluent `FrameworkConfig` builder (`$framework->router()->resource(…)`
+/// or `->router(['resource' => …])`), with
+/// `$container->extension('framework', […])`, or in the array the file
+/// returns, `App::config()`'s or a plain one.  The PHP counterpart of
+/// [`configures_foreign_router_resource`].
+pub(crate) fn php_configures_foreign_router_resource(
+    program: &Program<'_>,
+    content: &str,
+    names: &crate::names::OwnedResolvedNames,
+) -> bool {
+    use std::ops::ControlFlow;
+
+    let mut framework_params: Vec<String> = Vec::new();
+    let mut found = false;
+    let note_params = |parameters: &FunctionLikeParameterList<'_>,
+                       framework_params: &mut Vec<String>| {
+        for param in parameters.parameters.iter() {
+            if let Some(Hint::Identifier(hint)) = &param.hint
+                && names
+                    .get(hint.span().start.offset)
+                    .unwrap_or_else(|| bytes_to_str(hint.value()))
+                    .trim_start_matches('\\')
+                    .eq_ignore_ascii_case(FRAMEWORK_CONFIG)
+            {
+                framework_params.push(bytes_to_str(param.variable.name).to_string());
+            }
+        }
+    };
+    crate::virtual_members::laravel::walk_program_expressions(program, &mut |expr: &Expression<
+        '_,
+    >| {
+        found = match expr {
+            Expression::Closure(closure) => {
+                note_params(&closure.parameter_list, &mut framework_params);
+                false
+            }
+            Expression::ArrowFunction(arrow) => {
+                note_params(&arrow.parameter_list, &mut framework_params);
+                false
+            }
+            Expression::Array(_) | Expression::LegacyArray(_) => array_entry(expr, "framework")
+                .is_some_and(|framework| framework_array_has_foreign_resource(framework, content)),
+            Expression::Call(Call::Method(call)) => {
+                let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+                    return ControlFlow::Continue(());
+                };
+                let method = bytes_to_str(method.value);
+                let first = call.argument_list.arguments.first().map(|a| a.value());
+                if method.eq_ignore_ascii_case("extension")
+                    || method.eq_ignore_ascii_case("loadFromExtension")
+                {
+                    first.is_some_and(|namespace| {
+                        crate::virtual_members::laravel::helpers::resolved_string_literal(
+                            namespace, content,
+                        )
+                        .is_some_and(|(namespace, _, _)| namespace == "framework")
+                    }) && call.argument_list.arguments.get(1).is_some_and(|config| {
+                        framework_array_has_foreign_resource(config.value(), content)
+                    })
+                } else if method.eq_ignore_ascii_case("router") {
+                    is_framework_param(call.object, &framework_params)
+                        && first
+                            .and_then(|value| array_entry(value, "resource"))
+                            .is_some_and(|resource| is_foreign_php_resource(resource, content))
+                } else if method.eq_ignore_ascii_case("resource") {
+                    matches!(call.object, Expression::Call(Call::Method(router))
+                            if matches!(&router.method, ClassLikeMemberSelector::Identifier(name)
+                                if bytes_to_str(name.value).eq_ignore_ascii_case("router"))
+                            && is_framework_param(router.object, &framework_params))
+                        && first.is_some_and(|resource| is_foreign_php_resource(resource, content))
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+        if found {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    });
+    found
+}
+
+/// Whether `object` is a variable a closure of the file takes as the
+/// framework bundle's configuration builder.
+fn is_framework_param(object: &Expression<'_>, framework_params: &[String]) -> bool {
+    matches!(object, Expression::Variable(Variable::Direct(variable))
+        if framework_params.iter().any(|name| name.as_bytes() == variable.name))
+}
+
 /// The key being typed at `cursor`, as the path of the key it is nested in
 /// (empty at the top level) and where the typed name starts.
 pub(crate) fn config_key_completion(content: &str, cursor: usize) -> Option<(String, usize)> {
