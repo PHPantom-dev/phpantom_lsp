@@ -75,7 +75,7 @@ pub(crate) fn symfony_receiver_method(
     // turned away on a single byte.
     if !matches!(
         member_name.as_bytes().first().map(u8::to_ascii_lowercase),
-        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f')
+        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f' | b'c')
     ) {
         return None;
     }
@@ -102,7 +102,13 @@ pub(crate) fn symfony_receiver_method(
         0 if is("generateUrl") || is("redirectToRoute") => {
             Some((ReceiverClass::ControllerRouting, false))
         }
-        0 if is("generate") || is("generateAbsolute") => Some((ReceiverClass::UrlGenerator, false)),
+        0 if is("generate") || is("generateAbsolute") || is("generateFromRoute") => {
+            Some((ReceiverClass::UrlGenerator, false))
+        }
+        0 if is("setRedirect") => Some((ReceiverClass::FormRedirect, false)),
+        0 if is("redirect") => Some((ReceiverClass::RouteRedirect, false)),
+        0 if is("checkNamedRoute") => Some((ReceiverClass::AccessCheck, false)),
+        0 if is("getRouteByName") => Some((ReceiverClass::RouteLookup, false)),
         3 if is("generateFromCurrent") => Some((ReceiverClass::UrlGenerator, false)),
         0 if is("add") => Some((ReceiverClass::RoutingConfigurator, true)),
         0 if is("getParameter") || is("hasParameter") => {

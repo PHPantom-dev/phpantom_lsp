@@ -44,6 +44,7 @@ pub(super) fn extract_instantiation_expr<'a>(
         }
         emit_symfony_instantiation_spans(inst.class, args, ctx);
         emit_twig_callable_instantiation(inst.class, args, ctx);
+        emit_drupal_url_spans(inst.class, args, ctx);
         if !class_text.is_empty() {
             emit_call_site(
                 format!("new {}", class_text),
@@ -614,6 +615,12 @@ fn extract_static_method_call<'a>(
                 ctx.content,
                 &mut ctx.spans,
             );
+        }
+        if ctx.drupal
+            && let Some(index) =
+                crate::drupal::static_route_argument(semantic_subject, &member_name)
+        {
+            emit_drupal_route_span(index, &static_call.argument_list, ctx);
         }
     }
     extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);

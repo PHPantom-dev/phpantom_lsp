@@ -7,8 +7,8 @@
 //! `sites/*/services.yml`.  Those are read by the same scan as Symfony's
 //! configuration (see [`crate::symfony::resources`]), so service IDs and
 //! container parameters work alike in both.  Nothing else Symfony declares
-//! (routes, translations, events) is read here: Drupal declares those its
-//! own way.
+//! (translations, events) is read here, and routes are read from Drupal's
+//! own routing files: Drupal declares those its own way.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -32,13 +32,29 @@ pub(crate) struct DrupalState {
     declaration_files: RwLock<Vec<PathBuf>>,
 }
 
-/// Whether the file name at the end of `path` is one Drupal loads services
-/// from: `services.yml`, or one ending in `.services.yml` other than
-/// `default.services.yml`, the template a site's `services.yml` is copied
-/// from.
-fn is_services_file_name(path: &str) -> bool {
+/// A kind of file Drupal reads declarations from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeclarationFile {
+    /// `services.yml`, or a file ending in `.services.yml` other than
+    /// `default.services.yml`, the template a site's `services.yml` is
+    /// copied from.
+    Services,
+    /// `<extension>.routing.yml`.
+    Routing,
+}
+
+/// The kind of declaration file the file name at the end of `path` is, if
+/// any.
+fn declaration_file_kind(path: &str) -> Option<DeclarationFile> {
     let name = path.rsplit('/').next().unwrap_or(path);
-    name == "services.yml" || (name.ends_with(".services.yml") && name != "default.services.yml")
+    if name == "services.yml" || (name.ends_with(".services.yml") && name != "default.services.yml")
+    {
+        Some(DeclarationFile::Services)
+    } else if name.ends_with(".routing.yml") {
+        Some(DeclarationFile::Routing)
+    } else {
+        None
+    }
 }
 
 /// The folders of a web root whose YAML Drupal never loads as it stands:
@@ -81,11 +97,36 @@ pub(crate) fn is_entity_query(class: &str, method: &str) -> bool {
             || method.eq_ignore_ascii_case("entityQueryAggregate"))
 }
 
+/// The argument a static call of `method` on `class`, a resolved class
+/// name, takes a route name in: the first of `Url::fromRoute()`, the second
+/// of `Link::createFromRoute()`.
+pub(crate) fn static_route_argument(class: &str, method: &str) -> Option<usize> {
+    let class = class.strip_prefix('\\').unwrap_or(class);
+    if class.eq_ignore_ascii_case("Drupal\\Core\\Url") && method.eq_ignore_ascii_case("fromRoute") {
+        Some(0)
+    } else if class.eq_ignore_ascii_case("Drupal\\Core\\Link")
+        && method.eq_ignore_ascii_case("createFromRoute")
+    {
+        Some(1)
+    } else {
+        None
+    }
+}
+
+/// Whether `class`, a resolved class name, is `Drupal\Core\Url`, whose
+/// constructor takes a route name first.
+pub(crate) fn is_url_class(class: &str) -> bool {
+    class
+        .strip_prefix('\\')
+        .unwrap_or(class)
+        .eq_ignore_ascii_case("Drupal\\Core\\Url")
+}
+
 /// Whether `path` is a file Drupal reads declarations from.
 pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(is_services_file_name)
+        .is_some_and(|name| declaration_file_kind(name).is_some())
         && !is_test_fixture(path, web_root)
         && !is_unloaded(path, web_root)
 }
@@ -224,23 +265,25 @@ impl Backend {
     /// Other YAML files in a Drupal project have a `services:` key with
     /// another meaning, or none at all.
     pub(crate) fn is_drupal_services_uri(&self, uri: &str) -> bool {
-        if !self.is_drupal_project() || !is_services_file_name(uri) {
-            return false;
+        self.drupal_declaration_file(uri) == Some(DeclarationFile::Services)
+    }
+
+    /// The kind of declaration file `uri` is in a Drupal project: one
+    /// inside one of its web roots, outside test modules unless it is open.
+    pub(crate) fn drupal_declaration_file(&self, uri: &str) -> Option<DeclarationFile> {
+        if !self.is_drupal_project() {
+            return None;
         }
-        let Some(path) = crate::util::uri_to_path(uri) else {
-            return false;
-        };
-        let Some((in_fixture, unloaded)) = self
+        let kind = declaration_file_kind(uri)?;
+        let path = crate::util::uri_to_path(uri)?;
+        let (in_fixture, unloaded) = self
             .drupal
             .web_roots
             .read()
             .iter()
             .find(|root| path.starts_with(root))
-            .map(|root| (is_test_fixture(&path, root), is_unloaded(&path, root)))
-        else {
-            return false;
-        };
-        !unloaded && (!in_fixture || self.open_files.read().contains_key(uri))
+            .map(|root| (is_test_fixture(&path, root), is_unloaded(&path, root)))?;
+        (!unloaded && (!in_fixture || self.open_files.read().contains_key(uri))).then_some(kind)
     }
 }
 

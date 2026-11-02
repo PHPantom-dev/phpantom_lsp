@@ -95,6 +95,7 @@ impl CheckedStringKind {
             // an entity type in PHP, through `hook_entity_type_build()`.
             StringKeyKind::WordPressHook
             | StringKeyKind::DrupalEntityType
+            | StringKeyKind::DrupalRoute
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack

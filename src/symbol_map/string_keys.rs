@@ -160,6 +160,12 @@ pub(crate) enum StringKeyKind {
     /// the entity type manager's `getStorage()` and the other methods that
     /// take one.
     DrupalEntityType,
+    /// A Drupal route name: declared by a top-level key of a routing file,
+    /// and read by `Url::fromRoute()`, `Link::createFromRoute()`, a form
+    /// state's `setRedirect()`, a controller's or form's `redirect()`, and
+    /// the URL generator, access manager, and route provider methods that
+    /// take one.
+    DrupalRoute,
 }
 
 impl StringKeyKind {
@@ -206,7 +212,7 @@ impl StringKeyKind {
             | Self::TwigVariable => KeyFramework::Twig,
             Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
-            Self::DrupalEntityType => KeyFramework::Drupal,
+            Self::DrupalEntityType | Self::DrupalRoute => KeyFramework::Drupal,
         }
     }
 
@@ -728,6 +734,13 @@ const YII_LEGACY_VIEW_RENDERER: &str = "Yiisoft\\Yii\\View\\ViewRenderer";
 const YII_VIEW: &str = "Yiisoft\\View\\ViewInterface";
 pub(crate) const DRUPAL_ENTITY_TYPE_MANAGER: &str =
     "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
+const DRUPAL_URL_GENERATOR: &str = "Drupal\\Core\\Routing\\UrlGeneratorInterface";
+const DRUPAL_FORM_STATE: &str = "Drupal\\Core\\Form\\FormStateInterface";
+const DRUPAL_CONTROLLER_BASE: &str = "Drupal\\Core\\Controller\\ControllerBase";
+const DRUPAL_FORM_BASE: &str = "Drupal\\Core\\Form\\FormBase";
+const DRUPAL_ENTITY_CONTROLLER: &str = "Drupal\\Core\\Entity\\Controller\\EntityController";
+const DRUPAL_ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterface";
+const DRUPAL_ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -784,8 +797,9 @@ pub(crate) enum ReceiverClass {
     /// the shortcuts a Symfony controller inherits.
     ControllerRouting,
     /// A URL generator, the router included, whose `generate()` takes a
-    /// route name: Symfony's, and Yii's, whose `generateAbsolute()` takes
-    /// one too and whose `generateFromCurrent()` takes a fallback.
+    /// route name: Symfony's, Drupal's, whose `generateFromRoute()` takes
+    /// one too, and Yii's, whose `generateAbsolute()` takes one too and
+    /// whose `generateFromCurrent()` takes a fallback.
     UrlGenerator,
     /// A PHP routing configurator, a collection of one, or the route one
     /// of them just added, whose `add()` declares a route.
@@ -822,6 +836,17 @@ pub(crate) enum ReceiverClass {
     /// both Symfony's container builder and Drupal's entity type manager
     /// have: the one takes a service ID, the other an entity type ID.
     DefinitionLookup,
+    /// A Drupal form state, whose `setRedirect()` takes a route name.
+    FormRedirect,
+    /// What has Drupal's `redirect()` shortcut, which takes a route name: a
+    /// controller or a form.
+    RouteRedirect,
+    /// Drupal's access manager, whose `checkNamedRoute()` takes a route
+    /// name.
+    AccessCheck,
+    /// Drupal's route provider, whose `getRouteByName()` takes a route
+    /// name.
+    RouteLookup,
 }
 
 impl ReceiverClass {
@@ -870,7 +895,10 @@ impl ReceiverClass {
             Self::ConfiguratorArgument => &[(SYMFONY_ABSTRACT_CONFIGURATOR, ContainerParameter)],
             Self::ContainerBuilder => &[(SYMFONY_CONTAINER_BUILDER, ServiceId)],
             Self::ControllerRouting => &[(SYMFONY_ABSTRACT_CONTROLLER, SymfonyRoute)],
+            // Drupal's generator extends Symfony's, so it has to be asked
+            // about first.
             Self::UrlGenerator => &[
+                (DRUPAL_URL_GENERATOR, StringKeyKind::DrupalRoute),
                 (SYMFONY_URL_GENERATOR, SymfonyRoute),
                 (YII_URL_GENERATOR, YiiRoute),
             ],
@@ -907,6 +935,14 @@ impl ReceiverClass {
                 (SYMFONY_CONTAINER_BUILDER, ServiceId),
                 (DRUPAL_ENTITY_TYPE_MANAGER, StringKeyKind::DrupalEntityType),
             ],
+            Self::FormRedirect => &[(DRUPAL_FORM_STATE, StringKeyKind::DrupalRoute)],
+            Self::RouteRedirect => &[
+                (DRUPAL_CONTROLLER_BASE, StringKeyKind::DrupalRoute),
+                (DRUPAL_FORM_BASE, StringKeyKind::DrupalRoute),
+                (DRUPAL_ENTITY_CONTROLLER, StringKeyKind::DrupalRoute),
+            ],
+            Self::AccessCheck => &[(DRUPAL_ACCESS_MANAGER, StringKeyKind::DrupalRoute)],
+            Self::RouteLookup => &[(DRUPAL_ROUTE_PROVIDER, StringKeyKind::DrupalRoute)],
         }
     }
 

@@ -202,6 +202,7 @@ mod document_symbols;
 mod document_symbols_blade;
 mod drupal_entities;
 mod drupal_mixed_workspace;
+mod drupal_routes;
 mod drupal_services;
 mod duplicate_class_declarations;
 mod duplicate_function_declarations;

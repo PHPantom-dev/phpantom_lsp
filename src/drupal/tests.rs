@@ -68,6 +68,22 @@ fn services_files_in_the_web_root_declare_services_and_parameters() {
 }
 
 #[test]
+fn a_routing_file_under_a_config_directory_is_drupals_in_a_symfony_site() {
+    // Core's `config` module puts a `config` segment on the way to its
+    // routing file, which a Symfony site reads as container configuration.
+    let (backend, dir) = drupal_backend(&[]);
+    backend.set_is_symfony(true);
+    backend.update_resource_symbol_index(
+        &uri(dir.path(), "web/core/modules/config/config.routing.yml"),
+        "config.sync:\n  path: '/admin/config/development/configuration'\n",
+    );
+    assert_eq!(
+        backend.symfony_declared_names(StringKeyKind::DrupalRoute),
+        vec!["config.sync".to_string()]
+    );
+}
+
+#[test]
 fn other_yaml_is_not_read_as_services() {
     let (backend, _dir) = drupal_backend(&[
         // A file with a `services:` key that Drupal does not load services from.

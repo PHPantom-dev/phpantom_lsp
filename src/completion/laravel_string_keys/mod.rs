@@ -52,6 +52,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::YiiRoute
+        | StringKeyKind::DrupalRoute
         | StringKeyKind::Command
         | StringKeyKind::Section
         | StringKeyKind::Stack
@@ -183,7 +184,8 @@ impl Backend {
             | StringKeyKind::SymfonyEvent
             | StringKeyKind::MessengerBus
             | StringKeyKind::YiiRoute
-            | StringKeyKind::DrupalEntityType => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::DrupalEntityType
+            | StringKeyKind::DrupalRoute => self.symfony_declared_names(*kind).into(),
             StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
                 self.twig_callable_names(*kind).into()
             }

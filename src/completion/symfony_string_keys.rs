@@ -218,6 +218,9 @@ impl Backend {
                 if call.arg_index == 0 && is_bus_name_stamp(&class) {
                     return Some(StringKeyKind::MessengerBus);
                 }
+                if call.arg_index == 0 && crate::drupal::is_url_class(&class) {
+                    return Some(StringKeyKind::DrupalRoute);
+                }
                 is_translatable_message(&class)
             } else {
                 let function = resolve_function_name(ctx, written, offset);
@@ -235,17 +238,21 @@ impl Backend {
             };
         };
         if call.is_static {
-            // `\Drupal::service('|')`, `\Drupal::hasService('|')`, and
-            // `\Drupal::entityQuery('|')`.
-            if call.arg_index != 0 || !self.is_drupal_project() {
-                return None;
-            }
+            // `\Drupal::service('|')`, `\Drupal::hasService('|')`,
+            // `\Drupal::entityQuery('|')`, `Url::fromRoute('|')`, and
+            // `Link::createFromRoute('', '|')`.
             let class = ctx.resolve_name_at(subject, cursor as u32);
-            if crate::drupal::is_service_lookup(&class, &call.method_name) {
-                return Some(StringKeyKind::ServiceId);
+            if call.arg_index == 0 && self.is_drupal_project() {
+                if crate::drupal::is_service_lookup(&class, &call.method_name) {
+                    return Some(StringKeyKind::ServiceId);
+                }
+                if crate::drupal::is_entity_query(&class, &call.method_name) {
+                    return Some(StringKeyKind::DrupalEntityType);
+                }
             }
-            return crate::drupal::is_entity_query(&class, &call.method_name)
-                .then_some(StringKeyKind::DrupalEntityType);
+            return (crate::drupal::static_route_argument(&class, &call.method_name)
+                == Some(call.arg_index))
+            .then_some(StringKeyKind::DrupalRoute);
         }
         self.receiver_call_key(
             subject,

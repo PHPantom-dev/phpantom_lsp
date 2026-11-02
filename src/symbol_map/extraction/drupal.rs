@@ -1,5 +1,6 @@
 //! The entity types a Drupal entity class declares, by attribute or by the
-//! annotation older code uses (see [`crate::drupal`]).
+//! annotation older code uses, and the route names Drupal's static and
+//! constructor calls read (see [`crate::drupal`]).
 
 use super::*;
 use crate::symbol_map::{EntityTypeSite, StringKeyKind};
@@ -97,6 +98,55 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_entity_type_spans(
             class: fqn,
             storage: storage.map(|storage| crate::atom::atom(&storage)),
         });
+    }
+}
+
+/// Record the route name `new Url('…')` reads.
+pub(in crate::symbol_map::extraction) fn emit_drupal_url_spans(
+    class: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal {
+        return;
+    }
+    let Expression::Identifier(identifier) = class else {
+        return;
+    };
+    let resolved = ctx
+        .resolved_name_at(identifier.span().start.offset)
+        .unwrap_or_else(|| bytes_to_str(identifier.value()));
+    if crate::drupal::is_url_class(resolved) {
+        emit_drupal_route_span(0, argument_list, ctx);
+    }
+}
+
+/// Record the route name a call reads in its positional argument `index`,
+/// or in the `route_name:` argument that names it.
+pub(in crate::symbol_map::extraction) fn emit_drupal_route_span(
+    index: usize,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let route =
+        argument_list
+            .arguments
+            .iter()
+            .enumerate()
+            .find_map(|(at, argument)| match argument {
+                Argument::Positional(positional) if at == index => Some(positional.value),
+                Argument::Named(named) if named.name.value == b"route_name" => Some(named.value),
+                _ => None,
+            });
+    if let Some(route) = route {
+        push_laravel_string_span(
+            StringKeyKind::DrupalRoute,
+            false,
+            false,
+            route,
+            ctx.content,
+            &mut ctx.spans,
+        );
     }
 }
 
