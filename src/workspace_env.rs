@@ -10,7 +10,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 
 use parking_lot::{Mutex, RwLock};
 
@@ -94,6 +94,10 @@ pub(crate) struct WorkspaceEnv {
     /// reason `config` is, since a `didChangeConfiguration` handled on
     /// one clone has to be visible to every other.
     pub(crate) client_indexing: Arc<RwLock<config::ClientIndexingOptions>>,
+    /// Whether a Composer project of the workspace is a Drupal site, so
+    /// `index_filters` treats Drupal's `.module`, `.install`, … files as
+    /// PHP source in every walk, not only in the web-root class scan.
+    pub(crate) is_drupal: Arc<AtomicBool>,
     /// The stub directory the editor extension forwarded, beside the
     /// `[stubs]` paths of `config`. Shared by `Arc` for the same reason
     /// `client_indexing` is.
@@ -196,6 +200,7 @@ impl WorkspaceEnv {
             global_config_path,
             index_filters: Arc::new(RwLock::new(None)),
             client_indexing: Arc::new(RwLock::new(config::ClientIndexingOptions::default())),
+            is_drupal: Arc::new(AtomicBool::new(false)),
             client_stubs: Arc::new(RwLock::new(config::ClientStubOptions::default())),
             client_inlay_hints: Arc::new(RwLock::new(config::ClientInlayHintOptions::default())),
             followed_links: crate::classmap_scanner::FollowedLinks::default(),
@@ -243,6 +248,7 @@ impl Clone for WorkspaceEnv {
             global_config_path: self.global_config_path.clone(),
             index_filters: Arc::clone(&self.index_filters),
             client_indexing: Arc::clone(&self.client_indexing),
+            is_drupal: Arc::clone(&self.is_drupal),
             client_stubs: Arc::clone(&self.client_stubs),
             client_inlay_hints: Arc::clone(&self.client_inlay_hints),
             followed_links: self.followed_links.clone(),

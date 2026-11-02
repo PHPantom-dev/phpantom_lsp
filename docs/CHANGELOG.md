@@ -101,6 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Find References in Drupal hook files.** Calls in a Drupal site's `.module`, `.install`, `.theme`, `.profile`, `.inc` and `.engine` files are now found by Find References and rename, and `analyze` checks those files, without listing the extensions under `[indexing] extensions`.
 - **Component tags spelled differently from their class.** `<livewire:last-24-hours-orders>` and `<x-forms.datePicker>` now navigate and complete and type their attributes like the spelling derived from the class name, since Laravel and Livewire reach the same class from either.
 - **Members read through a dynamic property name.** A call like `$model->{$column}->equals($other)` is no longer checked against the object the property is read from, which reported a method that the property's own value has.
 - **Arguments to a variadic parameter are type-checked.** Each argument collected by a `...$rest` parameter is now checked against the type the parameter declares, the same as any other argument. Mockery's `Mockery::mock(Foo::class, [...])` and `spy()` accept the mocked class's constructor arguments.

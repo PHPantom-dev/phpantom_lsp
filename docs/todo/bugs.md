@@ -159,27 +159,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B705. Find References skips Drupal's `.module` and `.install` files
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-// web/core/modules/navigation/navigation.install
-$file = \Drupal::entityTypeManager()->getStorage('file')->load($logo_fid);
-```
-
-Find References on `EntityStorageInterface::load()` in a Drupal site
-returns no result from a `.module`, `.install`, `.theme`, `.profile`,
-`.inc` or `.engine` file, though their classes and functions are
-indexed. On Drupal core the call above and one in `search.install` are
-missing. Setting `[indexing] extensions` to those six extensions brings
-them back.
-
-When the web root is detected, `scan_drupal_directories` reads those
-files with its own `is_drupal_php_file`, but `IndexFilters::is_php_file`,
-which decides which files the workspace walk turns into symbol maps,
-knows only `.php` and the configured extensions. Add the Drupal
-extensions to the filter's extension list when a Drupal web root is
-detected, so every workspace walk sees the same files the class scan
-does. Check which other workspace-wide features (rename, workspace
-symbols, `analyze`) read the same filter.
+No outstanding items.

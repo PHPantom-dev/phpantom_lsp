@@ -237,6 +237,14 @@ impl Backend {
             .map(crate::composer::explicit_dependency_names)
             .unwrap_or_default();
 
+        // Detected before the filters are read, so the walks below see
+        // Drupal's `.module`, `.install`, … files as PHP too.
+        let drupal_web_root =
+            composer_json.and_then(|pkg| composer::detect_drupal_web_root(root, pkg));
+        if drupal_web_root.is_some() {
+            self.mark_drupal_project();
+        }
+
         // Composer's class lists name files without any walk reaching
         // them, so `exclude` is applied to them here, where they merge.
         let filters = self.index_filters();
@@ -341,9 +349,7 @@ impl Backend {
         // contain every base interface and hook definition that modules
         // depend on.  detect_drupal_web_root() returns None for
         // non-Drupal projects so this block is a no-op in that case.
-        if let Some(pkg) = composer_json
-            && let Some(drupal_web_root) = composer::detect_drupal_web_root(root, pkg)
-        {
+        if let Some(drupal_web_root) = drupal_web_root {
             if let Some(p) = progress {
                 p.set_scope(at(55), at(59), "Scanning Drupal directories");
             }

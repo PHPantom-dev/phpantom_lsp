@@ -688,12 +688,15 @@ pub fn scan_drupal_directories(
     scan_files_parallel_full(&php_files, progress)
 }
 
+/// The extensions besides `.php` that Drupal treats as PHP source.
+pub(crate) const DRUPAL_PHP_EXTENSIONS: [&str; 6] =
+    ["module", "install", "theme", "profile", "inc", "engine"];
+
 /// Return `true` for file extensions that Drupal treats as PHP source.
 fn is_drupal_php_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("php" | "module" | "install" | "theme" | "profile" | "inc" | "engine")
-    )
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext == "php" || DRUPAL_PHP_EXTENSIONS.contains(&ext))
 }
 
 /// Derive the class name a PSR-4 mapping expects a file to declare, from

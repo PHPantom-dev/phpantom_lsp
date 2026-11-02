@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use crate::{Backend, classmap_scanner, config, stubs, types};
 
@@ -71,10 +72,11 @@ impl Backend {
         let root = self.workspace.workspace_root.read().clone();
         let indexing = self.config().indexing;
         let client = self.workspace.client_indexing.read();
+        let is_drupal = self.workspace.is_drupal.load(Ordering::Acquire);
 
         // The overwhelmingly common case is one layer or the other being
         // empty, so only pay for a merged allocation when both contribute.
-        let compiled = if client.is_empty() {
+        let compiled = if client.is_empty() && !is_drupal {
             classmap_scanner::IndexFilters::compile(
                 root.as_deref(),
                 indexing.exclude(),
@@ -85,7 +87,14 @@ impl Backend {
             // `.phpantom.toml` can still override an exclude the editor
             // forwarded: gitignore semantics give the last match priority.
             let exclude = [client.exclude.as_slice(), indexing.exclude()].concat();
-            let extensions = [client.extensions.as_slice(), indexing.extensions()].concat();
+            let mut extensions = [client.extensions.as_slice(), indexing.extensions()].concat();
+            if is_drupal {
+                extensions.extend(
+                    classmap_scanner::DRUPAL_PHP_EXTENSIONS
+                        .iter()
+                        .map(|ext| (*ext).to_string()),
+                );
+            }
             classmap_scanner::IndexFilters::compile(root.as_deref(), &exclude, &extensions)
         };
         drop(client);
@@ -97,6 +106,18 @@ impl Backend {
         let compiled = Arc::new(compiled);
         *self.workspace.index_filters.write() = Some(Arc::clone(&compiled));
         compiled
+    }
+
+    /// Record that a Composer project of the workspace is a Drupal site,
+    /// so every workspace walk reads Drupal's `.module`, `.install`, …
+    /// files as PHP the way the web-root class scan does.
+    ///
+    /// Only ever turned on: a workspace whose subprojects include one
+    /// Drupal site treats those extensions as PHP throughout.
+    pub(crate) fn mark_drupal_project(&self) {
+        if !self.workspace.is_drupal.swap(true, Ordering::AcqRel) {
+            *self.workspace.index_filters.write() = None;
+        }
     }
 
     /// Replace the client-supplied file filters.

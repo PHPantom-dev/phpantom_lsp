@@ -34,9 +34,8 @@ pub struct IndexingConfig {
     pub exclude: Option<Vec<String>>,
     /// Extra file extensions (without the dot) treated as PHP source
     /// during workspace discovery, e.g. `["module", "inc", "theme"]`
-    /// for Drupal. `.php` is always included. Drupal projects get the
-    /// Drupal extensions inside the detected web root automatically;
-    /// this setting extends discovery elsewhere.
+    /// for Drupal. `.php` is always included. A Drupal project, detected
+    /// by its web root, gets the Drupal extensions automatically.
     pub extensions: Option<Vec<String>>,
 
     /// Extra files and directories to index, relative to the workspace

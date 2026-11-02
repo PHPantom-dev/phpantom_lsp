@@ -284,3 +284,46 @@ async fn the_locked_phpunit_version_is_read_and_follows_an_update() {
     backend.rescan_composer_indexes(dir.path(), &[dir.path().join("composer.lock")]);
     assert_eq!(backend.phpunit_major(), Some(9));
 }
+
+/// Drupal keeps PHP in `.module`, `.install`, … files. Once the web root
+/// is detected every workspace walk has to read them, not only the class
+/// scan of the web root, or Find References misses the calls in them.
+#[tokio::test]
+async fn a_drupal_site_reads_its_hook_files_as_php_everywhere() {
+    use tower_lsp_server::gen_lsp_types::{Position, Uri};
+
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("composer.json"),
+        r#"{ "require": { "drupal/core-recommended": "^11" } }"#,
+    );
+    write(
+        &dir.path().join("web/core/lib/Drupal.php"),
+        "<?php\nclass Drupal {}\n",
+    );
+    let thing_path = dir.path().join("web/modules/custom/demo/src/Thing.php");
+    let thing = "<?php\nnamespace Demo;\nclass Thing {\n    public function go(): void {}\n}\n";
+    write(&thing_path, thing);
+    write(
+        &dir.path().join("web/modules/custom/demo/demo.install"),
+        "<?php\nfunction demo_install() {\n    (new \\Demo\\Thing())->go();\n}\n",
+    );
+
+    let backend = index_root_project(dir.path()).await;
+    assert!(
+        backend
+            .index_filters()
+            .is_php_file(&dir.path().join("demo.install"))
+    );
+
+    let thing_uri = Uri::from_file_path(&thing_path).unwrap().to_string();
+    let locations = backend
+        .find_references(&thing_uri, thing, Position::new(3, 21), false)
+        .expect("references to Thing::go()");
+    assert!(
+        locations
+            .iter()
+            .any(|loc| loc.uri.as_str().ends_with("demo.install")),
+        "the call in demo.install must be found: {locations:?}"
+    );
+}
