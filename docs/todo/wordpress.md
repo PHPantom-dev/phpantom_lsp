@@ -321,3 +321,19 @@ everywhere: it has no `hasOffset()` type, and does not type
 `get_object_vars()` by the scope it is called from. The fixture is
 ported in `tests/wordpress_stubs/data/phpstan-wordpress/`, marked
 `// SKIP`.
+
+---
+
+## WP16. Benchmark for WordPress hook names and stubs
+
+**Impact: Low-Medium · Complexity: Low**
+
+Laravel, Symfony, and Yii have Criterion benchmarks in `benches/`;
+WordPress has none, though its hook names are read from every installed
+plugin's files and its stubs are one 6 MB file. Add
+`benches/wordpress_completion.rs`: generate a plugin that fires and
+listens to a few hundred hooks across many files, and time hook name
+completion inside `add_action('…')` and `apply_filters('…')`,
+go-to-definition from a listener to the firing, and member completion
+on a value whose type comes from the stubs (`get_post()`, `$wpdb`).
+Register it in `Cargo.toml` so `benches/ci_benchmarks.py` picks it up.

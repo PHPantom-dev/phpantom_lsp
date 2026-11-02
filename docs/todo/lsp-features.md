@@ -547,6 +547,23 @@ recognises as rendering a template.
 
 ---
 
+## F61. Port TwigStan's tests
+
+**Impact: Low-Medium · Complexity: Medium**
+
+PHPantom types Twig template variables from the render calls and
+navigates templates, blocks, filters, and functions, but tests that
+against fixtures of its own only. TwigStan's `tests/EndToEnd/` holds
+templates with the variables, filters, functions, and globals they use
+and the errors and types it reports for each. Port them as fixtures in
+`tests/fixtures/twigstan/` with a project under `tests/twigstan/` holding
+the templates and a slice of `twig/twig`, and file every case PHPantom
+answers differently as a `// SKIP: reason` entry in `docs/todo/`. Tests
+of TwigStan's compiler and its PHPStan baseline have no counterpart here;
+list them in the README as not ported.
+
+---
+
 ## F38. Twig components
 
 **Impact: Low-Medium · Complexity: Medium-High**

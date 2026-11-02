@@ -32,11 +32,23 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| TS4 | [Data provider declaration checks](todo/testing.md#ts4-data-provider-declaration-checks) | Low-Medium  | Low         |
+| TS6 | [`setUp()` and `tearDown()` that skip the parent](todo/testing.md#ts6-setup-and-teardown-that-skip-the-parent) | Low         | Low         |
+| DR1 | [Drupal demo project and a real-world baseline](todo/drupal.md#dr1-drupal-demo-project-and-a-real-world-baseline) | High        | Low-Medium  |
+| DR9 | [Drupal directories outside `contrib` and `custom`](todo/drupal.md#dr9-drupal-directories-outside-contrib-and-custom) | Medium-High | Low-Medium |
 | L62 | [Validation rule strings](todo/laravel.md#l62-validation-rule-strings) | High | Medium |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | High        | Medium      |
+| DR2 | [Service IDs from `*.services.yml`](todo/drupal.md#dr2-service-ids-from-servicesyml) | High        | Medium      |
+| TS1 | [Mock method names](todo/testing.md#ts1-mock-method-names) | High        | Medium      |
 | L63 | [Middleware alias names](todo/laravel.md#l63-middleware-alias-names) | Medium-High | Medium |
 | L64 | [Routes on controller methods](todo/laravel.md#l64-routes-on-controller-methods) | Medium-High | Medium |
 | L65 | [Unknown Blade and Livewire components](todo/laravel.md#l65-unknown-blade-and-livewire-components) | Medium-High | Medium |
+| DR5 | [Route names](todo/drupal.md#dr5-route-names) | Medium-High | Medium      |
+| DR6 | [Hooks](todo/drupal.md#dr6-hooks) | Medium-High | Medium      |
+| TS2 | [Go to the test, and back](todo/testing.md#ts2-go-to-the-test-and-back) | Medium      | Medium      |
+| DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
+| DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
+| TS3 | [Create a test for a class](todo/testing.md#ts3-create-a-test-for-a-class) (depends on TS2) | Medium      | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -65,6 +77,7 @@ ships, remove every row that names it.
 | F31 | [Symfony Twig templates outside `templates/`](todo/lsp-features.md#f31-symfony-twig-templates-outside-templates) | Low-Medium  | Medium      |
 | F30 | [Symfony translations outside YAML, XLIFF, and the `trans` filter](todo/lsp-features.md#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter) | Low-Medium  | Medium      |
 | T54 | [Messenger handlers a service tag registers](todo/type-inference.md#t54-messenger-handlers-a-service-tag-registers) | Low-Medium  | Medium      |
+| F61 | [Port TwigStan's tests](todo/lsp-features.md#f61-port-twigstans-tests) | Low-Medium | Medium |
 | T55 | [Symfony array parameters are typed as plain `array`](todo/type-inference.md#t55-symfony-array-parameters-are-typed-as-plain-array) | Low         | Medium      |
 | F34 | [Template names a PHP wrapper builds](todo/lsp-features.md#f34-template-names-a-php-wrapper-builds) | Medium      | Medium-High |
 | F38 | [Twig components](todo/lsp-features.md#f38-twig-components) | Low-Medium  | Medium-High |
@@ -107,6 +120,7 @@ ships, remove every row that names it.
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | WP5 | [Hook callback parameter and return types](todo/wordpress.md#wp5-hook-callback-parameter-and-return-types) | Medium-High | Medium-High |
 | WP8 | [Sage view composers](todo/wordpress.md#wp8-sage-view-composers) | Medium      | Medium      |
+| WP16 | [Benchmark for WordPress hook names and stubs](todo/wordpress.md#wp16-benchmark-for-wordpress-hook-names-and-stubs) | Low-Medium | Low |
 | WP10 | [Hook docblocks that do not match the call](todo/wordpress.md#wp10-hook-docblocks-that-do-not-match-the-call) (depends on WP5) | Low-Medium  | Medium      |
 | WP12 | [Constants `wp-config.php` defines keep the value of one install](todo/wordpress.md#wp12-constants-wp-configphp-defines-keep-the-value-of-one-install) | Low         | Low-Medium  |
 | WP11 | [`assertWPError()` and `assertNotWPError()` narrow](todo/wordpress.md#wp11-assertwperror-and-assertnotwperror-narrow) | Low         | Low         |
@@ -118,10 +132,17 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | DR1 | [Drupal demo project and a real-world baseline](todo/drupal.md#dr1-drupal-demo-project-and-a-real-world-baseline) | High        | Low-Medium  |
 | F59 | [Send Twig, YAML, and XML documents to the server from Zed](todo/lsp-features.md#f59-send-twig-yaml-and-xml-documents-to-the-server-from-zed) (Zed PR) | Medium | Low |
+| DR9 | [Drupal directories outside `contrib` and `custom`](todo/drupal.md#dr9-drupal-directories-outside-contrib-and-custom) | Medium-High | Low-Medium |
+| DR11 | [Form and render callbacks](todo/drupal.md#dr11-form-and-render-callbacks) | Low-Medium | Low-Medium |
+| DR12 | [Translation placeholders](todo/drupal.md#dr12-translation-placeholders) | Low-Medium | Low-Medium |
+| DR13 | [Module names and `*.info.yml`](todo/drupal.md#dr13-module-names-and-infoyml) | Low-Medium | Low-Medium |
 | DR2 | [Service IDs from `*.services.yml`](todo/drupal.md#dr2-service-ids-from-servicesyml) | High        | Medium      |
 | DR5 | [Route names](todo/drupal.md#dr5-route-names) | Medium-High | Medium      |
 | DR6 | [Hooks](todo/drupal.md#dr6-hooks) | Medium-High | Medium      |
+| DR10 | [Plugin IDs](todo/drupal.md#dr10-plugin-ids) | Medium | Medium |
+| DR14 | [Port PHPStan's Drupal extension tests](todo/drupal.md#dr14-port-phpstans-drupal-extension-tests) | Medium | Medium |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
+| DR15 | [Benchmark for Drupal names](todo/drupal.md#dr15-benchmark-for-drupal-names) (depends on DR2) | Low-Medium | Low |
 | DR3 | [Entity storage and entity type IDs](todo/drupal.md#dr3-entity-storage-and-entity-type-ids) | High        | Medium-High |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
 | DR4 | [Entity field access](todo/drupal.md#dr4-entity-field-access) (depends on DR3) | Medium-High | High        |
@@ -144,7 +165,10 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | TS4 | [Data provider declaration checks](todo/testing.md#ts4-data-provider-declaration-checks) | Low-Medium  | Low         |
 | TS5 | [Assertion libraries](todo/testing.md#ts5-assertion-libraries) | Low-Medium  | Low         |
+| TS10 | [Benchmark for test code](todo/testing.md#ts10-benchmark-for-test-code) | Low-Medium | Low |
 | TS6 | [`setUp()` and `tearDown()` that skip the parent](todo/testing.md#ts6-setup-and-teardown-that-skip-the-parent) | Low         | Low         |
+| TS8 | [Port PHPStan's PHPUnit and Mockery extension tests](todo/testing.md#ts8-port-phpstans-phpunit-and-mockery-extension-tests) | Medium | Low-Medium |
+| TS9 | [PHPUnit and Pest demo project](todo/testing.md#ts9-phpunit-and-pest-demo-project) | Medium | Low-Medium |
 | TS7 | [Prophecy](todo/testing.md#ts7-prophecy) | Low         | Low-Medium  |
 | TS1 | [Mock method names](todo/testing.md#ts1-mock-method-names) | High        | Medium      |
 | TS2 | [Go to the test, and back](todo/testing.md#ts2-go-to-the-test-and-back) | Medium      | Medium      |
@@ -156,17 +180,20 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | L62 | [Validation rule strings](todo/laravel.md#l62-validation-rule-strings) | High | Medium |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | High        | Medium      |
+| L68 | [Port Larastan's type and rule tests](todo/laravel.md#l68-port-larastans-type-and-rule-tests) | High | Medium |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
 | L63 | [Middleware alias names](todo/laravel.md#l63-middleware-alias-names) | Medium-High | Medium |
 | L64 | [Routes on controller methods](todo/laravel.md#l64-routes-on-controller-methods) | Medium-High | Medium |
 | L65 | [Unknown Blade and Livewire components](todo/laravel.md#l65-unknown-blade-and-livewire-components) | Medium-High | Medium |
 | L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
+| L69 | [Benchmarks for Laravel string names and Blade](todo/laravel.md#l69-benchmarks-for-laravel-string-names-and-blade) | Medium | Low-Medium |
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L56 | [Typed Laravel connection names](todo/laravel.md#l56-typed-laravel-connection-names)                                                                                        | Medium      | Medium      |
 | L58 | [Laravel rate limiter names](todo/laravel.md#l58-laravel-rate-limiter-names)                                                                                                | Medium      | Medium      |
 | L53 | [Collection key types from the column for `keyBy` / `groupBy` / `pluck`](todo/laravel.md#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck)                   | Medium      | Medium      |
 | L66 | [Related-file navigation for models, events, and listeners](todo/laravel.md#l66-related-file-navigation-for-models-events-and-listeners) | Medium | Medium |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (assets, Inertia) | Medium | Medium |
+| BL20 | [Port Bladestan's tests](todo/blade.md#bl20-port-bladestans-tests) | Medium | Medium |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | L59 | [Typed controller middleware names](todo/laravel.md#l59-typed-controller-middleware-names)                                                                                  | Low-Medium  | Medium      |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |

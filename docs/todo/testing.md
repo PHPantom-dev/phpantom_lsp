@@ -170,3 +170,60 @@ Check what PHPantom does with current Prophecy, which declares
 a call on the prophecy should complete the mocked class's methods and
 give a `MethodProphecy`. PHPUnit 10 removed `prophesize()`, so Prophecy
 is declining; fix only what is cheap.
+
+---
+
+## TS8. Port PHPStan's PHPUnit and Mockery extension tests
+
+**Impact: Medium · Complexity: Low-Medium**
+
+PHPStan's PHPUnit extension (`phpstan/phpstan-phpunit`) is this
+document's checklist, and the Mockery support follows what
+`phpstan/phpstan-mockery` types, but neither's tests are ported, as
+the Symfony, Doctrine, and WordPress extensions' are. Their type tests
+cover assertion narrowing, `createMock()` and `createStub()`
+intersections, `getMockBuilder()` chains, and `Mockery::mock()` and
+its expectation chains; the rule tests cover assertion misuse
+(`assertSame(true, …)` where `assertTrue()` is meant, `assertEquals()`
+where `assertSame()` is), mocked methods that do not exist, data
+providers, coverage metadata, and `setUp()` that skips the parent. Port them into
+`tests/phpstan_phpunit/` the same way: the `assertType()` fixtures run
+by `tests/assert_type_runner.rs`, the rule tests as `.fixture` files,
+and slices of `phpunit/phpunit` and `mockery/mockery` copied by
+`scripts/extract-framework-stubs.php` as the stubs. File every
+gap as a `// SKIP: reason` in this document or `docs/todo/`; rule tests
+TS1, TS4, or TS6 already cover point at it.
+
+---
+
+## TS9. PHPUnit and Pest demo project
+
+**Impact: Medium · Complexity: Low-Medium**
+
+The PHPUnit demos in `examples/php/definition.php` work without PHPUnit
+installed, so the attributes, Pest, and Mockery are described there
+rather than shown. Add `examples/testing/`, a Composer project in the
+shape of `examples/symfony/` that installs `phpunit/phpunit`,
+`pestphp/pest`, and `mockery/mockery`, with a small library under
+`src/` and its tests under `tests/`: assertion narrowing, data
+providers and `@depends` in both annotation and attribute form,
+coverage attributes and the lens they feed, a `Pest.php` binding a test
+case, and a Mockery mock. Put a "Try:" comment at each site and a line
+in its README. Since the tests can actually run, `vendor/bin/phpunit`
+and `vendor/bin/pest` passing is the runtime check the other demos
+need an `assertions.php` for, and `analyze` on it must report no
+errors.
+
+---
+
+## TS10. Benchmark for test code
+
+**Impact: Low-Medium · Complexity: Low**
+
+Laravel, Symfony, and Yii have Criterion benchmarks in `benches/`; test
+code has none, though the coverage lens on a class looks through every
+test that names it. Add `benches/testing.rs`: generate a few hundred
+test classes covering a few dozen source classes, with data providers
+and Pest files, and time the code lens on a covered class, completion of
+a data provider name, and member completion inside a Pest closure.
+Register it in `Cargo.toml` so `benches/ci_benchmarks.py` picks it up.

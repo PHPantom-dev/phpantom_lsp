@@ -789,3 +789,50 @@ because each is a small, independent code action:
   new component.
 
 Pick them off individually; none depends on another.
+
+---
+
+## Test suites and benchmarks
+
+#### L68. Port Larastan's type and rule tests
+
+**Impact: High · Complexity: Medium**
+
+The Symfony, Doctrine, and WordPress extensions' tests are ported in
+`tests/phpstan_symfony/`, `tests/phpstan_doctrine/`, and
+`tests/wordpress_stubs/`. Larastan's are not, though Laravel is the
+framework PHPantom is measured on most. Its `tests/Type/data/` holds
+about ninety `assertType()` fixtures (Eloquent builders and relations,
+collections, `config()`, `app()->make()`, facades, `abort()`, request
+input, model properties), and `tests/Rules/` nineteen rule tests.
+
+Port them into `tests/larastan/` the same way: the type fixtures run by
+`tests/assert_type_runner.rs`, the rule tests as `.fixture` files in
+`tests/fixtures/larastan/`, a slice of `laravel/framework` copied by
+`scripts/extract-framework-stubs.php` as the stubs, and upstream's
+`tests/application/` (models, migrations, config) as the project they
+run in. Larastan boots that application; we read the same files
+statically.
+
+Larastan's types are not the reference: where one disagrees with what
+the framework actually returns, assert the correct type and say why in
+the README. Rule tests for checks PHPantom has no counterpart for and
+does not plan one (Octane compatibility, `env()` outside config,
+unnecessary collection calls) are listed in the README as not ported,
+not marked `SKIP`. Every other gap is a `// SKIP: reason` filed in
+`docs/todo/`.
+
+#### L69. Benchmarks for Laravel string names and Blade
+
+**Impact: Medium · Complexity: Low-Medium**
+
+`benches/laravel_completion.rs` measures Eloquent member and morph
+column completion only. Symfony and Yii benchmark their name completion
+over a generated application (`benches/symfony_completion.rs`,
+`benches/yii_completion.rs`); Laravel, with the most string contexts of
+any framework, has no equivalent. Add one that generates an application
+with a few hundred routes, config keys, views, and translation keys, and
+times completion inside `route('…')`, `config('…')`, `view('…')`, and
+`__('…')`, plus completion of a variable and a member inside a Blade
+template whose type comes from its signature. Register it in
+`Cargo.toml` so `benches/ci_benchmarks.py` picks it up.
