@@ -1459,17 +1459,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l68-unknown-methods-on-eloquent-models-and-builders" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L68. Unknown methods on Eloquent models and builders
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l66-related-file-navigation-for-models-events-and-listeners" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2208,17 +2197,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L65. Unknown Blade and Livewire components
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l68-unknown-methods-on-eloquent-models-and-builders" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L68. Unknown methods on Eloquent models and builders
       </span>
     </span>
   </a>
@@ -3030,35 +3008,6 @@ offers "Create view" (<code>create_missing_view.rs</code>). Offer to create the 
 resolves to (<code>resources/views/components/alert.blade.php</code>, honouring
 anonymous component namespaces and nested names), and as a second option
 the class-backed pair (<code>app/View/Components/Alert.php</code> plus its view).</p>
-<h4 id="l68-unknown-methods-on-eloquent-models-and-builders">L68. Unknown methods on Eloquent models and builders<a class="headerlink" href="#l68-unknown-methods-on-eloquent-models-and-builders" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$order-&gt;getTotl();          // BadMethodCallException at runtime, reported by nothing</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">Order::whereStatsu('paid'); // fine: a dynamic where on a column</span>
-</code></pre></div>
-<p>A method call on a class with <code>__call</code> is never reported
-(<code>diagnostics/unknown_members/member_check.rs</code> returns <code>MagicFallback</code>),
-which is right for a proxy that accepts any name but wrong for Eloquent.
-<code>Model::__call</code> forwards to the model's query builder, and the builder's
-<code>__call</code> accepts only a closed set: its own and the base query builder's
-methods, scopes, macros registered on the builder, and dynamic
-<code>where{Column}</code> calls. Anything else throws. So a typo in any model method
-call, in PHP or in a Blade template, goes unreported, while Larastan and
-Laravel Idea both report it.</p>
-<p>Judge an Eloquent receiver against that set instead of letting <code>__call</code>
-accept everything. The set is what completion already offers on a model
-and its builder, so the work is in the open-world edges: a project that
-registers macros we cannot read, <code>resolveRelationUsing()</code> dynamic
-relations, and a model or builder that overrides <code>__call</code> itself. In
-each of those, stay silent. Properties are a different case:
-<code>Model::__get</code> returns <code>null</code> for an unknown attribute instead of
-throwing, unless the application enables
-<code>Model::preventAccessingMissingAttributes()</code>, so property reports should
-follow that setting. An application that turns it on (directly or through
-<code>Model::shouldBeStrict()</code>) makes an unknown attribute a
-<code>MissingAttributeException</code>, so there the report belongs on by default
-rather than behind <code>report-magic-properties</code>. A production Laravel app
-used for comparison does exactly this, and its attribute typos go
-unreported unless the opt-in is set.</p>
 <h4 id="l66-related-file-navigation-for-models-events-and-listeners">L66. Related-file navigation for models, events, and listeners<a class="headerlink" href="#l66-related-file-navigation-for-models-events-and-listeners" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Laravel Idea links an Eloquent model to its factory, policy, observer,
