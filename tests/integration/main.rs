@@ -36,6 +36,7 @@ mod code_action_convert_switch_to_match;
 mod code_action_convert_to_instance_variable;
 mod code_action_convert_to_interpolation;
 mod code_action_create_missing_view;
+mod code_action_create_test;
 mod code_action_data_provider;
 mod code_action_extract_function;
 mod code_action_extract_interface;

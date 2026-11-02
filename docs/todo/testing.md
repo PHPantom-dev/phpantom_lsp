@@ -6,10 +6,11 @@ coverage metadata navigate, rename, and report a name that matches
 nothing; a data provider PHPUnit cannot call and a `setUp()` or
 `tearDown()` that skips the parent's are reported; a class shows a lens
 listing the tests that cover it or are named after it, and a test one
-back to its class; Pest closures know the test case `Pest.php` binds
-them to; Mockery mocks keep the mocked class; and the method a PHPUnit
-or Mockery expectation names by string completes, navigates, renames,
-and is reported when the mocked class has no such method.
+back to its class, and a class without a test can have one created;
+Pest closures know the test case `Pest.php` binds them to; Mockery mocks
+keep the mocked class; and the method a PHPUnit or Mockery expectation
+names by string completes, navigates, renames, and is reported when the
+mocked class has no such method.
 
 PHPStan's PHPUnit extension (`phpstan/phpstan-phpunit`) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
@@ -33,22 +34,6 @@ one data set are what PHP Tools and PhpStorm offer, but LSP has no
 request for them. They belong in the editor extensions (the VS Code
 Testing API, Zed runnables), which is a separate decision from anything
 in this document.
-
----
-
-## TS3. Create a test for a class
-
-**Impact: Medium · Complexity: Medium-High**
-
-A code action on a class (or one of its methods) that writes the test
-class at the path the class's test lens looks for (its path under its
-`autoload` root, mirrored under an `autoload-dev` root with a `Test`
-suffix): the right namespace, the project's
-base test case, a `#[CoversClass]` attribute, and a test method per
-public method chosen. PhpStorm and Phpactor both offer it. It shares the
-file-creation path with
-[A41](actions.md#a41-create-class-from-non-existing-name). For a Pest
-project, write a Pest file instead.
 
 ---
 

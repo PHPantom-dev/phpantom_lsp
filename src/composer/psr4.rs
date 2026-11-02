@@ -428,6 +428,59 @@ pub(crate) fn conventional_test_files(
     found
 }
 
+/// Where a new test for the class `class_fqn`, declared in `class_path`,
+/// goes, as `(test root directory, test file)`: a path
+/// [`conventional_test_files`] pairs with the class.
+///
+/// The test root is the `autoload-dev` directory that looks most like the
+/// class' own tests: one named for tests, then the one nearest the class'
+/// `autoload` directory (a package's own `tests/` over the project's), then
+/// the shallowest.  Inside it the test goes under `Unit/` when the root has
+/// that grouping directory.  `None` when the class is not under an
+/// `autoload` root or the project has no `autoload-dev` one.
+pub(crate) fn new_test_file(
+    mappings: &[Psr4Mapping],
+    workspace_root: &Path,
+    class_fqn: &str,
+    class_path: &Path,
+) -> Option<(PathBuf, PathBuf)> {
+    let (source_root, _) = psr4_mapping_for_path(mappings, workspace_root, class_path)?;
+    if source_root.is_dev {
+        return None;
+    }
+    let relative = namespace_below_prefix(class_fqn.trim_start_matches('\\'), &source_root.prefix)
+        .filter(|rest| !rest.is_empty())?;
+
+    let source_dirs: Vec<&str> = source_root.base_path.split('/').collect();
+    let test_root = mappings
+        .iter()
+        .filter(|mapping| mapping.is_dev)
+        .min_by_key(|mapping| {
+            let named_for_tests = mapping.base_path.to_ascii_lowercase().contains("test");
+            let shared_dirs = mapping
+                .base_path
+                .split('/')
+                .zip(&source_dirs)
+                .take_while(|(a, b)| !a.is_empty() && a == *b)
+                .count();
+            (
+                !named_for_tests,
+                std::cmp::Reverse(shared_dirs),
+                mapping.base_path.len(),
+            )
+        })?;
+
+    let root_dir = workspace_root.join(&test_root.base_path);
+    let unit_dir = root_dir.join("Unit");
+    let dir = if unit_dir.is_dir() {
+        unit_dir
+    } else {
+        root_dir.clone()
+    };
+    let file = dir.join(format!("{}{TEST_SUFFIX}.php", relative.replace('\\', "/")));
+    Some((root_dir, file))
+}
+
 /// The classes the naming convention pairs with the test file `test_path`,
 /// as `(FQN, file)`: the reverse of [`conventional_test_files`].
 pub(crate) fn conventional_test_subjects(

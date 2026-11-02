@@ -57,7 +57,7 @@ pub use psr4::{
     resolve_class_path, resolve_namespace_from_path,
 };
 pub(crate) use psr4::{
-    conventional_test_files, conventional_test_subjects, psr4_class_files,
+    conventional_test_files, conventional_test_subjects, new_test_file, psr4_class_files,
     psr4_directories_for_namespace, psr4_directory_for_namespace, psr4_path_for_class,
 };
 

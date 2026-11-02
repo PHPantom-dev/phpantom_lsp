@@ -42,7 +42,6 @@ contributor even though it's short.
 | DR6 | [Hooks](todo/drupal.md#dr6-hooks) | Medium-High | Medium      |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
-| TS3 | [Create a test for a class](todo/testing.md#ts3-create-a-test-for-a-class) | Medium      | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -166,7 +165,6 @@ ships, remove every row that names it.
 | TS8 | [Port PHPStan's PHPUnit and Mockery extension tests](todo/testing.md#ts8-port-phpstans-phpunit-and-mockery-extension-tests) | Medium | Low-Medium |
 | TS9 | [PHPUnit and Pest demo project](todo/testing.md#ts9-phpunit-and-pest-demo-project) | Medium | Low-Medium |
 | TS7 | [Prophecy](todo/testing.md#ts7-prophecy) | Low         | Low-Medium  |
-| TS3 | [Create a test for a class](todo/testing.md#ts3-create-a-test-for-a-class) | Medium      | Medium-High |
 
 ## Laravel & Blade
 
