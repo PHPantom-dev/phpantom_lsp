@@ -13,6 +13,7 @@
 
 require_once __DIR__ . '/vendor/autoload.php';
 
+use App\Admin\DashboardController;
 use App\Controller\DemoController;
 use App\DependencyInjection\Configuration;
 use App\Entity\User;
@@ -28,6 +29,7 @@ use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Symfony\Bridge\Twig\Extension\RoutingExtension;
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
 use Symfony\Bundle\FrameworkBundle\DependencyInjection\Configuration as FrameworkConfiguration;
+use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Bundle\FrameworkBundle\Routing\AttributeRouteControllerLoader;
 use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\Config\FileLocator;
@@ -42,6 +44,7 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\HandleTrait;
 use Symfony\Component\Routing\Generator\UrlGenerator;
 use Symfony\Component\Routing\Loader\AttributeDirectoryLoader;
+use Symfony\Component\Routing\Loader\PhpFileLoader as RoutesPhpLoader;
 use Symfony\Component\Routing\Loader\YamlFileLoader as RoutesYamlLoader;
 use Symfony\Component\Routing\RequestContext;
 use Symfony\Component\Translation\Loader\XliffFileLoader;
@@ -95,6 +98,18 @@ $routes = $routeLoader->load('routes.yaml');
 check('app_demo is declared by the #[Route] on DemoController::index()', $routes->get('app_demo')?->getDefault('_controller') === DemoController::class . '::index');
 check('app_demo_legacy is declared in config/routes.yaml', $routes->get('app_demo_legacy')?->getDefault('_controller') === DemoController::class . '::legacy');
 check('The legacy route points at a method that exists', method_exists(DemoController::class, 'legacy'));
+
+check("The admin import's name_prefix names DashboardController's route admin_dashboard", $routes->get('admin_dashboard')?->getDefault('_controller') === DashboardController::class . '::index');
+check("'dashboard' on its own is not a route", $routes->get('dashboard') === null);
+
+// config/routes/framework.yaml imports FrameworkBundle's own routing file,
+// which declares _preview_error. The bundle's path is its class's directory.
+$errorsResource = Yaml::parseFile("$config/routes/framework.yaml")['when@dev']['_errors']['resource'];
+$frameworkBundleDir = dirname((new ReflectionClass(FrameworkBundle::class))->getFileName());
+$errorRoutes = (new RoutesPhpLoader(new FileLocator()))->load(str_replace('@FrameworkBundle', $frameworkBundleDir, $errorsResource));
+check("FrameworkBundle's errors.php declares _preview_error", $errorRoutes->get('_preview_error') !== null);
+$errorRoutes->addPrefix('/_error');
+$routes->addCollection($errorRoutes);
 
 $urls = new UrlGenerator($routes, new RequestContext());
 check("generateUrl('app_demo', ['userId' => ...]) builds its URL", $urls->generate('app_demo', ['userId' => 42]) === '/demo/42');
@@ -192,6 +207,8 @@ check('demo/index.html.twig includes demo/_card.html.twig', str_contains($html, 
 check("The template's 'demo.title'|trans is translated", str_contains($html, 'Symfony intelligence'));
 check("The template's path('app_demo', ...) resolves", str_contains($html, 'href="/demo/42"'));
 check("The template's path('app_demo_legacy') resolves", str_contains($html, 'href="/legacy"'));
+check("The template's path('admin_dashboard') resolves", str_contains($html, 'href="/admin"'));
+check("The template's path('_preview_error', ...) resolves", str_contains($html, 'href="/_error/404"'));
 
 // ─── Forms ──────────────────────────────────────────────────────────────────
 

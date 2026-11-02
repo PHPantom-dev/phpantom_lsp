@@ -301,6 +301,10 @@ pub(crate) struct SymbolMap {
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,
+    /// The Symfony routes the file loads from elsewhere, and the ones it
+    /// declares in a way that cannot be read.  Empty for every file that
+    /// is not a routing configuration file.
+    pub route_imports: Vec<RouteImport>,
     /// Byte length of the source text this map was extracted from, or
     /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit
     /// in the `u32` fields above anyway).

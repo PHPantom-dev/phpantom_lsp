@@ -815,6 +815,7 @@ pub(super) fn extract_from_parameter<'a>(
     if let Some(ref hint) = param.hint {
         extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
     }
+    note_routing_configurator_parameter(param, ctx);
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, param)
     {

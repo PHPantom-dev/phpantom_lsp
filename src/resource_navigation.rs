@@ -245,6 +245,7 @@ impl Backend {
 
         let mut spans = Vec::new();
         let mut container_values = Vec::new();
+        let mut route_imports = Vec::new();
         if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
             // A bus is declared by a key under `config/packages/`, which is
             // a configuration key too; the bus is the one that means
@@ -258,7 +259,9 @@ impl Backend {
             spans.extend(container_spans);
             container_values = values;
             if crate::symfony::routes::is_routing_config_uri(uri) {
-                spans.extend(crate::symfony::routes::routing_key_spans(uri, content));
+                let (routes, imports) = crate::symfony::routes::routing_declarations(uri, content);
+                spans.extend(routes);
+                route_imports = imports;
             }
         }
         if is_symfony {
@@ -314,6 +317,7 @@ impl Backend {
             spans,
             member_access_indices,
             container_values,
+            route_imports,
             source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
             ..SymbolMap::default()
         }

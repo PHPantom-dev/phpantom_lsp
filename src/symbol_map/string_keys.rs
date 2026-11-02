@@ -420,6 +420,26 @@ pub(crate) struct RoutePlaceholder {
     pub end: u32,
 }
 
+/// Symfony routes a file loads from somewhere else: the `resource:` of a
+/// routing YAML entry, an XML `<import>`, or a PHP configurator's
+/// `import()`.
+///
+/// A file that declares routes it cannot be read for (a `#[Route]` whose
+/// name is a constant, a configurator collection whose prefix is not a
+/// literal) records one with no `resource`, which is how an import that
+/// cannot be followed reads as well: the names under its `name_prefix`
+/// are unknown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RouteImport {
+    /// What the import loads, as written, or `None` when it is not written
+    /// as a literal.
+    pub resource: Option<String>,
+    /// The loader the import names with its `type`, as written.
+    pub loader: Option<String>,
+    /// What the import puts in front of the name of every route it loads.
+    pub name_prefix: String,
+}
+
 // ─── String keys behind a typed receiver ────────────────────────────────────
 
 const PSR_CONTAINER: &str = "Psr\\Container\\ContainerInterface";
@@ -440,8 +460,12 @@ const SYMFONY_PARAMETERS_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ParametersConfigurator";
 const SYMFONY_URL_GENERATOR: &str = "Symfony\\Component\\Routing\\Generator\\UrlGeneratorInterface";
 const YII_URL_GENERATOR: &str = "Yiisoft\\Router\\UrlGeneratorInterface";
-const SYMFONY_ROUTING_CONFIGURATOR: &str =
+pub(crate) const SYMFONY_ROUTING_CONFIGURATOR: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator";
+const SYMFONY_COLLECTION_CONFIGURATOR: &str =
+    "Symfony\\Component\\Routing\\Loader\\Configurator\\CollectionConfigurator";
+const SYMFONY_ROUTE_CONFIGURATOR: &str =
+    "Symfony\\Component\\Routing\\Loader\\Configurator\\RouteConfigurator";
 const SYMFONY_TRANSLATOR: &str = "Symfony\\Contracts\\Translation\\TranslatorInterface";
 const SYMFONY_CONTROLLER_HELPER: &str =
     "Symfony\\Bundle\\FrameworkBundle\\Controller\\ControllerHelper";
@@ -504,7 +528,8 @@ pub(crate) enum ReceiverClass {
     /// route name: Symfony's, and Yii's, whose `generateAbsolute()` takes
     /// one too and whose `generateFromCurrent()` takes a fallback.
     UrlGenerator,
-    /// A PHP routing configurator, whose `add()` declares a route.
+    /// A PHP routing configurator, a collection of one, or the route one
+    /// of them just added, whose `add()` declares a route.
     RoutingConfigurator,
     /// A translator, whose `trans()` takes a translation key.
     Translator,
@@ -572,9 +597,13 @@ impl ReceiverClass {
                 (SYMFONY_URL_GENERATOR, SymfonyRoute),
                 (YII_URL_GENERATOR, YiiRoute),
             ],
-            // Only the top-level configurator: a route a collection's
-            // `add()` declares takes the collection's name prefix.
-            Self::RoutingConfigurator => &[(SYMFONY_ROUTING_CONFIGURATOR, SymfonyRoute)],
+            // A collection's name prefix is read with the call (see
+            // `record_symfony_receiver_sites`), and the site's key holds it.
+            Self::RoutingConfigurator => &[
+                (SYMFONY_ROUTING_CONFIGURATOR, SymfonyRoute),
+                (SYMFONY_COLLECTION_CONFIGURATOR, SymfonyRoute),
+                (SYMFONY_ROUTE_CONFIGURATOR, SymfonyRoute),
+            ],
             Self::Translator => &[(SYMFONY_TRANSLATOR, SymfonyTranslation)],
             Self::TranslatorDomain => &[(SYMFONY_TRANSLATOR, TranslationDomain)],
             Self::TemplateRenderer => &[

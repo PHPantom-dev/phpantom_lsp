@@ -131,6 +131,9 @@ struct DeclaredKeys<'a> {
     parameters: Vec<String>,
     /// The Symfony route names the project declares, sorted.
     symfony_routes: Vec<String>,
+    /// What the Symfony routes were read from, which tells which names can
+    /// be judged.
+    symfony_route_world: Option<crate::symfony::route_world::RouteWorld>,
     /// The Twig templates the project holds, sorted.
     twig_templates: Vec<String>,
     /// The Messenger buses the project's configuration declares, sorted.
@@ -277,10 +280,11 @@ impl<'a> DeclaredKeys<'a> {
         } else {
             Vec::new()
         };
-        let symfony_routes = if has_symfony_route {
-            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::SymfonyRoute)
+        let (symfony_routes, symfony_route_world) = if has_symfony_route {
+            let (names, world) = backend.symfony_routes();
+            (names, Some(world))
         } else {
-            Vec::new()
+            (Vec::new(), None)
         };
         let twig_templates = if has_twig_template {
             backend.symfony_declared_names(crate::symbol_map::StringKeyKind::TwigTemplate)
@@ -315,6 +319,7 @@ impl<'a> DeclaredKeys<'a> {
             services,
             parameters,
             symfony_routes,
+            symfony_route_world,
             twig_templates,
             messenger_buses,
             yii_routes,
@@ -371,10 +376,7 @@ impl<'a> DeclaredKeys<'a> {
                 Self::judge_application_key(&self.parameters, "app.", key)
                     .map(|valid| (valid, "container parameter", "invalid_symfony_parameter"))
             }
-            CheckedStringKind::SymfonyRoute => {
-                Self::judge_application_key(&self.symfony_routes, "app_", key)
-                    .map(|valid| (valid, "route", "invalid_symfony_route"))
-            }
+            CheckedStringKind::SymfonyRoute => self.judge_symfony_route(key),
             CheckedStringKind::TwigTemplate => self.judge_twig_template(key),
             CheckedStringKind::MessengerBus => self.judge_messenger_bus(key),
             // A view whose alias the project does not declare cannot be
@@ -386,6 +388,21 @@ impl<'a> DeclaredKeys<'a> {
             CheckedStringKind::YiiRoute => self.judge_yii_route(key),
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
         }
+    }
+
+    /// Routes are a closed world the project's routing configuration spells
+    /// out, bundles' included, apart from the names under a loader whose
+    /// routes cannot be read.
+    fn judge_symfony_route(&self, key: &str) -> Verdict {
+        let world = self.symfony_route_world.as_ref()?;
+        if !world.can_judge(key) {
+            return None;
+        }
+        let valid = self
+            .symfony_routes
+            .binary_search_by(|name| name.as_str().cmp(key))
+            .is_ok();
+        Some((valid, "route", "invalid_symfony_route"))
     }
 
     /// No package Yii installs declares routes of its own, so the
@@ -466,15 +483,14 @@ impl<'a> DeclaredKeys<'a> {
         Some((valid, "service", "invalid_symfony_service"))
     }
 
-    /// Whether `key`, a service ID, parameter, or route name, is among the
-    /// `declared` ones, when that can be told at all.
+    /// Whether `key`, a service ID or parameter, is among the `declared`
+    /// ones, when that can be told at all.
     ///
-    /// The configuration read is the project's own: the services,
-    /// parameters, and routes the bundles it installs register are not, and
-    /// neither are the ones a compiler pass or a route loader adds.  Symfony
-    /// names an application's own under the `app.` prefix (`app_` for a
-    /// route), which no bundle uses, so only those can be judged.  A project
-    /// that declares none was not read at all.
+    /// The configuration read is the project's own: the services and
+    /// parameters the bundles it installs register are not, and neither are
+    /// the ones a compiler pass adds.  Symfony names an application's own
+    /// under the `app.` prefix, which no bundle uses, so only those can be
+    /// judged.  A project that declares none was not read at all.
     fn judge_application_key(declared: &[String], prefix: &str, key: &str) -> Option<bool> {
         if !key.starts_with(prefix) || declared.is_empty() {
             return None;

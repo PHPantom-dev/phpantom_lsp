@@ -265,7 +265,6 @@ pub(crate) fn find_laravel_string_key_references(
         // template's) map like any use, so the usages already hold it.
         StringKeyKind::ServiceId
         | StringKeyKind::ContainerParameter
-        | StringKeyKind::SymfonyRoute
         | StringKeyKind::SymfonyTranslation
         | StringKeyKind::TwigTemplate
         | StringKeyKind::SymfonyConfigKey
@@ -275,8 +274,13 @@ pub(crate) fn find_laravel_string_key_references(
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // The catalogues named after a domain declare it, and the paths of
-        // its handler's routes a route argument, and are added below.
-        StringKeyKind::TranslationDomain | StringKeyKind::YiiRouteArgument => {
+        // its handler's routes a route argument, and are added below.  A
+        // route's name may be put together by the imports that load it, or
+        // declared by a bundle's routing file outside the workspace, so its
+        // declarations are too.
+        StringKeyKind::TranslationDomain
+        | StringKeyKind::YiiRouteArgument
+        | StringKeyKind::SymfonyRoute => {
             find_string_key_usages(kind, key, backend, snapshot, false)
         }
         // Two spellings of one view share no key, so the renders are found

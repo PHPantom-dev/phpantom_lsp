@@ -409,48 +409,6 @@ of the same design: `src/symbol_map/extraction/yii_routes.rs`, `src/yii/routes.r
 
 ---
 
-## F28. Symfony route names a loader composes
-
-**Impact: Medium-High · Complexity: Medium**
-
-Until this lands, the unknown-route diagnostic is inert in most real
-applications: it only judges names under `app_`, and applications that
-name their routes by area (`blog_post`, `admin_post_edit`, as the official
-Symfony demo does) never trigger it. A typo in `redirectToRoute()` or
-`path()` goes unreported there.
-
-Unlike service IDs, routes are a closed world the project spells out:
-every route enters through an import in `config/routes.yaml` /
-`config/routes/*` (or the kernel's `configureRoutes()`), and a bundle's
-routes come from the file that import names
-(`resource: '@WebProfilerBundle/Resources/config/routing/wdt.php'`).
-Following those imports into the bundle's routing files gives the full set,
-so the `app_` restriction can go. The exceptions are imports that run code,
-`type: service` loaders (the security logout loader) and custom loaders;
-an application with one of those keeps the world open only for the names
-that loader could produce, or entirely if that cannot be told.
-
-A route's name is read where it is declared: a `#[Route]` attribute, with
-its class's name prefix, a routing YAML or XML entry, or a routing
-configurator's `add()`. A few names are put together elsewhere, and are
-missed:
-
-- an import's `name_prefix:` in the routing YAML (or `->namePrefix()` in a
-  configurator), which prefixes every route it loads, attribute routes
-  included;
-- the routes a collection's `add()` declares under its
-  `$routes->collection('blog_')` prefix;
-- the `@Route` docblock annotations older applications still use;
-- the routes bundles declare in their own routing files, which is also why
-  only names under the application's own `app_` prefix are reported as
-  undeclared.
-
-**Where to look:** `src/symfony/routes.rs`,
-`src/symbol_map/extraction/symfony.rs`, `src/symbol_map/string_keys.rs`
-(`ReceiverClass::RoutingConfigurator`).
-
----
-
 ## F29. Report Symfony translation keys nothing declares
 
 **Impact: Medium-High · Complexity: Medium**
@@ -462,10 +420,10 @@ $translator->trans('demo.titel'); // a typo of demo.title
 ```
 
 Translation keys complete and navigate within their domain, but one that no
-catalogue declares is not reported. Service IDs and routes are only judged
-under the application's own `app.` and `app_` prefixes; translation keys
-have no such convention, so judging needs a fuller picture of what is
-declared:
+catalogue declares is not reported. Service IDs are only judged under the
+application's own `app.` prefix, and routes by following the routing
+configuration into the bundles it imports; translation keys have neither,
+so judging needs a fuller picture of what is declared:
 
 - the catalogues installed bundles ship (`validators`, `security`, and any
   bundle's own domain), which a key in the same domain may come from;
@@ -580,7 +538,7 @@ Blocks full Twig support: the README keeps Twig marked as partial until this lan
 <a href="{{ path('app_hme') }}">Home</a>
 ```
 
-An unknown template or `app_` route is reported where PHP names it, but not
+An unknown template or route is reported where PHP names it, but not
 in a Twig template: diagnostics are not run on resource documents at all.
 They need scheduling for a Twig file the way a PHP file's are, the
 string-key check reading the template's resource symbol map, and the

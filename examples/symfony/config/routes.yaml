@@ -2,6 +2,15 @@ controllers:
   resource: ../src/Controller/
   type: attribute
 
+# Try: go-to-definition on 'admin_dashboard' in
+# templates/demo/index.html.twig. Every route under src/Admin/ is named
+# after this import's name_prefix, so DashboardController's 'dashboard'
+# is 'admin_dashboard'.
+admin:
+  resource: ../src/Admin/
+  type: attribute
+  name_prefix: admin_
+
 app_demo_legacy:
   path: /legacy
   controller: App\Controller\DemoController::legacy

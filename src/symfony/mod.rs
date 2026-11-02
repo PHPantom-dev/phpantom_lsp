@@ -34,6 +34,7 @@ pub(crate) mod container;
 pub(crate) mod forms;
 pub(crate) mod messenger;
 pub(crate) mod resources;
+pub(crate) mod route_world;
 pub(crate) mod routes;
 pub(crate) mod tags;
 pub(crate) mod translations;
@@ -109,12 +110,14 @@ pub(crate) fn slot_spans(content: &str, slots: Vec<NameSlot>) -> Vec<SymbolSpan>
 #[derive(Default)]
 pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
+    /// The routing files of dependencies, read from disk.
+    foreign_routing: route_world::ForeignRoutingFiles,
 }
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
 /// translation key, a template, a configuration key, an event listener, or
 /// a Messenger bus, outright or through a configurator call still to be
-/// confirmed, or registers a Messenger handler.
+/// confirmed, or registers a Messenger handler, or imports routes.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that
 /// uses Twig declares its templates and nothing else.  A Yii route is
@@ -124,6 +127,7 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
     let counts = |kind: StringKeyKind| (kind.is_symfony() || kind.is_yii()) && enabled(kind);
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
+        || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
         || map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
@@ -214,14 +218,13 @@ impl Backend {
     }
 
     /// Visit every declaration of a `kind` key: the file and its symbol
-    /// map, the span's byte range, and the key.
+    /// map, the span's byte range, and the key.  A route is visited under
+    /// each name the imports that load it give it (see [`route_world`]).
     fn visit_symfony_declarations(
         &self,
         kind: StringKeyKind,
         mut visit: impl FnMut(&str, &SymbolMap, u32, u32, &str),
     ) {
-        let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
-        uris.sort_unstable();
         // The configurator calls are confirmed in their own files, whose
         // offsets have nothing to do with the file a diagnostic pass may be
         // checking on this thread, so neither of its caches may answer for
@@ -230,6 +233,13 @@ impl Backend {
             crate::type_engine::variable::forward_walk::suspend_diagnostic_scope(),
             crate::type_engine::resolver::with_isolated_chain_cache(),
         );
+        if kind == StringKeyKind::SymfonyRoute {
+            let world = self.symfony_route_world();
+            self.visit_route_declarations(&world, visit);
+            return;
+        }
+        let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
+        uris.sort_unstable();
         for uri in uris {
             let Some(map) = self.symbol_map_for(&uri) else {
                 continue;
@@ -255,6 +265,23 @@ impl Backend {
     /// translation domain, or template the project declares, sorted.
     pub(crate) fn symfony_declared_names(&self, kind: StringKeyKind) -> Vec<String> {
         self.symfony_declared_names_except(kind, None)
+    }
+
+    /// Every route name the project declares, sorted, with the world they
+    /// were read from, which tells which of the names nothing declares
+    /// are mistakes.
+    pub(crate) fn symfony_routes(&self) -> (Vec<String>, route_world::RouteWorld) {
+        // See `visit_symfony_declarations`.
+        let _isolated = (
+            crate::type_engine::variable::forward_walk::suspend_diagnostic_scope(),
+            crate::type_engine::resolver::with_isolated_chain_cache(),
+        );
+        let world = self.symfony_route_world();
+        let mut names = Vec::new();
+        self.visit_route_declarations(&world, |_, _, _, _, name| names.push(name.to_string()));
+        names.sort_unstable();
+        names.dedup();
+        (names, world)
     }
 
     /// [`Self::symfony_declared_names`], leaving out the declaration that

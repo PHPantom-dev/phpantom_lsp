@@ -26,7 +26,11 @@ catalogues together, the way a real Symfony project does.
   link to them. In `templates/demo/index.html.twig`, go to the definition of
   `app_demo` or `app_demo_legacy`, find references on `app_demo` in
   `DemoController`, or complete a name inside `generateUrl('')` or
-  `path('')`.
+  `path('')`. Names are followed through the imports that load them: in
+  the same template, `admin_dashboard` is `src/Admin/DashboardController.php`'s
+  `dashboard` under the import's `name_prefix`, and `_preview_error` is
+  declared by FrameworkBundle's own routing file. A route name nothing
+  declares is reported.
 - Translation keys navigate between the YAML and XLIFF catalogues in
   `translations/` and the PHP and Twig that translate them, within the
   domain each call names. In `DemoController`, go to the definition of

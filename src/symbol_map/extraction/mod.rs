@@ -151,6 +151,19 @@ struct ExtractionCtx<'a> {
     uses_symfony_configurators: Option<bool>,
     /// Likewise for Symfony's routing configurator namespace.
     uses_symfony_routing_configurators: Option<bool>,
+    /// Whether the file imports the class of Symfony's `@Route` docblock
+    /// annotation, checked once lazily.
+    uses_route_annotations: Option<bool>,
+    /// The parameters typed as Symfony's routing configurator, by name,
+    /// whose `import()` loads routes from elsewhere.
+    routing_configurator_params: Vec<String>,
+    /// The variables holding a routing configurator, by name, with the
+    /// name prefix the routes added on them take, or `None` when it is
+    /// not written as a literal.  The latest assignment of a name wins.
+    route_prefix_vars: Vec<(String, Option<String>)>,
+    /// The routes the file loads from elsewhere, each with the offset of
+    /// the `import()` call a later `namePrefix()` finds it by.
+    route_imports: Vec<(u32, crate::symbol_map::RouteImport)>,
     /// Whether the project is a Yii application, which [`Self::yii_dir`]
     /// says.  Gates the route definitions, the route arguments, and the URL
     /// generator calls recorded for the type engine to confirm.
@@ -403,6 +416,10 @@ fn extract_symbol_map_inner(
         twig,
         uses_symfony_configurators: None,
         uses_symfony_routing_configurators: None,
+        uses_route_annotations: None,
+        routing_configurator_params: Vec::new(),
+        route_prefix_vars: Vec::new(),
+        route_imports: Vec::new(),
         yii_dir,
         yii_view_scope: YiiViewScope::Template,
         yii_class_name_offset: None,
@@ -565,6 +582,11 @@ fn extract_symbol_map_inner(
         messenger_handlers: ctx.messenger_handlers,
         container_values: ctx.container_values,
         routes: ctx.routes,
+        route_imports: ctx
+            .route_imports
+            .into_iter()
+            .map(|(_, import)| import)
+            .collect(),
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
         source_hash: None,
     }

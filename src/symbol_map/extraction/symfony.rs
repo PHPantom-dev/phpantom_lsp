@@ -20,8 +20,8 @@
 
 use super::*;
 use crate::symbol_map::{
-    ContainerValue, ContainerValueSite, MessengerHandlerSite, ReceiverClass,
-    SYMFONY_CONTAINER_CONFIGURATOR_NS, StringKeyKind,
+    ContainerValue, ContainerValueSite, MessengerHandlerSite, ReceiverClass, RouteImport,
+    SYMFONY_CONTAINER_CONFIGURATOR_NS, SYMFONY_ROUTING_CONFIGURATOR, StringKeyKind,
 };
 use crate::symfony::translations::{DEFAULT_DOMAIN, is_domain_name, translation_key};
 use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_literal_at_range};
@@ -48,6 +48,12 @@ const MESSAGE_HANDLER_PARAMETERS: &[&str] = &[
 const ROUTE_ATTRIBUTES: [&str; 2] = [
     "Symfony\\Component\\Routing\\Attribute\\Route",
     "Symfony\\Component\\Routing\\Annotation\\Route",
+];
+/// The classes an older application's `@Route` docblock annotation is
+/// imported from.
+const ROUTE_ANNOTATIONS: [&str; 2] = [
+    "Symfony\\Component\\Routing\\Annotation\\Route",
+    "Sensio\\Bundle\\FrameworkExtraBundle\\Configuration\\Route",
 ];
 
 /// What a method call names in its positional argument `index`, when its
@@ -135,6 +141,14 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         record_configured_class(object, argument_list, ctx);
         return;
     }
+    if ctx.symfony && member_name.eq_ignore_ascii_case("import") {
+        record_route_import(object, argument_list, ctx);
+        return;
+    }
+    if ctx.symfony && member_name.eq_ignore_ascii_case("namePrefix") {
+        record_route_name_prefix(object, argument_list, ctx);
+        return;
+    }
     // A Yii `generateFromCurrent()` takes its fallback route fourth.
     for (index, argument) in argument_list.arguments.iter().take(4).enumerate() {
         let Argument::Positional(argument) = argument else {
@@ -173,10 +187,23 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
         {
             continue;
         }
+        // A route added to a collection takes the collection's name
+        // prefix.
+        let key = if receiver == ReceiverClass::RoutingConfigurator {
+            match route_name_prefix(object, ctx) {
+                Some(prefix) => format!("{prefix}{key}"),
+                None => {
+                    record_unreadable_routes(String::new(), ctx);
+                    continue;
+                }
+            }
+        } else {
+            key.to_string()
+        };
         ctx.typed_receiver_sites.push(TypedReceiverSite {
             start: start as u32,
             end: end as u32,
-            key: key.to_string(),
+            key,
             is_write,
             is_optional: false,
             receiver,
@@ -250,6 +277,223 @@ fn record_configured_class(
             start: start as u32,
             value,
         });
+    }
+}
+
+/// Note a parameter typed as Symfony's routing configurator, whose
+/// `import()` loads routes from elsewhere: the one a routing configuration
+/// file's closure takes, or a kernel's `configureRoutes()`.  The kernel's
+/// container configurator has an `import()` of its own, so the receiver of
+/// one is what tells the two apart.
+pub(in crate::symbol_map::extraction) fn note_routing_configurator_parameter(
+    param: &FunctionLikeParameter<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.symfony {
+        return;
+    }
+    let Some(Hint::Identifier(hint)) = &param.hint else {
+        return;
+    };
+    let resolved = ctx
+        .resolved_name_at(hint.span().start.offset)
+        .unwrap_or_else(|| bytes_to_str(hint.value()));
+    if resolved
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case(SYMFONY_ROUTING_CONFIGURATOR)
+    {
+        ctx.routing_configurator_params
+            .push(bare_variable_name(param.variable.name));
+    }
+}
+
+/// Track what a variable assigned a routing configurator's collection
+/// prefixes the routes added on it with.
+pub(in crate::symbol_map::extraction) fn note_route_configurator_assignment(
+    assign: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    // Only a file that takes a routing configurator builds routes on one.
+    if ctx.routing_configurator_params.is_empty() || !assign.operator.is_assign() {
+        return;
+    }
+    let Expression::Variable(Variable::Direct(variable)) = assign.lhs else {
+        return;
+    };
+    let name = bytes_to_str(variable.name);
+    let name = name.strip_prefix('$').unwrap_or(name);
+    let prefix = match assign.rhs {
+        Expression::Call(Call::Method(_))
+        | Expression::Variable(_)
+        | Expression::Parenthesized(_) => Some(route_name_prefix(assign.rhs, ctx)),
+        _ => None,
+    };
+    ctx.route_prefix_vars.retain(|(tracked, _)| tracked != name);
+    // A configurator without a prefix is what an untracked variable reads
+    // as anyway.
+    if let Some(prefix) = prefix.filter(|prefix| prefix.as_deref() != Some("")) {
+        ctx.route_prefix_vars.push((name.to_string(), prefix));
+    }
+}
+
+/// The name prefix the routes added on the routing configurator `receiver`
+/// take: the names of the `collection()` calls along its chain, after the
+/// prefix of the variable it starts from.  `None` when one of them is not a
+/// literal.
+fn route_name_prefix(receiver: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<String> {
+    let mut segments = Vec::new();
+    let mut link = receiver;
+    let root = loop {
+        match link {
+            Expression::Call(Call::Method(call)) => {
+                if let ClassLikeMemberSelector::Identifier(method) = &call.method
+                    && method.value.eq_ignore_ascii_case(b"collection")
+                    && let Some(argument) = call.argument_list.arguments.first()
+                {
+                    let (name, _, _) = resolved_string_literal(argument.value(), ctx.content)?;
+                    segments.push(name);
+                }
+                link = call.object;
+            }
+            Expression::Parenthesized(inner) => link = inner.expression,
+            other => break other,
+        }
+    };
+    let mut prefix = match root {
+        Expression::Variable(Variable::Direct(variable)) => {
+            let name = bytes_to_str(variable.name);
+            let name = name.strip_prefix('$').unwrap_or(name);
+            ctx.route_prefix_vars
+                .iter()
+                .rev()
+                .find(|(tracked, _)| tracked == name)
+                .map_or(Some(String::new()), |(_, prefix)| prefix.clone())?
+        }
+        _ => String::new(),
+    };
+    for segment in segments.iter().rev() {
+        prefix.push_str(segment);
+    }
+    Some(prefix)
+}
+
+/// Record that the file declares routes under `name_prefix` whose names
+/// cannot be read.
+fn record_unreadable_routes(name_prefix: String, ctx: &mut ExtractionCtx<'_>) {
+    let import = RouteImport {
+        resource: None,
+        loader: None,
+        name_prefix,
+    };
+    if !ctx.route_imports.iter().any(|(_, known)| *known == import) {
+        // No `import()` call starts at offset 0, so no `namePrefix()`
+        // finds this one.
+        ctx.route_imports.push((0, import));
+    }
+}
+
+/// Record the routes a routing configurator's `import()` loads.
+fn record_route_import(
+    object: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Expression::Variable(Variable::Direct(variable)) = object else {
+        return;
+    };
+    let name = bytes_to_str(variable.name);
+    let name = name.strip_prefix('$').unwrap_or(name);
+    if !ctx
+        .routing_configurator_params
+        .iter()
+        .any(|param| param == name)
+    {
+        return;
+    }
+    let mut resource = None;
+    let mut loader = None;
+    for (index, argument) in argument_list.arguments.iter().enumerate() {
+        let parameter = match argument {
+            Argument::Named(named) => bytes_to_str(named.name.value),
+            Argument::Positional(_) if index == 0 => "resource",
+            Argument::Positional(_) if index == 1 => "type",
+            Argument::Positional(_) => continue,
+        };
+        match parameter {
+            "resource" => resource = import_resource(argument.value(), ctx.content),
+            "type" => {
+                loader = resolved_string_literal(argument.value(), ctx.content)
+                    .map(|(loader, _, _)| loader.to_string());
+            }
+            _ => {}
+        }
+    }
+    ctx.route_imports.push((
+        argument_list.span().start.offset,
+        RouteImport {
+            resource,
+            loader,
+            name_prefix: String::new(),
+        },
+    ));
+}
+
+/// What an `import()` loads: a literal, or a path built from `__DIR__`,
+/// which is the importing file's own directory and so reads as relative to
+/// it.
+fn import_resource(value: &Expression<'_>, content: &str) -> Option<String> {
+    if let Some((resource, _, _)) = resolved_string_literal(value, content) {
+        return Some(resource.to_string());
+    }
+    crate::document_links::try_evaluate_path_expr(value, std::path::Path::new("."))
+}
+
+/// Put a `namePrefix()` in front of the names of the routes the `import()`
+/// it is chained to loads.
+fn record_route_name_prefix(
+    object: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if ctx.routing_configurator_params.is_empty() {
+        return;
+    }
+    let prefix = argument_list
+        .arguments
+        .first()
+        .and_then(|argument| resolved_string_literal(argument.value(), ctx.content))
+        .map(|(prefix, _, _)| prefix.to_string());
+    let mut link = object;
+    let import = loop {
+        match link {
+            Expression::Call(Call::Method(call)) => {
+                if let ClassLikeMemberSelector::Identifier(method) = &call.method
+                    && method.value.eq_ignore_ascii_case(b"import")
+                {
+                    break Some(call.argument_list.span().start.offset);
+                }
+                link = call.object;
+            }
+            Expression::Parenthesized(inner) => link = inner.expression,
+            _ => break None,
+        }
+    };
+    let import = import.and_then(|offset| {
+        ctx.route_imports
+            .iter_mut()
+            .find(|(start, _)| *start == offset)
+            .map(|(_, import)| import)
+    });
+    match (import, prefix) {
+        // A later prefix goes in front of an earlier one.
+        (Some(import), Some(prefix)) => import.name_prefix.insert_str(0, &prefix),
+        (Some(import), None) => {
+            import.resource = None;
+            import.name_prefix.clear();
+        }
+        // Imported somewhere this cannot follow, so whichever routes it
+        // renames are unknown.
+        (None, _) => record_unreadable_routes(String::new(), ctx),
     }
 }
 
@@ -639,32 +883,111 @@ fn is_route_attribute(class_name: &str) -> bool {
         .any(|route| class_name.eq_ignore_ascii_case(route))
 }
 
-/// The arguments of one `#[Route]` attribute that bear on its name.
-#[derive(Default)]
-struct RouteArguments<'e, 'a> {
-    path: Option<&'e Expression<'a>>,
-    name: Option<&'e Expression<'a>>,
-    alias: Option<&'e Expression<'a>>,
+/// A route's name, as its declaration writes it.
+enum RouteName {
+    /// No name: Symfony derives one from the class and the method.
+    Absent,
+    /// A literal, with the byte range of its text.
+    Literal(String, usize, usize),
+    /// Something other than a literal, such as a constant.
+    Unreadable,
 }
 
-/// The `#[Route]` attributes in `attribute_lists`, by their arguments.
-fn route_attributes<'e, 'a>(
-    attribute_lists: &'e Sequence<'a, AttributeList<'a>>,
+/// One `#[Route]` attribute or `@Route` annotation, by what bears on the
+/// names it declares.
+struct RouteDeclaration {
+    name: RouteName,
+    /// The byte range a derived name spans: the path, or the whole
+    /// declaration when the path is not a literal.
+    at: (usize, usize),
+    /// The aliases, each with the byte range of its text.
+    aliases: Vec<(String, usize, usize)>,
+}
+
+/// The name a `#[Route]`'s `name:` gives: a literal, or a constant of
+/// `class` itself (`self::ROUTE`) whose value is one, with the byte range of
+/// the literal's text or of the whole access.
+fn route_name_value(
+    value: &Expression<'_>,
+    class: &Class<'_>,
     ctx: &ExtractionCtx<'_>,
-) -> Vec<RouteArguments<'e, 'a>> {
+) -> Option<(String, usize, usize)> {
+    if let Some((name, start, end)) = resolved_string_literal(value, ctx.content) {
+        return Some((name.to_string(), start, end));
+    }
+    let Expression::Access(Access::ClassConstant(access)) = value else {
+        return None;
+    };
+    let ClassLikeConstantSelector::Identifier(constant) = &access.constant else {
+        return None;
+    };
+    let names_class = match access.class {
+        Expression::Self_(_) | Expression::Static(_) => true,
+        Expression::Identifier(identifier) => {
+            let own = ctx.resolved_name_at(class.name.span.start.offset);
+            let named = ctx.resolved_name_at(identifier.span().start.offset);
+            own.zip(named).is_some_and(|(own, named)| {
+                own.trim_start_matches('\\')
+                    .eq_ignore_ascii_case(named.trim_start_matches('\\'))
+            })
+        }
+        _ => false,
+    };
+    if !names_class {
+        return None;
+    }
+    let item = class.members.iter().find_map(|member| {
+        let ClassLikeMember::Constant(declaration) = member else {
+            return None;
+        };
+        declaration
+            .items
+            .iter()
+            .find(|item| item.name.value == constant.value)
+    })?;
+    let (name, _, _) = resolved_string_literal(item.value, ctx.content)?;
+    // The whole access, since the constant's own name is a member access
+    // span already, and of two spans over the same text only one is kept.
+    let span = access.span();
+    Some((
+        name.to_string(),
+        span.start.offset as usize,
+        span.end.offset as usize,
+    ))
+}
+
+/// The routes the `#[Route]` attributes in `attribute_lists` declare, and
+/// the `@Route` annotations in `docblock` (its text and offset), on `class`
+/// or one of its methods.
+fn route_declarations(
+    attribute_lists: &Sequence<'_, AttributeList<'_>>,
+    docblock: Option<(&str, u32)>,
+    class: &Class<'_>,
+    ctx: &ExtractionCtx<'_>,
+) -> Vec<RouteDeclaration> {
     let mut routes = Vec::new();
     for attribute in attribute_lists
         .iter()
         .flat_map(|list| list.attributes.iter())
     {
         let written = bytes_to_str(attribute.name.value());
+        let name_span = attribute.name.span();
         let resolved = ctx
-            .resolved_name_at(attribute.name.span().start.offset)
+            .resolved_name_at(name_span.start.offset)
             .unwrap_or(written);
         if !is_route_attribute(resolved) {
             continue;
         }
-        let mut route = RouteArguments::default();
+        // The whole attribute: its class name is a span already.
+        let attribute_span = attribute.span();
+        let mut route = RouteDeclaration {
+            name: RouteName::Absent,
+            at: (
+                attribute_span.start.offset as usize,
+                attribute_span.end.offset as usize,
+            ),
+            aliases: Vec::new(),
+        };
         if let Some(arguments) = &attribute.argument_list {
             for (index, argument) in arguments.arguments.iter().enumerate() {
                 let (parameter, value) = match argument {
@@ -678,26 +1001,197 @@ fn route_attributes<'e, 'a>(
                     _ => continue,
                 };
                 match parameter {
-                    "path" => route.path = Some(value),
-                    "name" => route.name = Some(value),
-                    "alias" => route.alias = Some(value),
+                    "path" => {
+                        if let Some((_, start, end)) = resolved_string_literal(value, ctx.content) {
+                            route.at = (start, end);
+                        }
+                    }
+                    "name" => {
+                        route.name = match route_name_value(value, class, ctx) {
+                            Some((name, start, end)) => RouteName::Literal(name, start, end),
+                            None if matches!(value, Expression::Literal(Literal::Null(_))) => {
+                                RouteName::Absent
+                            }
+                            None => RouteName::Unreadable,
+                        };
+                    }
+                    "alias" => route.aliases = route_aliases(value, ctx.content),
                     _ => {}
                 }
             }
         }
         routes.push(route);
     }
+    if let Some((text, offset)) = docblock {
+        routes.extend(annotation_routes(text, offset as usize));
+    }
     routes
 }
 
-/// Emit the route names a class's `#[Route]` attributes declare.
+/// The aliases a `#[Route]`'s `alias:` declares: one name, or a list.
+fn route_aliases(value: &Expression<'_>, content: &str) -> Vec<(String, usize, usize)> {
+    let values: Vec<&Expression<'_>> = match value {
+        Expression::Array(array) => array
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                ArrayElement::Value(value) => Some(value.value),
+                _ => None,
+            })
+            .collect(),
+        alias => vec![alias],
+    };
+    values
+        .into_iter()
+        .filter_map(|alias| resolved_string_literal(alias, content))
+        .map(|(alias, start, end)| (alias.to_string(), start, end))
+        .collect()
+}
+
+/// Whether the file imports the class of the `@Route` annotation, without
+/// which a docblock's `@Route` is something else.
+fn uses_route_annotations(ctx: &mut ExtractionCtx<'_>) -> bool {
+    let content = ctx.content;
+    *ctx.uses_route_annotations.get_or_insert_with(|| {
+        ROUTE_ANNOTATIONS
+            .iter()
+            .any(|annotation| content.contains(annotation))
+    })
+}
+
+/// The docblock of the declaration at `span`, and where it starts.
+fn route_docblock<'a>(span: mago_span::Span, ctx: &ExtractionCtx<'a>) -> Option<(&'a str, u32)> {
+    get_docblock_text_with_offset(ctx.trivias, ctx.content, &span)
+}
+
+/// What one argument of an annotation is: a string, by the byte range of
+/// its text, or anything else.
+enum AnnotationValue {
+    Str(usize, usize),
+    Other,
+}
+
+/// Where the next argument of an annotation starts, from `pos`: past the
+/// whitespace and the `*` that continues a docblock line.
+fn skip_annotation_blank(doc: &[u8], mut pos: usize) -> usize {
+    while doc
+        .get(pos)
+        .is_some_and(|byte| byte.is_ascii_whitespace() || *byte == b'*')
+    {
+        pos += 1;
+    }
+    pos
+}
+
+/// The annotation value starting at `pos`, and where it ends.
+fn annotation_value(doc: &[u8], pos: usize) -> (AnnotationValue, usize) {
+    let mut pos = skip_annotation_blank(doc, pos);
+    if doc.get(pos) == Some(&b'"') {
+        return match memchr::memchr(b'"', &doc[pos + 1..]) {
+            Some(len) => (AnnotationValue::Str(pos + 1, pos + 1 + len), pos + len + 2),
+            None => (AnnotationValue::Other, doc.len()),
+        };
+    }
+    let mut depth = 0usize;
+    while let Some(&byte) = doc.get(pos) {
+        match byte {
+            b'"' => {
+                pos = memchr::memchr(b'"', &doc[pos + 1..]).map_or(doc.len(), |len| pos + len + 1);
+            }
+            b'{' | b'(' => depth += 1,
+            b'}' | b')' if depth > 0 => depth -= 1,
+            b')' | b',' => break,
+            _ => {}
+        }
+        pos += 1;
+    }
+    (AnnotationValue::Other, pos)
+}
+
+/// The `@Route(…)` annotations of a docblock that starts at `offset`.
+fn annotation_routes(doc: &str, offset: usize) -> Vec<RouteDeclaration> {
+    const TAG: &str = "@Route";
+    let bytes = doc.as_bytes();
+    let mut routes = Vec::new();
+    let mut cursor = 0;
+    while let Some(found) = doc[cursor..].find(TAG) {
+        let tag = cursor + found;
+        cursor = tag + TAG.len();
+        let mut pos = skip_annotation_blank(bytes, cursor);
+        if bytes.get(pos) != Some(&b'(') {
+            continue;
+        }
+        pos += 1;
+        let mut route = RouteDeclaration {
+            name: RouteName::Absent,
+            at: (offset + tag, offset + cursor),
+            aliases: Vec::new(),
+        };
+        let mut index = 0;
+        loop {
+            pos = skip_annotation_blank(bytes, pos);
+            match bytes.get(pos) {
+                None => break,
+                Some(b')') => {
+                    pos += 1;
+                    break;
+                }
+                Some(b',') => {
+                    index += 1;
+                    pos += 1;
+                    continue;
+                }
+                Some(_) => {}
+            }
+            // `name="…"`, `name: "…"`, or a positional value.
+            let ident_end = pos
+                + bytes[pos..]
+                    .iter()
+                    .take_while(|byte| byte.is_ascii_alphanumeric() || **byte == b'_')
+                    .count();
+            let after = skip_annotation_blank(bytes, ident_end);
+            let parameter = if ident_end > pos && matches!(bytes.get(after), Some(b'=' | b':')) {
+                let parameter = &doc[pos..ident_end];
+                pos = after + 1;
+                parameter
+            } else if index == 0 {
+                "path"
+            } else {
+                ""
+            };
+            let (value, next) = annotation_value(bytes, pos);
+            pos = next;
+            match (parameter, value) {
+                ("path" | "value", AnnotationValue::Str(start, end)) => {
+                    route.at = (offset + start, offset + end);
+                }
+                ("name", AnnotationValue::Str(start, end)) => {
+                    route.name = RouteName::Literal(
+                        doc[start..end].to_string(),
+                        offset + start,
+                        offset + end,
+                    );
+                }
+                ("name", AnnotationValue::Other) => route.name = RouteName::Unreadable,
+                _ => {}
+            }
+        }
+        cursor = cursor.max(pos);
+        routes.push(route);
+    }
+    routes
+}
+
+/// Emit the route names a class's `#[Route]` attributes and `@Route`
+/// annotations declare.
 ///
 /// A route on a method is named by its `name:`, after the name of the
-/// class's own first `#[Route]`, which prefixes every route in it.  A route
-/// with no name is given the one Symfony derives from the class and the
-/// method, spanning its path.  A class with no routes on its methods and an
-/// `__invoke()` is a single action, and its own `#[Route]`s are its routes.
-/// An alias is declared as it is written, without the prefix.
+/// class's own first route, which prefixes every route in it.  A route with
+/// no name is given the one Symfony derives from the class and the method,
+/// spanning its path.  A class with no routes on its methods and an
+/// `__invoke()` is a single action, and its own routes are its routes.  An
+/// alias is declared as it is written, without the prefix.  A name that is
+/// not a literal is recorded as one that cannot be read.
 pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
     class: &Class<'_>,
     ctx: &mut ExtractionCtx<'_>,
@@ -705,7 +1199,13 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
     if !ctx.symfony {
         return;
     }
-    let class_routes = route_attributes(&class.attribute_lists, ctx);
+    let annotations = uses_route_annotations(ctx);
+    let class_doc = if annotations {
+        route_docblock(class.span(), ctx)
+    } else {
+        None
+    };
+    let class_routes = route_declarations(&class.attribute_lists, class_doc, class, ctx);
     // Derived names are spelled from the class an action is loaded with,
     // which an abstract one never is.
     let derive = (!class.modifiers.contains_abstract())
@@ -713,12 +1213,17 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
         .flatten();
     let mut spans = Vec::new();
 
-    let prefix = class_routes
-        .first()
-        .and_then(|route| route.name)
-        .and_then(|name| resolved_string_literal(name, ctx.content))
-        .map_or("", |(name, _, _)| name);
+    let prefix = match class_routes.first().map(|route| &route.name) {
+        Some(RouteName::Literal(name, _, _)) => name.as_str(),
+        // Every route in the class takes a prefix that cannot be read.
+        Some(RouteName::Unreadable) => {
+            record_unreadable_routes(String::new(), ctx);
+            return;
+        }
+        _ => "",
+    };
     let mut any_method_route = false;
+    let mut unreadable = false;
     let mut invoke = None;
     for member in class.members.iter() {
         let ClassLikeMember::Method(method) = member else {
@@ -728,19 +1233,23 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
         if method_name.eq_ignore_ascii_case("__invoke") {
             invoke = Some(method_name);
         }
-        let routes = route_attributes(&method.attribute_lists, ctx);
+        let method_doc = if annotations {
+            route_docblock(method.span(), ctx)
+        } else {
+            None
+        };
+        let routes = route_declarations(&method.attribute_lists, method_doc, class, ctx);
         any_method_route |= !routes.is_empty();
-        push_action_route_spans(
-            &routes,
-            prefix,
-            derive,
-            method_name,
-            ctx.content,
-            &mut spans,
-        );
+        unreadable |= push_action_route_spans(&routes, prefix, derive, method_name, &mut spans);
     }
-    if !any_method_route && let Some(invoke) = invoke {
-        push_action_route_spans(&class_routes, "", derive, invoke, ctx.content, &mut spans);
+    if unreadable {
+        record_unreadable_routes(prefix.to_string(), ctx);
+    }
+    if !any_method_route
+        && let Some(invoke) = invoke
+        && push_action_route_spans(&class_routes, "", derive, invoke, &mut spans)
+    {
+        record_unreadable_routes(String::new(), ctx);
     }
     ctx.spans.extend(spans);
 }
@@ -1156,39 +1665,40 @@ fn hint_classes(hint: &Hint<'_>, ctx: &ExtractionCtx<'_>) -> Vec<String> {
     }
 }
 
-/// The spans the `#[Route]`s of one action declare.  `derive_from` is the
-/// class to derive a name from for a route that has none; Symfony numbers
-/// the unnamed routes of one action from the second one on.
+/// The spans the routes of one action declare.  `derive_from` is the class
+/// to derive a name from for a route that has none; Symfony numbers the
+/// unnamed routes of one action from the second one on.  Whether one of
+/// them has a name that cannot be read.
 fn push_action_route_spans(
-    routes: &[RouteArguments<'_, '_>],
+    routes: &[RouteDeclaration],
     prefix: &str,
     derive_from: Option<&str>,
     method: &str,
-    content: &str,
     spans: &mut Vec<SymbolSpan>,
-) {
+) -> bool {
     let mut unnamed = 0;
+    let mut unreadable = false;
     for route in routes {
-        let derived = match (route.name, derive_from) {
-            (None, Some(class)) => {
+        let derived = match (&route.name, derive_from) {
+            (RouteName::Absent, Some(class)) => {
                 unnamed += 1;
                 Some(default_route_name(class, method, unnamed - 1))
             }
             _ => None,
         };
-        push_route_spans(route, prefix, derived, content, spans);
+        unreadable |= push_route_spans(route, prefix, derived, spans);
     }
+    unreadable
 }
 
-/// The spans one `#[Route]` declares: its name, or the `derived` one over
-/// its path, and its aliases.
+/// The spans one route declares: its name, or the `derived` one, and its
+/// aliases.  Whether its name cannot be read.
 fn push_route_spans(
-    route: &RouteArguments<'_, '_>,
+    route: &RouteDeclaration,
     prefix: &str,
     derived: Option<String>,
-    content: &str,
     spans: &mut Vec<SymbolSpan>,
-) {
+) -> bool {
     let declare = |spans: &mut Vec<SymbolSpan>, key: String, start: usize, end: usize| {
         spans.push(SymbolSpan {
             start: start as u32,
@@ -1201,39 +1711,23 @@ fn push_route_spans(
             },
         });
     };
-    match route.name {
-        Some(name) => {
-            if let Some((name, start, end)) = resolved_string_literal(name, content) {
-                declare(spans, format!("{prefix}{name}"), start, end);
-            }
+    let unreadable = match &route.name {
+        RouteName::Literal(name, start, end) => {
+            declare(spans, format!("{prefix}{name}"), *start, *end);
+            false
         }
-        None => {
-            if let Some(derived) = derived
-                && let Some((_, start, end)) = route
-                    .path
-                    .and_then(|path| resolved_string_literal(path, content))
-            {
-                declare(spans, format!("{prefix}{derived}"), start, end);
+        RouteName::Absent => {
+            if let Some(derived) = derived {
+                declare(spans, format!("{prefix}{derived}"), route.at.0, route.at.1);
             }
+            false
         }
-    }
-    let aliases: Vec<&Expression<'_>> = match route.alias {
-        Some(Expression::Array(array)) => array
-            .elements
-            .iter()
-            .filter_map(|element| match element {
-                ArrayElement::Value(value) => Some(value.value),
-                _ => None,
-            })
-            .collect(),
-        Some(alias) => vec![alias],
-        None => Vec::new(),
+        RouteName::Unreadable => true,
     };
-    for alias in aliases {
-        if let Some((alias, start, end)) = resolved_string_literal(alias, content) {
-            declare(spans, alias.to_string(), start, end);
-        }
+    for (alias, start, end) in &route.aliases {
+        declare(spans, alias.clone(), *start, *end);
     }
+    unreadable
 }
 
 /// The name Symfony's framework gives a route declared without one: the
@@ -1311,7 +1805,7 @@ fn emit_autowire_value_spans(value: &Expression<'_>, content: &str, spans: &mut 
 #[cfg(test)]
 mod tests {
     use crate::names::OwnedResolvedNames;
-    use crate::symbol_map::{ReceiverClass, SymbolMap};
+    use crate::symbol_map::{ReceiverClass, RouteImport, SymbolMap};
 
     fn map_of(php: &str) -> SymbolMap {
         let arena = mago_allocator::LocalArena::new();
@@ -1471,6 +1965,93 @@ mod tests {
             vec![
                 ("about".to_string(), "about".to_string()),
                 ("admin_x".to_string(), "x".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn route_annotations_declare_prefixed_and_derived_names() {
+        let php = "<?php\nnamespace App\\Controller;\nuse Symfony\\Component\\Routing\\Annotation\\Route;\n/**\n * @Route(\"/blog\", name=\"blog_\")\n */\nclass BlogController {\n    /**\n     * @Route(\n     *     \"/{slug}\",\n     *     requirements={\"slug\": \"[a-z,)]+\"},\n     *     name=\"post\"\n     * )\n     */\n    public function post() {}\n    /** @Route(path=\"/list\") @Router(name=\"not_a_route\") */\n    public function listAction() {}\n}\n";
+        assert_eq!(
+            declared_routes(&map_of(php), php),
+            vec![
+                ("blog_post".to_string(), "post".to_string()),
+                ("blog_app_blog_list".to_string(), "/list".to_string()),
+            ]
+        );
+        // Without the annotation's class, `@Route` is something else.
+        let php = php.replace("Annotation\\Route", "Other\\Route");
+        assert!(declared_routes(&map_of(&php), &php).is_empty());
+    }
+
+    #[test]
+    fn a_route_name_that_is_not_a_literal_leaves_its_prefix_open() {
+        let php = "<?php\nnamespace App\\Controller;\nuse Symfony\\Component\\Routing\\Attribute\\Route;\n#[Route('/admin', name: 'admin_')]\nclass AdminController {\n    public const B = 'b';\n    #[Route('/a', name: Other::NAME)]\n    public function a() {}\n    #[Route('/b', name: self::B)]\n    public function b() {}\n    #[Route('/c', name: AdminController::C)]\n    public function c() {}\n    const C = 'c';\n}\n";
+        let map = map_of(php);
+        // A constant of the class itself is read; another class's is not.
+        assert_eq!(
+            declared_routes(&map, php),
+            vec![
+                ("admin_b".to_string(), "self::B".to_string()),
+                ("admin_c".to_string(), "AdminController::C".to_string()),
+            ]
+        );
+        assert_eq!(
+            map.route_imports,
+            vec![RouteImport {
+                resource: None,
+                loader: None,
+                name_prefix: "admin_".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn an_invokable_controller_named_by_its_own_constant() {
+        let php = "<?php\nnamespace App\\Controller;\nuse Symfony\\Component\\Routing\\Attribute\\Route;\n#[Route(\n    path: '/healthcheck',\n    name: self::ROUTE,\n)]\nfinal class HealthCheckController\n{\n    public const string ROUTE = 'health-check';\n\n    public function __invoke(): void {}\n}\n";
+        let map = map_of(php);
+        assert_eq!(
+            declared_routes(&map, php),
+            vec![("health-check".to_string(), "self::ROUTE".to_string())]
+        );
+        assert!(map.route_imports.is_empty());
+    }
+
+    #[test]
+    fn configurator_collections_and_imports_are_recorded() {
+        let php = "<?php\nuse Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator;\nreturn static function (RoutingConfigurator $routes, $container): void {\n    $routes->add('home', '/');\n    $routes->collection('blog_')->collection('post_')->add('show', '/x')->add('edit', '/y');\n    $archive = $routes->collection('archive_');\n    $archive->add('list', '/archive');\n    $archive = $routes;\n    $archive->add('top', '/top');\n    $routes->collection($name)->add('lost', '/lost');\n    $routes->import('../src/Admin/', 'attribute')->prefix('/admin')->namePrefix('admin_');\n    $routes->import(__DIR__.'/legacy.yaml');\n    $container->import('../config/packages/*.yaml');\n};\n";
+        let map = map_of(php);
+        let added: Vec<&str> = receivers(&map)
+            .into_iter()
+            .filter(|(_, receiver, is_write)| {
+                *receiver == ReceiverClass::RoutingConfigurator && *is_write
+            })
+            .map(|(key, _, _)| key)
+            .collect();
+        assert_eq!(
+            added,
+            vec![
+                "home",
+                "blog_post_show",
+                "blog_post_edit",
+                "archive_list",
+                "top"
+            ]
+        );
+        let import =
+            |resource: Option<&str>, loader: Option<&str>, name_prefix: &str| RouteImport {
+                resource: resource.map(str::to_string),
+                loader: loader.map(str::to_string),
+                name_prefix: name_prefix.to_string(),
+            };
+        // The collection named by a variable leaves every name open, and
+        // the container's `import()` loads no routes.
+        assert_eq!(
+            map.route_imports,
+            vec![
+                import(None, None, ""),
+                import(Some("../src/Admin/"), Some("attribute"), "admin_"),
+                import(Some("./legacy.yaml"), None, ""),
             ]
         );
     }

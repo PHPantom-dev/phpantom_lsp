@@ -12,4 +12,10 @@
      config/routes.yaml. #}
   <a href="{{ path('app_demo', {'userId': 42}) }}">{{ sender }}</a>
   <a href="{{ path('app_demo_legacy') }}">Legacy</a>
+  {# Try: go-to-definition on the route names below. config/routes.yaml
+     gives admin_dashboard its admin_ prefix, and _preview_error comes from
+     FrameworkBundle's routing file, imported in
+     config/routes/framework.yaml. #}
+  <a href="{{ path('admin_dashboard') }}">Admin</a>
+  <a href="{{ path('_preview_error', {'code': 404}) }}">Error page</a>
 {% endblock %}
