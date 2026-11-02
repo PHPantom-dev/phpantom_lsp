@@ -561,31 +561,6 @@ recognises as rendering a template.
 
 ---
 
-## F36. Twig block navigation
-
-**Impact: Medium · Complexity: Medium**
-
-Blocks full Twig support: the README keeps Twig marked as partial until this lands.
-
-```twig
-{% extends 'base.html.twig' %}
-{% block body %}…{% endblock %}
-```
-
-A `{% block %}` in a child template overrides the block of the same name
-in the template it extends, possibly several levels up, and `{{ block('x') }}`
-and `{{ parent() }}` refer to them. None of that navigates. It is the Twig
-counterpart of Blade's section and stack navigation (`blade/blocks.rs`),
-and the `extends` links are already `TwigTemplate` spans, so it needs
-the blocks each template declares and a resolver that walks up the
-chain: go to the overridden block, find the overrides of a parent's
-block, and complete the block names a child can override.
-
-**Where to look:** `src/twig/templates.rs`, `src/blade/blocks.rs`,
-`src/blade/block_index.rs`.
-
----
-
 ## F37. Twig template variables
 
 **Impact: Medium-High · Complexity: Medium-High**

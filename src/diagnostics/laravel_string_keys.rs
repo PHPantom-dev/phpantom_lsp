@@ -82,11 +82,13 @@ impl CheckedStringKind {
             // event is declared by the listeners that subscribe to it, and
             // dispatching one nobody listens to is no mistake.  Nor is
             // listening to a WordPress hook nothing in the project fires,
-            // since another plugin or a later core may fire it.
+            // since another plugin or a later core may fire it.  A block
+            // name that nothing above defines starts a new block.
             StringKeyKind::WordPressHook
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack
+            | StringKeyKind::TwigBlock
             | StringKeyKind::ContainerBinding
             | StringKeyKind::Env
             | StringKeyKind::SymfonyConfigKey

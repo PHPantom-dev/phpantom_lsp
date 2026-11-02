@@ -9,6 +9,8 @@
 //! [`roots`]), so every template file in the workspace is remembered here
 //! with those names, and the roots rediscovered when they change.
 
+pub(crate) mod block_navigation;
+pub(crate) mod blocks;
 pub(crate) mod roots;
 pub(crate) mod templates;
 

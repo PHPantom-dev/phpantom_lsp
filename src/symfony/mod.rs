@@ -162,7 +162,7 @@ impl Backend {
     /// Whether the framework a string key of `kind` belongs to is the one
     /// this project uses.
     pub(crate) fn string_key_kind_enabled(&self, kind: StringKeyKind) -> bool {
-        if kind == StringKeyKind::TwigTemplate {
+        if kind.is_twig() {
             self.is_twig_project()
         } else if kind.is_wordpress() {
             // The hook functions' names are WordPress's own, and a project
@@ -227,7 +227,7 @@ impl Backend {
     /// Visit every declaration of a `kind` key: the file and its symbol
     /// map, the span's byte range, and the key.  A route is visited under
     /// each name the imports that load it give it (see [`route_world`]).
-    fn visit_symfony_declarations(
+    pub(crate) fn visit_symfony_declarations(
         &self,
         kind: StringKeyKind,
         mut visit: impl FnMut(&str, &SymbolMap, u32, u32, &str),

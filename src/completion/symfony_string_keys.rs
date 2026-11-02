@@ -319,8 +319,8 @@ impl Backend {
     }
 
     /// Complete a service reference or parameter placeholder in a YAML or
-    /// XML configuration file, or a route name, translation key, or template
-    /// name in a Twig template.
+    /// XML configuration file, or a route name, translation key, template
+    /// name, or block name in a Twig template.
     pub(crate) fn try_symfony_resource_completion(
         &self,
         uri: &str,
@@ -343,6 +343,17 @@ impl Backend {
                 return self.symfony_names_response(
                     StringKeyKind::SymfonyTranslation,
                     messages,
+                    content,
+                    start,
+                    cursor,
+                    position,
+                );
+            }
+            if let Some((start, is_tag)) = crate::twig::blocks::block_name_start(content, cursor) {
+                let names = self.twig_block_name_candidates(uri, content, cursor, is_tag);
+                return self.symfony_names_response(
+                    StringKeyKind::TwigBlock,
+                    names,
                     content,
                     start,
                     cursor,

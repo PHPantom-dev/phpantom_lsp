@@ -90,6 +90,10 @@ pub(crate) enum StringKeyKind {
     /// `textTemplate()`, `#[Template]`, and a template's `extends`,
     /// `include`, and the other tags and functions that load one.
     TwigTemplate,
+    /// A Twig block name: defined by a template's `{% block %}` tag, and
+    /// rendered by `block()`.  A name only means something among the
+    /// templates that extend each other (see `twig::block_navigation`).
+    TwigBlock,
     /// A bundle configuration key, as its dotted path from the bundle's
     /// root (`acme_demo.mailer.dsn`): declared by a `TreeBuilder` schema in
     /// a `getConfigTreeBuilder()` (see `symfony::config_tree`), and read by
@@ -156,6 +160,11 @@ impl StringKeyKind {
                 | Self::SymfonyEvent
                 | Self::MessengerBus
         )
+    }
+
+    /// Whether this key belongs to Twig, whatever the framework around it.
+    pub(crate) const fn is_twig(self) -> bool {
+        matches!(self, Self::TwigTemplate | Self::TwigBlock)
     }
 
     /// Whether this key belongs to Yii.

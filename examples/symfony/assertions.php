@@ -205,6 +205,7 @@ $twig->addExtension(new RoutingExtension($urls));
 $html = $twig->render('demo/index.html.twig', ['sender' => 'PHPantom', 'support' => '', 'title' => '']);
 
 check('demo/index.html.twig extends base.html.twig', str_contains($html, '<!doctype html>'));
+check("demo/index.html.twig's title block overrides base.html.twig's, and parent() renders it", str_contains($html, '<title>Demo · Symfony demo</title>'));
 check('demo/index.html.twig includes demo/_card.html.twig', str_contains($html, 'Every string links back to its declaration'));
 check("The template's 'demo.title'|trans is translated", str_contains($html, 'Symfony intelligence'));
 check("The template's path('app_demo', ...) resolves", str_contains($html, 'href="/demo/42"'));

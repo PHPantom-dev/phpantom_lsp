@@ -19,7 +19,9 @@ use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
 use crate::atom::{AtomMap, atom};
-use crate::symbol_map::{ClassRefContext, SubjectText, SymbolKind, SymbolMap, SymbolSpan};
+use crate::symbol_map::{
+    ClassRefContext, StringKeyKind, SubjectText, SymbolKind, SymbolMap, SymbolSpan,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 enum ResourceSymbol {
@@ -110,6 +112,15 @@ impl Backend {
             return Vec::new();
         };
         match span.kind {
+            // A block name means something only where it is written, which
+            // the key alone does not say.
+            SymbolKind::StringKey {
+                kind: StringKeyKind::TwigBlock,
+                key,
+                ..
+            } if self.is_twig_project() => {
+                self.twig_block_definitions(uri, Some(span.start as usize), &key)
+            }
             SymbolKind::StringKey { kind, key, .. } if self.string_key_kind_enabled(kind) => {
                 crate::virtual_members::laravel::resolve_laravel_string_key(self, &kind, &key, uri)
             }
@@ -326,7 +337,7 @@ impl Backend {
 
 impl Backend {
     /// The spans of a Twig template: the names it is loaded by, the
-    /// templates it names, and in a Symfony project the route names and
+    /// templates and blocks it names, and in a Symfony project the route names and
     /// translation keys it reads.
     fn twig_template_spans(&self, uri: &str, content: &str, is_symfony: bool) -> Vec<SymbolSpan> {
         let roots = self.twig_roots();
@@ -344,6 +355,7 @@ impl Backend {
             content,
             |name| roots.is_template_name(name),
         ));
+        spans.extend(crate::twig::blocks::twig_block_spans(content));
         spans.sort_by_key(|span| span.start);
         spans
     }

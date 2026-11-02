@@ -51,6 +51,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         | StringKeyKind::Command
         | StringKeyKind::Section
         | StringKeyKind::Stack
+        | StringKeyKind::TwigBlock
         | StringKeyKind::ContainerBinding => CompletionItemKind::Value,
     }
 }
@@ -189,6 +190,7 @@ impl Backend {
             | StringKeyKind::YiiRouteArgument
             | StringKeyKind::Section
             | StringKeyKind::Stack
+            | StringKeyKind::TwigBlock
             | StringKeyKind::ContainerBinding
             | StringKeyKind::YiiView => Arc::new([]),
         }

@@ -293,6 +293,7 @@ mod symfony_forms;
 mod symfony_routes;
 mod symfony_templates;
 mod symfony_translations;
+mod twig_blocks;
 mod twig_templates;
 mod type_definition;
 mod type_hierarchy;

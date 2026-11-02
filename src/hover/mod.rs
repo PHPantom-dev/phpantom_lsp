@@ -274,7 +274,7 @@ impl Backend {
                 if !self.string_key_kind_enabled(*kind) {
                     return None;
                 }
-                self.hover_laravel_string_key(kind, key, uri)
+                self.hover_laravel_string_key(kind, key, uri, symbol.start)
             }
             SymbolKind::CommandOwnParam { name, is_option } => {
                 hover_command_own_param(content, cursor_offset as usize, name, *is_option)

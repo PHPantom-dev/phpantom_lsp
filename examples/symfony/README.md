@@ -44,6 +44,10 @@ catalogues together, the way a real Symfony project does.
   complete a name inside `render('')` or `{% include '' %}`. A template that
   does not exist is reported, in PHP and Twig alike, with quick fixes that
   change it to a close name or create it.
+- Blocks navigate between the templates that override them. In
+  `templates/demo/index.html.twig`, go to the definition of `title` or of
+  `parent()` to reach `base.html.twig`'s block, and in `base.html.twig` go to
+  the definition of `body` to reach the template that overrides it.
 - Form fields and validation mappings name the properties of the class they
   map. In `src/Form/RegistrationType.php` or `config/validator/User.yaml`, go
   to the definition of `email`, find the references of `$displayName` in

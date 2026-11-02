@@ -419,6 +419,9 @@ impl Backend {
                 if !self.string_key_kind_enabled(*kind) {
                     return Vec::new();
                 }
+                if *kind == crate::symbol_map::StringKeyKind::TwigBlock {
+                    return self.twig_block_references(uri, Some(span_start as usize), key);
+                }
                 if *kind == crate::symbol_map::StringKeyKind::WordPressHook {
                     return self.wordpress_hook_references(
                         key,

@@ -1,5 +1,11 @@
 {% extends 'base.html.twig' %}
 
+{# Try: go-to-definition on title, which leads to the block it overrides in
+   base.html.twig, or on parent(), which renders that block. In
+   base.html.twig, go-to-definition on body leads back here, and completion
+   after a new {% block offers the blocks this template can override. #}
+{% block title %}Demo · {{ parent() }}{% endblock %}
+
 {% block body %}
   {# Try: find references on 'demo.title'. DemoController translates it too,
      and translations/messages.en.yaml declares it. #}
