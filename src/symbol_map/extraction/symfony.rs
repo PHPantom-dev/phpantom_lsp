@@ -10,7 +10,8 @@
 //! `#[AsMessageHandler]` attributes, `TranslatableMessage`, `BusNameStamp`,
 //! and `t()` are recognised by their resolved name.
 //! A method call names one only on the right receiver: `get()` on a
-//! container, `set()` on a configurator, `generate()` on a URL generator,
+//! container, `set()` on a configurator, `register()` on a container
+//! builder, `generate()` on a URL generator,
 //! `trans()` on a translator, `render()` on a controller or Twig,
 //! `dispatch()` on an event dispatcher.  Those names are far too common to
 //! claim on sight, and the receiver's spelling does not settle what it is
@@ -27,6 +28,8 @@ use crate::symfony::translations::{DEFAULT_DOMAIN, is_domain_name, translation_k
 use crate::virtual_members::laravel::helpers::{resolved_string_literal, string_literal_at_range};
 
 const CONFIGURATOR_NS: &str = SYMFONY_CONTAINER_CONFIGURATOR_NS;
+const DEFINITION: &str = "Symfony\\Component\\DependencyInjection\\Definition";
+const CHILD_DEFINITION: &str = "Symfony\\Component\\DependencyInjection\\ChildDefinition";
 const AUTOWIRE_ATTRIBUTE: &str = "Symfony\\Component\\DependencyInjection\\Attribute\\Autowire";
 const TEMPLATE_ATTRIBUTE: &str = "Symfony\\Bridge\\Twig\\Attribute\\Template";
 const TRANSLATABLE_MESSAGE: &str = "Symfony\\Component\\Translation\\TranslatableMessage";
@@ -71,13 +74,27 @@ pub(crate) fn symfony_receiver_method(
     // turned away on a single byte.
     if !matches!(
         member_name.as_bytes().first().map(u8::to_ascii_lowercase),
-        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't')
+        Some(b'g' | b'h' | b's' | b'a' | b'd' | b'r' | b't' | b'p' | b'f')
     ) {
         return None;
     }
     let is = |name: &str| member_name.eq_ignore_ascii_case(name);
     match index {
         0 if is("get") || is("has") => Some((ReceiverClass::ContainerLookup, false)),
+        0 if is("register") || is("autowire") || is("setDefinition") || is("setAlias") => {
+            Some((ReceiverClass::ContainerBuilder, true))
+        }
+        1 if is("setAlias") => Some((ReceiverClass::ContainerBuilder, false)),
+        0 if is("getDefinition")
+            || is("findDefinition")
+            || is("hasDefinition")
+            || is("removeDefinition")
+            || is("getAlias")
+            || is("hasAlias")
+            || is("removeAlias") =>
+        {
+            Some((ReceiverClass::ContainerBuilder, false))
+        }
         0 if is("generateUrl") || is("redirectToRoute") => {
             Some((ReceiverClass::ControllerRouting, false))
         }
@@ -93,7 +110,7 @@ pub(crate) fn symfony_receiver_method(
         // as another one for the second, a service or a route.
         0 if is("alias") => Some((ReceiverClass::ConfiguratorAlias, true)),
         1 if is("alias") => Some((ReceiverClass::ConfiguratorAlias, false)),
-        0 if is("decorate") => Some((ReceiverClass::ServiceConfigurator, false)),
+        0 if is("decorate") || is("parent") => Some((ReceiverClass::ServiceConfigurator, false)),
         0 if is("trans") => Some((ReceiverClass::Translator, false)),
         2 if is("trans") => Some((ReceiverClass::TranslatorDomain, false)),
         0 if is("render")
@@ -148,6 +165,12 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
     if ctx.symfony && member_name.eq_ignore_ascii_case("namePrefix") {
         record_route_name_prefix(object, argument_list, ctx);
         return;
+    }
+    if ctx.symfony {
+        record_configurator_placeholders(member_name, argument_list, ctx);
+        if member_name.eq_ignore_ascii_case("parent") {
+            record_configured_parent(object, argument_list, ctx);
+        }
     }
     // A Yii `generateFromCurrent()` takes its fallback route fourth.
     for (index, argument) in argument_list.arguments.iter().take(4).enumerate() {
@@ -218,16 +241,19 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             receiver,
         });
         if is_write {
-            record_declared_value(receiver, start as u32, argument_list, ctx);
+            record_declared_value(receiver, member_name, start as u32, argument_list, ctx);
         }
     }
 }
 
-/// Record what a configurator's `set('app.mailer', Mailer::class)` or
-/// `alias('app.mailer', 'app.smtp_mailer')` declares its name as, keyed
-/// by the name's site at `start`.
+/// Record what a declaring call says its name is, keyed by the name's site
+/// at `start`: the class of a configurator's `set('app.mailer',
+/// Mailer::class)` or a builder's `register('app.mailer', Mailer::class)`,
+/// the target of an `alias()` or `setAlias()`, the definition a
+/// `setDefinition()` is given, and the value of a parameter.
 fn record_declared_value(
     receiver: ReceiverClass,
+    member_name: &str,
     start: u32,
     argument_list: &ArgumentList<'_>,
     ctx: &mut ExtractionCtx<'_>,
@@ -235,17 +261,82 @@ fn record_declared_value(
     let Some(Argument::Positional(value)) = argument_list.arguments.get(1) else {
         return;
     };
-    let value = match receiver {
-        ReceiverClass::ConfiguratorSet => configured_value(value.value, ctx),
-        ReceiverClass::ConfiguratorAlias => resolved_string_literal(value.value, ctx.content)
+    let alias = |value: &Expression<'_>| {
+        resolved_string_literal(value, ctx.content)
             .filter(|(target, _, _)| !target.is_empty())
-            .map(|(target, _, _)| ContainerValue::Alias(crate::atom::atom(target))),
+            .map(|(target, _, _)| ContainerValue::Alias(crate::atom::atom(target)))
+    };
+    let value = match receiver {
+        ReceiverClass::ConfiguratorSet | ReceiverClass::ParameterHolder => {
+            configured_value(value.value, ctx)
+        }
+        ReceiverClass::ConfiguratorAlias => alias(value.value),
+        ReceiverClass::ContainerBuilder if member_name.eq_ignore_ascii_case("setAlias") => {
+            alias(value.value)
+        }
+        ReceiverClass::ContainerBuilder if member_name.eq_ignore_ascii_case("setDefinition") => {
+            defined_value(value.value, ctx)
+        }
+        ReceiverClass::ContainerBuilder => configured_value(value.value, ctx)
+            .filter(|value| matches!(value, ContainerValue::Class(_))),
         _ => None,
     };
     if let Some(value) = value {
         ctx.container_values
             .push(ContainerValueSite { start, value });
     }
+}
+
+/// What a `new Definition(Mailer::class)` or `new ChildDefinition('app.base')`
+/// handed to `setDefinition()` builds the service from.
+fn defined_value(value: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> Option<ContainerValue> {
+    let Expression::Instantiation(instantiation) = value else {
+        return None;
+    };
+    let Expression::Identifier(identifier) = instantiation.class else {
+        return None;
+    };
+    let written = bytes_to_str(identifier.value());
+    let resolved = ctx
+        .resolved_name_at(identifier.span().start.offset)
+        .unwrap_or(written)
+        .trim_start_matches('\\');
+    let Some(Argument::Positional(first)) = instantiation.argument_list.as_ref()?.arguments.first()
+    else {
+        return None;
+    };
+    if resolved.eq_ignore_ascii_case(DEFINITION) {
+        configured_value(first.value, ctx).filter(|value| matches!(value, ContainerValue::Class(_)))
+    } else if resolved.eq_ignore_ascii_case(CHILD_DEFINITION) {
+        resolved_string_literal(first.value, ctx.content)
+            .filter(|(parent, _, _)| !parent.is_empty())
+            .map(|(parent, _, _)| ContainerValue::Parent(crate::atom::atom(parent)))
+    } else {
+        None
+    }
+}
+
+/// The site of the ID a configurator chain's `set()` names, when `object`
+/// is that chain: the configurator methods in between (`->args()`,
+/// `->tag()`) return the same service's configurator.
+fn chained_service_start(object: &Expression<'_>, ctx: &mut ExtractionCtx<'_>) -> Option<u32> {
+    let mut link = object;
+    let set = loop {
+        let Expression::Call(Call::Method(call)) = link else {
+            return None;
+        };
+        if let ClassLikeMemberSelector::Identifier(name) = &call.method
+            && name.value.eq_ignore_ascii_case(b"set")
+        {
+            break call;
+        }
+        link = call.object;
+    };
+    let Some(Argument::Positional(id)) = set.argument_list.arguments.first() else {
+        return None;
+    };
+    let (_, start, _) = resolved_string_literal(id.value, ctx.content)?;
+    uses_configurators(CONFIGURATOR_NS, ctx).then_some(start as u32)
 }
 
 /// Record the class a configurator's `->set('app.mailer')->class(Mailer::class)`
@@ -258,34 +349,117 @@ fn record_configured_class(
     let Some(Argument::Positional(class)) = argument_list.arguments.first() else {
         return;
     };
-    // The configurator methods in between (`->args()`, `->tag()`) return
-    // the same service's configurator.
-    let mut link = object;
-    let set = loop {
-        let Expression::Call(Call::Method(call)) = link else {
-            return;
-        };
-        if let ClassLikeMemberSelector::Identifier(name) = &call.method
-            && name.value.eq_ignore_ascii_case(b"set")
-        {
-            break call;
-        }
-        link = call.object;
-    };
-    let Some(Argument::Positional(id)) = set.argument_list.arguments.first() else {
+    let Some(start) = chained_service_start(object, ctx) else {
         return;
     };
-    let Some((_, start, _)) = resolved_string_literal(id.value, ctx.content) else {
+    if let Some(value @ ContainerValue::Class(_)) = configured_value(class.value, ctx) {
+        ctx.container_values
+            .push(ContainerValueSite { start, value });
+    }
+}
+
+/// Record the service a configurator's `->set('app.cache')->parent('app.base')`
+/// inherits its definition from, keyed by the ID the chain's `set()` names.
+fn record_configured_parent(
+    object: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some(Argument::Positional(parent)) = argument_list.arguments.first() else {
         return;
     };
-    if !uses_configurators(CONFIGURATOR_NS, ctx) {
+    let Some((parent, _, _)) = resolved_string_literal(parent.value, ctx.content)
+        .filter(|(parent, _, _)| !parent.is_empty())
+    else {
+        return;
+    };
+    let parent = crate::atom::atom(parent);
+    let Some(start) = chained_service_start(object, ctx) else {
+        return;
+    };
+    ctx.container_values.push(ContainerValueSite {
+        start,
+        value: ContainerValue::Parent(parent),
+    });
+}
+
+/// Whether a configurator's `member_name` call may hold `%name%`
+/// placeholders in its arguments from `from` on: a service's arguments,
+/// bindings, method calls, properties, and factory, and the value a
+/// `set()` gives a parameter or the class it gives a service.
+fn placeholder_arguments_from(member_name: &str) -> Option<usize> {
+    let is = |name: &str| member_name.eq_ignore_ascii_case(name);
+    if is("set") {
+        Some(1)
+    } else if is("args")
+        || is("arg")
+        || is("bind")
+        || is("call")
+        || is("property")
+        || is("factory")
+        || is("configurator")
+    {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+/// Record the `%name%` placeholders in the strings a configurator call
+/// passes, for the type engine to confirm the receiver is a configurator.
+fn record_configurator_placeholders(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let Some(from) = placeholder_arguments_from(member_name) else {
+        return;
+    };
+    let mut found = Vec::new();
+    for argument in argument_list.arguments.iter().skip(from) {
+        placeholder_strings(argument.value(), &mut found);
+    }
+    if found.is_empty() || !uses_configurators(CONFIGURATOR_NS, ctx) {
         return;
     }
-    if let Some(value @ ContainerValue::Class(_)) = configured_value(class.value, ctx) {
-        ctx.container_values.push(ContainerValueSite {
-            start: start as u32,
-            value,
+    for (start, end) in found {
+        let Some(text) = ctx.content.get(start as usize..end as usize) else {
+            continue;
+        };
+        crate::symfony::resources::for_each_parameter_placeholder(text, |name, offset| {
+            let start = start + offset as u32;
+            ctx.typed_receiver_sites.push(TypedReceiverSite {
+                start,
+                end: start + name.len() as u32,
+                key: name.to_string(),
+                is_write: false,
+                is_optional: false,
+                receiver: ReceiverClass::ConfiguratorArgument,
+            });
         });
+    }
+}
+
+/// The contents of each string literal holding a `%` in `value`, and in
+/// the arrays it builds, as byte ranges inside the quotes.
+fn placeholder_strings(value: &Expression<'_>, found: &mut Vec<(u32, u32)>) {
+    let elements = match value {
+        Expression::Literal(Literal::String(string)) => {
+            if string.raw.contains(&b'%') {
+                found.push((string.span.start.offset + 1, string.span.end.offset - 1));
+            }
+            return;
+        }
+        Expression::Array(array) => &array.elements,
+        Expression::LegacyArray(array) => &array.elements,
+        _ => return,
+    };
+    for element in elements.iter() {
+        match element {
+            ArrayElement::Value(element) => placeholder_strings(element.value, found),
+            ArrayElement::KeyValue(element) => placeholder_strings(element.value, found),
+            _ => {}
+        }
     }
 }
 
@@ -1855,6 +2029,33 @@ mod tests {
     }
 
     #[test]
+    fn builder_calls_parents_and_placeholders_are_recorded() {
+        let builder = "<?php\nfunction f($container) {\n    $container->register('app.a', A::class);\n    $container->setAlias('app.b', 'app.a');\n    $container->findDefinition('app.a');\n}\n";
+        assert_eq!(
+            receivers(&map_of(builder)),
+            vec![
+                ("app.a", ReceiverClass::ContainerBuilder, true),
+                ("app.b", ReceiverClass::ContainerBuilder, true),
+                ("app.a", ReceiverClass::ContainerBuilder, false),
+                ("app.a", ReceiverClass::ContainerBuilder, false),
+            ]
+        );
+
+        let configurator = "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nreturn static function (ContainerConfigurator $c): void {\n    $c->services()->set('app.c')->parent('app.base')->args(['%app.x%/%app.y%', 'k' => ['50%'], '%%app.z%%']);\n    $c->parameters()->set('app.p', '%app.q%');\n};\n";
+        assert_eq!(
+            receivers(&map_of(configurator)),
+            vec![
+                ("app.c", ReceiverClass::ConfiguratorSet, true),
+                ("app.base", ReceiverClass::ServiceConfigurator, false),
+                ("app.x", ReceiverClass::ConfiguratorArgument, false),
+                ("app.y", ReceiverClass::ConfiguratorArgument, false),
+                ("app.p", ReceiverClass::ConfiguratorSet, true),
+                ("app.q", ReceiverClass::ConfiguratorArgument, false),
+            ]
+        );
+    }
+
+    #[test]
     fn configurator_calls_record_what_they_declare() {
         use crate::symbol_map::ContainerValue;
         let php = "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nuse App\\Mailer;\nreturn static function (ContainerConfigurator $c): void {\n    $c->services()->set('app.mailer', Mailer::class);\n    $c->services()->set('app.smtp')->args([])->class('App\\\\Smtp');\n    $c->services()->alias('app.alias', 'app.mailer');\n    $c->parameters()->set('app.port', 25);\n    $c->parameters()->set('app.name', 'PHPantom');\n};\n";
@@ -1871,6 +2072,7 @@ mod tests {
                 let value = match &site.value {
                     ContainerValue::Class(class) => format!("class {class}"),
                     ContainerValue::Alias(id) => format!("alias {id}"),
+                    ContainerValue::Parent(id) => format!("parent {id}"),
                     ContainerValue::Type(ty) => ty.to_string(),
                 };
                 (key, value)

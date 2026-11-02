@@ -35,15 +35,27 @@ const STUBS: &[(&str, &str)] = &[
     ),
     (
         "stubs/dependency-injection/Loader/Configurator/ServicesConfigurator.php",
-        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ServicesConfigurator {\n    public function set(?string $id, ?string $class = null): ServiceConfigurator {}\n    public function alias(string $id, string $referencedId): void {}\n}\n",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ServicesConfigurator extends AbstractConfigurator {\n    public function set(?string $id, ?string $class = null): ServiceConfigurator {}\n    public function alias(string $id, string $referencedId): void {}\n}\n",
     ),
     (
         "stubs/dependency-injection/Loader/Configurator/ServiceConfigurator.php",
-        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ServiceConfigurator {\n    public function decorate(?string $id): static {}\n}\n",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ServiceConfigurator extends AbstractConfigurator {\n    public function decorate(?string $id): static {}\n    public function parent(string $parent): static {}\n    public function args(array $arguments): static {}\n}\n",
+    ),
+    (
+        "stubs/dependency-injection/Loader/Configurator/AbstractConfigurator.php",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nabstract class AbstractConfigurator {}\n",
     ),
     (
         "stubs/dependency-injection/Loader/Configurator/ParametersConfigurator.php",
-        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ParametersConfigurator {\n    public function set(string $name, mixed $value): static {}\n}\n",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ParametersConfigurator extends AbstractConfigurator {\n    public function set(string $name, mixed $value): static {}\n}\n",
+    ),
+    (
+        "stubs/dependency-injection/ContainerBuilder.php",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection;\nclass ContainerBuilder implements ContainerInterface {\n    public function get(string $id): mixed {}\n    public function has(string $id): bool {}\n    public function getParameter(string $name): mixed {}\n    public function setParameter(string $name, mixed $value): void {}\n    public function register(string $id, ?string $class = null): Definition {}\n    public function setDefinition(string $id, Definition $definition): Definition {}\n    public function setAlias(string $alias, string $id): void {}\n    public function getDefinition(string $id): Definition {}\n}\n",
+    ),
+    (
+        "stubs/dependency-injection/Definition.php",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection;\nclass Definition {\n    public function __construct(?string $class = null) {}\n}\n",
     ),
     (
         "stubs/dependency-injection/Attribute/Autowire.php",
@@ -72,6 +84,7 @@ return static function (ContainerConfigurator $container): void {
     $services->set('app.decorator')->decorate('app.mailer');
     $parameters->set('app.php_sender', 'PHPantom');
     $services->set('app.newsletter')->args([service('app.mailer'), param('app.sender_name')]);
+    $services->set('app.child')->parent('app.mailer')->args(['%app.sender_name%', 'plain %']);
 };
 "#;
 
@@ -256,6 +269,7 @@ async fn references_reach_yaml_php_configurators_and_lookups() {
             (consumer.clone(), 19),
             (php_config.clone(), 9),
             (php_config.clone(), 11),
+            (php_config.clone(), 12),
             (yaml.clone(), 3),
             (yaml.clone(), 6),
         ])
@@ -273,6 +287,7 @@ async fn references_reach_yaml_php_configurators_and_lookups() {
             (consumer.clone(), 9),
             (consumer.clone(), 13),
             (php_config.clone(), 11),
+            (php_config.clone(), 12),
             (yaml.clone(), 1),
             (yaml.clone(), 5),
         ])
@@ -459,4 +474,233 @@ function send(ContainerInterface $container): void {
             "Unknown service: 'app.missing'".to_string(),
         ]
     );
+}
+
+const KERNEL_PHP: &str = r#"<?php
+namespace App;
+
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Definition;
+
+final class Kernel
+{
+    protected function build(ContainerBuilder $container): void
+    {
+        $container->register('app.registered', \App\Service\Mailer::class);
+        $container->setDefinition('app.defined', new Definition(\App\Service\Mailer::class));
+        $container->setAlias('app.registered_alias', 'app.registered');
+        $container->setParameter('app.built_sender', 'PHPantom');
+        $container->getDefinition('app.registered');
+    }
+}
+"#;
+
+#[tokio::test]
+async fn a_container_builder_declares_services_and_parameters() {
+    let consumer = r#"<?php
+use Symfony\Component\DependencyInjection\ContainerInterface;
+
+function send(ContainerInterface $container): void {
+    $container->get('app.registered');
+    $container->get('app.registered_alias');
+    $container->get('app.defined');
+    $container->getParameter('app.built_sender');
+    $container->get('app.unregistered');
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("src/Kernel.php", KERNEL_PHP),
+        ("config/services.yaml", SERVICES_YAML),
+        ("src/consumer.php", consumer),
+    ])
+    .await;
+    let kernel = uri_for(&dir, "src/Kernel.php");
+    let consumer_uri = uri_for(&dir, "src/consumer.php");
+
+    for (needle, line) in [
+        ("get('app.registered')", 10),
+        ("get('app.registered_alias')", 12),
+        ("get('app.defined')", 11),
+        ("getParameter('app.built_sender')", 13),
+    ] {
+        let found = definitions(
+            &backend,
+            &consumer_uri,
+            position_in(consumer, needle, needle.find('\'').unwrap() + 3),
+        )
+        .await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!((&found[0].uri, found[0].range.start.line), (&kernel, line));
+    }
+
+    // The alias's target and a definition lookup read the declared name.
+    let found = references(
+        &backend,
+        &kernel,
+        position_in(KERNEL_PHP, "register('app.registered'", 12),
+    )
+    .await;
+    assert_eq!(
+        found,
+        sorted(vec![
+            (consumer_uri.clone(), 4),
+            (kernel.clone(), 10),
+            (kernel.clone(), 12),
+            (kernel.clone(), 14),
+        ])
+    );
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(consumer_uri.as_str(), consumer, &mut diagnostics);
+    let reported: Vec<String> = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(Code::String(code)) if code.starts_with("invalid_symfony_")
+            )
+        })
+        .map(|diagnostic| message_text(&diagnostic.message).to_string())
+        .collect();
+    assert_eq!(
+        reported,
+        vec!["Unknown service: 'app.unregistered'".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn a_configurator_names_a_parent_and_placeholders_in_its_arguments() {
+    let (backend, dir) = workspace(&[
+        ("config/services.yaml", SERVICES_YAML),
+        ("config/services.php", SERVICES_PHP),
+    ])
+    .await;
+    let yaml = uri_for(&dir, "config/services.yaml");
+    let php_config = uri_for(&dir, "config/services.php");
+
+    let found = definitions(
+        &backend,
+        &php_config,
+        position_in(SERVICES_PHP, "parent('app.mailer')", 10),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((&found[0].uri, found[0].range.start.line), (&yaml, 3));
+
+    let found = definitions(
+        &backend,
+        &php_config,
+        position_in(SERVICES_PHP, "'%app.sender_name%'", 4),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((&found[0].uri, found[0].range.start.line), (&yaml, 1));
+}
+
+const BUNDLE_INSTALLED: &str = r#"{ "packages": [ {
+    "name": "acme/demo-bundle",
+    "install-path": "../acme/demo-bundle",
+    "autoload": { "psr-4": { "Acme\\DemoBundle\\": "src/" } }
+} ] }"#;
+
+const BUNDLE_SERVICES: &str = r#"<?php
+namespace Symfony\Component\DependencyInjection\Loader\Configurator;
+
+return static function (ContainerConfigurator $container) {
+    $container->parameters()->set('acme_demo.greeting', 'Hello');
+    $container->services()
+        ->set('acme_demo.greeter', \Acme\DemoBundle\Greeter::class)
+        ->set('.acme_demo.hidden');
+};
+"#;
+
+#[tokio::test]
+async fn an_installed_bundle_declares_services_and_parameters() {
+    let consumer = r#"<?php
+use Symfony\Component\DependencyInjection\ContainerInterface;
+
+function greet(ContainerInterface $container): void {
+    $container->get('acme_demo.greeter');
+    $container->getParameter('acme_demo.greeting');
+    $container->get('acme_demo.');
+    $greeter = $container->get('acme_demo.greeter');
+    $greeter;
+}
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    let files: Vec<(&str, &str)> = STUBS
+        .iter()
+        .copied()
+        .chain([
+            ("composer.json", COMPOSER),
+            ("vendor/composer/installed.json", BUNDLE_INSTALLED),
+            (
+                "vendor/acme/demo-bundle/src/AcmeDemoBundle.php",
+                "<?php\nnamespace Acme\\DemoBundle;\nfinal class AcmeDemoBundle {}\n",
+            ),
+            (
+                "vendor/acme/demo-bundle/src/Greeter.php",
+                "<?php\nnamespace Acme\\DemoBundle;\nfinal class Greeter {\n    public function greet(): string { return ''; }\n}\n",
+            ),
+            ("vendor/acme/demo-bundle/config/services.php", BUNDLE_SERVICES),
+            (
+                "vendor/acme/demo-bundle/src/Resources/config/legacy.xml",
+                "<container><services><service id=\"acme_demo.legacy\"/></services></container>\n",
+            ),
+            ("src/consumer.php", consumer),
+        ])
+        .collect();
+    for (path, content) in &files {
+        let full = dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, content).unwrap();
+    }
+    let backend = Backend::new_test();
+    crate::common::initialize_with_options(&backend, dir.path(), None).await;
+    let consumer_uri = uri_for(&dir, "src/consumer.php");
+    open_document(&backend, &consumer_uri, "php", consumer).await;
+    let bundle_services = uri_for(&dir, "vendor/acme/demo-bundle/config/services.php");
+
+    let found = definitions(
+        &backend,
+        &consumer_uri,
+        position_in(consumer, "get('acme_demo.greeter')", 7),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        (&found[0].uri, found[0].range.start.line),
+        (&bundle_services, 6)
+    );
+
+    let found = definitions(
+        &backend,
+        &consumer_uri,
+        position_in(consumer, "getParameter('acme_demo.greeting')", 15),
+    )
+    .await;
+    assert_eq!(
+        (&found[0].uri, found[0].range.start.line),
+        (&bundle_services, 4)
+    );
+
+    let labels = completion_labels(
+        &backend,
+        &consumer_uri,
+        position_in(consumer, "get('acme_demo.')", 15),
+    )
+    .await;
+    assert!(
+        labels.contains(&"acme_demo.greeter".to_string())
+            && labels.contains(&"acme_demo.legacy".to_string())
+            && !labels.contains(&".acme_demo.hidden".to_string()),
+        "{labels:?}"
+    );
+
+    // The service is typed by the class the bundle builds it from.
+    let at = position_in(consumer, "$greeter;", 2);
+    let hover = crate::common::hover_text_at(&backend, &consumer_uri, at.line, at.character)
+        .await
+        .unwrap_or_default();
+    assert!(hover.contains(" = Greeter\n"), "{hover}");
 }

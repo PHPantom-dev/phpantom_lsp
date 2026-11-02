@@ -17,6 +17,7 @@ use App\Admin\DashboardController;
 use App\Controller\DemoController;
 use App\DependencyInjection\Configuration;
 use App\Entity\User;
+use App\DependencyInjection\AcmeDemoExtension;
 use App\EventListener\OrderPlacedListener;
 use App\Form\RegistrationType;
 use App\Message\CountWelcomeEmails;
@@ -37,6 +38,7 @@ use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\Config\Loader\DelegatingLoader;
 use Symfony\Component\Config\Loader\LoaderResolver;
+use Symfony\Component\DependencyInjection\ChildDefinition;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
 use Symfony\Component\DependencyInjection\Loader\YamlFileLoader as ServicesYamlLoader;
@@ -134,6 +136,21 @@ check('app.support_email is a parameter declared in config/services.yaml', $cont
 check('app.welcome_mailer, which app.mailer aliases, is built from WelcomeMailer', $container->getDefinition('app.welcome_mailer')->getClass() === WelcomeMailer::class);
 check('app.support_email is a string', is_string($container->getParameter('app.support_email')));
 check('The App\\ resource registers the controller as a service', $container->hasDefinition(DemoController::class));
+check("app.greeting's %app.sender_name% placeholder reads app.sender_name", $container->getParameterBag()->resolveValue($container->getParameter('app.greeting')) === 'Hello from PHPantom');
+$demoCache = $container->getDefinition('app.demo_cache');
+check('app.demo_cache is a child of cache.app', $demoCache instanceof ChildDefinition && $demoCache->getParent() === 'cache.app');
+
+// FrameworkBundle declares cache.app in its own configuration, read from
+// the bundle's directory.
+$frameworkServices = new ContainerBuilder();
+(new PhpFileLoader($frameworkServices, new FileLocator("$frameworkBundleDir/Resources/config")))->load('cache.php');
+check("FrameworkBundle's Resources/config/cache.php declares cache.app", $frameworkServices->hasDefinition('cache.app'));
+
+// The demo's own extension declares services through the container builder.
+(new AcmeDemoExtension())->load([Yaml::parseFile("$config/packages/acme_demo.yaml")['acme_demo']], $container);
+check('AcmeDemoExtension registers app.dsn_mailer from WelcomeMailer', $container->getDefinition('app.dsn_mailer')->getClass() === WelcomeMailer::class);
+check('app.default_mailer is an alias of app.dsn_mailer', (string) $container->getAlias('app.default_mailer') === 'app.dsn_mailer');
+check('AcmeDemoExtension sets app.mailer_dsn from the bundle configuration', $container->getParameter('app.mailer_dsn') === 'smtp://localhost');
 
 // ─── Events ─────────────────────────────────────────────────────────────────
 

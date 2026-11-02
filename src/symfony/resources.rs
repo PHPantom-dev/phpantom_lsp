@@ -382,9 +382,22 @@ fn scan_service_references(text: &str, absolute_start: usize, spans: &mut Vec<Sy
     }
 }
 
-/// Each `%name%` parameter placeholder in `text`.  `%%` is an escaped
-/// percent sign, and `%env(…)%` reads an environment variable.
+/// Each `%name%` parameter placeholder in `text`.
 fn scan_parameter_placeholders(text: &str, absolute_start: usize, spans: &mut Vec<SymbolSpan>) {
+    for_each_parameter_placeholder(text, |name, start| {
+        spans.push(key_span(
+            StringKeyKind::ContainerParameter,
+            name,
+            absolute_start + start,
+            false,
+        ));
+    });
+}
+
+/// Call `found` with each `%name%` parameter placeholder in `text` and the
+/// offset of its name.  `%%` is an escaped percent sign, and `%env(…)%`
+/// reads an environment variable.
+pub(crate) fn for_each_parameter_placeholder(text: &str, mut found: impl FnMut(&str, usize)) {
     let bytes = text.as_bytes();
     let mut cursor = 0usize;
     while let Some(relative) = memchr::memchr(b'%', &bytes[cursor..]) {
@@ -395,12 +408,7 @@ fn scan_parameter_placeholders(text: &str, absolute_start: usize, spans: &mut Ve
         let close = open + 1 + close_relative;
         let name = &text[open + 1..close];
         if is_container_key(name) {
-            spans.push(key_span(
-                StringKeyKind::ContainerParameter,
-                name,
-                absolute_start + open + 1,
-                false,
-            ));
+            found(name, open + 1);
             cursor = close + 1;
         } else {
             // `50% of the 100%` pairs the wrong signs: try the closing one
@@ -660,6 +668,7 @@ mod tests {
                 let value = match site.value {
                     ContainerValue::Class(class) => format!("class {class}"),
                     ContainerValue::Alias(id) => format!("alias {id}"),
+                    ContainerValue::Parent(id) => format!("parent {id}"),
                     ContainerValue::Type(ty) => ty.to_string(),
                 };
                 (name, value)

@@ -346,30 +346,6 @@ feeding to the framework index the YAML occurrences are kept in. Sidux's
 
 ---
 
-## F26. Symfony service IDs a bundle or a definition API declares
-
-**Impact: Low-Medium · Complexity: Medium**
-
-Service IDs and container parameters are read from the application's YAML,
-XML, and PHP configurators. A bundle's own declarations, and the ones a
-kernel or an extension makes through the `ContainerBuilder` API
-(`register('app.mailer', …)`, `setAlias()`, `setParameter()` on a builder,
-`setDefinition()`), are not, so those names neither complete nor navigate,
-and only names under the application's own `app.` prefix can be reported
-as undeclared. Two reading shapes are missing too: a configurator's
-`->parent('app.base')`, and the `%name%` placeholders in a string a
-configurator passes as an argument (`->args(['%app.sender%'])`).
-
-Reading the installed bundles' `Resources/config/` would also let the
-unknown-ID check judge names outside `app.`; it has to stay cheap enough
-for a project with dozens of bundles.
-
-**Where to look:** `src/symbol_map/extraction/symfony.rs`
-(`symfony_receiver_method`), `src/symbol_map/string_keys.rs`
-(`ReceiverClass`), `src/symfony/`.
-
----
-
 ## F27. Symfony route parameters
 
 **Impact: Medium · Complexity: Medium**

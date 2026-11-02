@@ -294,12 +294,14 @@ impl<'a> DeclaredKeys<'a> {
             };
 
         let services = if has_service {
-            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::ServiceId)
+            backend.symfony_project_declared_names(crate::symbol_map::StringKeyKind::ServiceId)
         } else {
             Vec::new()
         };
         let parameters = if has_parameter {
-            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::ContainerParameter)
+            backend.symfony_project_declared_names(
+                crate::symbol_map::StringKeyKind::ContainerParameter,
+            )
         } else {
             Vec::new()
         };
@@ -557,11 +559,13 @@ impl<'a> DeclaredKeys<'a> {
     /// Whether `key`, a service ID or parameter, is among the `declared`
     /// ones, when that can be told at all.
     ///
-    /// The configuration read is the project's own: the services and
-    /// parameters the bundles it installs register are not, and neither are
-    /// the ones a compiler pass adds.  Symfony names an application's own
-    /// under the `app.` prefix, which no bundle uses, so only those can be
-    /// judged.  A project that declares none was not read at all.
+    /// The installed bundles' declarations are read too, but a bundle names
+    /// many of its services from the configuration it is given (a cache
+    /// pool, a Messenger bus), and a compiler pass adds more, so what they
+    /// declare is never the whole of it.  Symfony names an application's
+    /// own under the `app.` prefix, which no bundle uses, so only those can
+    /// be judged, against the project's own declarations.  A project that
+    /// declares none was not read at all.
     fn judge_application_key(declared: &[String], prefix: &str, key: &str) -> Option<bool> {
         if !key.starts_with(prefix) || declared.is_empty() {
             return None;

@@ -29,6 +29,7 @@
 //! that define its routes (see [`crate::yii`]), so the files holding one, or
 //! a route of any kind, are tracked here too.
 
+pub(crate) mod bundles;
 pub(crate) mod config_tree;
 pub(crate) mod container;
 pub(crate) mod forms;
@@ -113,6 +114,11 @@ pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
     /// The routing files of dependencies, read from disk.
     foreign_routing: route_world::ForeignRoutingFiles,
+    /// The service IDs and parameters the installed bundles declare, once
+    /// read.
+    /// Held while they are read, so the workers that ask at once read them
+    /// once.
+    bundle_declarations: parking_lot::Mutex<Option<std::sync::Arc<bundles::BundleDeclarations>>>,
     /// The translation domains an undeclared key is reported in.
     judged_translation_domains: translations::JudgedDomains,
 }
@@ -230,8 +236,21 @@ impl Backend {
 
     /// Visit every declaration of a `kind` key: the file and its symbol
     /// map, the span's byte range, and the key.  A route is visited under
-    /// each name the imports that load it give it (see [`route_world`]).
+    /// each name the imports that load it give it (see [`route_world`]),
+    /// and a service ID or parameter the installed bundles declare after
+    /// the project's own (see [`bundles`]).
     pub(crate) fn visit_symfony_declarations(
+        &self,
+        kind: StringKeyKind,
+        mut visit: impl FnMut(&str, &SymbolMap, u32, u32, &str),
+    ) {
+        self.visit_project_symfony_declarations(kind, &mut visit);
+        self.visit_bundle_declarations(kind, visit);
+    }
+
+    /// [`Self::visit_symfony_declarations`], leaving out what the installed
+    /// bundles declare.
+    fn visit_project_symfony_declarations(
         &self,
         kind: StringKeyKind,
         mut visit: impl FnMut(&str, &SymbolMap, u32, u32, &str),
@@ -293,6 +312,18 @@ impl Backend {
         names.sort_unstable();
         names.dedup();
         (names, world)
+    }
+
+    /// The service IDs or parameters the project's own configuration
+    /// declares, sorted, leaving out the installed bundles'.
+    pub(crate) fn symfony_project_declared_names(&self, kind: StringKeyKind) -> Vec<String> {
+        let mut names = Vec::new();
+        self.visit_project_symfony_declarations(kind, |_, _, _, _, key| {
+            names.push(key.to_string());
+        });
+        names.sort_unstable();
+        names.dedup();
+        names
     }
 
     /// [`Self::symfony_declared_names`], leaving out the declaration that

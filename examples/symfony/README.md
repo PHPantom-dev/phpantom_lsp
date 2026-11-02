@@ -20,7 +20,13 @@ catalogues together, the way a real Symfony project does.
   `src/Controller/DemoController.php`, go to the definition of
   `app.welcome_mailer` or `app.sender_name`, find their references, or
   complete a name inside `$container->has('')` or
-  `#[Autowire(param: '')]`.
+  `#[Autowire(param: '')]`. The names the installed bundles declare complete
+  and navigate too: in `config/services.php`, go to the definition of
+  `cache.app` to reach FrameworkBundle's own configuration. A container
+  builder declares them as well: `app.default_mailer` in `DemoController`
+  leads to `src/DependencyInjection/AcmeDemoExtension.php`. A `%name%`
+  placeholder in a configurator's string, such as `app.greeting`'s, reads
+  the parameter it names.
 - Route names navigate between their `#[Route]` attribute or
   `config/routes.yaml` entry and the controllers and Twig templates that
   link to them. In `templates/demo/index.html.twig`, go to the definition of

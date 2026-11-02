@@ -28,7 +28,6 @@
 //! argument its method passes on, which is found by reading the method (see
 //! [`Backend::typed_receiver_key_kind`]).
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
@@ -130,8 +129,8 @@ impl Backend {
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let _cache_guard =
             crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
-        let by_offset: HashMap<u32, &TypedReceiverSite> =
-            sites.iter().map(|site| (site.start, site)).collect();
+        let mut by_offset: Vec<&TypedReceiverSite> = sites.iter().collect();
+        by_offset.sort_by_key(|site| site.start);
 
         let file_ctx = self.file_context(uri);
         let loaders = self.file_loaders(&file_ctx);
@@ -442,43 +441,46 @@ struct CollectCtx<'w, 'ast, 'arena, 'sites> {
 
 /// Finds the method calls the candidate offsets belong to.
 ///
-/// A candidate is keyed by the offset of its string's contents, which is
-/// unique in the file, so a call owns exactly the candidates its own
-/// argument list spells.
+/// A candidate lies inside a string its call's argument list spells: the
+/// whole of its contents, or a `%name%` placeholder among them.  Strings
+/// do not overlap, so a call owns exactly the candidates inside its own.
 struct ReceiverCallWalker<'a, 'sites> {
-    sites: &'a HashMap<u32, &'sites TypedReceiverSite>,
+    /// Sorted by offset.
+    sites: &'a [&'sites TypedReceiverSite],
 }
 
 impl<'sites> ReceiverCallWalker<'_, 'sites> {
-    /// The candidates the argument at `index` holds: the string itself, or
-    /// the entries of the array a `first(['a', 'b'])` names.
+    /// The candidates the argument at `index` holds: in the string itself,
+    /// or in the entries of the array a `first(['a', 'b'])` or an
+    /// `args(['%app.sender%'])` builds.
     fn matching_sites(
         &self,
         expr: &Expression<'_>,
         index: usize,
         out: &mut Vec<(&'sites TypedReceiverSite, usize)>,
     ) {
-        match expr {
+        let elements = match expr {
             Expression::Literal(Literal::String(s)) => {
-                if let Some(site) = self.sites.get(&(s.span.start.offset + 1)) {
-                    out.push((site, index));
-                }
+                let (start, end) = (s.span.start.offset, s.span.end.offset);
+                let from = self.sites.partition_point(|site| site.start <= start);
+                out.extend(
+                    self.sites[from..]
+                        .iter()
+                        .take_while(|site| site.start < end)
+                        .map(|site| (*site, index)),
+                );
+                return;
             }
-            Expression::Array(array) => {
-                for element in array.elements.iter() {
-                    if let ArrayElement::Value(value) = element {
-                        self.matching_sites(value.value, index, out);
-                    }
-                }
+            Expression::Array(array) => &array.elements,
+            Expression::LegacyArray(array) => &array.elements,
+            _ => return,
+        };
+        for element in elements.iter() {
+            match element {
+                ArrayElement::Value(value) => self.matching_sites(value.value, index, out),
+                ArrayElement::KeyValue(value) => self.matching_sites(value.value, index, out),
+                _ => {}
             }
-            Expression::LegacyArray(array) => {
-                for element in array.elements.iter() {
-                    if let ArrayElement::Value(value) = element {
-                        self.matching_sites(value.value, index, out);
-                    }
-                }
-            }
-            _ => {}
         }
     }
 }

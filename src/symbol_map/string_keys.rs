@@ -446,6 +446,9 @@ pub(crate) enum ContainerValue {
     Class(Atom),
     /// The service an alias points at.
     Alias(Atom),
+    /// The service a child definition inherits from, whose class it is
+    /// built from unless it names one of its own.
+    Parent(Atom),
     /// The type of a parameter's value, generalized (`'en'` is a `string`).
     Type(crate::php_type::PhpType),
 }
@@ -517,8 +520,9 @@ const SYMFONY_SERVICES_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ServicesConfigurator";
 const SYMFONY_ABSTRACT_SERVICE_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\AbstractServiceConfigurator";
-const SYMFONY_SERVICE_CONFIGURATOR: &str =
-    "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ServiceConfigurator";
+const SYMFONY_ABSTRACT_CONFIGURATOR: &str =
+    "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\AbstractConfigurator";
+const SYMFONY_CONTAINER_BUILDER: &str = "Symfony\\Component\\DependencyInjection\\ContainerBuilder";
 const SYMFONY_PARAMETERS_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ParametersConfigurator";
 const SYMFONY_URL_GENERATOR: &str = "Symfony\\Component\\Routing\\Generator\\UrlGeneratorInterface";
@@ -583,8 +587,17 @@ pub(crate) enum ReceiverClass {
     /// one.
     ConfiguratorAlias,
     /// One service's configurator, whose `decorate()` names the service it
-    /// replaces.
+    /// replaces and whose `parent()` the one it inherits its definition
+    /// from.
     ServiceConfigurator,
+    /// Any of the container's configurators, whose arguments, bindings,
+    /// properties, and parameter values may hold `%name%` placeholders.
+    ConfiguratorArgument,
+    /// The container builder a kernel, a bundle, an extension, or a
+    /// compiler pass defines services on: `register()`, `autowire()`,
+    /// `setDefinition()`, and `setAlias()` declare a service ID, and the
+    /// rest of its definition API looks one up.
+    ContainerBuilder,
     /// What `generateUrl()` and `redirectToRoute()` take a route name in:
     /// the shortcuts a Symfony controller inherits.
     ControllerRouting,
@@ -658,7 +671,11 @@ impl ReceiverClass {
                 (SYMFONY_COLLECTION_CONFIGURATOR, SymfonyRoute),
                 (SYMFONY_ROUTE_CONFIGURATOR, SymfonyRoute),
             ],
-            Self::ServiceConfigurator => &[(SYMFONY_SERVICE_CONFIGURATOR, ServiceId)],
+            // `decorate()` and `parent()` are only on the configurators of
+            // one service, so the base class settles it.
+            Self::ServiceConfigurator => &[(SYMFONY_ABSTRACT_CONFIGURATOR, ServiceId)],
+            Self::ConfiguratorArgument => &[(SYMFONY_ABSTRACT_CONFIGURATOR, ContainerParameter)],
+            Self::ContainerBuilder => &[(SYMFONY_CONTAINER_BUILDER, ServiceId)],
             Self::ControllerRouting => &[(SYMFONY_ABSTRACT_CONTROLLER, SymfonyRoute)],
             Self::UrlGenerator => &[
                 (SYMFONY_URL_GENERATOR, SymfonyRoute),
@@ -697,7 +714,7 @@ impl ReceiverClass {
     /// container or the routes with.  Empty for any other receiver.
     pub(crate) fn configurator_namespaces(self) -> &'static [&'static str] {
         match self {
-            Self::ConfiguratorSet | Self::ServiceConfigurator => {
+            Self::ConfiguratorSet | Self::ServiceConfigurator | Self::ConfiguratorArgument => {
                 &[SYMFONY_CONTAINER_CONFIGURATOR_NS]
             }
             Self::RoutingConfigurator => &[SYMFONY_ROUTING_CONFIGURATOR_NS],

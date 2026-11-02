@@ -40,6 +40,11 @@ final class DemoController extends AbstractController
         // config/services.yaml is a string.
         $mailer = $container->get('app.mailer');
         $mailer->send($userId);
+        // Try: go-to-definition on 'app.default_mailer', which
+        // src/DependencyInjection/AcmeDemoExtension.php declares with the
+        // container builder, or complete inside get('') to see the services
+        // the installed bundles declare too, such as 'cache.app'.
+        $container->get('app.default_mailer')->send($userId);
         // Try: complete a route name inside generateUrl('').
         $this->generateUrl('app_demo', ['userId' => $userId]);
         // Try: go-to-definition on a translation key, or complete one inside
