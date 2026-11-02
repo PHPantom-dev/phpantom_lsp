@@ -940,6 +940,22 @@ const THEME_INVOKERS: [HookInvoker; 4] = [
     invoker("alterForTheme", 1, true, None),
 ];
 
+/// What a call of `method` invokes in its positional argument `index`:
+/// the receiver it needs, and whether the argument is an alter type.
+pub(crate) fn hook_invocation(method: &str, index: usize) -> Option<(ReceiverClass, bool)> {
+    let find = |invokers: &'static [HookInvoker]| {
+        invokers
+            .iter()
+            .find(|invoker| invoker.method.eq_ignore_ascii_case(method) && invoker.hook == index)
+    };
+    match (find(&MODULE_INVOKERS), find(&THEME_INVOKERS)) {
+        (Some(invoker), Some(_)) => Some((ReceiverClass::Hooks, invoker.alter)),
+        (Some(invoker), None) => Some((ReceiverClass::ModuleHooks, invoker.alter)),
+        (None, Some(invoker)) => Some((ReceiverClass::ThemeHooks, invoker.alter)),
+        (None, None) => None,
+    }
+}
+
 /// Record the hooks a call may invoke, for the type engine to confirm
 /// against its receiver: a module handler's or a theme manager's.  An
 /// alter type names the hook `<type>_alter`, and a list of them names one

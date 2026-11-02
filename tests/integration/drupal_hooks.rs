@@ -413,3 +413,149 @@ async fn computed_hook_names_reach_their_documented_pattern() {
     .await;
     assert_eq!(found, vec![(api, 3), (module, 3)], "{found:?}");
 }
+
+/// Hooks complete where an implementation is named and where a hook name is
+/// written, an alter call's without its `_alter`.
+#[tokio::test]
+async fn hooks_complete_with_their_documented_signature() {
+    let module = "<?php\n\nfunction acme_fo\n";
+    let hooks = HOOKS.replace("#[Hook('form_alter')]", "#[Hook('')]");
+    let invoker = INVOKER
+        .replace("alter('form', $form)", "alter('', $form)")
+        .replace("invokeAll('cron')", "invokeAll('')");
+    let (backend, dir) = drupal(
+        &[
+            (FORM_API_PATH, FORM_API),
+            HOOK_ATTRIBUTE,
+            INVOKER_STUBS[0],
+            INVOKER_STUBS[1],
+            (
+                "web/core/lib/Drupal/Core/Form/FormStateInterface.php",
+                "<?php\nnamespace Drupal\\Core\\Form;\ninterface FormStateInterface {}\n",
+            ),
+        ],
+        &[
+            ("web/modules/custom/acme/acme.module", module),
+            (HOOKS_PATH, hooks.as_str()),
+            (INVOKER_PATH, invoker.as_str()),
+        ],
+    )
+    .await;
+    let module_uri = uri_for(&dir, "web/modules/custom/acme/acme.module");
+    references_at(&backend, &module_uri, position_in(module, "acme_fo", 1)).await;
+
+    let position = position_in(module, "acme_fo\n", 7);
+    let response = crate::common::completion_response(
+        &backend,
+        &module_uri,
+        position.line,
+        position.character,
+        None,
+    )
+    .await;
+    let items = match response {
+        Some(tower_lsp_server::gen_lsp_types::CompletionResponse::CompletionItemList(items)) => {
+            items
+        }
+        Some(tower_lsp_server::gen_lsp_types::CompletionResponse::CompletionList(list)) => {
+            list.items
+        }
+        None => Vec::new(),
+    };
+    let form_alter = items
+        .iter()
+        .find(|item| item.label == "acme_form_alter")
+        .expect("acme_form_alter offered");
+    let Some(tower_lsp_server::gen_lsp_types::CompletionItemTextEdit::TextEdit(edit)) =
+        &form_alter.text_edit
+    else {
+        panic!("{form_alter:?}");
+    };
+    assert_eq!(
+        edit.new_text,
+        "acme_form_alter(&\\$form, Drupal\\\\Core\\\\Form\\\\FormStateInterface \\$form_state, \\$form_id) {\n\t$1\n}"
+    );
+
+    for (path, content, needle, inside, expected) in [
+        (HOOKS_PATH, hooks.as_str(), "#[Hook('')]", 8, "form_alter"),
+        (INVOKER_PATH, invoker.as_str(), "invokeAll('')", 11, "cron"),
+        (
+            INVOKER_PATH,
+            invoker.as_str(),
+            "modules->alter(''",
+            16,
+            "form",
+        ),
+    ] {
+        let position = position_in(content, needle, inside);
+        let labels = crate::common::response_labels(
+            crate::common::completion_response(
+                &backend,
+                &uri_for(&dir, path),
+                position.line,
+                position.character,
+                None,
+            )
+            .await,
+        );
+        assert!(
+            labels.contains(&expected.to_string()),
+            "{needle}: {labels:?}"
+        );
+    }
+}
+
+/// The completion labels right after `typed` in `acme.module`, whose
+/// content is `module`, once the documented hooks are known.
+async fn module_completion_labels(module: &str, typed: &str) -> Vec<String> {
+    let (backend, dir) = drupal(
+        &[(FORM_API_PATH, FORM_API)],
+        &[("web/modules/custom/acme/acme.module", module)],
+    )
+    .await;
+    let module_uri = uri_for(&dir, "web/modules/custom/acme/acme.module");
+    // The same warm-up as the test above, on the first `acme_` name, so
+    // the hooks are known.
+    references_at(&backend, &module_uri, position_in(module, "acme_", 1)).await;
+    let position = position_in(module, typed, typed.len());
+    crate::common::response_labels(
+        crate::common::completion_response(
+            &backend,
+            &module_uri,
+            position.line,
+            position.character,
+            None,
+        )
+        .await,
+    )
+}
+
+/// A method without a modifier in a `.module` file is not a hook
+/// implementation, so its name gets the class-body completion instead: the
+/// parent's method it can override.
+#[tokio::test]
+async fn a_method_in_a_module_file_is_not_offered_hooks() {
+    let module = "<?php\n\nclass AcmeBase {\n    public function acme_format(): void {}\n}\n\nclass AcmeHelper extends AcmeBase {\n    function acme_fo\n}\n";
+    let labels = module_completion_labels(module, "    function acme_fo").await;
+    assert!(
+        !labels.iter().any(|label| label == "acme_form_alter"),
+        "{labels:?}"
+    );
+    assert!(
+        labels.iter().any(|label| label.starts_with("acme_format(")),
+        "{labels:?}"
+    );
+}
+
+/// A closure on a line of its own inside a call's arguments is not a hook
+/// implementation either.
+#[tokio::test]
+async fn a_closure_in_a_module_file_is_not_offered_hooks() {
+    let module =
+        "<?php\n\nfunction acme_cron() {}\n\n$callbacks = array_map(\n    function \n, []);\n";
+    let labels = module_completion_labels(module, "    function ").await;
+    assert!(
+        !labels.iter().any(|label| label == "acme_form_alter"),
+        "{labels:?}"
+    );
+}

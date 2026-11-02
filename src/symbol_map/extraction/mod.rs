@@ -351,6 +351,7 @@ use wordpress::*;
 use yii::*;
 use yii_routes::*;
 
+pub(crate) use drupal::hook_invocation;
 pub(crate) use symfony::{
     configurator_function_kind, is_autowire_attribute, is_bus_name_stamp,
     is_event_listener_attribute, is_message_handler_attribute, is_template_attribute,

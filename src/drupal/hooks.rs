@@ -603,8 +603,18 @@ impl Backend {
 
     /// The documented hook names with placeholders, sorted.
     fn documented_hook_patterns(&self) -> Vec<String> {
+        let mut patterns = self.drupal_documented_hooks();
+        patterns.retain(|hook| is_hook_pattern(hook));
+        patterns
+    }
+
+    /// Every hook an `*.api.php` file documents, patterns included, sorted.
+    pub(crate) fn drupal_documented_hooks(&self) -> Vec<String> {
         use crate::symbol_map::{StringKeyKind, SymbolKind};
-        let mut patterns = Vec::new();
+        let mut hooks = Vec::new();
+        // The documentation is a plain span; an invocation, the other kind
+        // of declaration, is a call the type engine confirms, and is left
+        // out.
         self.visit_declaring_symbol_maps(|_, map| {
             for span in &map.spans {
                 if let SymbolKind::StringKey {
@@ -613,15 +623,14 @@ impl Backend {
                     is_write: true,
                     ..
                 } = &span.kind
-                    && is_hook_pattern(key)
                 {
-                    patterns.push(key.clone());
+                    hooks.push(key.clone());
                 }
             }
         });
-        patterns.sort_unstable();
-        patterns.dedup();
-        patterns
+        hooks.sort_unstable();
+        hooks.dedup();
+        hooks
     }
 
     /// Every hook the workspace names, implemented or documented, that the

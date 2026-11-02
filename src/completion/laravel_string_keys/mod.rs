@@ -189,11 +189,13 @@ impl Backend {
             | StringKeyKind::MessengerBus
             | StringKeyKind::YiiRoute
             | StringKeyKind::DrupalEntityType
-            | StringKeyKind::DrupalRoute
-            | StringKeyKind::DrupalHook => self.symfony_declared_names(*kind).into(),
+            | StringKeyKind::DrupalRoute => self.symfony_declared_names(*kind).into(),
             StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
                 self.twig_callable_names(*kind).into()
             }
+            // Only the documentation, not the invocations the type engine
+            // would have to confirm in every file that fires a hook.
+            StringKeyKind::DrupalHook => self.drupal_documented_hooks().into(),
             // A translation key is completed in the domain it is looked up
             // in, a configuration key under the key it is nested in, which
             // only the Symfony completion knows, and a route argument from
