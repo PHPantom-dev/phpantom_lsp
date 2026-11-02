@@ -1518,9 +1518,9 @@ omits them can come from the documented signature.</p>
   (<code>#[RenderElement('details')]</code>, <code>#[FormElement('textfield')]</code>).</li>
 <li><strong>Libraries</strong> in <code>#attached</code> name entries in <code>&lt;module&gt;.libraries.yml</code>.</li>
 </ul>
-<p>The Twig support already finds templates outside Symfony; the
-template's variables are the same problem as
-<a href="../lsp-features/#f37-twig-template-variables">F37</a>.</p>
+<p>The Twig support already finds templates outside Symfony, and a
+template's variables from the renders that name it; a theme hook's
+variables would be one more source of them (see <code>src/twig/variables.rs</code>).</p>
 <hr />
 <h2 id="dr8-permission-and-configuration-names">DR8. Permission and configuration names<a class="headerlink" href="#dr8-permission-and-configuration-names" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>

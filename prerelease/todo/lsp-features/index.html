@@ -2276,23 +2276,26 @@ Laravel views. TwigStan's context collectors (the ones that find
 <code>render()</code> calls and <code>#[Template]</code> returns) show which call shapes it
 recognises as rendering a template.</p>
 <hr />
-<h2 id="f37-twig-template-variables">F37. Twig template variables<a class="headerlink" href="#f37-twig-template-variables" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
-<p>Blocks full Twig support: the README keeps Twig marked as partial until this lands.</p>
+<h2 id="f60-twig-template-variable-types">F60. Twig template variable types<a class="headerlink" href="#f60-twig-template-variable-types" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">return $this-&gt;render('post/show.html.twig', ['post' =&gt; $post]);</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="cp">{{</span> <span class="nv">post.title</span> <span class="cp">}}</span>
 </code></pre></div>
-<p>The variables a template receives come from the keys every <code>render()</code>
-of it passes, the names a <code>#[Template]</code> action returns, Twig's globals,
-and the <code>{% types %}</code> tag. Completing and hovering those names is feasible
-from the call sites alone, the way Blade's call-site inference collects a
-template's variables (<code>blade/call_site_inference.rs</code>). Typing what follows
-(<code>post.title</code> as the <code>Post</code> class's <code>getTitle()</code>) is a much larger
-project: TwigStan does it by compiling templates to PHP and analysing
-that. Start with the names; decide on types separately.</p>
-<p><strong>Where to look:</strong> <code>src/blade/call_site_inference.rs</code>,
-<code>src/symbol_map/extraction/symfony.rs</code> (the render sites).</p>
+<p>A template's variables complete, navigate, and hover by name, from the
+keys its renders pass, the templates that include or extend it, the
+project's globals, and its <code>{% types %}</code> tag (see <code>src/twig/variables.rs</code>).
+Nothing types them: <code>post.</code> completes nothing, <code>post.title</code> does not
+lead to the <code>Post</code> class's <code>getTitle()</code>, and a hover does not say what
+<code>post</code> holds. TwigStan does it by compiling templates to PHP and
+analysing that; resolving each passed value with the type engine at its
+render, the way Blade's call-site inference does, would answer the
+common cases. The same resolution would read a context the render builds
+in a variable (<code>$params = [...]; render('…', $params)</code>), whose names are
+not found today, and a <code>types</code> tag's declared type is already read.</p>
+<p><strong>Where to look:</strong> <code>src/twig/variables.rs</code>,
+<code>src/symbol_map/extraction/twig_context.rs</code> (the render contexts),
+<code>src/blade/call_site_inference.rs</code>.</p>
 <hr />
 <h2 id="f38-twig-components">F38. Twig components<a class="headerlink" href="#f38-twig-components" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
@@ -2652,7 +2655,7 @@ renames, and a name the class does not declare is not reported. Only a
 writable prop can be bound by <code>data-model</code>, and only a <code>#[LiveAction]</code>
 method can be called, so completion should offer just those. The template
 also sees the component's public properties and methods as <code>this.…</code> and
-bare variables, which F37's template variables would type. Builds on F38's
+bare variables, which <a href="#f60-twig-template-variable-types">F60</a> would type. Builds on F38's
 link between a component class and its template.</p>
 <p><strong>Where to look:</strong> <code>src/twig/templates.rs</code>, <code>src/blade/component_tags/</code>
 (the Livewire <code>wire:model</code> handling is the closest counterpart).</p>
