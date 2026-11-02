@@ -117,4 +117,26 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B725. A Twig template opened during indexing keeps its early diagnostics
+
+**Impact: High · Complexity: Medium**
+
+Open a Twig template right after the server starts, before it has read
+the project's templates and translation catalogues, and the template's
+diagnostics are computed against the partial index: the parent in
+`{% extends 'base.html.twig' %}`, every `include()`, and every `|trans`
+key are reported as unknown although all of them exist. Nothing
+recomputes them when indexing finishes, so they stay until the file is
+edited. On `symfony-demo`'s `blog/post_show.html.twig` that is ten false
+reports (two templates and eight translation keys) that one keystroke
+clears. Whether a given run hits it depends on timing; a PHP file opened
+at the same moment comes out right.
+
+Diagnostics for an open document must either wait for the indexes their
+checks read, or be republished once those indexes are complete, for
+resource documents (Twig, and likely YAML and XML) the same as for PHP.
+A check whose index is not ready yet should report nothing rather than
+"unknown".
+
+Found by driving the server from a scripted LSP client that opens the
+template and waits; the first `publishDiagnostics` was never replaced.

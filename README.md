@@ -31,7 +31,9 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Closure parameter inference              | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
 | **Frameworks**                           |          |              |            |             |             |
 | Laravel & Blade                          | ✅       | ❌           | 🚧         | ❌          | 🚧🧩          |
-| Symfony & Twig                           | 🚧       | ❌           | ❌         | 🚧          | 🧩         |
+| Symfony & Twig                           | ✅       | ❌           | ❌         | 🚧          | 🧩         |
+| WordPress                                | 🚧       | 🚧           | 🚧         | ❌          | ✅          |
+| Yii 3                                    | ✅       | ❌           | ❌         | ❌          | ❌          |
 | Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅🧩          |
 | PHPUnit & Pest                           | 🚧       | ❌           | 🚧         | 🚧          | ✅          |
 | Other frameworks                         | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
@@ -52,17 +54,17 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 <sup>2</sup> Call hierarchy, type hierarchy, go-to implementation / type-definition, code lens.<br>
 <sup>3</sup> Semantic tokens, inlay hints, auto-import, smart select, folding ranges, formatting, document links.<br>
 <sup>4</sup> Undefined and unused variables, type errors, unknown symbols and members, argument counts.<br>
-<sup>5</sup> PHPantom runs PHPStan, PHPCS, PHPMD, and Mago in-server and turns their reports into quick fixes. Phpactor proxies PHPStan, Psalm, and PHP-CS-Fixer, and PHPStorm bundles PHPStan and Psalm runners, but both only relay the errors.<br>
-<sup>6</sup> Conditional return types, type aliases (`@phpstan-type` / `@phpstan-import-type`), pseudo-types, `@mixin`.<br>
-<sup>8</sup> Extract method/function, extract/inline variable, extract constant, extract interface, promote constructor parameter, generate constructor, generate getters/setters, implement interface methods.<br>
-<sup>9</sup> Null-check simplification, string interpolation conversion, converting between arrow functions and closures, and switch statements to match expressions.<br>
+<sup>5</sup> PHPStan, PHPCS, PHPMD, and Mago run in-server, and their reports come with quick fixes rather than as relayed errors.<br>
+<sup>6</sup> Conditional return types, type aliases, pseudo-types, `@mixin`.<br>
+<sup>8</sup> Extract and inline, generate constructors and accessors, implement interfaces.<br>
+<sup>9</sup> Rewrites to modern syntax, such as `match`, arrow functions, and simpler null checks.<br>
 Performance measured on a production Laravel codebase: 5.1K PHP files (389k lines) and 1.3K Blade templates (88k lines), with 27k vendor files (1.7M lines). Time to ready is the approximate wall-clock time from launch until full type intelligence is available on a cold start (first index). RAM is the steady resident memory once indexing has finished.<br>
 Independent, re-runnable type-inference conformance results across twelve PHP engines: <a href="https://zonuexe.github.io/php-typing-conformance/">php-typing-conformance</a> (Qodana covers the PHPStorm engine, phpy the PHP Tools engine).
 </sub>
 </p>
 
 > [!TIP]
-> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. For Laravel specifically, open [`examples/laravel/`](examples/laravel/) — a standalone project with real Eloquent models, config, routes, views, and translations that exercises Eloquent property resolution, query builder chaining, scopes, custom collections, and go-to-definition for config keys, route names, and translation strings. For Symfony, open [`examples/symfony/`](examples/symfony/), which uses attributes, YAML, XML, PHP configurators, Twig, and translation catalogues together; its README lists what to try. For Yii 3, open [`examples/yii/`](examples/yii/), an application generated from `yiisoft/app` with a route, a view, a DI definition, and an alias of its own.
+> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. Each framework has a standalone project of its own, with a README listing what to try: [`examples/laravel/`](examples/laravel/), [`examples/symfony/`](examples/symfony/), [`examples/wordpress/`](examples/wordpress/), and [`examples/yii/`](examples/yii/).
 
 ## Context-Aware Intelligence
 
@@ -75,6 +77,7 @@ Independent, re-runnable type-inference conformance results across twelve PHP en
 - **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Macros behave like real methods. Container strings like `app('cache')` resolve to the bound class, `auth()->user()` resolves to your configured model, authorization strings resolve to the gate definition or policy method that declares them, and query string completion on both relation and column names. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing, and Livewire components and Folio pages are understood alongside them. No ide-helper or database access required.
 - **Symfony.** The names Symfony takes as strings complete, navigate, and list their references across PHP, YAML, XML, and Twig, and the ones nothing declares are reported. Form fields and validation mappings resolve to the properties they name. Doctrine entities and repositories link to each other, and renames reach the mapping files. Everything is read from the project's files, without booting the application.
 - **Twig.** Template names complete, navigate, and are checked in any project that uses Twig, Symfony or not. Blocks navigate between the templates that override them, filters and functions lead to the PHP that runs them, with its signature on hover, and variables lead to the renders and templates that pass them. The template directories are found from the templates themselves, with no configuration.
+- **WordPress.** Core's functions and classes come from `php-stubs/wordpress-stubs` once Composer installs it, and their return types follow the arguments. The project's hook names complete, navigate, and rename between the places that fire a hook and the ones that listen to it, and `@global` tags type the globals a function imports.
 - **Yii 3.** Route names, route arguments, and view names complete, navigate, and are checked, and a route's handler renames with the method it names. Everything is read from the application's configuration without booting it.
 - **Testing.** PHPUnit's assertions narrow types, in Pest tests too. Test metadata (data providers, dependencies, coverage) navigates and renames, covered classes list the tests that cover them, and mocks keep the mocked class. Inside a Pest test, `$this` is the test case your `Pest.php` binds.
 - **Everything else you'd expect.** Generics, type narrowing, named arguments, destructuring, first-class callables, anonymous classes, `@deprecated` detection, and namespace segment drilling.
