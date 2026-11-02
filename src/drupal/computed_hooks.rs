@@ -222,6 +222,18 @@ pub(crate) const COMPUTED: &[(&[&str], &[&str], Storage)] = &[
     ),
 ];
 
+/// Whether `class`, a resolved class name, declares one of the table's core
+/// methods.
+pub(crate) fn is_computing_class(class: &str) -> bool {
+    let class = class.trim_start_matches('\\');
+    COMPUTED.iter().any(|(_, sites, _)| {
+        sites.iter().any(|site| {
+            site.split_once("::")
+                .is_some_and(|(site_class, _)| site_class.eq_ignore_ascii_case(class))
+        })
+    })
+}
+
 /// Whether `class::method`, a resolved class name and a method, is one of
 /// the table's core methods.
 pub(crate) fn is_computing_method(class: &str, method: &str) -> bool {

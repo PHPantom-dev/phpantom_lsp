@@ -1053,7 +1053,11 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_computed_hook_sites(
     if !ctx.drupal || ctx.drupal_file == crate::drupal::hooks::DrupalFile::Test {
         return;
     }
-    let Some(class) = ctx.resolved_name_at(name_offset).map(str::to_string) else {
+    let Some(class) = ctx
+        .resolved_name_at(name_offset)
+        .filter(|class| crate::drupal::computed_hooks::is_computing_class(class))
+        .map(str::to_string)
+    else {
         return;
     };
     for member in members.iter() {
