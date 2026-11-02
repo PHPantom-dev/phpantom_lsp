@@ -1279,10 +1279,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#wp4-hook-names" class="md-nav__link">
+  <a href="#wp16-cores-hook-names-outside-the-projects-own-files" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        WP4. Hook names
+        WP16. Core's hook names outside the project's own files
       </span>
     </span>
   </a>
@@ -1397,7 +1397,8 @@ WordPress gets the generic engine, plus the output constants (<code>OBJECT</code
 <code>ARRAY_A</code>, …) its stubs leave out and the return types an argument
 decides that they declare too wide (<code>src/wordpress/</code>), or that no PHPDoc
 type can spell (<code>src/type_engine/type_ops/call_site_returns/wordpress.rs</code>).
-Core's functions
+Hook names navigate between the places that fire a hook and its listeners
+(<code>src/wordpress/hooks.rs</code>). Core's functions
 and classes resolve only when the project indexes WordPress itself or a
 stub package for it. The stubs' own type tests run in
 <code>tests/wordpress_stubs/</code>, and what the engine reads wrongly in them is
@@ -1425,7 +1426,7 @@ installed. Of their 104 and 232 diagnostics (2026-11-02), most are what
 the stubs or the projects' own docblocks declare, and PHPStan reports
 them too. What they show PHPantom getting wrong is filed below under
 WP3, WP9 and WP15. Hooks and template parts produce no diagnostics
-today, so the baseline cannot rank WP4 to WP6; they rank by what an
+today, so the baseline cannot rank WP5, WP6 and WP16; they rank by what an
 editor user compares first.</p>
 <p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
@@ -1515,45 +1516,29 @@ but leaves 18 members "could not be resolved" on the object it builds.</p>
 (<code>scan_drupal_directories</code> is the closest precedent),
 <code>src/config/indexing.rs</code>.</p>
 <hr />
-<h2 id="wp4-hook-names">WP4. Hook names<a class="headerlink" href="#wp4-hook-names" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">add_action('acme_order_placed', [$this, 'sendReceipt']);</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">do_action('acme_order_placed', $order);</span>
+<h2 id="wp16-cores-hook-names-outside-the-projects-own-files">WP16. Core's hook names outside the project's own files<a class="headerlink" href="#wp16-cores-hook-names-outside-the-projects-own-files" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">add_action('init', [$this, 'registerBlocks']);   // goes nowhere, `init` is not completed</span>
 </code></pre></div>
-<p>The hook name is the string that ties a listener to the place that fires
-it, and nothing navigates between the two today. Treat it as a string
-key, the way Laravel's route, config, and translation names are:</p>
-<ul>
-<li><strong>Declarations</strong>: <code>do_action()</code>, <code>do_action_ref_array()</code>,
-  <code>do_action_deprecated()</code>, <code>apply_filters()</code>,
-  <code>apply_filters_ref_array()</code>, <code>apply_filters_deprecated()</code>.</li>
-<li><strong>Uses</strong>: <code>add_action()</code>, <code>add_filter()</code>, <code>remove_action()</code>,
-  <code>remove_filter()</code>, <code>has_action()</code>, <code>has_filter()</code>, <code>did_action()</code>,
-  <code>doing_action()</code>.</li>
-<li><strong>Features</strong>: completion of hook names in a use, go-to-definition from
-  a use to every place that fires it, find references, rename, and
-  document highlight.</li>
-<li><strong>Dynamic names</strong>: core fires many hooks with an interpolated name
-  (<code>"save_post_{$post-&gt;post_type}"</code>). Match a use against the literal
-  parts, and offer the pattern in completion.</li>
-</ul>
-<p>Reporting a hook nothing fires is not safe as a default: a plugin
-listens to hooks that other plugins or a future core version fire. If it
-is done at all, it belongs behind an opt-in.</p>
-<p>PHP Tools added hook navigation in 2026, and PhpStorm has it built in,
-so this is the feature a WordPress developer will compare first.
-PhpStorm, pointed at a WordPress install, completes core's and the
-project's own hook names in <code>add_action('…')</code>, navigates from a use to
-where the hook fires, and marks both ends in the gutter. Its completion
-only opens on an explicit Ctrl+Space; ours opens on the quote, since <code>'</code>
-and <code>"</code> are already completion triggers.</p>
-<p><strong>Where to look:</strong> the string-key machinery Laravel and Symfony names
-use (<code>src/virtual_members/laravel/string_keys.rs</code>,
-<code>src/symbol_map/extraction/symfony.rs</code>).</p>
+<p>Hook names are read from the symbol maps of the project's own files, so
+core's hooks are known only when the workspace is a whole install with
+<code>wp-includes/</code> and <code>wp-admin/</code> in it. The stubs fire no hook (their
+functions have no bodies), and a dependency's files are left out: core
+installed with Composer (<code>roots/wordpress</code>, <code>johnpbloch/wordpress-core</code>),
+WooCommerce, and the install <a href="#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own">WP3</a>
+finds above a plugin opened on its own. So a use of <code>init</code> or <code>save_post</code>
+has nowhere to go and core's names are not completed, which are the hooks
+a plugin uses most.</p>
+<p>Read the places a dependency fires its hooks from its files when they are
+installed, as names to complete and go to rather than as the project's
+own (a rename must not reach them), and decide what a project with only
+the stubs gets: the hook list <code>wp-hooks/wordpress-core</code> publishes (every
+core hook with its docblock, which WP5 could read too) is one source.</p>
+<p><strong>Where to look:</strong> <code>src/wordpress/hooks.rs</code> (<code>note_wordpress_hooks</code>
+leaves out vendor files).</p>
 <hr />
 <h2 id="wp5-hook-callback-parameter-and-return-types">WP5. Hook callback parameter and return types<a class="headerlink" href="#wp5-hook-callback-parameter-and-return-types" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Complexity: Medium-High</strong> (depends on WP4)</p>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/**</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x"> * Filters the post content.</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x"> *</span>
@@ -1568,7 +1553,7 @@ use (<code>src/virtual_members/laravel/string_keys.rs</code>,
 <p>Core documents every hook with a docblock above the call that fires it.
 Its <code>@param</code> tags type the callback's parameters, and a filter's first
 <code>@param</code> is also what the callback must return and what
-<code>apply_filters()</code> returns. With WP4 linking a callback to its hook, the
+<code>apply_filters()</code> returns. With a callback linked to its hook by name, the
 closure parameter inference that already feeds <code>array_map()</code> callbacks
 can feed hook callbacks from the same docblock.</p>
 <p>PHPStan's WordPress extension also checks a callback against the hook:
