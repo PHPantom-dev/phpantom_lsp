@@ -4,9 +4,9 @@ Known gaps and missing features in PHPantom's Drupal support. The web
 root is detected, core, contrib, and the Drupal file extensions
 (`.module`, `.install`, `.theme`, …) are indexed past `.gitignore`, and
 the services the `*.services.yml` files declare, the entity types
-entity classes declare, and the routes the routing files, route
-attributes, and route builders declare are read. Nothing reads Drupal's
-other declarations yet: fields or hooks.
+entity classes declare, the routes the routing files, route attributes,
+and route builders declare, and the hooks the `*.api.php` files document
+and the extensions implement are read. Nothing reads fields yet.
 
 The requests in
 [#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
@@ -51,28 +51,6 @@ PHPStan's Drupal extension types any magic property on a fieldable
 entity as `FieldItemListInterface` without checking the name. That is
 the floor; reading the configuration is what lets an editor complete
 names and report a misspelt one.
-
----
-
-## DR6. Hooks
-
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-function acme_form_alter(&$form, FormStateInterface $form_state, $form_id) { … }
-
-#[Hook('form_alter')]
-public function formAlter(array &$form, FormStateInterface $form_state, $form_id): void { … }
-```
-
-A hook is implemented by naming a function `<module>_<hook>` or, since
-Drupal 11.1, with a `#[Hook]` attribute on a method. Core and modules
-document each hook as a `hook_<name>()` function in a `*.api.php` file.
-Link an implementation to that documentation: hover shows it,
-go-to-definition reaches it, find references lists the implementations,
-and completing `acme_` in a `.module` file offers the hooks with their
-documented signatures. Parameter types for an implementation that
-omits them can come from the documented signature.
 
 ---
 
@@ -306,6 +284,21 @@ Report one where `getStorage()`, `\Drupal::entityQuery()`, and the other
 calls that take an entity type ID take it. A module can add entity types
 in code from `hook_entity_type_build()`, which no class declares, so a
 site where an implementation of that hook may add one stays silent.
+
+---
+
+## DR19. Warn on unknown hook names
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+\Drupal::moduleHandler()->invokeAll('acme_order_placd', [$order]);
+```
+
+Any module may invoke any hook name, and many hooks have no `*.api.php`
+documentation, so a name nothing documents is not wrong on that alone.
+Report only a hook name that nothing in the site documents, implements,
+or invokes anywhere else, which is most likely a typo.
 
 ---
 

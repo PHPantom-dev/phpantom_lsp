@@ -22,9 +22,15 @@ final class Greeter
         // from core's ConfigFactoryInterface.
         $siteName = $this->configFactory->get('system.site')->get('name');
 
-        return strtr($this->format, [
+        $greeting = strtr($this->format, [
             '@name' => $name,
             '@site' => is_string($siteName) ? $siteName : 'Drupal',
         ]);
+        // Try: go to the definition of 'acme_greeting', which lists the
+        // implementation in AcmeHooks and then the documentation in
+        // acme.api.php. Complete a hook inside `alter('')`.
+        \Drupal::moduleHandler()->alter('acme_greeting', $greeting, $name);
+
+        return $greeting;
     }
 }

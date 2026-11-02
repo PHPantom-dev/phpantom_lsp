@@ -28,4 +28,18 @@ final class AcmeHooks
             ],
         ];
     }
+
+    /**
+     * Implements hook_acme_greeting_alter().
+     */
+    #[Hook('acme_greeting_alter')]
+    public function greetingAlter(string &$greeting, $name): void
+    {
+        // Try: hover `$name`, typed `string` by the hook's documentation in
+        // acme.api.php, or go to the definition of 'acme_greeting_alter',
+        // which lists the alter() call in Greeter and the documentation.
+        if ($name === 'Ada') {
+            $greeting .= ' Welcome back.';
+        }
+    }
 }

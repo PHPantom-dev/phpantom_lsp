@@ -201,6 +201,18 @@ check('acme_greeting declares the variables the controller passes', array_keys($
 check('acme_greeting has the template its name implies', is_file("$module/templates/acme-greeting.html.twig"));
 check('acme_theme preprocesses acme_greeting', function_exists('acme_theme_preprocess_acme_greeting'));
 
+// The module documents, invokes, and implements its own hook, and
+// implements core's form alter hooks.
+require_once "$module/acme.api.php";
+$greetingAlter = new ReflectionMethod(AcmeHooks::class, 'greetingAlter');
+check('acme.api.php documents hook_acme_greeting_alter()', function_exists('hook_acme_greeting_alter'));
+check('Greeter invokes the acme_greeting alter hook', str_contains((string) file_get_contents("$module/src/Greeter.php"), "->alter('acme_greeting', \$greeting, \$name)"));
+check("AcmeHooks::greetingAlter() implements it through #[Hook('acme_greeting_alter')]", attributeArguments($greetingAlter, Hook::class) === ['acme_greeting_alter']);
+check("greetingAlter()'s untyped name is the documented string", $greetingAlter->getParameters()[1]->getType() === null && (string) (new ReflectionFunction('hook_acme_greeting_alter'))->getParameters()[1]->getType() === 'string');
+check('acme_form_alter() implements hook_form_alter procedurally', function_exists('acme_form_alter'));
+check("core documents hook_form_alter() with the FormStateInterface acme_form_alter() leaves untyped", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/form.api.php"), 'function hook_form_alter(&$form, \\Drupal\\Core\\Form\\FormStateInterface $form_state, $form_id)') && (new ReflectionFunction('acme_form_alter'))->getParameters()[1]->getType() === null);
+check("core's FormBuilder::prepareForm() fires the form alter hooks", str_contains((string) file_get_contents("$web/core/lib/Drupal/Core/Form/FormBuilder.php"), '$this->moduleHandler->alter($hooks, $form, $form_state, $form_id);'));
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

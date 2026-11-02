@@ -11,6 +11,20 @@ use Drupal\acme\Greeter;
 use Drupal\Core\Routing\RouteMatchInterface;
 
 /**
+ * Implements hook_form_alter().
+ */
+function acme_form_alter(array &$form, $form_state, string $form_id): void
+{
+    // Try: hover `$form_state`, typed by hook_form_alter()'s documentation
+    // in core. Go to the definition of `form_alter` in the function's name,
+    // which lists the alter() call in core's FormBuilder and the
+    // documentation. Type `function acme_` on a new line to complete a hook.
+    if ($form_id === 'user_login_form') {
+        $form_state->disableCache();
+    }
+}
+
+/**
  * Implements hook_help().
  */
 function acme_help(string $route_name, RouteMatchInterface $route_match): ?string
