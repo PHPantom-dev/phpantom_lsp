@@ -267,6 +267,7 @@ fn psr4_mappings_resolve_across_subprojects() {
         all_mappings.push(phpantom_lsp::composer::Psr4Mapping {
             prefix: m.prefix.clone(),
             base_path: phpantom_lsp::composer::normalise_path(&abs_base),
+            is_dev: false,
         });
     }
     for m in &mappings_b {
@@ -274,6 +275,7 @@ fn psr4_mappings_resolve_across_subprojects() {
         all_mappings.push(phpantom_lsp::composer::Psr4Mapping {
             prefix: m.prefix.clone(),
             base_path: phpantom_lsp::composer::normalise_path(&abs_base),
+            is_dev: false,
         });
     }
 

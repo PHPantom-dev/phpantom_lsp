@@ -62,6 +62,7 @@ pub(crate) const ARRAY_PRESERVING_FUNCS: &[&str] = &[
     "array_udiff_uassoc",
     "array_intersect",
     "array_intersect_assoc",
+    "array_intersect_key",
     "array_intersect_uassoc",
     "array_intersect_ukey",
     "array_uintersect",

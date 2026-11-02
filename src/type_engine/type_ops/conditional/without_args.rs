@@ -11,7 +11,10 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::ParameterInfo;
 
 use super::arg_form::condition_result_from_text;
-use super::{this_condition_holds, type_condition_result, union_branch_types};
+use super::{
+    decide_nested, this_condition_holds, type_condition_result, undecided_answer,
+    union_branch_types,
+};
 
 /// Resolve a conditional return type **without** call-site arguments
 /// (text-based path).  Walks the tree taking the "no argument / null
@@ -105,8 +108,7 @@ pub fn resolve_conditional_without_args_and_defaults(
                 return match decided {
                     Some(true) => recurse(then_type),
                     Some(false) => recurse(else_type),
-                    None if cond.else_when_undecided => recurse(else_type),
-                    None => union_branch_types(recurse(then_type), recurse(else_type)),
+                    None => undecided_answer(cond, recurse),
                 };
             }
 
@@ -129,11 +131,7 @@ pub fn resolve_conditional_without_args_and_defaults(
             // condition can be decided against settles the branch.
             let param_info = params.iter().find(|p| p.name == target);
             if param_info.is_none() && target.starts_with('$') {
-                return if cond.else_when_undecided {
-                    recurse(else_type)
-                } else {
-                    union_branch_types(recurse(then_type), recurse(else_type))
-                };
+                return undecided_answer(cond, recurse);
             }
             if let Some(default_text) = param_info.and_then(|p| p.default_value.as_deref())
                 && let Some(matched) = condition_result_from_text(condition, default_text)
@@ -157,14 +155,11 @@ pub fn resolve_conditional_without_args_and_defaults(
                 recurse(else_type)
             }
         }
-        _ => {
-            // See the matching early return in `TextArgs::resolve`: `never`
-            // must propagate as informative, only `void` falls back.
-            if conditional.is_void() {
-                return None;
-            }
-            Some(conditional.clone())
-        }
+        _ => Some(decide_nested(
+            conditional,
+            &recurse,
+            this_ctx.map_or(&|_| None, |ctx| ctx.class_loader),
+        )),
     }
 }
 
@@ -211,7 +206,7 @@ pub(super) fn try_resolve_with_template_default(
                 return union_branch_types(Some(then_type.clone()), Some(else_type.clone()));
             }
         };
-        return (!branch.is_void()).then(|| branch.clone());
+        return Some(branch.clone());
     }
 
     // Determine whether the default value matches the condition.
@@ -266,9 +261,6 @@ pub(super) fn try_resolve_with_template_default(
     } else {
         else_type
     };
-    if branch.is_void() {
-        return None;
-    }
     Some(branch.clone())
 }
 
@@ -281,7 +273,7 @@ pub(super) fn try_resolve_with_template_default(
 /// evaluated and the conditional replaced by the winning branch.
 ///
 /// Returns `None` when the conditional's subject is a runtime parameter,
-/// is absent from `values`, or the winning branch is uninformative.
+/// or is absent from `values`.
 pub fn resolve_conditional_from_values(
     conditional: &PhpType,
     values: &HashMap<String, PhpType>,

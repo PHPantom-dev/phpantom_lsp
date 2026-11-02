@@ -261,3 +261,26 @@ async fn a_nested_project_installed_after_startup_is_indexed_on_rescan() {
     assert!(indexes(&backend, "Acme\\Lib\\Renamed"));
     assert!(!indexes(&backend, "Acme\\Lib\\Client"));
 }
+
+#[tokio::test]
+async fn the_locked_phpunit_version_is_read_and_follows_an_update() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("composer.json"),
+        r#"{ "require-dev": { "phpunit/phpunit": "^10.5" } }"#,
+    );
+    write(
+        &dir.path().join("composer.lock"),
+        r#"{ "packages": [], "packages-dev": [{ "name": "phpunit/phpunit", "version": "10.5.38" }] }"#,
+    );
+
+    let backend = index_root_project(dir.path()).await;
+    assert_eq!(backend.phpunit_major(), Some(10));
+
+    write(
+        &dir.path().join("composer.lock"),
+        r#"{ "packages": [], "packages-dev": [{ "name": "phpunit/phpunit", "version": "9.6.20" }] }"#,
+    );
+    backend.rescan_composer_indexes(dir.path(), &[dir.path().join("composer.lock")]);
+    assert_eq!(backend.phpunit_major(), Some(9));
+}

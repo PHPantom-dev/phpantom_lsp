@@ -14,8 +14,13 @@ impl Backend {
     ///
     /// A leaf entry is the line itself; a group hands back the nested array
     /// of lines beneath it.  A key the indexed translations do not cover
-    /// falls back to [`unresolved_trans_type`].
+    /// falls back to [`unresolved_trans_type`].  Outside a Laravel project
+    /// there is no answer at all: the `__()` being called is some other
+    /// function, such as WordPress's, and keeps its own return type.
     pub(crate) fn resolve_trans_type(&self, key: &str) -> Option<PhpType> {
+        if !self.resolved_class_cache.read().laravel().is_enabled() {
+            return None;
+        }
         match self.cached_translations().entries.get(key) {
             Some(entries) if entries.iter().any(|entry| entry.is_group) => Some(trans_group_type()),
             Some(_) => Some(PhpType::string()),
@@ -40,7 +45,7 @@ fn trans_group_type() -> PhpType {
 /// itself).  Which of the two remaining branches applies depends on a key
 /// PHPantom cannot see, so the union is benevolent: a call site that passes
 /// it on is accepted rather than reported against every branch.
-pub(crate) fn unresolved_trans_type() -> PhpType {
+fn unresolved_trans_type() -> PhpType {
     PhpType::benevolent(PhpType::union(vec![PhpType::string(), trans_group_type()]))
 }
 

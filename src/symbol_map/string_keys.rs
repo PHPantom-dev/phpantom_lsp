@@ -90,6 +90,26 @@ pub(crate) enum StringKeyKind {
     /// `textTemplate()`, `#[Template]`, and a template's `extends`,
     /// `include`, and the other tags and functions that load one.
     TwigTemplate,
+    /// A Twig block name: defined by a template's `{% block %}` tag, and
+    /// rendered by `block()`.  A name only means something among the
+    /// templates that extend each other (see `twig::block_navigation`).
+    TwigBlock,
+    /// A Twig filter name: declared by a `new TwigFilter('price', …)` or an
+    /// `#[AsTwigFilter]` method in an extension, the project's or an
+    /// installed package's (see `twig::callables`), and applied by a
+    /// template's `|price`.
+    TwigFilter,
+    /// A Twig function name: declared like [`Self::TwigFilter`], with
+    /// `TwigFunction` and `#[AsTwigFunction]`, and called by a template's
+    /// `icon(…)`.
+    TwigFunction,
+    /// A variable a Twig template reads.  What a template receives is
+    /// passed by the renders of it (see [`TwigContextSite`]) or set by the
+    /// template itself, so a name only means something in the template it
+    /// is written in (see `twig::variables`).  The project's globals are
+    /// declared with this kind: a `twig.globals` key, an `addGlobal()`, or
+    /// a `getGlobals()` key.
+    TwigVariable,
     /// A bundle configuration key, as its dotted path from the bundle's
     /// root (`acme_demo.mailer.dsn`): declared by a `TreeBuilder` schema in
     /// a `getConfigTreeBuilder()` (see `symfony::config_tree`), and read by
@@ -121,6 +141,14 @@ pub(crate) enum StringKeyKind {
     /// under the routes that dispatch to that handler, whose paths declare
     /// it.
     YiiRouteArgument,
+    /// A WordPress hook name: declared by each place that fires it (a
+    /// `do_action()`, an `apply_filters()`, and their `_ref_array` and
+    /// `_deprecated` forms), and read by `add_action()`, `add_filter()`, and
+    /// the rest of the listener API. A name built at runtime
+    /// (`"save_post_{$post->post_type}"`) is stored as a pattern (see
+    /// `wordpress::hooks`), which a literal name matches by its literal
+    /// parts.
+    WordPressHook,
 }
 
 impl StringKeyKind {
@@ -150,12 +178,29 @@ impl StringKeyKind {
         )
     }
 
+    /// Whether this key belongs to Twig, whatever the framework around it.
+    pub(crate) const fn is_twig(self) -> bool {
+        matches!(
+            self,
+            Self::TwigTemplate
+                | Self::TwigBlock
+                | Self::TwigFilter
+                | Self::TwigFunction
+                | Self::TwigVariable
+        )
+    }
+
     /// Whether this key belongs to Yii.
     pub(crate) const fn is_yii(self) -> bool {
         matches!(
             self,
             Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument
         )
+    }
+
+    /// Whether this key belongs to WordPress.
+    pub(crate) const fn is_wordpress(self) -> bool {
+        matches!(self, Self::WordPressHook)
     }
 }
 
@@ -351,6 +396,71 @@ pub(crate) struct MessengerHandlerSite {
     pub message: Atom,
 }
 
+/// A Twig filter or function an extension declares, and the PHP callable
+/// behind it.
+///
+/// Kept beside the declaring [`SymbolKind::StringKey`] span, which only
+/// holds the name: what a template's `|price` runs is a fact about the
+/// declaration, read by the definition and hover of the name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TwigCallableSite {
+    /// [`StringKeyKind::TwigFilter`] or [`StringKeyKind::TwigFunction`].
+    pub kind: StringKeyKind,
+    pub name: Atom,
+    /// The byte range of the name, inside its quotes.
+    pub start: u32,
+    pub end: u32,
+    pub target: TwigCallableTarget,
+}
+
+/// The PHP callable a Twig filter or function runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TwigCallableTarget {
+    /// A method, of the class fully qualified.
+    Method { class: Atom, method: Atom },
+    /// A function, fully qualified.
+    Function(Atom),
+    /// A closure, or a callable that names nothing (a filter Twig compiles
+    /// itself, such as `raw`).
+    Inline,
+}
+
+/// The variables one render of a Twig template hands it: the keys of a
+/// `render()`'s context array, of a templated email's `context()`, or of
+/// what a `#[Template]` action returns.
+///
+/// Keyed by the template name it renders, whose span (or typed receiver
+/// site, for a `render()` only its receiver's type confirms) starts at
+/// [`Self::template_start`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TwigContextSite {
+    pub template_start: u32,
+    /// The names passed, each with the byte range it is written at.
+    pub vars: Vec<TwigContextVar>,
+    /// The byte range of a context no literal spells out (`render('…',
+    /// $params)`), whose names only its type tells.
+    pub shape: Option<(u32, u32)>,
+}
+
+/// One variable a [`TwigContextSite`] passes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TwigContextVar {
+    pub name: Atom,
+    pub start: u32,
+    pub end: u32,
+    pub value: TwigContextValue,
+}
+
+/// Where the value a [`TwigContextVar`] passes is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TwigContextValue {
+    /// The expression spanning `start..end`.
+    Expression { start: u32, end: u32 },
+    /// The PHP variable of the same name, as it stands at `offset`: what a
+    /// `compact()` copies, and an action's argument.
+    Variable { offset: u32 },
+}
+
 // ─── Container declarations ─────────────────────────────────────────────────
 
 /// What a Symfony service or container parameter declaration says about the
@@ -383,6 +493,9 @@ pub(crate) enum ContainerValue {
     Class(Atom),
     /// The service an alias points at.
     Alias(Atom),
+    /// The service a child definition inherits from, whose class it is
+    /// built from unless it names one of its own.
+    Parent(Atom),
     /// The type of a parameter's value, generalized (`'en'` is a `string`).
     Type(crate::php_type::PhpType),
 }
@@ -420,6 +533,26 @@ pub(crate) struct RoutePlaceholder {
     pub end: u32,
 }
 
+/// Symfony routes a file loads from somewhere else: the `resource:` of a
+/// routing YAML entry, an XML `<import>`, or a PHP configurator's
+/// `import()`.
+///
+/// A file that declares routes it cannot be read for (a `#[Route]` whose
+/// name is a constant, a configurator collection whose prefix is not a
+/// literal) records one with no `resource`, which is how an import that
+/// cannot be followed reads as well: the names under its `name_prefix`
+/// are unknown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RouteImport {
+    /// What the import loads, as written, or `None` when it is not written
+    /// as a literal.
+    pub resource: Option<String>,
+    /// The loader the import names with its `type`, as written.
+    pub loader: Option<String>,
+    /// What the import puts in front of the name of every route it loads.
+    pub name_prefix: String,
+}
+
 // ─── String keys behind a typed receiver ────────────────────────────────────
 
 const PSR_CONTAINER: &str = "Psr\\Container\\ContainerInterface";
@@ -434,14 +567,19 @@ const SYMFONY_SERVICES_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ServicesConfigurator";
 const SYMFONY_ABSTRACT_SERVICE_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\AbstractServiceConfigurator";
-const SYMFONY_SERVICE_CONFIGURATOR: &str =
-    "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ServiceConfigurator";
+const SYMFONY_ABSTRACT_CONFIGURATOR: &str =
+    "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\AbstractConfigurator";
+const SYMFONY_CONTAINER_BUILDER: &str = "Symfony\\Component\\DependencyInjection\\ContainerBuilder";
 const SYMFONY_PARAMETERS_CONFIGURATOR: &str =
     "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ParametersConfigurator";
 const SYMFONY_URL_GENERATOR: &str = "Symfony\\Component\\Routing\\Generator\\UrlGeneratorInterface";
 const YII_URL_GENERATOR: &str = "Yiisoft\\Router\\UrlGeneratorInterface";
-const SYMFONY_ROUTING_CONFIGURATOR: &str =
+pub(crate) const SYMFONY_ROUTING_CONFIGURATOR: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator";
+const SYMFONY_COLLECTION_CONFIGURATOR: &str =
+    "Symfony\\Component\\Routing\\Loader\\Configurator\\CollectionConfigurator";
+const SYMFONY_ROUTE_CONFIGURATOR: &str =
+    "Symfony\\Component\\Routing\\Loader\\Configurator\\RouteConfigurator";
 const SYMFONY_TRANSLATOR: &str = "Symfony\\Contracts\\Translation\\TranslatorInterface";
 const SYMFONY_CONTROLLER_HELPER: &str =
     "Symfony\\Bundle\\FrameworkBundle\\Controller\\ControllerHelper";
@@ -491,12 +629,22 @@ pub(crate) enum ReceiverClass {
     /// A PHP configurator's `set()`, which declares a service on the
     /// services configurator and a parameter on the parameters one.
     ConfiguratorSet,
-    /// The services configurator, whose `alias()` declares a service ID
-    /// for another one.
-    ServicesConfigurator,
+    /// A PHP configurator's `alias()`, which declares another name for a
+    /// service on the services configurator and for a route on a routing
+    /// one.
+    ConfiguratorAlias,
     /// One service's configurator, whose `decorate()` names the service it
-    /// replaces.
+    /// replaces and whose `parent()` the one it inherits its definition
+    /// from.
     ServiceConfigurator,
+    /// Any of the container's configurators, whose arguments, bindings,
+    /// properties, and parameter values may hold `%name%` placeholders.
+    ConfiguratorArgument,
+    /// The container builder a kernel, a bundle, an extension, or a
+    /// compiler pass defines services on: `register()`, `autowire()`,
+    /// `setDefinition()`, and `setAlias()` declare a service ID, and the
+    /// rest of its definition API looks one up.
+    ContainerBuilder,
     /// What `generateUrl()` and `redirectToRoute()` take a route name in:
     /// the shortcuts a Symfony controller inherits.
     ControllerRouting,
@@ -504,7 +652,8 @@ pub(crate) enum ReceiverClass {
     /// route name: Symfony's, and Yii's, whose `generateAbsolute()` takes
     /// one too and whose `generateFromCurrent()` takes a fallback.
     UrlGenerator,
-    /// A PHP routing configurator, whose `add()` declares a route.
+    /// A PHP routing configurator, a collection of one, or the route one
+    /// of them just added, whose `add()` declares a route.
     RoutingConfigurator,
     /// A translator, whose `trans()` takes a translation key.
     Translator,
@@ -516,6 +665,9 @@ pub(crate) enum ReceiverClass {
     /// A templated email, whose `htmlTemplate()` and `textTemplate()` name
     /// the templates its bodies are rendered from.
     TemplatedEmail,
+    /// Twig's environment, whose `addGlobal()` declares a variable every
+    /// template receives.
+    TwigGlobals,
     /// An event dispatcher, whose `dispatch()` takes the event's name after
     /// the event itself.
     EventDispatcher,
@@ -535,7 +687,7 @@ impl ReceiverClass {
     pub(crate) fn targets(self) -> &'static [(&'static str, StringKeyKind)] {
         use StringKeyKind::{
             ContainerParameter, ServiceId, SymfonyEvent, SymfonyRoute, SymfonyTranslation,
-            TranslationDomain, TwigTemplate, View, YiiRoute, YiiView,
+            TranslationDomain, TwigTemplate, TwigVariable, View, YiiRoute, YiiView,
         };
         match self {
             // The concrete `Illuminate\View\Factory` implements the
@@ -562,19 +714,30 @@ impl ReceiverClass {
                 (SYMFONY_SERVICES_CONFIGURATOR, ServiceId),
                 (SYMFONY_ABSTRACT_SERVICE_CONFIGURATOR, ServiceId),
             ],
-            Self::ServicesConfigurator => &[
+            Self::ConfiguratorAlias => &[
                 (SYMFONY_SERVICES_CONFIGURATOR, ServiceId),
                 (SYMFONY_ABSTRACT_SERVICE_CONFIGURATOR, ServiceId),
+                (SYMFONY_ROUTING_CONFIGURATOR, SymfonyRoute),
+                (SYMFONY_COLLECTION_CONFIGURATOR, SymfonyRoute),
+                (SYMFONY_ROUTE_CONFIGURATOR, SymfonyRoute),
             ],
-            Self::ServiceConfigurator => &[(SYMFONY_SERVICE_CONFIGURATOR, ServiceId)],
+            // `decorate()` and `parent()` are only on the configurators of
+            // one service, so the base class settles it.
+            Self::ServiceConfigurator => &[(SYMFONY_ABSTRACT_CONFIGURATOR, ServiceId)],
+            Self::ConfiguratorArgument => &[(SYMFONY_ABSTRACT_CONFIGURATOR, ContainerParameter)],
+            Self::ContainerBuilder => &[(SYMFONY_CONTAINER_BUILDER, ServiceId)],
             Self::ControllerRouting => &[(SYMFONY_ABSTRACT_CONTROLLER, SymfonyRoute)],
             Self::UrlGenerator => &[
                 (SYMFONY_URL_GENERATOR, SymfonyRoute),
                 (YII_URL_GENERATOR, YiiRoute),
             ],
-            // Only the top-level configurator: a route a collection's
-            // `add()` declares takes the collection's name prefix.
-            Self::RoutingConfigurator => &[(SYMFONY_ROUTING_CONFIGURATOR, SymfonyRoute)],
+            // A collection's name prefix is read with the call (see
+            // `record_symfony_receiver_sites`), and the site's key holds it.
+            Self::RoutingConfigurator => &[
+                (SYMFONY_ROUTING_CONFIGURATOR, SymfonyRoute),
+                (SYMFONY_COLLECTION_CONFIGURATOR, SymfonyRoute),
+                (SYMFONY_ROUTE_CONFIGURATOR, SymfonyRoute),
+            ],
             Self::Translator => &[(SYMFONY_TRANSLATOR, SymfonyTranslation)],
             Self::TranslatorDomain => &[(SYMFONY_TRANSLATOR, TranslationDomain)],
             Self::TemplateRenderer => &[
@@ -582,6 +745,7 @@ impl ReceiverClass {
                 (SYMFONY_CONTROLLER_HELPER, TwigTemplate),
                 (TWIG_ENVIRONMENT, TwigTemplate),
             ],
+            Self::TwigGlobals => &[(TWIG_ENVIRONMENT, TwigVariable)],
             Self::TemplatedEmail => &[(SYMFONY_TEMPLATED_EMAIL, TwigTemplate)],
             // The component's dispatcher extends the contract, so the
             // contract covers both.
@@ -596,17 +760,27 @@ impl ReceiverClass {
         }
     }
 
-    /// The namespace of the configurators the receiver has to be one of,
-    /// when it is one of the configurators a PHP configuration file builds
-    /// the container or the routes with.
-    pub(crate) fn configurator_namespace(self) -> Option<&'static str> {
+    /// The namespaces of the configurators the receiver can be one of, when
+    /// it is one of the configurators a PHP configuration file builds the
+    /// container or the routes with.  Empty for any other receiver.
+    pub(crate) fn configurator_namespaces(self) -> &'static [&'static str] {
         match self {
-            Self::ConfiguratorSet | Self::ServicesConfigurator | Self::ServiceConfigurator => {
-                Some(SYMFONY_CONTAINER_CONFIGURATOR_NS)
+            Self::ConfiguratorSet | Self::ServiceConfigurator | Self::ConfiguratorArgument => {
+                &[SYMFONY_CONTAINER_CONFIGURATOR_NS]
             }
-            Self::RoutingConfigurator => Some(SYMFONY_ROUTING_CONFIGURATOR_NS),
-            _ => None,
+            Self::RoutingConfigurator => &[SYMFONY_ROUTING_CONFIGURATOR_NS],
+            Self::ConfiguratorAlias => &[
+                SYMFONY_CONTAINER_CONFIGURATOR_NS,
+                SYMFONY_ROUTING_CONFIGURATOR_NS,
+            ],
+            _ => &[],
         }
+    }
+
+    /// Whether a call on the receiver that declares a name can declare a
+    /// route: a routing configurator's `add()` and `alias()`.
+    pub(crate) fn declares_routes(self) -> bool {
+        matches!(self, Self::RoutingConfigurator | Self::ConfiguratorAlias)
     }
 
     /// Whether a call on a class of the project's own that passes the

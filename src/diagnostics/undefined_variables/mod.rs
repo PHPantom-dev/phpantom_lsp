@@ -84,12 +84,14 @@ macro_rules! stop_at_inner_scopes {
 }
 
 mod feature_guards;
+mod includes;
 mod offset_guards;
 
 pub(crate) use feature_guards::{
     collect_compact_vars, collect_import_offsets, has_get_defined_vars,
 };
 use feature_guards::{has_dynamic_variables, has_extract_call};
+use includes::{ANY_VARIABLE, IncludeResolver};
 use offset_guards::{
     collect_error_suppressed_offsets, collect_guarded_offsets, collect_isset_guarded_regions,
     collect_short_circuit_guarded_offsets, collect_var_annotations,
@@ -132,6 +134,8 @@ impl Backend {
                 backend: self,
                 uri,
                 content,
+                includes: IncludeResolver::new(self, uri),
+                namespace: &None,
                 diagnostics: Vec::new(),
             };
 
@@ -141,6 +145,7 @@ impl Backend {
                 let offset = stmt.span().start.offset;
                 let file_use_map = file_ctx.use_map_at(offset);
                 let file_namespace = file_ctx.namespace_at(offset);
+                ctx.namespace = file_namespace;
 
                 // Build a by-ref resolver that uses Backend to look up
                 // function and method signatures.  This lets the scope
@@ -254,6 +259,10 @@ struct DiagnosticCtx<'a> {
     backend: &'a Backend,
     uri: &'a str,
     content: &'a str,
+    includes: IncludeResolver<'a>,
+    /// The namespace of the top-level statement being walked, which the
+    /// constants in an include path resolve against.
+    namespace: &'a Option<String>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -452,6 +461,10 @@ fn check_scope(
         return;
     }
 
+    // An include defines whatever the included file's top level does, at
+    // the point the include ends.
+    let include_writes = ctx.includes.include_writes(body, ctx.namespace);
+
     // Build a set of "always-defined" names that do not require a
     // prior write: superglobals, compact-referenced vars, @var
     // annotations, and optionally $this.
@@ -492,6 +505,14 @@ fn check_scope(
             // `/** @var Type $var */` annotations act as a write at the
             // annotation's offset, but only within the frame they appear in.
             for (name, offset) in &var_annotated {
+                if *offset >= frame.start
+                    && *offset <= frame.end
+                    && !is_in_nested_frame(*offset, frame, &scope.frames)
+                {
+                    writes.push((name.as_str(), *offset));
+                }
+            }
+            for (name, offset) in &include_writes {
                 if *offset >= frame.start
                     && *offset <= frame.end
                     && !is_in_nested_frame(*offset, frame, &scope.frames)
@@ -561,9 +582,9 @@ fn check_scope(
 
             // Check if any write of this variable exists at a lower
             // offset.  Parameters use offset 0 so they always qualify.
-            let has_prior_write = frame_writes
-                .iter()
-                .any(|(name, off)| *name == access.name && *off < access.offset);
+            let has_prior_write = frame_writes.iter().any(|(name, off)| {
+                (*name == access.name || *name == ANY_VARIABLE) && *off < access.offset
+            });
 
             if has_prior_write {
                 continue;

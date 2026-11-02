@@ -7641,3 +7641,86 @@ async fn test_wrapper_template_not_bound_through_call_chained_off_new() {
         "the argument is a Receipt, so T is not Product, got: {chained:?}"
     );
 }
+
+/// A template typing a variadic parameter binds from every argument the
+/// parameter collects, through a function and a static method alike.
+#[tokio::test]
+async fn variadic_template_parameter_binds_every_argument() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///variadic-template.php").unwrap();
+    let source = r#"<?php
+class Pen { public function write(): void {} }
+class Brush { public function paint(): void {} }
+class Chalk { public function sketch(): void {} }
+/**
+ * @template T
+ * @param T ...$values
+ * @return T
+ */
+function first_of(...$values) {}
+class Pick {
+    /**
+     * @template T
+     * @param string $label
+     * @param T ...$values
+     * @return T
+     */
+    public static function one(string $label, ...$values) {}
+}
+function demonstrate(): void { BODY }
+"#;
+    for expression in [
+        "first_of(new Pen(), new Brush(), new Chalk())->",
+        "Pick::one('x', new Pen(), new Brush(), new Chalk())->",
+    ] {
+        let content = source.replace("BODY", expression);
+        let position = crate::common::position_after(&content, expression);
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        for name in ["write", "paint", "sketch"] {
+            assert!(
+                crate::common::method_names(&items).contains(&name),
+                "{expression}: missing {name}, got {:?}",
+                crate::common::method_names(&items)
+            );
+        }
+    }
+}
+
+/// A spread argument hands a variadic parameter its elements, so the
+/// template binds from the element type rather than the array.
+#[tokio::test]
+async fn variadic_template_parameter_binds_spread_elements() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///variadic-template-spread.php").unwrap();
+    let source = r#"<?php
+class Pen { public function write(): void {} }
+class Brush { public function paint(): void {} }
+/**
+ * @template T
+ * @param T ...$values
+ * @return T
+ */
+function first_of(...$values) {}
+/** @param list<Brush> $brushes */
+function demonstrate(Pen $pen, array $brushes): void { BODY }
+"#;
+    for (expression, expected) in [
+        ("first_of($pen, ...$brushes)->", &["write", "paint"][..]),
+        ("first_of(...$brushes)->", &["paint"][..]),
+    ] {
+        let content = source.replace("BODY", expression);
+        let position = crate::common::position_after(&content, expression);
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        for name in expected {
+            assert!(
+                crate::common::method_names(&items).contains(name),
+                "{expression}: missing {name}, got {:?}",
+                crate::common::method_names(&items)
+            );
+        }
+    }
+}

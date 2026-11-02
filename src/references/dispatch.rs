@@ -419,6 +419,21 @@ impl Backend {
                 if !self.string_key_kind_enabled(*kind) {
                     return Vec::new();
                 }
+                if *kind == crate::symbol_map::StringKeyKind::TwigBlock {
+                    return self.twig_block_references(uri, Some(span_start as usize), key);
+                }
+                if *kind == crate::symbol_map::StringKeyKind::TwigVariable
+                    && self.is_twig_template_uri(uri)
+                {
+                    return self.twig_variable_references(uri, Some(span_start as usize), key);
+                }
+                if *kind == crate::symbol_map::StringKeyKind::WordPressHook {
+                    return self.wordpress_hook_references(
+                        key,
+                        include_declaration,
+                        mode == ReferenceSearchMode::Rename,
+                    );
+                }
                 // Config resources and their generic config spelling share a
                 // canonical index identity. Declaration lookup is independent
                 // of this usage snapshot, so every request stays narrow.

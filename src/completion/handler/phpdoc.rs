@@ -167,7 +167,8 @@ impl Backend {
                         &class_loader,
                     )
                     .with_imports(Some(&ctx.use_map))
-                    .with_backend(Some(self)),
+                    .with_backend(Some(self))
+                    .with_uri(ctx.uri.as_deref()),
                     Some(
                         &function_loader
                             as &dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,

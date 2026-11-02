@@ -333,6 +333,7 @@ pub(crate) mod virtual_members;
 /// target miscompiles the completion path (see `docs/wasm.md`).
 #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
 mod wasm_wasi;
+mod wordpress;
 mod workspace_env;
 mod workspace_symbols;
 mod yii;
@@ -527,8 +528,14 @@ pub struct BackendState {
     /// [`crate::composer::is_yii_project`].  Starts `true` so a workspace with
     /// no `composer.json` to classify behaves as before.
     pub(crate) is_yii: Arc<std::sync::atomic::AtomicBool>,
+    /// The major version of PHPUnit the project's `composer.lock` installs,
+    /// `0` when it is not known.  In a workspace of several projects, the
+    /// lowest of theirs.  Decides whether a data provider has to be static.
+    pub(crate) phpunit_major: Arc<std::sync::atomic::AtomicU8>,
     /// The Yii path aliases the project's configuration declares.
     pub(crate) yii: yii::YiiState,
+    /// The files that fire or use a WordPress hook.
+    pub(crate) wordpress_hooks: wordpress::hooks::HookFiles,
     /// The `Pest.php` files of the project's test directories, read on
     /// first use and dropped when one is saved.  `None` until then.
     pub(crate) pest_configs: Arc<RwLock<Option<pest::PestConfigs>>>,

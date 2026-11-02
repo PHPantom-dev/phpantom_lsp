@@ -719,61 +719,6 @@ established.
 `virtual_members/laravel/route_names/` for the discovered routes and
 their actions.
 
-#### L65. Unknown Blade and Livewire components
-
-**Impact: Medium-High · Complexity: Medium**
-
-`<x-buttons.bakc />` and `<livewire:orders.overveiw />` name nothing, and
-nothing says so: component tags complete and navigate, but a tag that
-resolves to no class and no view is not reported (the tag diagnostics in
-`diagnostics/blade_component_tags.rs` only check that tags balance).
-Laravel Idea reports both, though on a project that keeps its Blade views
-outside `resources/views` it also flags components that exist. Report a
-tag that `blade/discovery.rs` cannot resolve, keeping the world open for
-component namespaces and paths the project registers in a way we cannot
-read.
-
-Pair it with a "Create component" quick fix, as an unknown view already
-offers "Create view" (`create_missing_view.rs`). Offer to create the anonymous component's Blade file at the path the tag
-resolves to (`resources/views/components/alert.blade.php`, honouring
-anonymous component namespaces and nested names), and as a second option
-the class-backed pair (`app/View/Components/Alert.php` plus its view).
-
-#### L68. Unknown methods on Eloquent models and builders
-
-**Impact: High · Complexity: Medium**
-
-```php
-$order->getTotl();          // BadMethodCallException at runtime, reported by nothing
-Order::whereStatsu('paid'); // fine: a dynamic where on a column
-```
-
-A method call on a class with `__call` is never reported
-(`diagnostics/unknown_members/member_check.rs` returns `MagicFallback`),
-which is right for a proxy that accepts any name but wrong for Eloquent.
-`Model::__call` forwards to the model's query builder, and the builder's
-`__call` accepts only a closed set: its own and the base query builder's
-methods, scopes, macros registered on the builder, and dynamic
-`where{Column}` calls. Anything else throws. So a typo in any model method
-call, in PHP or in a Blade template, goes unreported, while Larastan and
-Laravel Idea both report it.
-
-Judge an Eloquent receiver against that set instead of letting `__call`
-accept everything. The set is what completion already offers on a model
-and its builder, so the work is in the open-world edges: a project that
-registers macros we cannot read, `resolveRelationUsing()` dynamic
-relations, and a model or builder that overrides `__call` itself. In
-each of those, stay silent. Properties are a different case:
-`Model::__get` returns `null` for an unknown attribute instead of
-throwing, unless the application enables
-`Model::preventAccessingMissingAttributes()`, so property reports should
-follow that setting. An application that turns it on (directly or through
-`Model::shouldBeStrict()`) makes an unknown attribute a
-`MissingAttributeException`, so there the report belongs on by default
-rather than behind `report-magic-properties`. A production Laravel app
-used for comparison does exactly this, and its attribute typos go
-unreported unless the opt-in is set.
-
 #### L66. Related-file navigation for models, events, and listeners
 
 **Impact: Medium · Complexity: Medium**
@@ -806,3 +751,50 @@ because each is a small, independent code action:
   new component.
 
 Pick them off individually; none depends on another.
+
+---
+
+## Test suites and benchmarks
+
+#### L68. Port Larastan's type and rule tests
+
+**Impact: High · Complexity: Medium**
+
+The Symfony, Doctrine, and WordPress extensions' tests are ported in
+`tests/phpstan_symfony/`, `tests/phpstan_doctrine/`, and
+`tests/wordpress_stubs/`. Larastan's are not, though Laravel is the
+framework PHPantom is measured on most. Its `tests/Type/data/` holds
+about ninety `assertType()` fixtures (Eloquent builders and relations,
+collections, `config()`, `app()->make()`, facades, `abort()`, request
+input, model properties), and `tests/Rules/` nineteen rule tests.
+
+Port them into `tests/larastan/` the same way: the type fixtures run by
+`tests/assert_type_runner.rs`, the rule tests as `.fixture` files in
+`tests/fixtures/larastan/`, a slice of `laravel/framework` copied by
+`scripts/extract-framework-stubs.php` as the stubs, and upstream's
+`tests/application/` (models, migrations, config) as the project they
+run in. Larastan boots that application; we read the same files
+statically.
+
+Larastan's types are not the reference: where one disagrees with what
+the framework actually returns, assert the correct type and say why in
+the README. Rule tests for checks PHPantom has no counterpart for and
+does not plan one (Octane compatibility, `env()` outside config,
+unnecessary collection calls) are listed in the README as not ported,
+not marked `SKIP`. Every other gap is a `// SKIP: reason` filed in
+`docs/todo/`.
+
+#### L69. Benchmarks for Laravel string names and Blade
+
+**Impact: Medium · Complexity: Low-Medium**
+
+`benches/laravel_completion.rs` measures Eloquent member and morph
+column completion only. Symfony and Yii benchmark their name completion
+over a generated application (`benches/symfony_completion.rs`,
+`benches/yii_completion.rs`); Laravel, with the most string contexts of
+any framework, has no equivalent. Add one that generates an application
+with a few hundred routes, config keys, views, and translation keys, and
+times completion inside `route('…')`, `config('…')`, `view('…')`, and
+`__('…')`, plus completion of a variable and a member inside a Blade
+template whose type comes from its signature. Register it in
+`Cargo.toml` so `benches/ci_benchmarks.py` picks it up.

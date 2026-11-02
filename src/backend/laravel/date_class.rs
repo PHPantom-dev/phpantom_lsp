@@ -1,5 +1,6 @@
 //! The date class the project's providers select with `Date::use()`, which
-//! is what `now()` and `today()` return.
+//! is what `now()` and `today()` return, and the other runtime switch the
+//! same providers flip: whether Eloquent throws on a missing attribute.
 
 use crate::Backend;
 
@@ -12,8 +13,13 @@ impl Backend {
     /// pipeline so every consumer resolves the date helpers to a concrete
     /// class. Until this has run, `laravel_date_class` stays `None` and the
     /// helpers resolve to nothing rather than a stale default.
+    ///
+    /// The same pass records whether the providers turn on Eloquent's
+    /// missing-attribute exception (see
+    /// [`LaravelState::strict_attributes`](super::LaravelState::strict_attributes)).
     pub(crate) fn build_laravel_date_class(&self, providers: &super::LaravelProviders) {
         let mut configured = None;
+        let mut strict_attributes = false;
         // Track every file this scan reads so the single-file refresh can tell
         // whether an edit could change the configured class.  The app's
         // provider-registration files are seeds too: editing them changes which
@@ -46,8 +52,16 @@ impl Backend {
             {
                 configured = Some(class);
             }
+            if let Some(strict) =
+                crate::virtual_members::laravel::extract_strict_attributes(&content)
+            {
+                strict_attributes = strict;
+            }
         }
         *self.laravel.date_seed_uris.write() = seed_uris;
+        self.laravel
+            .strict_attributes
+            .store(strict_attributes, std::sync::atomic::Ordering::Relaxed);
         let previous = self.laravel.date_class.write().replace(configured.clone());
         // `now()` reaches the configured class through this slot rather than
         // through a lookup of the provider that set it, so a cached receiver

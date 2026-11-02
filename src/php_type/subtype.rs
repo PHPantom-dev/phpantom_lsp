@@ -200,14 +200,16 @@ impl PhpType {
             return Some(members.iter().any(|m| self.is_subtype_of(m)));
         }
 
+        // ── Intersection supertype: all members required ────────────
+        // Checked before the subtype side so that `A&B&C <: A&B` can meet
+        // each required member through a different member of its own.
+        if let TypeKind::Intersection(members) = supertype.kind() {
+            return Some(members.iter().all(|m| self.is_subtype_of(m)));
+        }
+
         // ── Intersection subtype: at least one member suffices ──────
         if let TypeKind::Intersection(members) = self.kind() {
             return Some(members.iter().any(|m| m.is_subtype_of(supertype)));
-        }
-
-        // ── Intersection supertype: all members required ────────────
-        if let TypeKind::Intersection(members) = supertype.kind() {
-            return Some(members.iter().all(|m| self.is_subtype_of(m)));
         }
         None
     }
@@ -881,9 +883,11 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
         // `non-falsy-string` and its Psalm synonym `truthy-string` exclude
         // both `""` and `"0"`, so they are strictly narrower than
         // `non-empty-string`, which excludes only `""`.
+        // A numeric string has at least one digit, so it is never `""`.
         "non-empty-string" => matches!(
             sub_n,
-            "non-empty-literal-string"
+            "numeric-string"
+                | "non-empty-literal-string"
                 | "non-empty-lowercase-string"
                 | "non-empty-uppercase-string"
                 | "callable-string"

@@ -753,6 +753,20 @@ fn normalize_void_assignment(mut resolved: Vec<ResolvedType>) -> Vec<ResolvedTyp
         if rt.type_string.is_void() {
             rt.type_string = PhpType::null();
             rt.class_info = None;
+        } else if let TypeKind::Union(members) = rt.type_string.kind()
+            && members.iter().any(PhpType::is_void)
+        {
+            let members = members
+                .iter()
+                .map(|m| {
+                    if m.is_void() {
+                        PhpType::null()
+                    } else {
+                        m.clone()
+                    }
+                })
+                .collect();
+            rt.type_string = PhpType::union(members).simplified();
         }
     }
     resolved

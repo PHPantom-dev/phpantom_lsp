@@ -85,7 +85,7 @@ pub async fn completion_response(
 /// Flatten a completion response into its items, keeping "the server had
 /// nothing to offer" (`None`) distinct from "the server offered an empty
 /// list".
-fn response_items(response: Option<CompletionResponse>) -> Option<Vec<CompletionItem>> {
+pub fn response_items(response: Option<CompletionResponse>) -> Option<Vec<CompletionItem>> {
     match response {
         Some(CompletionResponse::CompletionItemList(items)) => Some(items),
         Some(CompletionResponse::CompletionList(list)) => Some(list.items),

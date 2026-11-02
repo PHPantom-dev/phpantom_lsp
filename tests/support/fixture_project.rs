@@ -3,7 +3,10 @@
 //! `tests/phpstan_symfony/` and `tests/phpstan_doctrine/` each hold a
 //! `composer.json`, the slice of the framework their fixtures touch (copied
 //! by `scripts/extract-framework-stubs.php`), and the configuration a booted
-//! application would answer from. A fixture is analysed in a backend rooted
+//! application would answer from. `tests/wordpress_stubs/` holds the slice
+//! of the WordPress stubs its fixtures touch (copied by
+//! `scripts/extract-wordpress-stubs.php`), made a stub path by its
+//! `.phpantom.toml`. A fixture is analysed in a backend rooted
 //! at its project, after the startup and workspace index the server runs,
 //! so the project's classes and configuration files are indexed the way an
 //! editor would index them.

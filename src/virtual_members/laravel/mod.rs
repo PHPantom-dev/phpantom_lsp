@@ -185,10 +185,10 @@ pub(crate) use gates::{
     LaravelGateIndex, enumerate_gate_abilities, model_policy_abilities, scan_gate_registrations,
 };
 pub(crate) use macros::{
-    LaravelMacroIndex, MacroRegistration, extract_date_factory_class, extract_macro_registrations,
-    extract_mixin_registrations, inject_macros, macro_closure_this_target,
-    parse_installed_providers, parse_provider_class_list, parse_provider_referenced_classes,
-    synthesize_mixin_macros,
+    LaravelMacroIndex, MacroRegistration, OpenCallName, extract_date_factory_class,
+    extract_macro_registrations, extract_mixin_registrations, extract_open_call_names,
+    extract_strict_attributes, inject_macros, macro_closure_this_target, parse_installed_providers,
+    parse_provider_class_list, parse_provider_referenced_classes, synthesize_mixin_macros,
 };
 pub(crate) use model_extraction::{
     attribute_entry_offset, extract_laravel_metadata, extract_laravel_trait_metadata,
@@ -217,10 +217,9 @@ pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,
 };
-pub(crate) use table_names::model_table_name;
+pub(crate) use table_names::{model_schema_is_known, model_table_name};
 pub(crate) use trans_catalog::TranslationCatalog;
 pub(crate) use trans_json::find_json_trans_references;
-pub(crate) use trans_keys::unresolved_trans_type;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_data::{SharedViewVar, composer_class_vars, is_view_facade};
 pub(crate) use view_names::canonical_view_name;
@@ -246,6 +245,7 @@ pub(crate) use relationships::class_has_relation_method_ci;
 pub(crate) use relationships::classify_relationship_typed;
 pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
+pub(crate) use relationships::patch_config_related_models;
 pub(crate) use relationships::{
     RELATION_QUERY_METHODS, related_model_type, relation_query_method, resolve_relation_chain,
     resolve_relation_chain_details, resolve_relation_type,

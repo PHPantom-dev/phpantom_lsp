@@ -1,0 +1,14 @@
+// test: `void` in a declared return union reads as null in the variable
+// feature: hover
+// expect: string|null
+// expect_absent: void
+---
+<?php
+
+/** @return string|void */
+function maybe_title() {}
+
+function test(): void {
+    $title = maybe_title();
+    echo $<>title;
+}

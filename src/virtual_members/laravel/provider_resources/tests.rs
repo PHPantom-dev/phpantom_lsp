@@ -1249,3 +1249,92 @@ fn a_replaced_translator_binds_the_key_to_the_replacement() {
         Some("Acme\\Translation\\DatabaseTranslator")
     );
 }
+
+fn scan_provider(body: &str) -> ProviderResources {
+    let content = format!(
+        "<?php\n\
+         namespace Acme;\n\
+         use Acme\\View\\Components\\Forms\\DatePicker;\n\
+         use Acme\\Ui\\Calendar;\n\
+         class UiServiceProvider {{\n\
+             public function boot(): void {{\n{body}\n}}\n\
+         }}\n"
+    );
+    extract_provider_resources(
+        &content,
+        Path::new("/ws/app/Providers/UiServiceProvider.php"),
+        Path::new("/ws"),
+        ClassContext::default(),
+        Default::default(),
+    )
+}
+
+/// `BladeCompiler::component()` takes the class and alias in either order,
+/// derives an alias left out from the class, and puts the prefix in front.
+#[test]
+fn records_blade_component_aliases() {
+    let resources = scan_provider(
+        "Blade::component('package-alert', Calendar::class);\n\
+         Blade::component(Calendar::class, 'swapped');\n\
+         Blade::component(Calendar::class);\n\
+         Blade::component(DatePicker::class);\n\
+         Blade::component('badge', Calendar::class, 'ui');\n\
+         Blade::components(['card' => Calendar::class, DatePicker::class], 'kit');\n\
+         $this->loadViewComponentsAs('pkg', [Calendar::class, 'modal' => Calendar::class]);\n",
+    );
+    assert_eq!(
+        resources.component_aliases,
+        vec![
+            "package-alert",
+            "swapped",
+            "calendar",
+            "forms:date-picker",
+            "ui-badge",
+            "kit-card",
+            "kit-forms:date-picker",
+            "pkg-calendar",
+            "pkg-modal",
+        ]
+    );
+    assert!(resources.open_component_alias_prefixes.is_empty());
+}
+
+/// An alias whose name only exists at runtime leaves every tag under its
+/// prefix open, which for no prefix is every un-namespaced tag.
+#[test]
+fn an_unreadable_component_alias_opens_its_prefix() {
+    let resources = scan_provider(
+        "foreach ($icons as $name) { Blade::component($name, Calendar::class); }\n\
+         Blade::components($this->components(), 'kit');\n",
+    );
+    assert!(resources.component_aliases.is_empty());
+    assert_eq!(resources.open_component_alias_prefixes, vec!["", "kit"]);
+}
+
+/// `component()` is a common method name, so only Blade's compiler counts.
+#[test]
+fn component_on_another_receiver_registers_nothing() {
+    let resources = scan_provider(
+        "$form->component('alert', Calendar::class);\n\
+         $this->callAfterResolving('blade.compiler', function ($blade) {\n\
+             $blade->component('alert', Calendar::class);\n\
+         });\n",
+    );
+    assert_eq!(resources.component_aliases, vec!["alert"]);
+}
+
+#[test]
+fn records_livewire_component_registrations() {
+    let resources = scan_provider(
+        "Livewire::component('orders.overview', Calendar::class);\n\
+         Livewire::component(Calendar::class);\n",
+    );
+    assert_eq!(
+        resources.livewire_aliases,
+        vec!["orders.overview", "acme.ui.calendar"]
+    );
+    assert!(!resources.open_livewire_aliases);
+
+    let open = scan_provider("Livewire::component($name, Calendar::class);\n");
+    assert!(open.open_livewire_aliases);
+}

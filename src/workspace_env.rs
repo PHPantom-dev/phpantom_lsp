@@ -98,6 +98,10 @@ pub(crate) struct WorkspaceEnv {
     /// `[stubs]` paths of `config`. Shared by `Arc` for the same reason
     /// `client_indexing` is.
     pub(crate) client_stubs: Arc<RwLock<config::ClientStubOptions>>,
+    /// The inlay hint toggles the editor forwarded, beside the
+    /// `[inlay_hints]` section of `config`. Shared by `Arc` for the same
+    /// reason `client_indexing` is.
+    pub(crate) client_inlay_hints: Arc<RwLock<config::ClientInlayHintOptions>>,
     /// Directory symlinks the workspace walks have indexed through.
     ///
     /// Shared by `Arc` because the walk that discovers a link runs on a
@@ -165,8 +169,15 @@ impl WorkspaceEnv {
     }
 
     /// An environment with no global config layer, for tests.
+    ///
+    /// `possibly-empty-mismatches` is on, because tests of the type engine
+    /// observe what a value can hold through the mismatches it causes: with
+    /// the report off, a test that narrowing removed a `null` passes whether
+    /// or not it did. A test of the setting itself overrides this.
     pub(crate) fn new_isolated() -> Self {
-        Self::with_global_config(None)
+        let env = Self::with_global_config(None);
+        env.config.lock().diagnostics.possibly_empty_mismatches = Some(true);
+        env
     }
 
     fn with_global_config(global_config_path: Option<PathBuf>) -> Self {
@@ -186,6 +197,7 @@ impl WorkspaceEnv {
             index_filters: Arc::new(RwLock::new(None)),
             client_indexing: Arc::new(RwLock::new(config::ClientIndexingOptions::default())),
             client_stubs: Arc::new(RwLock::new(config::ClientStubOptions::default())),
+            client_inlay_hints: Arc::new(RwLock::new(config::ClientInlayHintOptions::default())),
             followed_links: crate::classmap_scanner::FollowedLinks::default(),
             filter_rediscovery_generation: Arc::new(AtomicU64::new(0)),
         }
@@ -232,6 +244,7 @@ impl Clone for WorkspaceEnv {
             index_filters: Arc::clone(&self.index_filters),
             client_indexing: Arc::clone(&self.client_indexing),
             client_stubs: Arc::clone(&self.client_stubs),
+            client_inlay_hints: Arc::clone(&self.client_inlay_hints),
             followed_links: self.followed_links.clone(),
             filter_rediscovery_generation: Arc::clone(&self.filter_rediscovery_generation),
         }

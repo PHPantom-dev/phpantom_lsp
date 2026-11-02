@@ -28,9 +28,8 @@ use super::{resolve_rhs_expression, resolved_type_with_lookup};
 /// `$this` replaced (via the `replace_self` closure, which differs between the
 /// instance and static call paths), and any conditionals nested inside the
 /// winning branch collapsed.  Returns `None` when the method has no
-/// conditional return type, the condition cannot be decided from the
-/// arguments, or the winning branch is uninformative (a bare `mixed`/`array`
-/// else-branch) — in which case the caller falls back to the native return
+/// conditional return type or the condition cannot be decided from the
+/// arguments, in which case the caller falls back to the native return
 /// type so the full union (including scalar/`array` members) is preserved.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn resolve_conditional_return_for_call(
@@ -70,6 +69,7 @@ pub(super) fn resolve_conditional_return_for_call(
         bindings: method.template_bindings(),
         arg_type_resolver,
         this_type: Some(&this_type),
+        subs: None,
     };
     let resolved =
         crate::type_engine::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
@@ -99,6 +99,7 @@ pub(super) fn resolve_conditional_return_for_call(
             bindings: method.template_bindings(),
             arg_type_resolver,
             this_type: Some(&this_type),
+            subs: None,
         };
         crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
             &substituted,
@@ -112,11 +113,7 @@ pub(super) fn resolve_conditional_return_for_call(
     } else {
         substituted
     };
-    if collapsed.is_void() {
-        None
-    } else {
-        Some(collapsed)
-    }
+    Some(collapsed)
 }
 
 /// The types the call site's arguments resolve to, indexed by the
@@ -380,6 +377,7 @@ pub(super) fn resolve_owner_method_call(
                 bindings: method_ref.map(|m| m.template_bindings()).unwrap_or(&[]),
                 arg_type_resolver: Some(&arg_ty_resolver),
                 this_type: None,
+                subs: None,
             };
             crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
                 &ty,

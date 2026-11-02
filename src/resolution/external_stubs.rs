@@ -23,12 +23,12 @@ impl Backend {
             return None;
         }
         let path = self.external_stubs.read().classes.get(class_name)?.clone();
-        let uri = crate::util::path_to_uri(&path);
-        let cached = self.symbols.uri_classes_index.read().get(&uri).cloned();
-        let classes = match cached {
-            Some(classes) => classes,
-            None => self.parse_and_cache_file(&path)?,
-        };
+        // Parsed with its functions and constants, which a project that
+        // uses a stub package's classes reaches for too. Caching only the
+        // classes here would leave the first function lookup to parse the
+        // whole file a second time.
+        let uri = self.parse_external_stub_globals(&path)?;
+        let classes = self.symbols.uri_classes_index.read().get(&uri).cloned()?;
         classes
             .iter()
             .find(|class| class.fqn().eq_ignore_ascii_case(class_name))
@@ -41,17 +41,16 @@ impl Backend {
         if !self.has_external_stubs() {
             return None;
         }
-        let (name, path) = {
-            let stubs = self.external_stubs.read();
-            candidates.iter().find_map(|&name| {
-                stubs
-                    .functions
-                    .get_key_value(name)
-                    .map(|(name, path)| (name.to_owned(), path.clone()))
-            })?
-        };
-        let uri = self.parse_external_stub_globals(&path)?;
-        self.function_declared_by(&name, &uri)
+        let stubs = self.external_stubs();
+        let (name, path) = candidates
+            .iter()
+            .find_map(|&name| stubs.functions.get_key_value(name))?;
+        let uri = self.parse_external_stub_globals(path)?;
+        let mut function = self.function_declared_by(name, &uri)?;
+        if let Some(wordpress) = &stubs.wordpress {
+            wordpress.apply(path, &mut function);
+        }
+        Some(function)
     }
 
     /// What `read` takes from the constant the first of `candidates` a
@@ -83,13 +82,10 @@ impl Backend {
             .map(read)
     }
 
-    /// Parse the stub file at `path` for its functions and constants,
-    /// unless it already was, and return its URI.
+    /// Parse the stub file at `path` for its classes, functions and
+    /// constants, unless it already was, and return its URI.
     ///
-    /// A file a class lookup parsed counts as not parsed here: that parse
-    /// only caches classes, while this one publishes the functions and
-    /// constants too, and leaves the file's state behind to say so.
-    ///
+    /// The parse leaves the file's state behind to say it happened.
     /// Claimed like any other lazy parse, so the workers of a diagnostic
     /// pass that all reach for built-ins at once parse each large stub
     /// file once rather than once per worker.

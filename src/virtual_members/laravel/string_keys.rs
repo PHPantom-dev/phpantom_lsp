@@ -78,7 +78,13 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::MessengerBus
         | StringKeyKind::YiiRoute => backend.symfony_declaration_locations(*kind, key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
+        StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
+        StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
+        StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
+            backend.twig_callable_definitions(*kind, key)
+        }
         StringKeyKind::YiiRouteArgument => backend.yii_route_argument_locations(key),
+        StringKeyKind::WordPressHook => backend.wordpress_hook_definitions(key),
     }
 }
 
@@ -265,9 +271,10 @@ pub(crate) fn find_laravel_string_key_references(
         // template's) map like any use, so the usages already hold it.
         StringKeyKind::ServiceId
         | StringKeyKind::ContainerParameter
-        | StringKeyKind::SymfonyRoute
         | StringKeyKind::SymfonyTranslation
         | StringKeyKind::TwigTemplate
+        | StringKeyKind::TwigFilter
+        | StringKeyKind::TwigFunction
         | StringKeyKind::SymfonyConfigKey
         | StringKeyKind::SymfonyEvent
         | StringKeyKind::MessengerBus
@@ -275,14 +282,37 @@ pub(crate) fn find_laravel_string_key_references(
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // The catalogues named after a domain declare it, and the paths of
-        // its handler's routes a route argument, and are added below.
-        StringKeyKind::TranslationDomain | StringKeyKind::YiiRouteArgument => {
+        // its handler's routes a route argument, and are added below.  A
+        // route's name may be put together by the imports that load it, or
+        // declared by a bundle's routing file outside the workspace, so its
+        // declarations are too.
+        StringKeyKind::TranslationDomain
+        | StringKeyKind::YiiRouteArgument
+        | StringKeyKind::SymfonyRoute => {
             find_string_key_usages(kind, key, backend, snapshot, false)
         }
         // Two spellings of one view share no key, so the renders are found
         // by the file they name rather than in the key's snapshot.
         StringKeyKind::YiiView => {
             return backend.find_yii_view_references(key, include_declaration);
+        }
+        // Like a Blade section, a block is shared only by the templates
+        // that extend each other.
+        StringKeyKind::TwigBlock => {
+            return backend.twig_block_references(uri, None, key);
+        }
+        // A template's variable is its own, but a global is every
+        // template's.
+        StringKeyKind::TwigVariable if backend.is_twig_template_uri(uri) => {
+            return backend.twig_variable_references(uri, None, key);
+        }
+        StringKeyKind::TwigVariable => {
+            return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
+        }
+        // A pattern only names a hook by matching it, so the places that
+        // fire or use it are found by matching too.
+        StringKeyKind::WordPressHook => {
+            return backend.wordpress_hook_references(key, include_declaration, false);
         }
     };
 

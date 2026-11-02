@@ -22,6 +22,18 @@ impl Backend {
         self.workspace.config.lock().diagnostics.enabled()
     }
 
+    /// Whether a type mismatch that only a `null` or `false` causes is
+    /// reported; see
+    /// [`DiagnosticsConfig::possibly_empty_mismatches_enabled`](config::DiagnosticsConfig::possibly_empty_mismatches_enabled).
+    /// Reads the one flag without cloning the whole config.
+    pub(crate) fn possibly_empty_mismatches_enabled(&self) -> bool {
+        self.workspace
+            .config
+            .lock()
+            .diagnostics
+            .possibly_empty_mismatches_enabled()
+    }
+
     /// The directory symlinks the workspace walks have indexed through.
     ///
     /// Walks report into it as they discover links; the watcher
@@ -103,6 +115,23 @@ impl Backend {
         drop(current);
         *self.workspace.index_filters.write() = None;
         true
+    }
+
+    /// The inlay hint kinds in force, from `[inlay_hints]` and the
+    /// editor's toggles together. Reads the one section without cloning
+    /// the whole config.
+    pub(crate) fn inlay_hint_kinds(&self) -> config::InlayHintKinds {
+        let client = *self.workspace.client_inlay_hints.read();
+        config::InlayHintKinds::resolve(&self.workspace.config.lock().inlay_hints, &client)
+    }
+
+    /// Replace the editor's inlay hint toggles. Returns whether the kinds
+    /// in force changed, so a settings push that leaves them as they were
+    /// does not make the editor re-pull every hint.
+    pub fn set_client_inlay_hint_options(&self, options: config::ClientInlayHintOptions) -> bool {
+        let before = self.inlay_hint_kinds();
+        *self.workspace.client_inlay_hints.write() = options;
+        self.inlay_hint_kinds() != before
     }
 
     /// Return the configured PHP version.

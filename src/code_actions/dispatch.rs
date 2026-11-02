@@ -137,6 +137,7 @@ static COLLECTORS: &[Collector] = &[
     offer(QUICKFIX, Backend::collect_implement_methods_actions),
     offer(QUICKFIX, Backend::collect_replace_deprecated_actions),
     skip_in_template(QUICKFIX, Backend::collect_phpstan_actions),
+    skip_in_template(QUICKFIX, Backend::collect_data_provider_actions),
     skip_in_template(QUICKFIX, Backend::collect_mago_fix_actions),
     offer(
         &["quickfix", "refactor.rewrite"],
@@ -165,6 +166,7 @@ static COLLECTORS: &[Collector] = &[
     offer(QUICKFIX, Backend::collect_fix_class_case_actions),
     offer(EXTRACT, Backend::collect_extract_interface_actions),
     offer_in_resource(QUICKFIX, Backend::collect_create_missing_view_actions),
+    template_range(QUICKFIX, Backend::collect_create_missing_component_actions),
     offer_in_resource(QUICKFIX, Backend::collect_insert_translation_key_actions),
 ];
 
@@ -242,6 +244,7 @@ impl Backend {
 
         let only = params.context.only.as_deref().unwrap_or_default();
         let is_resource = self.is_resource_uri(uri);
+        let eol = Self::request_line_ending(template.as_ref(), content);
         for collector in COLLECTORS {
             // The kind filter is its own gate, ahead of the document one,
             // and the collector's own range checks are left to it.
@@ -269,21 +272,28 @@ impl Backend {
                     .all(|action| collector.kinds.contains(&action_kind(action))),
                 "a code action collector offered a kind its table entry does not list",
             );
+
+            // A collector plans its edits against the PHP a template lowers
+            // to, unless it was handed the template's own range, in which
+            // case it planned them against the template's own text.  The
+            // editor applies them to the template itself, and an action
+            // that cannot be moved there whole is not offered.
+            let planned_in_template =
+                is_template && collector.template == TemplatePolicy::TemplateRange;
+            let mut offered = actions.split_off(first);
+            offered.retain_mut(|action| match action {
+                CodeActionResponse::CodeAction(CodeAction {
+                    edit: Some(edit), ..
+                }) => {
+                    self.finish_action_edit(edit, uri, eol, template.as_ref(), planned_in_template)
+                }
+                _ => true,
+            });
+            actions.append(&mut offered);
         }
         // A collector that offers several kinds may have offered one the
         // request did not ask for.
         actions.retain(|action| kind_requested(only, action_kind(action)));
-
-        // Every collector plans its edits against the PHP a template lowers
-        // to; the editor applies them to the template itself, and an action
-        // that cannot be moved there whole is not offered.
-        let eol = Self::request_line_ending(template.as_ref(), content);
-        actions.retain_mut(|action| match action {
-            CodeActionResponse::CodeAction(CodeAction {
-                edit: Some(edit), ..
-            }) => self.finish_action_edit(edit, uri, eol, template.as_ref(), false),
-            _ => true,
-        });
 
         // A deferred action can resolve to nothing in a template (an
         // extraction whose statement starts in the PHP an echo lowers to),

@@ -119,14 +119,23 @@ pub(crate) enum DocblockMemberRef {
     See,
     /// PHPUnit metadata naming a member: coverage (a `@covers` / `@uses`
     /// tag, a `@covers ::name` under a `@coversDefaultClass`, or a
-    /// `#[CoversMethod]` / `#[UsesMethod]` attribute), a data provider
-    /// (`@dataProvider`, `#[DataProvider]`, `#[DataProviderExternal]`), or
-    /// a test dependency (`@depends`, `#[Depends]` and its variants).
+    /// `#[CoversMethod]` / `#[UsesMethod]` attribute) or a test dependency
+    /// (`@depends`, `#[Depends]` and its variants).  A data provider is
+    /// marked [`Self::PhpUnitDataProvider`] instead.
     ///
     /// Unlike `@see`, the target names a code unit that has to exist —
     /// PHPUnit errors out on metadata that names nothing — so it is still
     /// checked.
     PhpUnit,
+    /// The method a PHPUnit data provider names: `@dataProvider`,
+    /// `#[DataProvider]`, or `#[DataProviderExternal]`.  Checked like
+    /// [`Self::PhpUnit`], and additionally for the modifiers PHPUnit
+    /// requires of a provider.
+    ///
+    /// `attribute` records the attribute form, which only PHPUnit 10 and
+    /// later read, and so implies a version that requires the provider to
+    /// be static.
+    PhpUnitDataProvider { attribute: bool },
     /// A Symfony form field, naming the property path of the form's data
     /// class it reads and writes.
     ///

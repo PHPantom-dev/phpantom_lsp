@@ -1,0 +1,36 @@
+{
+    "name": "phpantom/wordpress-demo",
+    "description": "WordPress intelligence playground for PHPantom",
+    "license": "MIT",
+    "type": "project",
+    "repositories": [
+        {
+            "type": "composer",
+            "url": "https://wpackagist.org",
+            "only": ["wpackagist-plugin/*"]
+        }
+    ],
+    "require": {
+        "php": ">=8.2"
+    },
+    "require-dev": {
+        "php-stubs/wordpress-stubs": "^7.0",
+        "roots/wordpress-no-content": "^7.0",
+        "wpackagist-plugin/sqlite-database-integration": "^2.2"
+    },
+    "autoload": {
+        "classmap": [
+            "wp-content/plugins/acme-shop/src/"
+        ]
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/installers": false,
+            "roots/wordpress-core-installer": false
+        },
+        "platform": {
+            "php": "8.2.0"
+        },
+        "sort-packages": true
+    }
+}

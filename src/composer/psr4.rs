@@ -18,6 +18,9 @@ pub struct Psr4Mapping {
     pub prefix: String,
     /// The base directory path relative to the workspace root (e.g. `"src/Klarna/"`).
     pub base_path: String,
+    /// Whether the mapping comes from `autoload-dev`, where a project keeps
+    /// its tests.
+    pub is_dev: bool,
 }
 
 /// Extract all PSR-4 autoload mappings from both `autoload` and
@@ -30,13 +33,13 @@ pub fn extract_psr4_mappings_from_package(package: &ComposerPackage) -> Vec<Psr4
 
     if let Some(autoload) = &package.autoload {
         for (prefix, paths) in &autoload.psr_4 {
-            collect_psr4_entries(prefix, paths, &mut mappings);
+            collect_psr4_entries(prefix, paths, false, &mut mappings);
         }
     }
 
     if let Some(autoload_dev) = &package.autoload_dev {
         for (prefix, paths) in &autoload_dev.psr_4 {
-            collect_psr4_entries(prefix, paths, &mut mappings);
+            collect_psr4_entries(prefix, paths, true, &mut mappings);
         }
     }
 
@@ -133,12 +136,18 @@ pub(super) fn normalise_prefix(prefix: &str) -> String {
 }
 
 /// Collect PSR-4 entries from any value that implements [`Psr4Paths`].
-fn collect_psr4_entries<P: Psr4Paths>(prefix: &str, paths: &P, mappings: &mut Vec<Psr4Mapping>) {
+fn collect_psr4_entries<P: Psr4Paths>(
+    prefix: &str,
+    paths: &P,
+    is_dev: bool,
+    mappings: &mut Vec<Psr4Mapping>,
+) {
     let normalised_prefix = normalise_prefix(prefix);
     paths.for_each_path(|path| {
         mappings.push(Psr4Mapping {
             prefix: normalised_prefix.clone(),
             base_path: normalise_path(path),
+            is_dev,
         });
     });
 }
@@ -304,29 +313,7 @@ pub fn resolve_namespace_from_path(
         return None;
     }
 
-    let file_unix = file_path.to_str()?.replace('\\', "/");
-
-    let mut best: Option<(&Psr4Mapping, String)> = None;
-
-    for mapping in mappings {
-        let abs_base = workspace_root.join(&mapping.base_path);
-        let abs_base_str = abs_base.to_str()?.replace('\\', "/");
-        let abs_base_slash = if abs_base_str.ends_with('/') {
-            abs_base_str
-        } else {
-            format!("{}/", abs_base_str)
-        };
-
-        if let Some(remainder) = file_unix.strip_prefix(&abs_base_slash)
-            && best
-                .as_ref()
-                .is_none_or(|(b, _)| mapping.base_path.len() > b.base_path.len())
-        {
-            best = Some((mapping, remainder.to_string()));
-        }
-    }
-
-    let (mapping, remainder) = best?;
+    let (mapping, remainder) = psr4_mapping_for_path(mappings, workspace_root, file_path)?;
     let without_ext = remainder.strip_suffix(".php")?;
     let class_name = without_ext
         .rsplit('/')
@@ -352,6 +339,149 @@ pub fn resolve_namespace_from_path(
     Some((namespace, class_name))
 }
 
+/// The mapping whose directory holds `file_path`, the most specific when
+/// several do, with the file's path below that directory in `/` form.
+fn psr4_mapping_for_path<'a>(
+    mappings: &'a [Psr4Mapping],
+    workspace_root: &Path,
+    file_path: &Path,
+) -> Option<(&'a Psr4Mapping, String)> {
+    let file_unix = file_path.to_str()?.replace('\\', "/");
+
+    let mut best: Option<(&Psr4Mapping, String)> = None;
+
+    for mapping in mappings {
+        let abs_base = workspace_root.join(&mapping.base_path);
+        let abs_base_str = abs_base.to_str()?.replace('\\', "/");
+        let abs_base_slash = if abs_base_str.ends_with('/') {
+            abs_base_str
+        } else {
+            format!("{}/", abs_base_str)
+        };
+
+        if let Some(remainder) = file_unix.strip_prefix(&abs_base_slash)
+            && best
+                .as_ref()
+                .is_none_or(|(b, _)| mapping.base_path.len() > b.base_path.len())
+        {
+            best = Some((mapping, remainder.to_string()));
+        }
+    }
+
+    best
+}
+
+/// What a test's name adds to the name of the class it tests.
+const TEST_SUFFIX: &str = "Test";
+
+fn push_existing_file(found: &mut Vec<PathBuf>, path: PathBuf) {
+    if path.is_file() && !found.contains(&path) {
+        found.push(path);
+    }
+}
+
+/// The test files the naming convention pairs with the class `class_fqn`,
+/// declared in `class_path`.
+///
+/// The class' path below its `autoload` root is mirrored below each
+/// `autoload-dev` root with a `Test` suffix, optionally inside one grouping
+/// directory: `App\Billing\Invoice` in `src/` pairs with
+/// `tests/Billing/InvoiceTest.php` and with `tests/Unit/Billing/InvoiceTest.php`.
+/// A Pest file follows the same naming, so it is found the same way. A class
+/// that lives under an `autoload-dev` root is test code and pairs with nothing.
+pub(crate) fn conventional_test_files(
+    mappings: &[Psr4Mapping],
+    workspace_root: &Path,
+    class_fqn: &str,
+    class_path: &Path,
+) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let Some((mapping, _)) = psr4_mapping_for_path(mappings, workspace_root, class_path) else {
+        return found;
+    };
+    if mapping.is_dev {
+        return found;
+    }
+    let class_fqn = class_fqn.trim_start_matches('\\');
+    let Some(relative) =
+        namespace_below_prefix(class_fqn, &mapping.prefix).filter(|rest| !rest.is_empty())
+    else {
+        return found;
+    };
+    let relative_file = format!("{}{TEST_SUFFIX}.php", relative.replace('\\', "/"));
+
+    for test_root in mappings.iter().filter(|mapping| mapping.is_dev) {
+        let base = workspace_root.join(&test_root.base_path);
+        push_existing_file(&mut found, base.join(&relative_file));
+        let Ok(entries) = std::fs::read_dir(&base) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                push_existing_file(&mut found, entry.path().join(&relative_file));
+            }
+        }
+    }
+
+    // Directory listings come back in no particular order.
+    found.sort();
+    found
+}
+
+/// The classes the naming convention pairs with the test file `test_path`,
+/// as `(FQN, file)`: the reverse of [`conventional_test_files`].
+pub(crate) fn conventional_test_subjects(
+    mappings: &[Psr4Mapping],
+    workspace_root: &Path,
+    test_path: &Path,
+) -> Vec<(String, PathBuf)> {
+    let mut found: Vec<(String, PathBuf)> = Vec::new();
+    let Some((mapping, remainder)) = psr4_mapping_for_path(mappings, workspace_root, test_path)
+    else {
+        return found;
+    };
+    if !mapping.is_dev {
+        return found;
+    }
+    let Some(without_ext) = remainder.strip_suffix(".php") else {
+        return found;
+    };
+    let (dirs, stem) = without_ext.rsplit_once('/').unwrap_or(("", without_ext));
+    let Some(short) = stem
+        .strip_suffix(TEST_SUFFIX)
+        .filter(|short| !short.is_empty())
+    else {
+        return found;
+    };
+
+    // The mirrored path, and the same without a grouping directory such as
+    // `Unit/` or `Feature/`.
+    let mut dir_choices = vec![dirs];
+    if !dirs.is_empty() {
+        dir_choices.push(dirs.split_once('/').map_or("", |(_, rest)| rest));
+    }
+
+    for source_root in mappings.iter().filter(|mapping| !mapping.is_dev) {
+        for dir in &dir_choices {
+            let relative = if dir.is_empty() {
+                short.to_string()
+            } else {
+                format!("{dir}/{short}")
+            };
+            let path = workspace_root
+                .join(&source_root.base_path)
+                .join(format!("{relative}.php"));
+            if !path.is_file() || found.iter().any(|(_, existing)| *existing == path) {
+                continue;
+            }
+            let fqn = format!("{}{}", source_root.prefix, relative.replace('/', "\\"));
+            found.push((fqn, path));
+        }
+    }
+
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,6 +493,7 @@ mod tests {
         let mappings = vec![Psr4Mapping {
             prefix: "App\\".to_string(),
             base_path: "app/".to_string(),
+            is_dev: false,
         }];
         let root = Path::new("/project");
         let result =
@@ -378,6 +509,7 @@ mod tests {
         let mappings = vec![Psr4Mapping {
             prefix: "App\\".to_string(),
             base_path: "app/".to_string(),
+            is_dev: false,
         }];
         let root = Path::new("/project");
         let result =
@@ -393,6 +525,7 @@ mod tests {
         let mappings = vec![Psr4Mapping {
             prefix: "App\\".to_string(),
             base_path: "app/".to_string(),
+            is_dev: false,
         }];
         let root = Path::new("/project");
         let result = resolve_namespace_from_path(
@@ -417,10 +550,12 @@ mod tests {
             Psr4Mapping {
                 prefix: "Tests\\".to_string(),
                 base_path: "tests/".to_string(),
+                is_dev: false,
             },
             Psr4Mapping {
                 prefix: "Tests\\".to_string(),
                 base_path: "shared/tests/".to_string(),
+                is_dev: false,
             },
         ];
         let root = Path::new("/project");
@@ -447,10 +582,12 @@ mod tests {
             Psr4Mapping {
                 prefix: "App\\".to_string(),
                 base_path: "app/".to_string(),
+                is_dev: false,
             },
             Psr4Mapping {
                 prefix: "App\\Models\\".to_string(),
                 base_path: "app/Models/".to_string(),
+                is_dev: false,
             },
         ];
         let root = Path::new("/project");
@@ -467,6 +604,7 @@ mod tests {
         let mappings = vec![Psr4Mapping {
             prefix: String::new(),
             base_path: "src/".to_string(),
+            is_dev: false,
         }];
         let root = Path::new("/project");
         let result =
@@ -479,6 +617,7 @@ mod tests {
         let mappings = vec![Psr4Mapping {
             prefix: String::new(),
             base_path: "src/".to_string(),
+            is_dev: false,
         }];
         let root = Path::new("/project");
         let result =
@@ -491,6 +630,7 @@ mod tests {
         let mappings = vec![Psr4Mapping {
             prefix: "App\\".to_string(),
             base_path: "app/".to_string(),
+            is_dev: false,
         }];
         let root = Path::new("/project");
         let result = resolve_namespace_from_path(
@@ -506,6 +646,7 @@ mod tests {
         let mappings = vec![Psr4Mapping {
             prefix: "App\\".to_string(),
             base_path: "app/".to_string(),
+            is_dev: false,
         }];
         let root = Path::new("/project");
         let result =
@@ -518,6 +659,7 @@ mod tests {
         let mappings = vec![Psr4Mapping {
             prefix: "Acme\\Billing\\".to_string(),
             base_path: "/project/modules/billing/src/".to_string(),
+            is_dev: false,
         }];
         let root = Path::new("/project");
         let result = resolve_namespace_from_path(

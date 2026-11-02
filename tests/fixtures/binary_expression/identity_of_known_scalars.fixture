@@ -1,0 +1,38 @@
+// test: `===` and `!==` between operands that can only hold known scalars resolve to the answer
+// feature: hover
+// expect_hover: $never => false
+// expect_hover: $always => true
+// expect_hover: $maybe => bool
+// expect_hover: $nullable => false
+// expect_hover: $nullMatches => bool
+// expect_hover: $sameValue => true
+// expect_hover: $intVsString => false
+// expect_hover: $openString => bool
+---
+<?php
+
+/** @return 'HTTP/1.0'|'HTTP/1.1'|'HTTP/2' */
+function protocol() { return 'HTTP/1.1'; }
+
+/** @return ?'a' */
+function maybeA() { return null; }
+
+function test(string $s): void {
+    $never = protocol() === 'HTTP/1';
+    $always = 'HTTP/1' !== protocol();
+    $maybe = protocol() === 'HTTP/2';
+    $nullable = maybeA() === 'b';
+    $nullMatches = maybeA() === null;
+    $one = 'x';
+    $sameValue = $one === 'x';
+    $intVsString = $one === 1;
+    $openString = $s === 'x';
+    $<>never;
+    $always;
+    $maybe;
+    $nullable;
+    $nullMatches;
+    $sameValue;
+    $intVsString;
+    $openString;
+}

@@ -391,6 +391,105 @@ async fn a_missing_template_can_be_created() {
     }
 }
 
+const BROKEN_TWIG: &str = "{% extends 'base.html.twig' %}
+{% block body %}
+  {% include 'partials/crad.html.twig' %}
+  {% include 'partials/optional.html.twig' ignore missing %}
+  {% include '@Vendor/external.html.twig' %}
+{% endblock %}
+";
+
+/// The `invalid_symfony_template` messages reported in the template at
+/// `uri`, with the line each is on.
+fn template_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<(String, u32)> {
+    let mut diagnostics = Vec::new();
+    backend.collect_template_diagnostics(uri.as_str(), content, &mut diagnostics);
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(Code::String(code)) if code == "invalid_symfony_template"
+            )
+        })
+        .map(|diagnostic| {
+            (
+                message_text(&diagnostic.message).to_string(),
+                diagnostic.range.start.line,
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn missing_templates_a_template_names_are_reported() {
+    let (backend, dir) = workspace(&[
+        ("templates/base.html.twig", BASE_TWIG),
+        ("templates/partials/card.html.twig", CARD_TWIG),
+        ("templates/broken.html.twig", BROKEN_TWIG),
+    ])
+    .await;
+    let uri = uri_for(&dir, "templates/broken.html.twig");
+
+    assert_eq!(
+        template_problems(&backend, &uri, BROKEN_TWIG),
+        vec![("Unknown template: 'partials/crad.html.twig'".to_string(), 2)]
+    );
+
+    // A template that names only what exists has nothing to report.
+    let page = uri_for(&dir, "templates/base.html.twig");
+    assert!(template_problems(&backend, &page, BASE_TWIG).is_empty());
+}
+
+#[tokio::test]
+async fn a_missing_template_a_template_names_can_be_fixed() {
+    let (backend, dir) = workspace(&[
+        ("templates/base.html.twig", BASE_TWIG),
+        ("templates/partials/card.html.twig", CARD_TWIG),
+        ("templates/broken.html.twig", BROKEN_TWIG),
+    ])
+    .await;
+    let uri = uri_for(&dir, "templates/broken.html.twig");
+    let at = position_in(BROKEN_TWIG, "partials/crad", 0);
+
+    let actions = get_code_actions_in_range(
+        &backend,
+        uri.as_str(),
+        BROKEN_TWIG,
+        Range::new(Position::new(at.line, 0), Position::new(at.line, 200)),
+    );
+    let change = find_action(&actions, "Change to 'partials/card.html.twig'")
+        .expect("should offer the close name");
+    let edits = change
+        .edit
+        .as_ref()
+        .and_then(|edit| edit.changes.as_ref())
+        .and_then(|changes| changes.get(&uri))
+        .expect("an edit to the template");
+    assert_eq!(edits[0].new_text, "partials/card.html.twig");
+    assert_eq!(edits[0].range.start, at);
+
+    let create = find_action(
+        &actions,
+        "Create missing template 'partials/crad.html.twig'",
+    )
+    .expect("should offer to create the template");
+    let Some(ops) = create
+        .edit
+        .as_ref()
+        .and_then(|edit| edit.document_changes.as_ref())
+    else {
+        panic!("expected resource operations");
+    };
+    match &ops[0] {
+        DocumentChange::CreateFile(create) => assert_eq!(
+            create.uri.to_file_path().unwrap(),
+            dir.path().join("templates/partials/crad.html.twig")
+        ),
+        _ => panic!("expected a CreateFile operation"),
+    }
+}
+
 #[tokio::test]
 async fn a_close_template_name_is_offered() {
     const TYPO_PHP: &str = "<?php\nnamespace App\\Controller;\n\nuse Symfony\\Bundle\\FrameworkBundle\\Controller\\AbstractController;\n\nfinal class TypoController extends AbstractController\n{\n    public function show(): object\n    {\n        return $this->render('blog/shw.html.twig');\n    }\n}\n";

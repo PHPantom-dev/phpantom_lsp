@@ -1,0 +1,8 @@
+{
+    "name": "phpantom/wordpress-stubs-fixtures",
+    "description": "The project the type fixtures of php-stubs/wordpress-stubs run in",
+    "type": "project",
+    "require": {
+        "php-stubs/wordpress-stubs": "7.1.2"
+    }
+}

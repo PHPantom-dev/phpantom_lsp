@@ -19,7 +19,9 @@ use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::Backend;
 use crate::atom::{AtomMap, atom};
-use crate::symbol_map::{ClassRefContext, SubjectText, SymbolKind, SymbolMap, SymbolSpan};
+use crate::symbol_map::{
+    ClassRefContext, StringKeyKind, SubjectText, SymbolKind, SymbolMap, SymbolSpan,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 enum ResourceSymbol {
@@ -106,10 +108,36 @@ impl Backend {
         if let Some(location) = self.resolve_resource_symbol_definition(content, position) {
             return vec![location];
         }
+        // An attribute read off a Twig variable leads to the member it reads,
+        // which only the variable's type tells.
+        if self.is_twig_template_uri(uri) && self.is_twig_project() {
+            let offset = crate::text_position::position_to_offset(content, position);
+            let members = self.twig_attribute_definitions(uri, content, offset as usize);
+            if !members.is_empty() {
+                return members;
+            }
+        }
         let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
             return Vec::new();
         };
         match span.kind {
+            // A block name means something only where it is written, which
+            // the key alone does not say.
+            SymbolKind::StringKey {
+                kind: StringKeyKind::TwigBlock,
+                key,
+                ..
+            } if self.is_twig_project() => {
+                self.twig_block_definitions(uri, Some(span.start as usize), &key)
+            }
+            // So is a template variable, which is the template's own.
+            SymbolKind::StringKey {
+                kind: StringKeyKind::TwigVariable,
+                key,
+                ..
+            } if self.is_twig_project() => {
+                self.twig_variable_definitions(uri, Some(span.start as usize), &key)
+            }
             SymbolKind::StringKey { kind, key, .. } if self.string_key_kind_enabled(kind) => {
                 crate::virtual_members::laravel::resolve_laravel_string_key(self, &kind, &key, uri)
             }
@@ -245,6 +273,7 @@ impl Backend {
 
         let mut spans = Vec::new();
         let mut container_values = Vec::new();
+        let mut route_imports = Vec::new();
         if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
             // A bus is declared by a key under `config/packages/`, which is
             // a configuration key too; the bus is the one that means
@@ -258,7 +287,9 @@ impl Backend {
             spans.extend(container_spans);
             container_values = values;
             if crate::symfony::routes::is_routing_config_uri(uri) {
-                spans.extend(crate::symfony::routes::routing_key_spans(uri, content));
+                let (routes, imports) = crate::symfony::routes::routing_declarations(uri, content);
+                spans.extend(routes);
+                route_imports = imports;
             }
         }
         if is_symfony {
@@ -314,6 +345,7 @@ impl Backend {
             spans,
             member_access_indices,
             container_values,
+            route_imports,
             source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
             ..SymbolMap::default()
         }
@@ -322,8 +354,8 @@ impl Backend {
 
 impl Backend {
     /// The spans of a Twig template: the names it is loaded by, the
-    /// templates it names, and in a Symfony project the route names and
-    /// translation keys it reads.
+    /// templates, blocks, filters, functions, and variables it names, and in
+    /// a Symfony project the route names and translation keys it reads.
     fn twig_template_spans(&self, uri: &str, content: &str, is_symfony: bool) -> Vec<SymbolSpan> {
         let roots = self.twig_roots();
         let names = crate::util::uri_to_path(uri)
@@ -340,6 +372,27 @@ impl Backend {
             content,
             |name| roots.is_template_name(name),
         ));
+        spans.extend(crate::twig::blocks::twig_block_spans(content));
+        // The `parent` of a `parent()` is the block it renders, rather than
+        // the function Twig declares it as.
+        let callables: Vec<SymbolSpan> = crate::twig::callables::twig_callable_spans(content)
+            .into_iter()
+            .filter(|callable| {
+                !spans
+                    .iter()
+                    .any(|span| span.start < callable.end && callable.start < span.end)
+            })
+            .collect();
+        spans.extend(callables);
+        let variables: Vec<SymbolSpan> = crate::twig::variables::twig_variable_spans(content)
+            .into_iter()
+            .filter(|variable| {
+                !spans
+                    .iter()
+                    .any(|span| span.start < variable.end && variable.start < span.end)
+            })
+            .collect();
+        spans.extend(variables);
         spans.sort_by_key(|span| span.start);
         spans
     }

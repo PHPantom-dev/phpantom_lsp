@@ -84,6 +84,14 @@ impl<'a> ArrayElements<'a> {
             ArrayElements::Any(resolve) if value.starts_with('"') && value.contains('$') => {
                 resolve(value)
             }
+            // An argument's `true` is that value, which a condition on the
+            // entry (`$args is array{echo: false, ...}`) compares, where a
+            // constant's type widens it to `bool`.
+            ArrayElements::Any(resolve)
+                if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") =>
+            {
+                resolve(value)
+            }
             ArrayElements::Any(resolve) => {
                 infer_type_from_constant_value_inner(value, self).or_else(|| resolve(value))
             }

@@ -41,11 +41,23 @@ const STUBS: &[(&str, &str)] = &[
     ),
     (
         "stubs/dependency-injection/Loader/Configurator/ServiceConfigurator.php",
-        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ServiceConfigurator {\n    public function class(?string $class): static {}\n    public function args(array $arguments): static {}\n}\n",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ServiceConfigurator {\n    public function class(?string $class): static {}\n    public function parent(string $parent): static {}\n    public function args(array $arguments): static {}\n}\n",
     ),
     (
         "stubs/dependency-injection/Loader/Configurator/ParametersConfigurator.php",
         "<?php\nnamespace Symfony\\Component\\DependencyInjection\\Loader\\Configurator;\nclass ParametersConfigurator {\n    public function set(string $name, mixed $value): static {}\n}\n",
+    ),
+    (
+        "stubs/dependency-injection/ContainerBuilder.php",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection;\nclass ContainerBuilder implements ContainerInterface {\n    public function get(string $id): mixed {}\n    public function has(string $id): bool {}\n    public function getParameter(string $name): array|bool|string|int|float|\\UnitEnum|null {}\n    public function setParameter(string $name, mixed $value): void {}\n    public function register(string $id, ?string $class = null): Definition {}\n    public function setDefinition(string $id, Definition $definition): Definition {}\n    public function setAlias(string $alias, string $id): void {}\n}\n",
+    ),
+    (
+        "stubs/dependency-injection/Definition.php",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection;\nclass Definition {\n    public function __construct(?string $class = null) {}\n}\n",
+    ),
+    (
+        "stubs/dependency-injection/ChildDefinition.php",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection;\nclass ChildDefinition extends Definition {\n    public function __construct(string $parent) {}\n}\n",
     ),
     (
         "stubs/framework-bundle/Controller/AbstractController.php",
@@ -124,6 +136,7 @@ return static function (ContainerConfigurator $container): void {
     $services->alias('app.php_alias', 'app.newsletter');
     $parameters->set('app.php_sender', 'PHPantom');
     $parameters->set('app.php_retries', 3);
+    $services->set('app.php_child')->parent('app.mailer');
 };
 "#;
 
@@ -364,4 +377,58 @@ async fn handle_keeps_mixed_without_exactly_one_handler() {
         .await;
         assert!(shows(&hover, "mixed"), "{message}: {hover}");
     }
+}
+
+#[tokio::test]
+async fn a_container_builder_and_a_parent_declare_service_classes() {
+    let kernel = r#"<?php
+namespace App;
+
+use App\Service\Mailer;
+use App\Service\Newsletter;
+use Symfony\Component\DependencyInjection\ChildDefinition;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Definition;
+
+final class Kernel
+{
+    protected function build(ContainerBuilder $container): void
+    {
+        $container->register('app.registered', Mailer::class);
+        $container->setDefinition('app.defined', new Definition(Newsletter::class));
+        $container->setDefinition('app.child_definition', new ChildDefinition('app.registered'));
+        $container->setAlias('app.built_alias', 'app.defined');
+        $container->setParameter('app.built_port', 8080);
+    }
+}
+"#;
+    let consumer = |body: &str| {
+        format!(
+            "<?php\nnamespace App\\Controller;\n\nuse Symfony\\Component\\DependencyInjection\\ContainerInterface;\n\nfunction send(ContainerInterface $container): void\n{{\n{body}\n}}\n"
+        )
+    };
+    for (id, class) in [
+        ("app.registered", "Mailer"),
+        ("app.defined", "Newsletter"),
+        ("app.child_definition", "Mailer"),
+        ("app.built_alias", "Newsletter"),
+        ("app.php_child", "Mailer"),
+    ] {
+        let hover = hover_in(
+            &[("src/Kernel.php", kernel)],
+            "src/consumer.php",
+            &consumer(&format!(
+                "    $service = $container->get('{id}');\n    $serv§ice;"
+            )),
+        )
+        .await;
+        assert!(shows(&hover, class), "{id}: {hover}");
+    }
+    let hover = hover_in(
+        &[("src/Kernel.php", kernel)],
+        "src/consumer.php",
+        &consumer("    $port = $container->getParameter('app.built_port');\n    $po§rt;"),
+    )
+    .await;
+    assert!(shows(&hover, "int"), "{hover}");
 }

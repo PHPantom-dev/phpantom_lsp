@@ -1,0 +1,22 @@
+// test: a string an assertion refined in one branch is plain string again after the join
+// feature: hover
+// expect: $joined = string
+// expect_absent: lowercase-string
+// expect_absent: TUuid
+---
+<?php
+
+/**
+ * @template TUuid of string
+ * @param TUuid $uuid
+ * @phpstan-assert-if-true =TUuid&lowercase-string&non-falsy-string $uuid
+ */
+function is_uuid($uuid): bool { return true; }
+
+function test(string $s): void {
+    if (is_uuid($s)) {
+        echo $s;
+    }
+    $joined = $s;
+    $<>joined;
+}

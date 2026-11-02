@@ -1,7 +1,7 @@
 //! Completion inside a string argument: array shape keys, the Laravel
 //! string keys (routes, config, views, translations, morph aliases, paths,
 //! route and command parameters, request input), Symfony service IDs and
-//! container parameters, Yii views, Eloquent relation and
+//! container parameters, Yii views, WordPress hook names, Eloquent relation and
 //! column names, the strings a parameter's declared type asks for, and
 //! method names in route-controller groups and array callables.
 
@@ -96,6 +96,16 @@ impl Backend {
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_symfony_string_key_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── WordPress hook names ─────────────────────────────────
+        // `add_action('|')`, `do_action('|')`, and the rest of the hook
+        // functions.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_wordpress_hook_completion(uri, content, position, code)
         {
             return Some(response);
         }

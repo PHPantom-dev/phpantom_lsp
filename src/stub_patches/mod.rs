@@ -130,6 +130,23 @@
 //!     declares, so what the callback writes through a by-reference
 //!     capture widens the variable after the call instead of replacing it.
 //!
+//! 13. **The `array_udiff()` family** -- `array_udiff`, `array_diff_ukey`,
+//!     `array_uintersect_uassoc` and the rest take `array $array,
+//!     ...$rest` since PHP 8.0, where `$rest` holds the other arrays and
+//!     then one or two comparison callbacks. The stubs tag `$rest` as
+//!     `array`, which the trailing callback contradicts; it becomes
+//!     `array|callable`.
+//!
+//! ### Third-party patches
+//!
+//! [`apply_third_party_class_patches`] and
+//! [`apply_third_party_function_patches`] reach code parsed from the
+//! project or its vendor tree, so they match on an exact FQN (and, for
+//! functions, the docblock shape) and leave everything else alone. They
+//! cover a few `@phpstan-assert-if-true` promises PHPStan's own classes
+//! leave undeclared, and the `$args` docblock of Mockery's mock factories,
+//! whose `array<TMock>` alternative is really constructor arguments.
+//!
 //! ### Class patches
 //!
 //! 1. **`IteratorIterator`** -- phpstorm-stubs lack `@template` and `@mixin`.
@@ -184,9 +201,10 @@
 
 mod classes;
 mod functions;
+mod mockery;
 
 pub use classes::{apply_class_stub_patches, apply_third_party_class_patches};
-pub use functions::apply_function_stub_patches;
+pub use functions::{apply_function_stub_patches, apply_third_party_function_patches};
 
 #[cfg(test)]
 mod tests;

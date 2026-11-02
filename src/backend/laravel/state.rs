@@ -128,6 +128,13 @@ pub(crate) struct LaravelState {
     ///
     /// [`build_laravel_date_class`]: crate::Backend::build_laravel_date_class
     pub(crate) date_seed_uris: RwLock<HashSet<String>>,
+    /// Whether the app turns on Eloquent's missing-attribute exception
+    /// (`Model::preventAccessingMissingAttributes()` or
+    /// `Model::shouldBeStrict()`) in a service provider, which makes an
+    /// unknown model attribute an error rather than a `null` read.  Found by
+    /// the same scan as [`date_class`](Self::date_class), whose seed files
+    /// are the ones that can change it.
+    pub(crate) strict_attributes: std::sync::atomic::AtomicBool,
     /// What the project's registered service providers register: container
     /// bindings, package config files, view and translation directories, route
     /// files, and Blade component namespaces, merged across every provider.
@@ -174,6 +181,7 @@ impl LaravelState {
             macro_mixin_uris: RwLock::default(),
             date_class: RwLock::new(None),
             date_seed_uris: RwLock::default(),
+            strict_attributes: std::sync::atomic::AtomicBool::new(false),
             provider_resources: RwLock::default(),
             provider_scans: RwLock::default(),
             string_key_cache: RwLock::default(),

@@ -1,6 +1,7 @@
 //! Whether a statement list leaves the block it sits in: `return`,
 //! `throw`, `exit`, a `continue` or `break`, or a call to a function or
-//! method declared to return `never`.  Guard clauses narrow the code after
+//! method that returns `never`, declared or picked by a conditional
+//! return type at the call site.  Guard clauses narrow the code after
 //! them only when their body leaves.
 
 use std::cell::RefCell;
@@ -12,7 +13,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::{FunctionLoaderFn, ScopeVarResolverFn};
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -189,7 +190,17 @@ pub(in crate::type_engine) struct ExitCtx<'a> {
     /// names, so the call terminates a branch the same way
     /// `Aborter::fail()` does.
     pub static_receiver_resolver: ReceiverResolverFn<'a>,
+    /// Resolves a call through the shared expression pipeline, for a
+    /// callee whose conditional return type has a `never` branch: only
+    /// the call-site arguments decide whether `wp_die($m, '', $args)`
+    /// returns.
+    pub call_resolver: CallResolverFn<'a>,
 }
+
+/// Resolves a call expression to the types it returns.  See
+/// [`ExitCtx::call_resolver`].
+pub(in crate::type_engine) type CallResolverFn<'a> =
+    Option<&'a dyn for<'e> Fn(&'e Expression<'e>) -> Vec<ResolvedType>>;
 
 /// Resolves a method-call receiver that is not a plain variable (a call
 /// result, a `new` expression, a property chain) to the fully-qualified
@@ -266,8 +277,16 @@ fn expression_is_never_call(expr: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
             let Some(function_loader) = ctx.function_loader else {
                 return false;
             };
-            function_loader(bytes_to_str(ident.value()), fc.function.span().start.offset)
-                .is_some_and(|fi| type_is_never(fi.return_type.as_ref()))
+            let Some(fi) =
+                function_loader(bytes_to_str(ident.value()), fc.function.span().start.offset)
+            else {
+                return false;
+            };
+            match returns_never(fi.return_type.as_ref(), fi.conditional_return.as_ref()) {
+                ReturnsNever::Always => true,
+                ReturnsNever::No => false,
+                ReturnsNever::ByArguments => call_resolves_to_never(expr, ctx),
+            }
         }
         Call::Method(mc) => {
             let Some(method_name) = member_selector_name(&mc.method) else {
@@ -275,9 +294,13 @@ fn expression_is_never_call(expr: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
             };
             let receivers = receiver_class_names(mc.object, ctx);
             !receivers.is_empty()
-                && receivers
-                    .iter()
-                    .all(|class_name| class_has_never_method(class_name, method_name, ctx))
+                && all_return_never(
+                    receivers
+                        .iter()
+                        .map(|class_name| method_returns_never(class_name, method_name, ctx)),
+                    expr,
+                    ctx,
+                )
         }
         Call::StaticMethod(sc) => {
             let Some(method_name) = member_selector_name(&sc.method) else {
@@ -312,12 +335,20 @@ fn expression_is_never_call(expr: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
                     };
                     let class_names = static_receiver_resolver(class_expr);
                     return !class_names.is_empty()
-                        && class_names.iter().all(|class_name| {
-                            class_has_never_method(class_name, method_name, ctx)
-                        });
+                        && all_return_never(
+                            class_names.iter().map(|class_name| {
+                                method_returns_never(class_name, method_name, ctx)
+                            }),
+                            expr,
+                            ctx,
+                        );
                 }
             };
-            class_has_never_method(&class_name, method_name, ctx)
+            all_return_never(
+                std::iter::once(method_returns_never(&class_name, method_name, ctx)),
+                expr,
+                ctx,
+            )
         }
         // `$x?->fail()` is skipped entirely when `$x` is null, so it
         // does not unconditionally exit.
@@ -378,39 +409,104 @@ fn this_is_rebound(held: &[ResolvedType], current_class: &ClassInfo) -> bool {
         })
 }
 
-fn class_has_never_method(class_name: &str, method_name: &str, ctx: &ExitCtx<'_>) -> bool {
+/// Whether a call to a member returns `never`, as far as its declaration
+/// can tell.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReturnsNever {
+    /// The declared return type is `never`.
+    Always,
+    /// A conditional return type has a `never` branch, so the call-site
+    /// arguments decide.
+    ByArguments,
+    No,
+}
+
+/// Whether every one of a call's possible callees returns `never`, resolving
+/// the call when a conditional return type leaves it to the arguments.
+fn all_return_never(
+    callees: impl Iterator<Item = ReturnsNever>,
+    call: &Expression<'_>,
+    ctx: &ExitCtx<'_>,
+) -> bool {
+    let mut by_arguments = false;
+    for callee in callees {
+        match callee {
+            ReturnsNever::Always => {}
+            ReturnsNever::ByArguments => by_arguments = true,
+            ReturnsNever::No => return false,
+        }
+    }
+    !by_arguments || call_resolves_to_never(call, ctx)
+}
+
+/// Whether the call resolves to `never` through the caller's
+/// [`CallResolverFn`].
+fn call_resolves_to_never(call: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
+    let Some(call_resolver) = ctx.call_resolver else {
+        return false;
+    };
+    let Some(_guard) = try_acquire_receiver_guard(call.span()) else {
+        return false;
+    };
+    let types = call_resolver(call);
+    !types.is_empty() && types.iter().all(|rt| rt.type_string.is_never())
+}
+
+fn method_returns_never(class_name: &str, method_name: &str, ctx: &ExitCtx<'_>) -> ReturnsNever {
     // A method declared on the class itself is the common case; only
     // fall back to an inheritance merge when the class does not declare
     // the method, so trait and parent declarations are still found.
     if ctx.current_class.fqn().eq_ignore_ascii_case(class_name)
-        && let Some(is_never) = declared_method_returns_never(ctx.current_class, method_name)
+        && let Some(returns) = declared_method_returns_never(ctx.current_class, method_name)
     {
-        return is_never;
+        return returns;
     }
     let Some(class_info) = (ctx.class_loader)(Fqn::new(class_name)) else {
-        return false;
+        return ReturnsNever::No;
     };
-    if let Some(is_never) = declared_method_returns_never(&class_info, method_name) {
-        return is_never;
+    if let Some(returns) = declared_method_returns_never(&class_info, method_name) {
+        return returns;
     }
     let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
         &class_info,
         ctx.class_loader,
         ctx.resolved_class_cache,
     );
-    declared_method_returns_never(&merged, method_name).unwrap_or(false)
+    declared_method_returns_never(&merged, method_name).unwrap_or(ReturnsNever::No)
 }
 
-/// `Some(true)`/`Some(false)` when `class_info` declares `method_name`,
-/// `None` when it does not declare it at all.
-fn declared_method_returns_never(class_info: &ClassInfo, method_name: &str) -> Option<bool> {
+/// What `class_info`'s own declaration of `method_name` says, or `None`
+/// when it does not declare it at all.
+fn declared_method_returns_never(
+    class_info: &ClassInfo,
+    method_name: &str,
+) -> Option<ReturnsNever> {
     class_info
         .methods
         .iter()
         .find(|m| m.name.eq_ignore_ascii_case(method_name))
-        .map(|m| type_is_never(m.return_type.as_ref()))
+        .map(|m| returns_never(m.return_type.as_ref(), m.conditional_return()))
 }
 
-fn type_is_never(return_type: Option<&PhpType>) -> bool {
-    return_type.is_some_and(|t| t.is_never())
+fn returns_never(
+    return_type: Option<&PhpType>,
+    conditional_return: Option<&PhpType>,
+) -> ReturnsNever {
+    if return_type.is_some_and(|t| t.is_never()) {
+        ReturnsNever::Always
+    } else if conditional_return.is_some_and(has_never_branch) {
+        ReturnsNever::ByArguments
+    } else {
+        ReturnsNever::No
+    }
+}
+
+/// Whether some branch of a conditional type's spine is `never`.
+fn has_never_branch(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Conditional(cond) => {
+            has_never_branch(&cond.then_type) || has_never_branch(&cond.else_type)
+        }
+        _ => ty.is_never(),
+    }
 }

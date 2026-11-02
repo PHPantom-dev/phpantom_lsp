@@ -4,8 +4,8 @@
 //! Both read the spans the symbol map recorded for a file, resolve each name
 //! against what the project actually registers (routes, config keys,
 //! views, translation keys, console commands, morph aliases, gate
-//! abilities, Symfony service IDs, container parameters, routes and Twig
-//! templates, Yii views, routes, and the route arguments a handler reads),
+//! abilities, Symfony service IDs, container parameters, routes, translation
+//! keys and Twig templates, Yii views, routes, and the route arguments a handler reads),
 //! and report the ones nothing declares.
 
 use std::sync::Arc;
@@ -38,7 +38,10 @@ enum CheckedStringKind {
     ServiceId,
     ContainerParameter,
     SymfonyRoute,
+    SymfonyTranslation,
     TwigTemplate,
+    TwigFilter,
+    TwigFunction,
     MessengerBus,
     YiiView,
     YiiRoute,
@@ -63,7 +66,10 @@ impl CheckedStringKind {
             StringKeyKind::ServiceId => Self::ServiceId,
             StringKeyKind::ContainerParameter => Self::ContainerParameter,
             StringKeyKind::SymfonyRoute => Self::SymfonyRoute,
+            StringKeyKind::SymfonyTranslation => Self::SymfonyTranslation,
             StringKeyKind::TwigTemplate => Self::TwigTemplate,
+            StringKeyKind::TwigFilter => Self::TwigFilter,
+            StringKeyKind::TwigFunction => Self::TwigFunction,
             StringKeyKind::MessengerBus => Self::MessengerBus,
             StringKeyKind::YiiView => Self::YiiView,
             StringKeyKind::YiiRoute => Self::YiiRoute,
@@ -74,17 +80,22 @@ impl CheckedStringKind {
             // runtime, so an unrecognised container key proves nothing —
             // nor does an environment variable absent from `.env`, since
             // the environment a process runs with is not on disk.  A
-            // translation key no catalogue of the project declares may be
-            // one an installed bundle's does, or a message that is its own
-            // translation.  A configuration key is only declared by the
+            // configuration key is only declared by the
             // project's own schemas so far, which say nothing about what
             // a key under an open node or an installed bundle may be.  An
             // event is declared by the listeners that subscribe to it, and
-            // dispatching one nobody listens to is no mistake.
-            StringKeyKind::SymfonyTranslation
+            // dispatching one nobody listens to is no mistake.  Nor is
+            // listening to a WordPress hook nothing in the project fires,
+            // since another plugin or a later core may fire it.  A block
+            // name that nothing above defines starts a new block.  A
+            // template variable no render was found to pass may be passed
+            // by one that builds its context at runtime.
+            StringKeyKind::WordPressHook
             | StringKeyKind::TranslationDomain
             | StringKeyKind::Section
             | StringKeyKind::Stack
+            | StringKeyKind::TwigBlock
+            | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
             | StringKeyKind::Env
             | StringKeyKind::SymfonyConfigKey
@@ -131,8 +142,19 @@ struct DeclaredKeys<'a> {
     parameters: Vec<String>,
     /// The Symfony route names the project declares, sorted.
     symfony_routes: Vec<String>,
+    /// What the Symfony routes were read from, which tells which names can
+    /// be judged.
+    symfony_route_world: Option<crate::symfony::route_world::RouteWorld>,
+    /// The Symfony translation keys the project's catalogues declare, each
+    /// with its domain, sorted.
+    symfony_translations: Vec<String>,
+    /// The translation domains a key nothing declares can be judged in,
+    /// sorted.
+    judged_translation_domains: Arc<[String]>,
     /// The Twig templates the project holds, sorted.
     twig_templates: Vec<String>,
+    /// The Twig filters and functions the project and its packages declare.
+    twig_callables: Option<Arc<crate::twig::callables::TwigCallables>>,
     /// The Messenger buses the project's configuration declares, sorted.
     messenger_buses: Vec<String>,
     /// The Yii route names the project declares, sorted.
@@ -160,7 +182,14 @@ impl<'a> DeclaredKeys<'a> {
         let has_service = names(|kind| kind == CheckedStringKind::ServiceId);
         let has_parameter = names(|kind| kind == CheckedStringKind::ContainerParameter);
         let has_symfony_route = names(|kind| kind == CheckedStringKind::SymfonyRoute);
+        let has_symfony_translation = names(|kind| kind == CheckedStringKind::SymfonyTranslation);
         let has_twig_template = names(|kind| kind == CheckedStringKind::TwigTemplate);
+        let has_twig_callable = names(|kind| {
+            matches!(
+                kind,
+                CheckedStringKind::TwigFilter | CheckedStringKind::TwigFunction
+            )
+        });
         let has_messenger_bus = names(|kind| kind == CheckedStringKind::MessengerBus);
         let has_yii_route = names(|kind| kind == CheckedStringKind::YiiRoute);
 
@@ -268,25 +297,39 @@ impl<'a> DeclaredKeys<'a> {
             };
 
         let services = if has_service {
-            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::ServiceId)
+            backend.symfony_project_declared_names(crate::symbol_map::StringKeyKind::ServiceId)
         } else {
             Vec::new()
         };
         let parameters = if has_parameter {
-            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::ContainerParameter)
+            backend.symfony_project_declared_names(
+                crate::symbol_map::StringKeyKind::ContainerParameter,
+            )
         } else {
             Vec::new()
         };
-        let symfony_routes = if has_symfony_route {
-            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::SymfonyRoute)
+        let (symfony_routes, symfony_route_world) = if has_symfony_route {
+            let (names, world) = backend.symfony_routes();
+            (names, Some(world))
         } else {
+            (Vec::new(), None)
+        };
+        let judged_translation_domains = if has_symfony_translation {
+            backend.symfony_judged_translation_domains()
+        } else {
+            Arc::default()
+        };
+        let symfony_translations = if judged_translation_domains.is_empty() {
             Vec::new()
+        } else {
+            backend.symfony_declared_names(crate::symbol_map::StringKeyKind::SymfonyTranslation)
         };
         let twig_templates = if has_twig_template {
             backend.symfony_declared_names(crate::symbol_map::StringKeyKind::TwigTemplate)
         } else {
             Vec::new()
         };
+        let twig_callables = has_twig_callable.then(|| backend.twig_callables());
 
         let messenger_buses = if has_messenger_bus {
             backend.symfony_declared_names(crate::symbol_map::StringKeyKind::MessengerBus)
@@ -315,7 +358,11 @@ impl<'a> DeclaredKeys<'a> {
             services,
             parameters,
             symfony_routes,
+            symfony_route_world,
+            symfony_translations,
+            judged_translation_domains,
             twig_templates,
+            twig_callables,
             messenger_buses,
             yii_routes,
         }
@@ -371,11 +418,19 @@ impl<'a> DeclaredKeys<'a> {
                 Self::judge_application_key(&self.parameters, "app.", key)
                     .map(|valid| (valid, "container parameter", "invalid_symfony_parameter"))
             }
-            CheckedStringKind::SymfonyRoute => {
-                Self::judge_application_key(&self.symfony_routes, "app_", key)
-                    .map(|valid| (valid, "route", "invalid_symfony_route"))
-            }
+            CheckedStringKind::SymfonyRoute => self.judge_symfony_route(key),
+            CheckedStringKind::SymfonyTranslation => self.judge_symfony_translation(key),
             CheckedStringKind::TwigTemplate => self.judge_twig_template(key),
+            CheckedStringKind::TwigFilter => self
+                .twig_callables
+                .as_ref()?
+                .declares(crate::symbol_map::StringKeyKind::TwigFilter, key)
+                .map(|valid| (valid, "Twig filter", "invalid_twig_filter")),
+            CheckedStringKind::TwigFunction => self
+                .twig_callables
+                .as_ref()?
+                .declares(crate::symbol_map::StringKeyKind::TwigFunction, key)
+                .map(|valid| (valid, "Twig function", "invalid_twig_function")),
             CheckedStringKind::MessengerBus => self.judge_messenger_bus(key),
             // A view whose alias the project does not declare cannot be
             // told missing.
@@ -386,6 +441,44 @@ impl<'a> DeclaredKeys<'a> {
             CheckedStringKind::YiiRoute => self.judge_yii_route(key),
             CheckedStringKind::YiiRouteArgument => self.judge_yii_route_argument(key),
         }
+    }
+
+    /// Routes are a closed world the project's routing configuration spells
+    /// out, bundles' included, apart from the names under a loader whose
+    /// routes cannot be read.
+    fn judge_symfony_route(&self, key: &str) -> Verdict {
+        let world = self.symfony_route_world.as_ref()?;
+        if !world.can_judge(key) {
+            return None;
+        }
+        let valid = self
+            .symfony_routes
+            .binary_search_by(|name| name.as_str().cmp(key))
+            .is_ok();
+        Some((valid, "route", "invalid_symfony_route"))
+    }
+
+    /// A key no catalogue declares is still translated when an installed
+    /// package's catalogue declares it, and a message that is its own
+    /// translation (`trans('Save')`) needs no catalogue at all.  So a key is
+    /// only judged in a domain whose every catalogue is read (see
+    /// [`Backend::symfony_judged_translation_domains`]), and only when it is
+    /// spelled like a key.
+    fn judge_symfony_translation(&self, key: &str) -> Verdict {
+        let (domain, message) = crate::symfony::translations::split_translation_key(key);
+        if !crate::symfony::translations::is_dotted_key(message)
+            || self
+                .judged_translation_domains
+                .binary_search_by(|judged| judged.as_str().cmp(domain))
+                .is_err()
+        {
+            return None;
+        }
+        let valid = self
+            .symfony_translations
+            .binary_search_by(|declared| declared.as_str().cmp(key))
+            .is_ok();
+        Some((valid, "translation key", "invalid_symfony_translation"))
     }
 
     /// No package Yii installs declares routes of its own, so the
@@ -466,15 +559,16 @@ impl<'a> DeclaredKeys<'a> {
         Some((valid, "service", "invalid_symfony_service"))
     }
 
-    /// Whether `key`, a service ID, parameter, or route name, is among the
-    /// `declared` ones, when that can be told at all.
+    /// Whether `key`, a service ID or parameter, is among the `declared`
+    /// ones, when that can be told at all.
     ///
-    /// The configuration read is the project's own: the services,
-    /// parameters, and routes the bundles it installs register are not, and
-    /// neither are the ones a compiler pass or a route loader adds.  Symfony
-    /// names an application's own under the `app.` prefix (`app_` for a
-    /// route), which no bundle uses, so only those can be judged.  A project
-    /// that declares none was not read at all.
+    /// The installed bundles' declarations are read too, but a bundle names
+    /// many of its services from the configuration it is given (a cache
+    /// pool, a Messenger bus), and a compiler pass adds more, so what they
+    /// declare is never the whole of it.  Symfony names an application's
+    /// own under the `app.` prefix, which no bundle uses, so only those can
+    /// be judged, against the project's own declarations.  A project that
+    /// declares none was not read at all.
     fn judge_application_key(declared: &[String], prefix: &str, key: &str) -> Option<bool> {
         if !key.starts_with(prefix) || declared.is_empty() {
             return None;
@@ -737,22 +831,30 @@ impl Backend {
                 && let Some(range) = range(start, end)
             {
                 // A Yii view is keyed by the whole path it names, which
-                // reads best from the workspace root, and a route
-                // argument's key names its handler too.
-                let shown = match kind {
+                // reads best from the workspace root, a route argument's
+                // key names its handler too, and a translation key its
+                // domain.
+                let message = match kind {
                     CheckedStringKind::YiiView => {
-                        std::borrow::Cow::Owned(self.yii_view_display(key))
+                        format!("Unknown {}: '{}'", label, self.yii_view_display(key))
                     }
-                    CheckedStringKind::YiiRouteArgument => std::borrow::Cow::Borrowed(
-                        crate::yii::routes::split_route_argument_key(key).1,
+                    CheckedStringKind::YiiRouteArgument => format!(
+                        "Unknown {}: '{}'",
+                        label,
+                        crate::yii::routes::split_route_argument_key(key).1
                     ),
-                    _ => std::borrow::Cow::Borrowed(key),
+                    CheckedStringKind::SymfonyTranslation => {
+                        let (domain, message) =
+                            crate::symfony::translations::split_translation_key(key);
+                        format!("Unknown {label}: '{message}' in domain '{domain}'")
+                    }
+                    _ => format!("Unknown {}: '{}'", label, key),
                 };
                 out.push(helpers::make_diagnostic(
                     range,
                     DiagnosticSeverity::Warning,
                     code,
-                    format!("Unknown {}: '{}'", label, shown),
+                    message,
                 ));
             }
         }

@@ -140,3 +140,7 @@ harness = false
 [[bench]]
 name = "yii_completion"
 harness = false
+
+[[bench]]
+name = "wordpress_completion"
+harness = false

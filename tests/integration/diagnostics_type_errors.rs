@@ -4704,149 +4704,202 @@ function test(array $params): void {
     );
 }
 
-// ─── Nullability-only argument mismatches (downgrade-nullable-argument-mismatch) ───
+// ─── Mismatches only a `null` or `false` causes (possibly-empty-mismatches) ───
 
-#[test]
-fn negated_and_guard_leaves_null_reachable_as_an_error_by_default() {
-    let php = r#"<?php
-function takes_string(string $s): void {}
-
-function test(mixed $password): void {
-    if ($password !== null && ! is_string($password)) {
-        throw new \Exception('bad');
-    }
-    takes_string($password);
-}
-"#;
-    let diags = collect(php);
-    let messages = messages_with_code(&diags, "type_mismatch_argument");
-    assert_eq!(messages.len(), 1, "got {diags:?}");
-    assert!(
-        messages[0].contains("null does not satisfy string"),
-        "expected a nullability-only mismatch, got: {messages:?}"
-    );
-    let type_error = diags
-        .iter()
-        .find(|d| has_type_error(std::slice::from_ref(d)))
-        .unwrap();
-    assert_eq!(
-        type_error.severity,
-        Some(DiagnosticSeverity::Error),
-        "default severity must stay ERROR so existing projects see no change"
-    );
-}
-
-#[test]
-fn nullability_only_mismatch_can_be_downgraded_to_a_warning() {
+/// Every kind of type mismatch in `php`, with the setting as given; `None`
+/// leaves it unset, which is what a project without the key gets.
+fn type_mismatches(php: &str, possibly_empty_mismatches: Option<bool>) -> Vec<Diagnostic> {
     let backend = create_test_backend();
-    let uri = "file:///nullable_downgrade.php";
-    let php = r#"<?php
-function takes_string(string $s): void {}
-
-function test(mixed $password): void {
-    if ($password !== null && ! is_string($password)) {
-        throw new \Exception('bad');
-    }
-    takes_string($password);
-}
-"#;
-    {
-        let mut cfg = backend.config();
-        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
-        backend.set_config(cfg);
-    }
+    let uri = "file:///possibly_empty.php";
+    let mut cfg = backend.config();
+    cfg.diagnostics.possibly_empty_mismatches = possibly_empty_mismatches;
+    backend.set_config(cfg);
     backend.update_ast(uri, php);
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(uri, php, &mut diags);
-    let type_errors: Vec<&Diagnostic> = diags
-        .iter()
-        .filter(|d| has_type_error(std::slice::from_ref(d)))
-        .collect();
-    assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Warning));
+    backend.collect_return_type_diagnostics(uri, php, &mut diags);
+    backend.collect_property_type_diagnostics(uri, php, &mut diags);
+    diags
+}
+
+const POSSIBLY_EMPTY: &str = r#"<?php
+declare(strict_types=1);
+function takes_string(string $s): void {}
+
+class Holder {
+    public string $name = '';
+
+    public function run(
+        ?string $a,
+        string|null $b,
+        string|false $c,
+        string|false|null $d,
+        ?string $e,
+        string|false $f,
+        string|false $g,
+    ): string {
+        takes_string($a);
+        takes_string($b);
+        takes_string($c);
+        takes_string($d);
+        $this->name = $e;
+        $this->name = $f;
+        return $g;
+    }
+}
+"#;
+
+#[test]
+fn a_mismatch_only_null_or_false_causes_is_not_reported_by_default() {
+    let diags = type_mismatches(POSSIBLY_EMPTY, None);
+    assert!(diags.is_empty(), "got {diags:?}");
 }
 
 #[test]
-fn a_declared_nullable_argument_is_the_same_gap_as_the_union_spelling() {
-    let backend = create_test_backend();
-    let uri = "file:///nullable_downgrade_declared.php";
-    let php = r#"<?php
-function takes_string(string $s): void {}
-
-function test(?string $a, string|null $b, ?array $c): void {
-    takes_string($a);
-    takes_string($b);
-    takes_string($c);
+fn switching_the_report_off_is_the_same_as_the_default() {
+    let diags = type_mismatches(POSSIBLY_EMPTY, Some(false));
+    assert!(diags.is_empty(), "got {diags:?}");
 }
-"#;
-    {
-        let mut cfg = backend.config();
-        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
-        backend.set_config(cfg);
-    }
-    backend.update_ast(uri, php);
-    let mut diags = Vec::new();
-    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
-    let severities: Vec<Option<DiagnosticSeverity>> = diags
+
+#[test]
+fn opting_in_reports_arguments_returns_and_properties_as_errors() {
+    let diags = type_mismatches(POSSIBLY_EMPTY, Some(true));
+    let codes: Vec<_> = diags
         .iter()
-        .filter(|d| has_type_error(std::slice::from_ref(d)))
-        .map(|d| d.severity)
+        .map(|d| match &d.code {
+            Some(Code::String(code)) => code.as_str(),
+            other => panic!("unexpected code {other:?}"),
+        })
         .collect();
     assert_eq!(
-        severities,
+        codes,
         vec![
-            Some(DiagnosticSeverity::Warning),
-            Some(DiagnosticSeverity::Warning),
-            // `?array` fails on more than its nullability.
-            Some(DiagnosticSeverity::Error),
+            "type_mismatch_argument",
+            "type_mismatch_argument",
+            "type_mismatch_argument",
+            "type_mismatch_argument",
+            "type_mismatch_return",
+            "type_mismatch_property",
+            "type_mismatch_property",
         ],
+        "got {diags:?}"
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::Error)),
         "got {diags:?}"
     );
 }
 
 #[test]
-fn a_declared_nullable_argument_stays_an_error_by_default() {
+fn opting_in_names_the_member_that_fails() {
     let php = r#"<?php
 function takes_string(string $s): void {}
 
-function test(?string $a): void {
+function test(mixed $password): void {
+    if ($password !== null && ! is_string($password)) {
+        throw new \Exception('bad');
+    }
+    takes_string($password);
+}
+"#;
+    let diags = type_mismatches(php, Some(true));
+    assert_eq!(diags.len(), 1, "got {diags:?}");
+    let message = message_text(&diags[0].message);
+    assert!(
+        message.contains("null does not satisfy string"),
+        "{message}"
+    );
+}
+
+/// Another member failing makes the code wrong for a value that is not
+/// empty, so the setting has no say in it.
+#[test]
+fn a_mismatch_some_other_member_causes_is_always_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+function takes_string(string $s): void {}
+
+class Holder {
+    public string $name = '';
+
+    public function run(
+        ?array $a,
+        array|string $b,
+        array|string|null $c,
+        array|false $d,
+        array|string|null $e,
+        array|string $f,
+    ): string {
+        takes_string($a);
+        takes_string($b);
+        takes_string($c);
+        takes_string($d);
+        $this->name = $e;
+        return $f;
+    }
+}
+"#;
+    assert_eq!(type_mismatches(php, None).len(), 6);
+    assert_eq!(type_mismatches(php, Some(true)).len(), 6);
+}
+
+/// With nothing else in the value, there is no case in which it fits.
+#[test]
+fn a_value_that_can_only_be_empty_is_always_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+function takes_string(string $s): void {}
+
+/** @param null|false $empty */
+function test($empty): void {
+    takes_string(null);
+    takes_string(false);
+    takes_string($empty);
+}
+"#;
+    let diags = type_mismatches(php, None);
+    assert_eq!(diags.len(), 3, "got {diags:?}");
+}
+
+/// `bool` also holds `true`, which is not an empty value, so it is judged
+/// like any other member.
+#[test]
+fn a_bool_member_is_not_an_empty_one() {
+    let php = r#"<?php
+declare(strict_types=1);
+function takes_string(string $s): void {}
+
+function test(string|bool $a): void {
     takes_string($a);
 }
 "#;
-    let diags = collect(php);
-    let type_errors: Vec<&Diagnostic> = diags
-        .iter()
-        .filter(|d| has_type_error(std::slice::from_ref(d)))
-        .collect();
-    assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Error));
+    let diags = type_mismatches(php, None);
+    assert_eq!(diags.len(), 1, "got {diags:?}");
 }
 
+/// A value passed where the parameter takes the empty member too is fine
+/// on that count, whichever way the setting points.
 #[test]
-fn a_genuine_type_mismatch_stays_an_error_even_when_downgrade_is_enabled() {
-    let backend = create_test_backend();
-    let uri = "file:///nullable_downgrade_control.php";
+fn the_failing_member_is_the_one_judged_not_every_empty_one() {
     let php = r#"<?php
-function takes_string(string $s): void {}
+declare(strict_types=1);
+function takes_nullable(?string $s): void {}
 
-function test(array|string $val): void {
-    takes_string($val);
+function test(string|false|null $a): void {
+    takes_nullable($a);
+}
+function test_two(?array $b): void {
+    takes_nullable($b);
 }
 "#;
-    {
-        let mut cfg = backend.config();
-        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
-        backend.set_config(cfg);
-    }
-    backend.update_ast(uri, php);
-    let mut diags = Vec::new();
-    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
-    let type_errors: Vec<&Diagnostic> = diags
-        .iter()
-        .filter(|d| has_type_error(std::slice::from_ref(d)))
-        .collect();
-    assert_eq!(type_errors.len(), 1, "got {diags:?}");
-    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::Error));
+    let diags = type_mismatches(php, None);
+    assert_eq!(diags.len(), 1, "got {diags:?}");
+    assert!(
+        message_text(&diags[0].message).contains("?array"),
+        "{diags:?}"
+    );
 }
 
 #[test]
@@ -13184,6 +13237,49 @@ function test(array $lines): void {
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
+/// A subject whose type is unknown comes back as whatever shape it was, so
+/// the result is not checked against the string or array the next call
+/// expects, nor against the subject of a replace it is fed back into.
+#[test]
+fn a_replace_on_a_subject_of_unknown_type_is_not_enforced() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+function test($untyped, mixed $anything, $row): void {
+    $collapsed = trim(preg_replace('/[\r\n]+/', ' ', $untyped));
+    $twice = preg_replace('/\s+/', ' ', preg_replace('/[\r\n]+/', ' ', $untyped));
+    useString($twice);
+    $once = preg_replace('/[\r\n]+/', ' ', $untyped);
+    $again = preg_replace('/\s+/', ' ', $once);
+    useString($again);
+    useString(str_replace('a', 'b', $anything));
+    useString(substr_replace($row->name, 'b', 0, 1));
+    useString(preg_replace_callback('/a/', fn (array $m): string => 'b', $anything));
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A string subject still reports the `null` that `preg_replace` returns on
+/// a PCRE error: only a subject of unknown type relaxes the check.
+#[test]
+fn a_preg_replace_on_a_string_subject_keeps_its_error_branch() {
+    let php = r#"<?php
+function useString(string $value): void {}
+
+function test(string $text): void {
+    useString(preg_replace('/a/', 'b', $text));
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("null does not satisfy string"),
+        "got {messages:?}"
+    );
+}
+
 /// `json_encode()` is declared `string|false`, but `JSON_THROW_ON_ERROR`
 /// raises a `JsonException` instead of returning `false`, so the result
 /// satisfies a `string` parameter.
@@ -16332,4 +16428,165 @@ abstract class Request
         msgs.is_empty(),
         "`$this` binds `T` to `Acme\\Requests\\Request`, not the global `Request`: {msgs:?}"
     );
+}
+
+#[test]
+fn array_udiff_family_accepts_trailing_callback() {
+    let php = r#"<?php
+function test(array $a, array $b, array $c): void {
+    array_udiff($a, $b, fn($x, $y) => $x <=> $y);
+    array_udiff($a, $b, $c, fn($x, $y) => $x <=> $y);
+    array_diff_ukey($a, $b, fn($x, $y) => $x <=> $y);
+    array_uintersect_uassoc($a, $b, fn($x, $y) => $x <=> $y, fn($x, $y) => $x <=> $y);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(msgs.is_empty(), "unexpected type errors: {msgs:?}");
+}
+
+#[test]
+fn array_udiff_still_checks_its_first_argument() {
+    let php = r#"<?php
+function test(array $b): void {
+    array_udiff('nope', $b, fn($x, $y) => $x <=> $y);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "expected the string argument to be reported: {msgs:?}"
+    );
+}
+
+#[test]
+fn array_udiff_checks_its_trailing_arguments() {
+    let php = r#"<?php
+function test(array $a): void {
+    array_udiff($a, 42, fn($x, $y) => $x <=> $y);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "expected the int argument to be reported: {msgs:?}"
+    );
+}
+
+#[test]
+fn arguments_to_a_variadic_are_checked_against_its_element_type() {
+    let php = r#"<?php
+class Item {}
+function tags(int $count, string ...$tags): void {}
+tags(1, 'a', 'b', new Item());
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(msgs.len(), 1, "expected one mismatch: {msgs:?}");
+    assert!(
+        msgs[0].starts_with("Argument 4 ($tags) expects string, got Item"),
+        "{msgs:?}"
+    );
+}
+
+#[test]
+fn named_argument_collected_by_a_variadic_is_checked() {
+    let php = r#"<?php
+class Item {}
+function tags(string ...$tags): void {}
+tags(first: 'a', second: new Item());
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(msgs.len(), 1, "expected one mismatch: {msgs:?}");
+}
+
+#[test]
+fn variadic_typed_by_docblock_is_checked_against_the_tag() {
+    let php = r#"<?php
+class Item {}
+/** @param Item ...$items */
+function items(...$items): void {}
+items(new Item(), new Item());
+items(new Item(), 'nope');
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(msgs.len(), 1, "expected one mismatch: {msgs:?}");
+}
+
+#[test]
+fn mockery_constructor_arguments_are_not_checked_against_the_mocked_class() {
+    let php = r#"<?php
+interface LegacyMockInterface {}
+interface MockInterface {}
+class Connector { public function __construct(string $key) {} }
+
+class Mockery
+{
+    /**
+     * @template TMock of object
+     *
+     * @param array<class-string<TMock>|TMock|Closure(LegacyMockInterface&MockInterface&TMock):LegacyMockInterface&MockInterface&TMock|array<TMock>> $args
+     *
+     * @return LegacyMockInterface&MockInterface&TMock
+     */
+    public static function mock(...$args) {}
+}
+
+/**
+ * @template TSpy of object
+ *
+ * @param array<class-string<TSpy>|TSpy|Closure(LegacyMockInterface&MockInterface&TSpy):LegacyMockInterface&MockInterface&TSpy|array<TSpy>> $args
+ *
+ * @return LegacyMockInterface&MockInterface&TSpy
+ */
+function spy(...$args) {}
+
+function takes(Connector $c): void {}
+
+function test(): void
+{
+    takes(Mockery::mock(Connector::class, ['api_key']));
+    takes(spy(Connector::class, ['api_key']));
+    Mockery::mock(Connector::class, 42);
+}
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "only the int argument should be reported: {msgs:?}"
+    );
+    assert!(msgs[0].starts_with("Argument 2 ($args)"), "{msgs:?}");
+}
+
+#[test]
+fn template_named_twice_in_one_parameter_is_checked_against_its_bound() {
+    let php = r#"<?php
+/** @template T of object */
+class Mirror {
+    /** @param T|class-string<T> $objectOrClass */
+    public function __construct(object|string $objectOrClass) {}
+}
+class Item {}
+function test(string $name): void {
+    new Mirror(Item::class);
+    new Mirror(new Item());
+    new Mirror($name);
+}
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "only the plain string should be reported: {msgs:?}"
+    );
+    assert!(msgs[0].ends_with("got string"), "{msgs:?}");
 }

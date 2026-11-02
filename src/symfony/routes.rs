@@ -6,10 +6,11 @@
 //! A route that is an `alias:` of another reads the other one's name, and
 //! Twig's `path('…')` and `url('…')` read one too.  Each becomes a
 //! [`StringKey`](SymbolKind::StringKey) span in the file's resource symbol
-//! map.
+//! map.  A key with a `resource:`, or an `<import>`, loads routes from
+//! elsewhere, and becomes a [`RouteImport`] (see [`super::route_world`]).
 
 use super::resources::{yaml_content_before_comment, yaml_mapping_key};
-use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolSpan};
+use crate::symbol_map::{RouteImport, StringKeyKind, SymbolKind, SymbolSpan};
 
 /// Whether `uri` is a file Symfony loads routes from: `config/routes.yaml`,
 /// a file under `config/routes/`, or one under a bundle's
@@ -46,22 +47,21 @@ pub(crate) fn is_twig_uri(uri: &str) -> bool {
         .ends_with(".twig")
 }
 
-/// The route-name spans of one routing YAML or XML file, sorted by offset.
-pub(crate) fn routing_key_spans(uri: &str, content: &str) -> Vec<SymbolSpan> {
-    let path = uri
-        .split(['?', '#'])
-        .next()
-        .unwrap_or(uri)
-        .to_ascii_lowercase();
-    let path = path.strip_suffix(".dist").unwrap_or(&path);
+/// What one routing YAML or XML file declares: its route-name spans,
+/// sorted by offset, and the routes it imports, in source order.
+pub(crate) fn routing_declarations(
+    uri: &str,
+    content: &str,
+) -> (Vec<SymbolSpan>, Vec<RouteImport>) {
     let mut spans = Vec::new();
-    if path.ends_with(".yaml") || path.ends_with(".yml") {
-        scan_yaml(content, &mut spans);
-    } else if path.ends_with(".xml") {
-        scan_xml(content, &mut spans);
+    let mut imports = Vec::new();
+    match super::config_format(uri) {
+        Some(super::ConfigFormat::Yaml) => scan_yaml(content, &mut spans, &mut imports),
+        Some(super::ConfigFormat::Xml) => scan_xml(content, &mut spans, &mut imports),
+        None => {}
     }
     spans.sort_by_key(|span| (span.start, span.end));
-    spans
+    (spans, imports)
 }
 
 fn route_span(key: &str, start: usize, is_write: bool) -> SymbolSpan {
@@ -127,8 +127,8 @@ fn yaml_lines(content: &str) -> Vec<YamlLine<'_>> {
 
 /// The route declarations of a routing YAML file: every top-level key, and
 /// every key under a top-level `when@env:`, whose mapping has a `path:` or
-/// an `alias:` rather than a `resource:` (which imports other routes).
-fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>) {
+/// an `alias:` rather than a `resource:`, which imports other routes.
+fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>, imports: &mut Vec<RouteImport>) {
     let lines = yaml_lines(content);
     // The indentation of the entries of the `when@env:` section the scan is
     // in, from its first one.
@@ -148,18 +148,31 @@ fn scan_yaml(content: &str, spans: &mut Vec<SymbolSpan>) {
                 continue;
             }
         }
-        scan_yaml_route(line, &lines[index + 1..], spans);
+        scan_yaml_route(line, &lines[index + 1..], spans, imports);
     }
 }
 
+/// A YAML scalar, without its quotes and the space around it.
+fn yaml_scalar(value: &str) -> &str {
+    crate::framework::strip_yaml_quotes(value.trim()).0
+}
+
 /// Declare `entry` as a route if its mapping makes it one, and read the
-/// route an `alias:` names.  `rest` is every line after it.
-fn scan_yaml_route(entry: &YamlLine<'_>, rest: &[YamlLine<'_>], spans: &mut Vec<SymbolSpan>) {
+/// route an `alias:` names, or the import a `resource:` makes it.  `rest`
+/// is every line after it.
+fn scan_yaml_route(
+    entry: &YamlLine<'_>,
+    rest: &[YamlLine<'_>],
+    spans: &mut Vec<SymbolSpan>,
+    imports: &mut Vec<RouteImport>,
+) {
     if !is_route_name(entry.key) {
         return;
     }
     let mut is_route = false;
-    let mut is_import = false;
+    let mut import: Option<RouteImport> = None;
+    let mut loader = None;
+    let mut name_prefix = "";
     let mut alias = None;
 
     let inline = entry.value.trim();
@@ -170,7 +183,9 @@ fn scan_yaml_route(entry: &YamlLine<'_>, rest: &[YamlLine<'_>], spans: &mut Vec<
             };
             match key.trim().trim_matches(['\'', '"']) {
                 "path" => is_route = true,
-                "resource" => is_import = true,
+                "resource" => import = Some(yaml_import(Some(yaml_scalar(value)))),
+                "type" => loader = Some(yaml_scalar(value)),
+                "name_prefix" => name_prefix = yaml_scalar(value),
                 "alias" => {
                     let offset = value.as_ptr() as usize - entry.value.as_ptr() as usize;
                     alias = Some((value, entry.value_start + offset));
@@ -180,17 +195,44 @@ fn scan_yaml_route(entry: &YamlLine<'_>, rest: &[YamlLine<'_>], spans: &mut Vec<
         }
     } else {
         let mut child_indent = None;
-        for child in rest.iter().take_while(|child| child.indent > entry.indent) {
+        for (index, child) in rest
+            .iter()
+            .enumerate()
+            .take_while(|(_, child)| child.indent > entry.indent)
+        {
             if *child_indent.get_or_insert(child.indent) != child.indent {
                 continue;
             }
             match child.key {
                 "path" => is_route = true,
-                "resource" => is_import = true,
+                "resource" => {
+                    // `resource: { path: …, namespace: … }` written as a
+                    // block.
+                    let resource = match yaml_scalar(child.value) {
+                        "" => rest[index + 1..]
+                            .iter()
+                            .take_while(|nested| nested.indent > child.indent)
+                            .find(|nested| nested.key == "path")
+                            .map(|nested| yaml_scalar(nested.value)),
+                        resource => Some(resource),
+                    };
+                    import = Some(yaml_import(resource));
+                }
+                "type" => loader = Some(yaml_scalar(child.value)),
+                "name_prefix" => name_prefix = yaml_scalar(child.value),
                 "alias" => alias = Some((child.value, child.value_start)),
                 _ => {}
             }
         }
+    }
+
+    if let Some(mut import) = import {
+        import.loader = loader
+            .filter(|loader| !loader.is_empty())
+            .map(str::to_string);
+        import.name_prefix = name_prefix.to_string();
+        imports.push(import);
+        return;
     }
 
     let alias = alias.and_then(|(value, value_start)| {
@@ -199,7 +241,7 @@ fn scan_yaml_route(entry: &YamlLine<'_>, rest: &[YamlLine<'_>], spans: &mut Vec<
         let (name, (quote, _)) = crate::framework::strip_yaml_quotes(trimmed.trim_end());
         is_route_name(name).then(|| (name, value_start + leading + quote))
     });
-    if is_import || !(is_route || alias.is_some()) {
+    if !(is_route || alias.is_some()) {
         return;
     }
     spans.push(route_span(entry.key, entry.key_start, true));
@@ -208,11 +250,33 @@ fn scan_yaml_route(entry: &YamlLine<'_>, rest: &[YamlLine<'_>], spans: &mut Vec<
     }
 }
 
+/// The import a `resource:` makes, before its `type:` and `name_prefix:`
+/// are read.  A resource written as a mapping (`{ path: …, namespace: … }`)
+/// loads its `path`.
+fn yaml_import(resource: Option<&str>) -> RouteImport {
+    let resource = resource.and_then(|resource| match resource.strip_prefix('{') {
+        Some(mapping) => mapping
+            .trim_end_matches('}')
+            .split(',')
+            .filter_map(|pair| pair.split_once(':'))
+            .find(|(key, _)| key.trim() == "path")
+            .map(|(_, path)| yaml_scalar(path)),
+        None => Some(resource),
+    });
+    RouteImport {
+        resource: resource
+            .filter(|resource| !resource.is_empty())
+            .map(str::to_string),
+        loader: None,
+        name_prefix: String::new(),
+    }
+}
+
 // ─── XML ────────────────────────────────────────────────────────────────────
 
-/// The `<route id="…">` declarations of a routing XML file, and the route
-/// each `alias="…"` names.
-fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>) {
+/// The `<route id="…">` declarations of a routing XML file, the route each
+/// `alias="…"` names, and its `<import>`s.
+fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>, imports: &mut Vec<RouteImport>) {
     let bytes = content.as_bytes();
     let mut cursor = 0usize;
     while let Some(relative) = memchr::memchr(b'<', &bytes[cursor..]) {
@@ -229,10 +293,24 @@ fn scan_xml(content: &str, spans: &mut Vec<SymbolSpan>) {
         let tag_end = tag_start + tag_len + 1;
         cursor = tag_end;
         let tag = &content[tag_start..tag_end];
-        let is_route = tag
-            .strip_prefix("<route")
-            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_whitespace()));
-        if !is_route {
+        let is_element = |name: &str| {
+            tag.strip_prefix(name)
+                .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_whitespace()))
+        };
+        if is_element("<import") {
+            let attribute = |name: &str| {
+                crate::framework::xml_attr_value(tag, tag_start, &[name])
+                    .map(|(value, _, _)| value)
+                    .filter(|value| !value.is_empty())
+            };
+            imports.push(RouteImport {
+                resource: attribute("resource"),
+                loader: attribute("type"),
+                name_prefix: attribute("name-prefix").unwrap_or_default(),
+            });
+            continue;
+        }
+        if !is_element("<route") {
             continue;
         }
         for (attribute, is_write) in [("id", true), ("alias", false)] {
@@ -343,7 +421,7 @@ mod tests {
     #[test]
     fn yaml_declares_routes_and_reads_aliases() {
         let yaml = "# the home page\nhomepage:\n    path: /{_locale}\n    controller: App\\Controller\\HomeController\n\ncontrollers:\n    resource: routing.controllers\n    prefix: /{_locale}\n\n'quoted_route': { path: /quoted }\nold_home:\n    alias: homepage\ninline_alias: { alias: 'quoted_route' }\nwhen@dev:\n    _errors:\n        resource: '@FrameworkBundle/Resources/config/routing/errors.php'\n    app_debug:\n        path: /debug\n        defaults:\n            path: not-a-route\n";
-        let found = routing_key_spans("file:///p/config/routes.yaml", yaml);
+        let (found, _) = routing_declarations("file:///p/config/routes.yaml", yaml);
         assert_eq!(
             routes(&found, yaml),
             vec![
@@ -368,13 +446,50 @@ mod tests {
     <import resource="../src/Controller/" type="attribute"/>
 </routes>
 "#;
-        let found = routing_key_spans("file:///p/config/routes.xml", xml);
+        let (found, _) = routing_declarations("file:///p/config/routes.xml", xml);
         assert_eq!(
             routes(&found, xml),
             vec![
                 ("blog_list".to_string(), true),
                 ("blog_index".to_string(), true),
                 ("blog_list".to_string(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn imports_are_read_with_their_loader_and_name_prefix() {
+        let import =
+            |resource: Option<&str>, loader: Option<&str>, name_prefix: &str| RouteImport {
+                resource: resource.map(str::to_string),
+                loader: loader.map(str::to_string),
+                name_prefix: name_prefix.to_string(),
+            };
+        let yaml = "controllers:\n    resource:\n        path: ../src/Controller/\n        namespace: App\\Controller\n    type: attribute\n\nadmin:\n    resource: '../src/Admin/'\n    name_prefix: admin_\nshop: { resource: shop.xml, name_prefix: 'shop_' }\nflow:\n    resource: { path: ../src/Flow/, namespace: App\\Flow }\nwhen@dev:\n    _errors:\n        resource: '@FrameworkBundle/Resources/config/routing/errors.php'\n";
+        let (spans, imports) = routing_declarations("file:///p/config/routes.yaml", yaml);
+        assert!(spans.is_empty(), "{spans:?}");
+        assert_eq!(
+            imports,
+            vec![
+                import(Some("../src/Controller/"), Some("attribute"), ""),
+                import(Some("../src/Admin/"), None, "admin_"),
+                import(Some("shop.xml"), None, "shop_"),
+                import(Some("../src/Flow/"), None, ""),
+                import(
+                    Some("@FrameworkBundle/Resources/config/routing/errors.php"),
+                    None,
+                    ""
+                ),
+            ]
+        );
+
+        let xml = r#"<routes><import resource="errors.php" type="php" name-prefix="x_"/><import resource="other.xml"/></routes>"#;
+        let (_, imports) = routing_declarations("file:///p/config/routes.xml", xml);
+        assert_eq!(
+            imports,
+            vec![
+                import(Some("errors.php"), Some("php"), "x_"),
+                import(Some("other.xml"), None, ""),
             ]
         );
     }

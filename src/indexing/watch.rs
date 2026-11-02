@@ -42,6 +42,9 @@ struct WatchedChangeBatch {
     pest_dirs: Vec<String>,
     /// Whether a file under a stub path changed.
     stubs_changed: bool,
+    /// The PHP files left out of `php_changes` whose `@global` tags may
+    /// still have changed.
+    global_tag_changes: Vec<PathBuf>,
 }
 
 impl WatchedChangeBatch {
@@ -55,6 +58,7 @@ impl WatchedChangeBatch {
             && !self.schema_full_rebuild
             && self.migration_changes.is_empty()
             && self.pest_dirs.is_empty()
+            && self.global_tag_changes.is_empty()
             && !self.stubs_changed
     }
 }
@@ -88,6 +92,13 @@ impl Backend {
     ) -> bool {
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         let changes = self.spell_changes_as_indexed(&params.changes);
+        if self.is_symfony_project()
+            && changes.iter().any(|change| {
+                crate::symfony::translations::is_translation_setup_uri(change.uri.as_str())
+            })
+        {
+            self.forget_symfony_judged_translation_domains();
+        }
         let mut batch = self.classify_watched_changes(&changes, root, is_laravel);
         if batch.is_empty() {
             return false;
@@ -117,6 +128,10 @@ impl Backend {
             self.reindex_watched_php_files(&batch.php_changes);
         }
 
+        if !batch.global_tag_changes.is_empty() {
+            self.symbols.rescan_global_tags(&batch.global_tag_changes);
+        }
+
         if batch.stubs_changed {
             tracing::info!("PHPantom: stub files changed, rebuilding the stub index");
             self.refresh_stub_paths();
@@ -125,10 +140,22 @@ impl Backend {
         if !batch.composer_changes.is_empty() {
             tracing::info!("PHPantom: composer files changed, rescanning vendor");
             self.rescan_composer_indexes(root, &batch.composer_changes);
+            self.forget_vendor_twig_callables();
+            self.forget_symfony_bundle_declarations();
+            self.forget_wordpress_dependency_hooks();
         }
 
         if !batch.resource_changes.is_empty() {
+            // A template created or deleted on disk changes whether the open
+            // files naming it are reported.
+            let template_names = batch
+                .resource_changes
+                .iter()
+                .any(|(uri, ..)| crate::twig::roots::is_candidate_uri(uri))
+                .then(|| self.twig_template_names())
+                .flatten();
             self.reindex_watched_resource_files(&batch.resource_changes);
+            self.rediagnose_template_namers(template_names);
         }
 
         if batch.schema_full_rebuild {
@@ -307,8 +334,15 @@ impl Backend {
 
             self.note_yii_config_change(&uri_str);
 
-            // Open files are already tracked via did_open/did_change.
+            // Open files are already tracked via did_open/did_change, except
+            // for the `@global` tags discovery reads from disk.
             if is_open(&uri_str) {
+                if change.kind == FileChangeType::Changed
+                    && (self.symbols.global_tags.read().documents_any(&file_path)
+                        || !crate::classmap_scanner::scan_global_tags(&file_path).is_empty())
+                {
+                    batch.global_tag_changes.push(file_path);
+                }
                 continue;
             }
 
@@ -327,6 +361,11 @@ impl Backend {
                 let loaded = parsed.contains(&uri_str) || parsed.contains(canonical_uri.as_str());
                 drop(parsed);
                 if !loaded {
+                    // Only a file already known to hold tags is read again,
+                    // for the same reason the others are left alone.
+                    if self.symbols.global_tags.read().documents_any(&file_path) {
+                        batch.global_tag_changes.push(file_path);
+                    }
                     continue;
                 }
             }
@@ -411,6 +450,7 @@ impl Backend {
         // below can tell which way the discovery inputs moved.
         let previous_inputs = self.discovery_inputs();
         let was_diagnosing = self.diagnostics_enabled();
+        let previous_hint_kinds = self.inlay_hint_kinds();
 
         match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
             Ok(cfg) => self.set_config(cfg),
@@ -421,6 +461,10 @@ impl Backend {
                 );
                 return;
             }
+        }
+
+        if self.inlay_hint_kinds() != previous_hint_kinds {
+            self.request_inlay_hint_refresh_detached();
         }
 
         // Resolved classes and completions may depend on config-driven

@@ -196,6 +196,63 @@ pub fn extract_removed_version(docblock: &str) -> Option<PhpVersion> {
     PhpVersion::from_composer_constraint(desc)
 }
 
+/// The `@global Type $name` tags of a function's docblock: the global
+/// variables it documents, each with the type it declares.
+///
+/// This is the phpDocumentor tag WordPress core and most plugins write
+/// above a function that imports a global with `global $name;`.  The name
+/// keeps its `$`.  A tag without a variable or a parsable type is skipped.
+pub fn extract_global_tags(docblock: &str) -> Vec<(String, PhpType)> {
+    if !docblock.contains("@global") {
+        return Vec::new();
+    }
+    let Some(info) = parse_docblock_for_tags(docblock) else {
+        return Vec::new();
+    };
+    // `@global` is not a tag the parser models, so it arrives as
+    // `TagKind::Other`.  We match by name instead.
+    info.tags
+        .iter()
+        .filter(|t| t.name == "global")
+        .filter_map(|tag| {
+            let variable = tag.variable()?;
+            let php_type = sanitise_and_parse_docblock_type(&tag.type_text()?)?;
+            Some((variable.into_owned(), php_type))
+        })
+        .collect()
+}
+
+/// The docblocks of `content` that hold an `@global` tag, each with the
+/// offset it starts at, found without parsing the file.
+pub fn docblocks_with_global_tags(content: &str) -> Vec<(usize, &str)> {
+    use memchr::memmem;
+
+    let bytes = content.as_bytes();
+    let mut found: Vec<(usize, &str)> = Vec::new();
+    for pos in memmem::find_iter(bytes, b"@global") {
+        // A second tag of a docblock already taken.
+        if found
+            .last()
+            .is_some_and(|&(start, doc)| pos < start + doc.len())
+        {
+            continue;
+        }
+        let Some(start) = memmem::rfind(&bytes[..pos], b"/**") else {
+            continue;
+        };
+        // The nearest opener belongs to a docblock that closed before the
+        // tag: the tag sits in some other comment, or in code.
+        if memmem::find(&bytes[start + 3..pos], b"*/").is_some() {
+            continue;
+        }
+        let Some(end) = memmem::find(&bytes[pos..], b"*/") else {
+            continue;
+        };
+        found.push((start, &content[start..pos + end + 2]));
+    }
+    found
+}
+
 /// Extract all `@see` references from a PHPDoc block.
 ///
 /// Returns the raw text after each `@see` tag, which may be:
@@ -641,6 +698,11 @@ pub fn extract_param_raw_type_from_info(info: &DocblockInfo, var_name: &str) -> 
 /// parameter `func_get_args()` reads that the native signature has none
 /// for.
 ///
+/// `declares` says whether the native signature names a parameter,
+/// counting one that `#[PhpStormStubsElementAvailable]` left out of
+/// `parameters` for the target PHP version. A tag for such a parameter
+/// documents an older signature and is not appended.
+///
 /// A `@param` tag that omits its variable name (common in
 /// phpstorm-stubs, e.g. `@param callable(TValue, TKey): bool`) is matched
 /// by position instead, once the name-based pass leaves a parameter
@@ -649,6 +711,7 @@ pub(crate) fn merge_param_docblock_into_parameters(
     info: &DocblockInfo,
     parameters: &mut Vec<ParameterInfo>,
     template_bounds: &crate::atom::AtomMap<PhpType>,
+    declares: impl Fn(&str) -> bool,
 ) {
     for param in parameters.iter_mut() {
         let param_doc_type = extract_param_raw_type_from_info(info, &param.name);
@@ -727,11 +790,11 @@ pub(crate) fn merge_param_docblock_into_parameters(
         }
     }
 
-    // Append extra `@param` tags that don't match any native parameter.
+    // Append extra `@param` tags that don't name any native parameter.
     // These document parameters accessed via `func_get_args()` or
     // similar mechanisms and should appear in hover/signature.
     for (tag_name, tag_type) in extract_all_param_tags_from_info(info) {
-        if !parameters.iter().any(|p| p.name == tag_name) {
+        if !declares(&tag_name) {
             let description = extract_param_description_from_info(info, &tag_name);
             parameters.push(ParameterInfo {
                 name: atom(&tag_name),
@@ -774,18 +837,22 @@ pub fn extract_all_param_tags_from_info(info: &DocblockInfo) -> Vec<(String, Php
 
     // Iterate in vendor precedence order so that when both `@param` and
     // `@psalm-param` document the same parameter, the more specific
-    // variant wins.
+    // variant wins, then list the winners in the order they are written.
     for tag in info.tags_by_kind_vendor_first(TagKind::Param) {
         if let Some(name) = tag.variable()
             && let Some(type_text) = tag.type_text()
             && seen_params.insert(name.to_string())
             && let Some(parsed) = sanitise_and_parse_docblock_type(&type_text)
         {
-            results.push((name.into_owned(), parsed));
+            results.push((tag.span.start.offset, name.into_owned(), parsed));
         }
     }
+    results.sort_by_key(|(offset, _, _)| *offset);
 
     results
+        .into_iter()
+        .map(|(_, name, parsed)| (name, parsed))
+        .collect()
 }
 
 /// Extract `@param` type strings in order of appearance, including

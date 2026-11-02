@@ -509,7 +509,8 @@ fn resolved_receiver_class_names(
 ///
 /// The branch's own scope is passed along so that a `never`-returning
 /// method called on a local variable (`$aborter->fail()`) is recognised,
-/// not just `$this->fail()`.
+/// not just `$this->fail()`, and so that a call whose conditional return
+/// type picks `never` is read against the arguments it was given.
 pub(crate) fn branch_exits_stmts<'s>(
     stmts: impl Iterator<Item = &'s Statement<'s>>,
     scope: &ScopeState,
@@ -523,6 +524,7 @@ pub(crate) fn branch_exits_stmts<'s>(
             .map(|class| class.fqn().to_string())
             .collect()
     };
+    let call_resolver = |call: &Expression<'_>| resolve_rhs_with_scope(call, scope, ctx);
     let exit_ctx = condition_facts::ExitCtx {
         current_class: ctx.current_class,
         all_classes: ctx.file.all_classes,
@@ -534,6 +536,7 @@ pub(crate) fn branch_exits_stmts<'s>(
         var_types: Some(&var_types),
         receiver_resolver: Some(&receiver_resolver),
         static_receiver_resolver: Some(&static_receiver_resolver),
+        call_resolver: Some(&call_resolver),
     };
     condition_facts::statements_unconditionally_exit(stmts, &exit_ctx)
 }

@@ -68,6 +68,7 @@ mod diagnostic_walk;
 mod expr;
 mod foreach;
 mod if_else;
+mod includes;
 mod loop_control;
 mod loops;
 mod param_seeding;
@@ -102,6 +103,7 @@ pub(crate) use diagnostic_walk::*;
 pub(crate) use expr::*;
 pub(crate) use foreach::*;
 pub(crate) use if_else::*;
+pub(crate) use includes::*;
 pub(crate) use loop_control::*;
 pub(crate) use loops::*;
 pub(crate) use param_seeding::*;
@@ -436,16 +438,27 @@ pub(crate) fn top_level_scope_for_globals<'b>(
     walked_scope(ctx, span, || {
         let mut scope = ScopeState::new();
         seed_superglobals(&mut scope);
-        // Suspend snapshot recording (see `resolve_in_method_body`): this
-        // transient lookup must not pollute an active diagnostic scope
-        // cache.  Its statements can even belong to another file
-        // (return-type inference of a called function), whose offsets
-        // would otherwise collide with the outer file's.
-        let _suspend = suspend_snapshot_recording();
-        let _barrier = suspend_return_edges(ctx.flow);
-        walk_body_forward(statements.iter().copied(), &mut scope, ctx);
+        walk_top_level(&statements, &mut scope, ctx);
         scope
     })
+}
+
+/// Walk top-level `statements` on `scope`, which holds what they start
+/// with, as an included file starts with the including scope's
+/// variables.  Not memoized: `scope` is part of the answer.
+pub(crate) fn walk_top_level(
+    statements: &[&Statement<'_>],
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    // Suspend snapshot recording (see `resolve_in_method_body`): this
+    // transient lookup must not pollute an active diagnostic scope
+    // cache.  Its statements can even belong to another file
+    // (return-type inference of a called function), whose offsets
+    // would otherwise collide with the outer file's.
+    let _suspend = suspend_snapshot_recording();
+    let _barrier = suspend_return_edges(ctx.flow);
+    walk_body_forward(statements.iter().copied(), scope, ctx);
 }
 
 // ─── Generator yield reverse inference ──────────────────────────────────────

@@ -719,7 +719,7 @@ impl Backend {
         let is_twig = self.is_twig_project();
         let is_yii = self.is_yii_project();
         let enabled = |kind: StringKeyKind| {
-            if kind == StringKeyKind::TwigTemplate {
+            if kind.is_twig() {
                 is_twig
             } else if kind.is_yii() {
                 is_yii

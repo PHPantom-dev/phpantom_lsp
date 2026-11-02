@@ -141,10 +141,23 @@ impl ResolvedType {
             // For unions/intersections, check whether the class still
             // appears as a top-level member (e.g. `Foobar|int` still
             // contains `Foobar`).
-            new_type.top_level_class_names().iter().any(|name| {
+            let new_names = new_type.top_level_class_names();
+            if new_names.iter().any(|name| {
                 let name = name.strip_prefix('\\').unwrap_or(name);
                 name == ci.name || name == ci.fqn()
-            })
+            }) {
+                return true;
+            }
+            // A name the loader maps to a class spelled differently (the
+            // configured Laravel date class) never matches the class's own
+            // name, but the class still stands for it when the old type
+            // named that one class alone and the new type names nothing
+            // else, as when a `null` is narrowed away.
+            let old_names = self.type_string.top_level_class_names();
+            let [old_name] = old_names.as_slice() else {
+                return false;
+            };
+            !new_names.is_empty() && new_names.iter().all(|name| name == old_name)
         });
         if !still_matches {
             self.class_info = None;
@@ -722,6 +735,7 @@ impl ResolvedType {
                     && (types[j].is_subset_of(&types[i])
                         || array_snapshot_covered_by(&types[j], &types[i])
                         || intersection_covered_by(&types[j], &types[i])
+                        || runtime_values_covered_by(&types[j], &types[i])
                         || (mixed_absorbs_siblings && object_covers(&types[i], &types[j])))
                 {
                     keep[j] = false;
@@ -1022,15 +1036,30 @@ fn holds_only_mixed(ty: &PhpType) -> bool {
 /// carries `?Base`, and `Base&Verbose` is still one of the values that
 /// describes.
 ///
-/// Only a part named verbatim by the covering type counts.  Widening a
-/// part to its parent would need the class loader, and the case that
-/// matters (a branch narrowing the very type the sibling path carries)
-/// names it exactly.
+/// A class part only counts when the covering type names it verbatim.
+/// Widening a part to its parent would need the class loader, and the case
+/// that matters (a branch narrowing the very type the sibling path carries)
+/// names it exactly.  A scalar refinement is covered by the scalar it
+/// refines: `lowercase-string&non-falsy-string` under `string`.
 fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
     let TypeKind::Intersection(parts) = covered.kind() else {
         return false;
     };
-    parts.iter().any(|part| part.is_subset_of(cover))
+    parts
+        .iter()
+        .any(|part| part.is_subset_of(cover) || runtime_values_covered_by(part, cover))
+}
+
+/// Whether every scalar value `covered` can hold is one `cover` already
+/// holds, e.g. `non-falsy-string` under `string`.
+///
+/// [`PhpType::is_subset_of`] matches alternatives by spelling, so it never
+/// sees a refinement as part of the type it refines.
+fn runtime_values_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
+    covered
+        .union_members()
+        .iter()
+        .all(|member| crate::php_type::is_runtime_value_subtype(member, cover))
 }
 
 /// Whether `cover` holds an `object` alternative that every value of

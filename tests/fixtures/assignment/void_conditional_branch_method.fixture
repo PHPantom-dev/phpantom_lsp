@@ -1,0 +1,17 @@
+// test: a method whose conditional return type picks `void` holds null
+// feature: hover
+// expect: null
+// expect_absent: void
+// expect_absent: string
+---
+<?php
+
+class Template {
+    /** @return ($display is true ? void : string) */
+    public function title(bool $display = true) {}
+}
+
+function test(Template $template): void {
+    $title = $template->title(true);
+    echo $<>title;
+}

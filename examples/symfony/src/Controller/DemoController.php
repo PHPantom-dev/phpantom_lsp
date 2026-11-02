@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Entity\User;
 use App\Event\OrderPlaced;
 use App\Message\SendWelcomeEmail;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -40,11 +41,20 @@ final class DemoController extends AbstractController
         // config/services.yaml is a string.
         $mailer = $container->get('app.mailer');
         $mailer->send($userId);
+        // Try: go-to-definition on 'app.default_mailer', which
+        // src/DependencyInjection/AcmeDemoExtension.php declares with the
+        // container builder, or complete inside get('') to see the services
+        // the installed bundles declare too, such as 'cache.app'.
+        $container->get('app.default_mailer')->send($userId);
         // Try: complete a route name inside generateUrl('').
         $this->generateUrl('app_demo', ['userId' => $userId]);
         // Try: go-to-definition on a translation key, or complete one inside
         // trans(''). A key is looked up in the domain the call names, so
         // 'user.invalid_email' is found in translations/validators.en.xlf.
+        // Try: misspell 'demo.title'. A key nothing declares is reported in
+        // a domain the project's own catalogues hold, but not in one an
+        // installed package ships (validators), nor when it reads like a
+        // message that is its own translation, such as 'Save'.
         $title = $this->translator->trans('demo.title');
         $this->translator->trans('user.invalid_email', [], 'validators');
         // Try: go-to-definition on the event name. It lists every listener
@@ -60,6 +70,7 @@ final class DemoController extends AbstractController
             'sender' => $this->senderName,
             'support' => $supportEmail,
             'title' => $title,
+            'user' => new User('ada@example.com', 'Ada'),
         ]);
     }
 

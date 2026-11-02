@@ -8,6 +8,10 @@
 //! - **Closure return type hints** for closures/arrow functions without an
 //!   explicit return type when the callable context specifies one.
 //!
+//! The first two are the `parameter-names` kind and the last two the
+//! `closure-types` kind of the `[inlay_hints]` config section, which the
+//! editor can also switch off (see [`crate::config::ClientInlayHintOptions`]).
+//!
 //! The handler walks precomputed [`CallSite`] entries from the
 //! [`SymbolMap`] within the requested viewport range, resolves each
 //! callable to obtain parameter metadata, and emits [`InlayHint`]
@@ -55,6 +59,11 @@ impl Backend {
         content: &str,
         range: Range,
     ) -> Option<Vec<InlayHint>> {
+        let kinds = self.inlay_hint_kinds();
+        if kinds.none() {
+            return Some(Vec::new());
+        }
+
         // No map at all means the parser gave up on this file, which no
         // re-request fixes, so that is "no hints" rather than a decline.
         let Some(symbol_map) = self.symbol_map_for(uri) else {
@@ -85,27 +94,29 @@ impl Backend {
 
         let mut hints = Vec::new();
 
-        for call_site in &symbol_map.call_sites {
-            // Skip call sites entirely outside the requested range.
-            if call_site.args_end < range_start || call_site.args_start > range_end {
-                continue;
-            }
+        if kinds.parameter_names {
+            for call_site in &symbol_map.call_sites {
+                // Skip call sites entirely outside the requested range.
+                if call_site.args_end < range_start || call_site.args_start > range_end {
+                    continue;
+                }
 
-            if call_site.arg_count == 0 {
-                continue;
-            }
+                if call_site.arg_count == 0 {
+                    continue;
+                }
 
-            self.emit_parameter_hints(
-                call_site,
-                &index,
-                (range_start, range_end),
-                &ctx,
-                &mut hints,
-            );
+                self.emit_parameter_hints(
+                    call_site,
+                    &index,
+                    (range_start, range_end),
+                    &ctx,
+                    &mut hints,
+                );
+            }
         }
 
         // ── Closure / arrow function hints ──────────────────────────
-        if !symbol_map.untyped_closure_sites.is_empty() {
+        if kinds.closure_types && !symbol_map.untyped_closure_sites.is_empty() {
             self.emit_closure_hints(
                 &index,
                 &symbol_map.untyped_closure_sites,

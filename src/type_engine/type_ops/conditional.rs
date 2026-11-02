@@ -35,6 +35,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::ParameterInfo;
 
 mod arg_form;
+pub(in crate::type_engine) mod refinements;
 mod text_args;
 mod without_args;
 
@@ -86,6 +87,15 @@ pub struct TemplateContext<'a> {
     /// and this is where the condition's subject comes from instead.
     /// `None` leaves such a condition undecided.
     pub this_type: Option<&'a PhpType>,
+    /// What the call's arguments bound its `@template` parameters to, each
+    /// already held to its `of` bound.
+    ///
+    /// A condition naming a template (`$maybeint is T`, `T is
+    /// non-falsy-string`) is judged against this rather than against the
+    /// template's name, and the branch it picks narrows the template to the
+    /// part of its binding that reaches it. `None` leaves such a condition
+    /// to be decided by the argument behind the template alone.
+    pub subs: Option<&'a HashMap<String, PhpType>>,
 }
 
 /// Callback that resolves an argument's source text (e.g. `"$obj->toHtml()"`)
@@ -100,6 +110,7 @@ impl<'a> TemplateContext<'a> {
             bindings: &[],
             arg_type_resolver: None,
             this_type: None,
+            subs: None,
         }
     }
 }
@@ -222,14 +233,23 @@ fn type_condition_result(
             };
         }
     }
-    // Condition union (`array|string`): satisfied when any member matches,
-    // refuted only when every member is refuted.
-    if let TypeKind::Union(members) = condition.kind() {
-        return combine_union_results(
-            members
-                .iter()
-                .map(|member| type_condition_result(arg_ty, member, class_loader)),
-        );
+    // Argument union: satisfied only when every member matches, refuted only
+    // when every member is refuted, otherwise indeterminate. It is split
+    // before the condition, as a nullable one is, so `''|null` is judged
+    // against all of `null|''` rather than failing `null` and `''` each as a
+    // whole.
+    if let TypeKind::Union(members) = arg_ty.kind() {
+        let results: Vec<Option<bool>> = members
+            .iter()
+            .map(|m| type_condition_result(m, condition, class_loader))
+            .collect();
+        return if results.iter().all(|r| *r == Some(true)) {
+            Some(true)
+        } else if results.iter().all(|r| *r == Some(false)) {
+            Some(false)
+        } else {
+            None
+        };
     }
     // A nullable argument is the union of its inner type and `null`, and has
     // to be judged as one: read whole, `?string` would answer an `is null`
@@ -243,20 +263,20 @@ fn type_condition_result(
             _ => None,
         };
     }
-    // Argument union: satisfied only when every member matches, refuted only
-    // when every member is refuted, otherwise indeterminate.
-    if let TypeKind::Union(members) = arg_ty.kind() {
-        let results: Vec<Option<bool>> = members
-            .iter()
-            .map(|m| type_condition_result(m, condition, class_loader))
-            .collect();
-        return if results.iter().all(|r| *r == Some(true)) {
-            Some(true)
-        } else if results.iter().all(|r| *r == Some(false)) {
-            Some(false)
-        } else {
-            None
-        };
+    // Condition union (`array|string`): satisfied when any member matches,
+    // refuted only when every member is refuted.
+    if let TypeKind::Union(members) = condition.kind() {
+        return combine_union_results(
+            members
+                .iter()
+                .map(|member| type_condition_result(arg_ty, member, class_loader)),
+        );
+    }
+    if condition.shape_parts().is_some() && type_category(arg_ty) == Some("array") {
+        return shape_condition_result(arg_ty, condition, class_loader);
+    }
+    if let Some(keyword) = refinements::cross_category_keyword(condition) {
+        return refinements::keyword_condition_result(arg_ty, keyword);
     }
     match (type_category(arg_ty), condition_category(condition)) {
         // `is non-empty-array` asks about the entries, which every array
@@ -271,11 +291,128 @@ fn type_condition_result(
                 None
             }
         }
+        (Some("array"), Some("array")) => {
+            refinements::array_condition_result(arg_ty, condition, class_loader)
+                .unwrap_or(Some(true))
+        }
+        (Some("int"), Some("int")) => refinements::int_condition_result(arg_ty, condition),
+        (Some("string"), Some("string")) => refinements::string_condition_result(arg_ty, condition),
         (Some(arg_cat), Some(cond_cat)) => Some(arg_cat == cond_cat),
         // A condition that names no scalar category names a class, which the
         // class hierarchy decides (`$id is Arrayable`).
         (Some(arg_cat), None) => class_condition_result(arg_ty, arg_cat, condition, class_loader),
         _ => None,
+    }
+}
+
+/// Decide an `is array{…}` condition against an array argument, entry by
+/// entry.
+///
+/// A key the condition requires that a sealed argument lacks, or holds with
+/// a value outside the condition's, refutes it, and so does a key a sealed
+/// condition does not allow. A key the argument may or may not hold (an
+/// optional entry, or one its unsealed tail might supply) leaves the check
+/// open, as does an array whose keys are not known one by one.
+fn shape_condition_result(
+    arg_ty: &PhpType,
+    condition: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<bool> {
+    let cond = condition.shape_parts()?;
+    let tail_admits_anything = |tail: Option<(&PhpType, &PhpType)>| {
+        tail.is_some_and(|(key, value)| key.is_array_key() && value.is_mixed())
+    };
+    let Some(arg) = arg_ty.shape_parts() else {
+        // Only a condition that names nothing holds for any array at all.
+        return (cond.entries.is_empty() && !cond.is_list && tail_admits_anything(cond.tail))
+            .then_some(true);
+    };
+    let mut all_hold = true;
+    let mut refuted = false;
+    let mut note = |result: Option<bool>| match result {
+        Some(true) => {}
+        Some(false) => refuted = true,
+        None => all_hold = false,
+    };
+
+    if cond.is_list && !arg.is_list {
+        note(None);
+    }
+    for entry in cond.entries {
+        let Some(key) = entry.key.as_deref() else {
+            note(None);
+            continue;
+        };
+        let Some(arg_entry) = arg.entries.iter().find(|e| e.key.as_deref() == Some(key)) else {
+            // A sealed argument lacks the key outright; an unsealed one may
+            // still hold it among the entries its tail allows.
+            note(if arg.tail.is_some() {
+                None
+            } else {
+                Some(entry.optional)
+            });
+            continue;
+        };
+        let value = if entry.value_type.is_mixed() {
+            Some(true)
+        } else {
+            type_condition_result(&arg_entry.value_type, &entry.value_type, class_loader)
+        };
+        note(match (value, arg_entry.optional, entry.optional) {
+            // Absent, the key satisfies an optional entry of the condition
+            // and fails a required one, whatever the value would have been.
+            (Some(false), true, true) | (Some(true), true, false) => None,
+            (value, _, _) => value,
+        });
+    }
+    for arg_entry in arg.entries {
+        let Some(key) = arg_entry.key.as_deref() else {
+            note(None);
+            continue;
+        };
+        if cond.entries.iter().any(|e| e.key.as_deref() == Some(key)) {
+            continue;
+        }
+        let allowed = match cond.tail {
+            None => Some(false),
+            Some(tail) if tail_admits_anything(Some(tail)) => Some(true),
+            Some((tail_key, tail_value)) => {
+                let key_ok = if tail_key.is_array_key() {
+                    Some(true)
+                } else {
+                    type_condition_result(
+                        &crate::php_type::shape_key_type(key),
+                        tail_key,
+                        class_loader,
+                    )
+                };
+                let value_ok = if tail_value.is_mixed() {
+                    Some(true)
+                } else {
+                    type_condition_result(&arg_entry.value_type, tail_value, class_loader)
+                };
+                match (key_ok, value_ok) {
+                    (Some(false), _) | (_, Some(false)) => Some(false),
+                    (Some(true), Some(true)) => Some(true),
+                    _ => None,
+                }
+            }
+        };
+        // An entry the argument may leave out is no proof against the
+        // condition.
+        note(match allowed {
+            Some(false) if arg_entry.optional => None,
+            allowed => allowed,
+        });
+    }
+    if arg.tail.is_some() && !tail_admits_anything(cond.tail) {
+        note(None);
+    }
+
+    if refuted {
+        Some(false)
+    } else {
+        all_hold.then_some(true)
     }
 }
 
@@ -306,7 +443,7 @@ pub(crate) fn bind_callable_condition_templates(
             condition: condition.unwrap_or_else(|| c.condition.clone()),
             then_type: then_type.unwrap_or_else(|| c.then_type.clone()),
             else_type: else_type.unwrap_or_else(|| c.else_type.clone()),
-            else_when_undecided: c.else_when_undecided,
+            undecided: c.undecided,
         },
     ))
 }
@@ -412,9 +549,286 @@ fn class_condition_result(
     Some(false)
 }
 
+/// `ty` with every conditional inside it (a union or intersection member, a
+/// generic argument, a shape value, …) replaced by what `decide` makes of
+/// it.
+///
+/// `false|($output is 'ARRAY_A' ? array<…> : \WP_Term)` decides its
+/// conditional against the call like a conditional that is the whole type
+/// does, and the result is simplified so the decided branch merges with the
+/// members around it: `($display is true ? void : string)|null` taking its
+/// then branch is `void|null`, and an intersection's decided members absorb
+/// their supertypes. A conditional `decide` cannot settle reads as the
+/// union of its branches.
+fn decide_nested(
+    ty: &PhpType,
+    decide: &dyn Fn(&PhpType) -> Option<PhpType>,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> PhpType {
+    if !ty.contains_conditional() {
+        return ty.clone();
+    }
+    let decided = ty.map_children(&|child| {
+        decide(child).unwrap_or_else(|| child.conditionals_as_branch_unions())
+    });
+    meet_intersected_unions(&decided, class_loader).simplified()
+}
+
+/// `ty` with every intersection that has a union among its members
+/// distributed over it, and each combination met.
+///
+/// Two decided conditionals intersected (`(array|\WP_Term) &
+/// (\WP_Term|\WP_Error|null)`) leave an intersection of unions, and only
+/// the values both sides share remain: `WP_Term&WP_Term` is `WP_Term`, and
+/// a pair no value satisfies (`array&WP_Term`, `WP_Term&null`, two classes
+/// neither of which extends the other) drops out.
+fn meet_intersected_unions(ty: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> PhpType {
+    let ty = ty.map_children(&|child| meet_intersected_unions(child, class_loader));
+    let TypeKind::Intersection(members) = ty.kind() else {
+        return ty;
+    };
+    if !members
+        .iter()
+        .any(|m| matches!(m.kind(), TypeKind::Union(_) | TypeKind::Nullable(_)))
+    {
+        return ty;
+    }
+    let mut met = vec![PhpType::mixed()];
+    let null = PhpType::null();
+    for member in members {
+        let alternatives = match member.kind() {
+            TypeKind::Nullable(inner) => vec![inner, &null],
+            _ => member.union_members(),
+        };
+        met = met
+            .iter()
+            .flat_map(|a| alternatives.iter().filter_map(|b| meet(a, b, class_loader)))
+            .collect();
+    }
+    match met.len() {
+        0 => PhpType::never(),
+        1 => met.pop().unwrap(),
+        _ => PhpType::union(met),
+    }
+}
+
+/// The values `a` and `b` share: the narrower of the two when one holds the
+/// other, `None` when they share none, and `a&b` when that is unknown.
+fn meet(a: &PhpType, b: &PhpType, class_loader: &ResolvedClassLoader<'_>) -> Option<PhpType> {
+    if a.is_mixed() {
+        return Some(b.clone());
+    }
+    if b.is_mixed() {
+        return Some(a.clone());
+    }
+    if a.is_untyped() || b.is_untyped() {
+        return Some(PhpType::intersection(vec![a.clone(), b.clone()]));
+    }
+    let a_in_b = type_condition_result(a, b, class_loader);
+    if a_in_b == Some(true) {
+        return Some(a.clone());
+    }
+    let b_in_a = type_condition_result(b, a, class_loader);
+    if b_in_a == Some(true) {
+        return Some(b.clone());
+    }
+    // A name no class answers to may be a template parameter still unbound,
+    // which may stand for a scalar as well as an instance.
+    let unknown_class = |t: &PhpType| {
+        !t.is_object()
+            && type_category(t) == Some("object")
+            && t.base_name()
+                .is_some_and(|name| class_loader(Fqn::new(name)).is_none())
+    };
+    if (a_in_b == Some(false) || b_in_a == Some(false)) && !unknown_class(a) && !unknown_class(b) {
+        return None;
+    }
+    Some(PhpType::intersection(vec![a.clone(), b.clone()]))
+}
+
+/// `subs` with every binding its template's `of` bound does not admit
+/// replaced, the way PHPStan infers a bounded template: a binding the bound
+/// holds stands, a union keeps the alternatives the bound holds, and
+/// anything else (`mixed` for `T of bool|string|int`, `stdClass` for `T of
+/// int<0, max>`) leaves the template its bound.
+pub(crate) fn template_subs_within_bounds(
+    mut subs: HashMap<String, PhpType>,
+    bounds: &crate::atom::AtomMap<PhpType>,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> HashMap<String, PhpType> {
+    let templates: Vec<crate::atom::Atom> = bounds.keys().copied().collect();
+    for (name, bound) in bounds {
+        // `mixed` admits every binding, and a bound over another template
+        // (`T of array<K>`) is not known until that one is, so the binding
+        // stands.
+        if bound.is_mixed() || bound.references_any_name(&templates) {
+            continue;
+        }
+        let Some(bound_to) = subs.get_mut(name.as_str()) else {
+            continue;
+        };
+        let within = |ty: &PhpType| type_condition_result(ty, bound, class_loader) == Some(true);
+        if within(bound_to) {
+            continue;
+        }
+        let kept: Vec<PhpType> = bound_to
+            .union_members()
+            .into_iter()
+            .filter(|member| within(member))
+            .cloned()
+            .collect();
+        *bound_to = if kept.is_empty() {
+            bound.clone()
+        } else {
+            PhpType::union(kept)
+        };
+    }
+    subs
+}
+
+/// The values of `ty` that satisfy `condition`, for a `ty` the condition
+/// leaves open: `string` tested by `non-falsy-string` is `non-falsy-string`,
+/// and `mixed` tested by `int` is `int`. `None` when they share none.
+fn meet_condition(
+    ty: &PhpType,
+    condition: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<PhpType> {
+    let met: Vec<PhpType> = condition
+        .union_members()
+        .into_iter()
+        .filter_map(|member| {
+            meet_arrays(ty, member, class_loader).unwrap_or_else(|| meet(ty, member, class_loader))
+        })
+        .collect();
+    (!met.is_empty()).then(|| absorb_held_alternatives(&met, class_loader))
+}
+
+/// The union of `members` without the alternatives another one already
+/// holds: `list<int>|array<int>` is `array<int>`.
+pub(super) fn absorb_held_alternatives(
+    members: &[PhpType],
+    class_loader: &ResolvedClassLoader<'_>,
+) -> PhpType {
+    let held = |a: &PhpType, b: &PhpType| type_condition_result(a, b, class_loader) == Some(true);
+    let kept: Vec<PhpType> = members
+        .iter()
+        .enumerate()
+        .filter(|(i, member)| {
+            // Of two alternatives that hold each other, the first stays.
+            !members.iter().enumerate().any(|(j, other)| {
+                *i != j && held(member, other) && (j < *i || !held(other, member))
+            })
+        })
+        .map(|(_, member)| member.clone())
+        .collect();
+    PhpType::union(kept).simplified()
+}
+
+/// The values two array types share, entry by entry: `list<mixed>` and
+/// `array<int<0, max>>` share `list<int<0, max>>`.
+///
+/// The outer `None` means the rule does not apply (either side is not an
+/// array, or is a shape, whose entries [`meet`] judges as a whole); the
+/// inner `None` means they share no array.
+fn meet_arrays(
+    a: &PhpType,
+    b: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> Option<Option<PhpType>> {
+    let is_plain_array =
+        |t: &PhpType| type_category(t) == Some("array") && t.shape_parts().is_none();
+    if !is_plain_array(a) || !is_plain_array(b) {
+        return None;
+    }
+    let is_list = |t: &PhpType| match t.kind() {
+        TypeKind::Named(name) => crate::php_type::is_list_name(name),
+        TypeKind::Generic(generic) => crate::php_type::is_list_name(&generic.name),
+        _ => false,
+    };
+    let part = |x: Option<PhpType>, y: Option<PhpType>| -> Option<PhpType> {
+        let (x, y) = (
+            x.unwrap_or_else(PhpType::mixed),
+            y.unwrap_or_else(PhpType::mixed),
+        );
+        meet(&x, &y, class_loader)
+    };
+    let Some(value) = part(a.iterable_element_type(), b.iterable_element_type()) else {
+        return Some(None);
+    };
+    let array = if is_list(a) || is_list(b) {
+        PhpType::list(value)
+    } else {
+        let Some(key) = part(a.iterable_key_type(), b.iterable_key_type()) else {
+            return Some(None);
+        };
+        PhpType::generic_array(key, value)
+    };
+    Some(Some(
+        if a.is_provably_non_empty() || b.is_provably_non_empty() {
+            array.non_empty_array_form()
+        } else {
+            array
+        },
+    ))
+}
+
+/// The values of `ty` left once those satisfying `condition` are taken out,
+/// for a `ty` the condition leaves open.
+///
+/// Only a value that changes how the rest is spelled is taken out: `''`
+/// leaves a `string` a `non-empty-string`. Anything else keeps `ty` whole,
+/// which is never wrong, only less precise.
+fn exclude_condition(
+    ty: &PhpType,
+    condition: &PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+) -> PhpType {
+    let excludes_empty_string = condition.union_members().into_iter().any(|member| {
+        member
+            .as_literal()
+            .and_then(crate::php_type::LiteralValue::string_content)
+            .is_some_and(|content| content.is_empty())
+    });
+    if excludes_empty_string
+        && type_category(ty) == Some("string")
+        && let Some(non_empty) = meet(ty, &PhpType::non_empty_string(), class_loader)
+    {
+        return non_empty;
+    }
+    ty.clone()
+}
+
+/// What `cond` answers when its condition cannot be decided, with each
+/// branch it names resolved by `resolve`.
+fn undecided_answer(
+    cond: &crate::php_type::ConditionalType,
+    resolve: impl Fn(&PhpType) -> Option<PhpType>,
+) -> Option<PhpType> {
+    use crate::php_type::UndecidedReading;
+    match cond.undecided {
+        UndecidedReading::ElseBranch => resolve(&cond.else_type),
+        UndecidedReading::BothBranches => {
+            union_branch_types(resolve(&cond.then_type), resolve(&cond.else_type))
+        }
+        UndecidedReading::BenevolentBothBranches => {
+            union_branch_types(resolve(&cond.then_type), resolve(&cond.else_type))
+                .map(PhpType::benevolent)
+        }
+    }
+}
+
 /// Union two optional branch types produced by an undecidable conditional,
-/// dropping duplicates and any uninformative branch.
+/// dropping duplicates and any branch that could not be resolved.
 fn union_branch_types(a: Option<PhpType>, b: Option<PhpType>) -> Option<PhpType> {
+    // `never` adds nothing to a union, so beside a branch that says nothing
+    // it says nothing either: the call may still return.
+    match (&a, &b) {
+        (None, Some(only)) | (Some(only), None) if only.is_never() => return None,
+        (Some(never), Some(_)) if never.is_never() => return b,
+        (Some(_), Some(never)) if never.is_never() => return a,
+        _ => {}
+    }
     let mut members: Vec<PhpType> = Vec::new();
     let mut push = |ty: PhpType| match ty.kind() {
         TypeKind::Union(inner) => {

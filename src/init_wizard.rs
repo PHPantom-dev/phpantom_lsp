@@ -101,10 +101,10 @@ fn prompt_diagnostic_toggles() -> Vec<&'static str> {
         diagnostics.push("partial-union-members = true");
     }
     if prompt_bool(
-        "Downgrade argument type mismatches to a warning when the only problem is a possible null?",
+        "Report a type mismatch when the only problem is a possible null or false?",
         false,
     ) {
-        diagnostics.push("downgrade-nullable-argument-mismatch = true");
+        diagnostics.push("possibly-empty-mismatches = true");
     }
     diagnostics
 }

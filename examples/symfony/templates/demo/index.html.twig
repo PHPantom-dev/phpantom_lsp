@@ -1,15 +1,46 @@
 {% extends 'base.html.twig' %}
 
+{# Try: go-to-definition on title, which leads to the block it overrides in
+   base.html.twig, or on parent(), which renders that block. In
+   base.html.twig, go-to-definition on body leads back here, and completion
+   after a new {% block offers the blocks this template can override. #}
+{% block title %}Demo · {{ parent() }}{% endblock %}
+
 {% block body %}
   {# Try: find references on 'demo.title'. DemoController translates it too,
      and translations/messages.en.yaml declares it. #}
   <h1>{{ 'demo.title'|trans }}</h1>
   {# Try: go-to-definition on the template names in the extends and include
-     tags, or find references on 'demo/_card.html.twig'. #}
+     tags, or find references on 'demo/_card.html.twig'. Misspell one, or a
+     route name below, and it is reported here as it is in PHP, with quick
+     fixes that change a template name or create the template. #}
   {% include 'demo/_card.html.twig' %}
   {# Try: go-to-definition on a route name below. app_demo is declared by the
      #[Route] on DemoController::index(), app_demo_legacy in
      config/routes.yaml. #}
   <a href="{{ path('app_demo', {'userId': 42}) }}">{{ sender }}</a>
   <a href="{{ path('app_demo_legacy') }}">Legacy</a>
+  {# Try: go-to-definition on the route names below. config/routes.yaml
+     gives admin_dashboard its admin_ prefix, and _preview_error comes from
+     FrameworkBundle's routing file, imported in
+     config/routes/framework.yaml. #}
+  <a href="{{ path('admin_dashboard') }}">Admin</a>
+  <a href="{{ path('_preview_error', {'code': 404}) }}">Error page</a>
+  {# Try: go-to-definition on initials, which leads to the method behind it
+     in src/Twig/AppExtension.php, on badge, declared by an #[AsTwigFunction]
+     in src/Twig/Badges.php, or on upper, one of Twig's own filters. Hover
+     one to see its signature, and complete a filter after a new | or a
+     function where an expression starts. A filter or function no extension
+     declares is reported. #}
+  <p>{{ sender|initials }} {{ badge('demo') }} {{ sender|upper }}</p>
+  {# Try: go-to-definition on sender, which leads to the key
+     DemoController::index() passes it under, or on support_url, a global
+     config/packages/twig.yaml declares. Hover one to see where it comes
+     from, and complete a variable where an expression starts. #}
+  <p>{{ sender }} <a href="{{ support_url }}">Support</a></p>
+  {# Try: hover user, which holds the App\Entity\User DemoController::index()
+     passes, or go-to-definition on displayName, which Twig reads with
+     getDisplayName(). Complete after a new user. to see the attributes the
+     class has, by the names Twig reads them by. #}
+  <p>{{ user.displayName }} &lt;{{ user.email }}&gt;</p>
 {% endblock %}

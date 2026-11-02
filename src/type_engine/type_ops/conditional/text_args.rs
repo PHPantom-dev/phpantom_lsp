@@ -4,18 +4,20 @@
 //! resolved type.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use crate::atom::atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
-use crate::php_type::{ConditionalType, PhpType, TypeKind};
+use crate::php_type::{ConditionalType, PhpType, TypeKind, UndecidedReading};
 use crate::text_scan::split_top_level_commas;
 use crate::types::ParameterInfo;
 
-use super::arg_form::{condition_result_from_text, literal_condition_result};
+use super::arg_form::{condition_result_from_text, literal_condition_result, type_category};
 use super::without_args::try_resolve_with_template_default;
 use super::{
-    ConditionalClassContext, TemplateContext, VarClassStringResolver, resolve_self_keyword,
-    this_condition_holds, type_condition_result, union_branch_types,
+    ConditionalClassContext, TemplateContext, VarClassStringResolver, absorb_held_alternatives,
+    decide_nested, exclude_condition, meet_condition, resolve_self_keyword, this_condition_holds,
+    type_condition_result, undecided_answer, union_branch_types,
 };
 
 /// Resolve a conditional return type using **textual** arguments extracted
@@ -43,6 +45,7 @@ pub fn resolve_conditional_with_text_args_and_defaults(
         class_loader,
         tpl,
         narrowed: None,
+        subs: tpl.subs,
     }
     .resolve(conditional)
 }
@@ -64,6 +67,10 @@ struct TextArgs<'a> {
     /// Arrayable ? … : …)` reaches the inner condition as `null` alone,
     /// since its `User` part took the outer then branch.
     narrowed: Option<(usize, &'a PhpType)>,
+    /// What the call bound its templates to, with any template an
+    /// enclosing condition tested narrowed to the part of its binding
+    /// that reaches the branch being resolved.
+    subs: Option<&'a HashMap<String, PhpType>>,
 }
 
 impl TextArgs<'_> {
@@ -87,14 +94,11 @@ impl TextArgs<'_> {
             ..
         } = *self;
         let TypeKind::Conditional(cond) = conditional.kind() else {
-            // `void` carries no information beyond the method's declared
-            // return type, so the caller falls back to that. `never` is
-            // different: it means the call provably does not return, which
-            // is informative and must propagate rather than being dropped.
-            if conditional.is_void() {
-                return None;
-            }
-            return Some(conditional.clone());
+            return Some(decide_nested(
+                conditional,
+                &|c| self.resolve(c),
+                class_loader,
+            ));
         };
         let target = cond.param.as_str();
 
@@ -129,6 +133,10 @@ impl TextArgs<'_> {
             )
         {
             return Some(resolved);
+        }
+
+        if let Some(decided) = self.template_condition(cond) {
+            return decided;
         }
 
         // `T[0] is string` asks about an offset of what the argument
@@ -197,6 +205,17 @@ impl TextArgs<'_> {
         let constant_values = condition_constants_as_values(&cond.condition, class_loader, tpl);
         let condition = constant_values.as_ref().unwrap_or(&cond.condition);
 
+        // A condition naming a template no argument binds (`$status is
+        // TStatus`) asks about a type the call never pins down, so either
+        // branch may be taken. Read as a class name it would refute every
+        // argument.
+        if let TypeKind::Named(name) = condition.kind()
+            && tpl.params.contains(name)
+            && !tpl.bindings.iter().any(|(template, _)| template == name)
+        {
+            return self.undecided(cond);
+        }
+
         if matches!(condition.kind(), TypeKind::ClassString(_)) {
             let variadic_args = is_variadic.then(|| args.get(param_idx..).unwrap_or_default());
             self.class_string_condition(cond, condition, param_idx, variadic_args, arg_text)
@@ -239,15 +258,9 @@ impl TextArgs<'_> {
 
     /// What the conditional answers when a resolver was consulted and could
     /// not pin the argument down: the call really may take either branch,
-    /// so the answer is their union unless the conditional asked for proof
-    /// and named its else branch as the undecided reading (see
-    /// [`ConditionalType::else_when_undecided`]).
+    /// so the answer is the conditional's [`UndecidedReading`] of them.
     fn undecided(&self, cond: &ConditionalType) -> Option<PhpType> {
-        if cond.else_when_undecided {
-            self.resolve(&cond.else_type)
-        } else {
-            union_branch_types(self.resolve(&cond.then_type), self.resolve(&cond.else_type))
-        }
+        undecided_answer(cond, |branch| self.resolve(branch))
     }
 
     /// Decide an `is null` condition.
@@ -357,7 +370,7 @@ impl TextArgs<'_> {
             TypeKind::Nullable(inner) => vec![inner.clone(), PhpType::null()],
             _ => Vec::new(),
         };
-        if cond.else_when_undecided || members.is_empty() {
+        if cond.undecided == UndecidedReading::ElseBranch || members.is_empty() {
             return self.undecided(cond);
         }
         let verdicts: Vec<Option<bool>> = members
@@ -388,10 +401,178 @@ impl TextArgs<'_> {
             }
             .resolve(branch)
         };
-        union_branch_types(
-            narrowed_branch(true, &cond.then_type),
-            narrowed_branch(false, &cond.else_type),
-        )
+        let reaches = |takes_then: bool| verdicts.iter().any(|v| *v != Some(!takes_then));
+        match (reaches(true), reaches(false)) {
+            (true, false) => narrowed_branch(true, &cond.then_type),
+            (false, true) => narrowed_branch(false, &cond.else_type),
+            _ => {
+                let both = union_branch_types(
+                    narrowed_branch(true, &cond.then_type),
+                    narrowed_branch(false, &cond.else_type),
+                );
+                // A benevolent argument was never pinned to one shape
+                // either, so a conditional that is lenient about an
+                // undecided argument stays lenient about this one.
+                if cond.undecided == UndecidedReading::BenevolentBothBranches
+                    && arg_ty.is_benevolent()
+                {
+                    both.map(PhpType::benevolent)
+                } else {
+                    both
+                }
+            }
+        }
+    }
+
+    /// Decide a condition that tests a template the call bound (`T is
+    /// non-falsy-string`) or tests an argument against one (`$maybeint is
+    /// T`), by what the call bound it to.
+    ///
+    /// Each alternative of the tested type is judged on its own, and one the
+    /// condition leaves open reaches both branches: the then branch with the
+    /// part of it the condition admits, the else branch with what is left.
+    /// Inside each branch a tested template stands for the part that reached
+    /// it, and a template the condition names stands for its binding.
+    ///
+    /// `None` when the condition is not over a bound template, leaving it to
+    /// the paths that read the argument behind it.
+    fn template_condition(&self, cond: &ConditionalType) -> Option<Option<PhpType>> {
+        let subs = self.subs?;
+        // `class-string<T>` asks which class `T` names, which the
+        // class-string path reads off the argument.
+        if matches!(cond.condition.kind(), TypeKind::ClassString(_)) {
+            return None;
+        }
+        let is_bound = |name: &str| {
+            subs.contains_key(name) && self.tpl.bindings.iter().any(|(t, _)| t == name)
+        };
+        let named: Vec<&str> = self
+            .tpl
+            .params
+            .iter()
+            .filter(|t| cond.condition.references_any_name(std::slice::from_ref(*t)))
+            .map(|t| t.as_str())
+            .collect();
+        if !named.iter().all(|t| is_bound(t)) {
+            return None;
+        }
+        let condition = cond.condition.substitute(subs);
+        // Inside either branch a template the condition names stands for
+        // what the call bound it to, the binding the condition was judged by.
+        let named_subs: HashMap<String, PhpType> = named
+            .iter()
+            .filter_map(|t| Some((t.to_string(), subs.get(*t)?.clone())))
+            .collect();
+        let target = cond.param.as_str();
+        let (subject, tested) = if let Some((operand, inner)) = type_operator_subject(target) {
+            // `value-of<T> is string` asks about the values of what `T`
+            // was bound to, not about that binding itself.
+            if !is_bound(inner) {
+                return None;
+            }
+            let binding = subs.get(inner)?;
+            match type_category(binding) {
+                Some("array") => {}
+                // A value that is no array has no keys or values for the
+                // condition to hold of.
+                Some(_) => {
+                    let taken = if cond.negated {
+                        &cond.then_type
+                    } else {
+                        &cond.else_type
+                    };
+                    return Some(self.resolve(taken).map(|ty| ty.substitute(&named_subs)));
+                }
+                None => return Some(self.undecided(cond)),
+            }
+            let evaluated = operand.substitute(subs);
+            if matches!(evaluated.kind(), TypeKind::KeyOf(_) | TypeKind::ValueOf(_)) {
+                return Some(self.undecided(cond));
+            }
+            (evaluated, None)
+        } else if !target.starts_with('$') {
+            if !is_bound(target) {
+                return None;
+            }
+            (subs.get(target)?.clone(), Some(target))
+        } else {
+            if named.is_empty() {
+                return None;
+            }
+            let param_idx = self.params.iter().position(|p| p.name == target)?;
+            let args = split_top_level_commas(self.text_args);
+            let bound_text = crate::call_args::bind_text_args_to_params(self.params, &args);
+            let arg = bound_text.get(param_idx).cloned().flatten()?;
+            // A literal argument is its own value, which its text says
+            // more exactly than its resolved type.
+            if let Some(holds) = condition_result_from_text(&condition, &arg) {
+                let taken = if holds ^ cond.negated {
+                    &cond.then_type
+                } else {
+                    &cond.else_type
+                };
+                return Some(self.resolve(taken).map(|ty| ty.substitute(&named_subs)));
+            }
+            (self.arg_type(param_idx, &arg)?, None)
+        };
+        let members: Vec<PhpType> = match subject.kind() {
+            TypeKind::Nullable(inner) => vec![inner.clone(), PhpType::null()],
+            _ => subject.union_members().into_iter().cloned().collect(),
+        };
+        let mut then_parts = Vec::new();
+        let mut else_parts = Vec::new();
+        for member in members {
+            match type_condition_result(&member, &condition, self.class_loader) {
+                Some(holds) if holds ^ cond.negated => then_parts.push(member),
+                Some(_) => else_parts.push(member),
+                None => {
+                    if cond.undecided == UndecidedReading::ElseBranch {
+                        return Some(self.undecided(cond));
+                    }
+                    let admitted = meet_condition(&member, &condition, self.class_loader);
+                    let rest = exclude_condition(&member, &condition, self.class_loader);
+                    let (then_part, else_part) = if cond.negated {
+                        (Some(rest), admitted)
+                    } else {
+                        (admitted, Some(rest))
+                    };
+                    then_parts.extend(then_part);
+                    else_parts.extend(else_part);
+                }
+            }
+        }
+
+        let branch = |parts: Vec<PhpType>, ty: &PhpType| -> Option<PhpType> {
+            let reached = PhpType::union(parts).simplified();
+            let mut local = named_subs.clone();
+            let resolved = match tested {
+                Some(t) => {
+                    local.insert(t.to_string(), reached.clone());
+                    let mut inner = subs.clone();
+                    inner.insert(t.to_string(), reached);
+                    TextArgs {
+                        subs: Some(&inner),
+                        ..*self
+                    }
+                    .resolve(ty)
+                }
+                None => self.resolve(ty),
+            }?;
+            Some(resolved.substitute(&local))
+        };
+        Some(match (then_parts.is_empty(), else_parts.is_empty()) {
+            (false, true) => branch(then_parts, &cond.then_type),
+            (true, false) => branch(else_parts, &cond.else_type),
+            (false, false) => union_branch_types(
+                branch(then_parts, &cond.then_type),
+                branch(else_parts, &cond.else_type),
+            )
+            .map(|both| {
+                let members: Vec<PhpType> = both.union_members().into_iter().cloned().collect();
+                absorb_held_alternatives(&members, self.class_loader)
+            }),
+            (true, true) => return None,
+        })
     }
 
     /// Decide a class-constant condition (e.g. `$mode is
@@ -907,4 +1088,16 @@ fn resolved_class_fqn(name: &str, class_loader: &ResolvedClassLoader<'_>) -> Str
     class_loader(Fqn::new(name))
         .map(|cls| cls.fqn().to_string())
         .unwrap_or_else(|| name.to_string())
+}
+
+/// A conditional subject that is `key-of<T>` or `value-of<T>`, as the
+/// operator type and the name of the template it is applied to.
+fn type_operator_subject(target: &str) -> Option<(PhpType, &str)> {
+    let lower = target.get(..9).map(str::to_ascii_lowercase)?;
+    if !lower.starts_with("key-of<") && !lower.starts_with("value-of<") {
+        return None;
+    }
+    let inner = target[target.find('<')? + 1..].strip_suffix('>')?.trim();
+    let operand = PhpType::parse(target);
+    matches!(operand.kind(), TypeKind::KeyOf(_) | TypeKind::ValueOf(_)).then_some((operand, inner))
 }

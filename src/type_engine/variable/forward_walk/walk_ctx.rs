@@ -86,6 +86,10 @@ pub(crate) struct ForwardWalkCtx<'a> {
     /// When a function body contains `global $x;`, the walker looks up
     /// `$x` in this map to seed the local scope with the top-level type.
     pub top_level_scope: Option<Locals>,
+    /// Where the function or method whose body is being walked starts,
+    /// docblock excluded.  A `global $x;` statement reads the `@global`
+    /// tags of the docblock above it.
+    pub declaration_start: Option<u32>,
     /// Whether the statement currently being walked sits lexically inside a
     /// loop body (`for`/`foreach`/`while`/`do-while`, at any nesting depth).
     ///
@@ -169,6 +173,7 @@ impl<'a> ForwardWalkCtx<'a> {
             resolved_class_cache: None,
             enclosing_return_type: None,
             top_level_scope: None,
+            declaration_start: None,
             in_loop: false,
             template_markers: None,
             cursor_scope: None,
@@ -226,12 +231,13 @@ impl<'a> ForwardWalkCtx<'a> {
     }
 
     /// Return a copy of this context for walking a body of its own: no
-    /// enclosing return type, top-level scope, template markers or cursor
-    /// scope, and not inside a loop.
+    /// enclosing return type, top-level scope, declaration, template
+    /// markers or cursor scope, and not inside a loop.
     pub(crate) fn fresh(&self) -> ForwardWalkCtx<'a> {
         ForwardWalkCtx {
             enclosing_return_type: None,
             top_level_scope: None,
+            declaration_start: None,
             in_loop: false,
             template_markers: None,
             cursor_scope: None,
@@ -278,6 +284,8 @@ impl<'a> ForwardWalkCtx<'a> {
     /// bounded templates as [`template_markers`](Self::template_markers)
     /// and its docblock's `@return` type as the
     /// [`enclosing_return_type`](Self::enclosing_return_type).
+    /// The docblock's `@global` tags are read only when the body imports a
+    /// global (see [`declaration_start`](Self::declaration_start)).
     pub(crate) fn for_declaration(&self, decl_start: u32) -> ForwardWalkCtx<'a> {
         use crate::type_engine::variable::resolution::{
             declaration_template_markers, declared_return_docblock_type,
@@ -295,6 +303,7 @@ impl<'a> ForwardWalkCtx<'a> {
             )
             .map(|ty| names.resolve_type(&ty)),
             top_level_scope: self.top_level_scope.clone(),
+            declaration_start: Some(decl_start),
             ..*self
         }
     }

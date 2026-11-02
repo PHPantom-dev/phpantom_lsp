@@ -1465,6 +1465,43 @@ function draw(Pen $tool): void {
     );
 }
 
+/// The variable a `global` statement imports shows the type it gets there,
+/// whether it comes from the function's `@global` tag, a `@var` above the
+/// statement, or the file's top level.
+#[test]
+fn hover_active_on_global_statement_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {}
+class Bar {}
+class Baz {}
+$top = new Baz();
+/** @global Foo $x */
+function f(): void
+{
+    global $x;
+    /** @var Bar $y */
+    global $y;
+    global $top;
+}
+"#;
+
+    for (line, col, var, ty) in [
+        (8, 12, "$x", "Foo"),
+        (10, 12, "$y", "Bar"),
+        (11, 12, "$top", "Baz"),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, col)
+            .unwrap_or_else(|| panic!("hover should be active on `global {var}`"));
+        let text = hover_text(&hover);
+        assert!(
+            text.contains(&format!("{var} = {ty}")),
+            "hover on `global {var}` should show {ty}: {text}"
+        );
+    }
+}
+
 #[test]
 fn hover_active_on_foreach_variable_definition_site() {
     let backend = create_test_backend();
@@ -11193,6 +11230,61 @@ class Consumer {
     );
 }
 
+#[test]
+fn hover_reads_the_last_of_repeated_phpstan_return_tags() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Post {}
+
+/**
+ * @return Post[]|int[]
+ * @phpstan-return ($args is array{fields: 'ids', ...} ? int[] : Post[])
+ * @phpstan-return ($args is array{fields: 'id=>parent'|'ids', ...} ? array<int, int> : array<int, Post>)
+ */
+function get_posts($args = null) {}
+
+function test(): void {
+    $ids = get_posts(['fields' => 'id=>parent']);
+    $ids;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 12, 5).expect("expected hover on $ids");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("array<int, int>"),
+        "The last @phpstan-return should win, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_reads_the_last_of_repeated_phpstan_param_tags() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Category {}
+
+/**
+ * @param array $args
+ * @phpstan-param array<int, string> $args
+ * @phpstan-param list<Category> $args
+ */
+function get_categories($args) {
+    $args;
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 9, 5).expect("expected hover on $args");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("list<Category>"),
+        "The last @phpstan-param should win, got: {}",
+        text
+    );
+}
+
 // ── Hover on generic method shows substituted return type ───────────────────
 
 #[test]
@@ -15554,7 +15646,7 @@ fn hover_object_cast_of_a_non_empty_array_keeps_stdclass() {
     let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $obj");
     let text = hover_text(&hover);
     assert!(
-        text.contains("object{foo: int}") && text.contains("stdClass"),
+        text.contains("object{foo: 1}") && text.contains("stdClass"),
         "a non-empty array cast to object should keep stdClass alongside the shape, got: {text}"
     );
 }
@@ -17078,4 +17170,27 @@ function f(Base $b): void {
         hover_at(&backend, "file:///test.php", content, 17, 5).expect("expected hover on $v");
     let text = hover_text(&hover);
     assert!(text.contains("Leaf"), "{text}");
+}
+
+#[test]
+fn hover_call_after_var_retype_ignores_earlier_argument_call() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+/** @template T */
+class Box { /** @return T */ public function get() {} }
+
+function make(): mixed { return null; }
+
+/** @var Box<int> $box */
+$box = make();
+strlen($box->get());
+
+/** @var Box<string> $box */
+$box = make();
+$result = $box->get();
+"#;
+    assert_eq!(
+        crate::common::assigned_type(&backend, "file:///test.php", content, "$result"),
+        "string"
+    );
 }

@@ -889,3 +889,29 @@ abstract class OverrideAttributeDemo extends Scaffolding\Model
     // #[\Override]
     // public function getNickname(): string { return 'demo'; }
 }
+
+
+// ── Diagnostic: PHPUnit Data Providers ──────────────────────────────────────
+// PHPUnit calls a data provider through reflection, before the test case
+// exists, so the provider must be public, and from PHPUnit 10 on also static
+// (read from composer.lock; the #[DataProvider] attribute implies it).
+
+class DataProviderDeclarationDemo
+{
+    /**
+     * @dataProvider amounts
+     */
+    public function testAmount(int $amount): void
+    {
+    }
+
+    // Try: change `public` to `private` to see the error, then use the
+    // "Make data provider 'amounts' public" quick fix on the tag above.
+    // Try: rename the tag's `amounts` to `totals`, then use the
+    // "Create data provider 'totals'" quick fix to declare it.
+    /** @return iterable<array{int}> */
+    public static function amounts(): iterable
+    {
+        yield [1];
+    }
+}

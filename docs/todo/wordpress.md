@@ -1,21 +1,50 @@
 # PHPantom — WordPress
 
 Known gaps and missing features in PHPantom's WordPress support. Today
-WordPress gets only the generic engine: there is no WordPress-specific
-code, and core's functions and classes resolve only when the project
-indexes WordPress itself or a stub package for it.
+WordPress gets the generic engine, plus the output constants (`OBJECT`,
+`ARRAY_A`, …) its stubs leave out and the return types an argument
+decides that they declare too wide (`src/wordpress/`), or that no PHPDoc
+type can spell (`src/type_engine/type_ops/call_site_returns/wordpress.rs`).
+Hook names navigate between the places that fire a hook and its listeners
+(`src/wordpress/hooks.rs`), core's and the installed plugins' read from
+their files, or core's from a list in the binary when only the stubs are
+installed (`src/wordpress/hook_sources.rs`). Core's functions
+and classes resolve only when the project indexes WordPress itself or a
+stub package for it. The stubs' own type tests run in
+`tests/wordpress_stubs/`, and what the engine reads wrongly in them is
+filed under "Conditional return types" in [bugs.md](bugs.md). The
+return types `src/wordpress/overrides.php` gives the stubs that hold for
+every WordPress version the stubs cover are worth offering to
+`php-stubs/wordpress-stubs` as well.
 
 Most WordPress typing lives in `php-stubs/wordpress-stubs`, so the
 external stubs are the foundation for everything here. Installed with
 Composer, the package is a stub source with no configuration, as is
 `php-stubs/woocommerce-stubs`; a project without Composer can list
-either under `[stubs] paths`. `global $wpdb;` being untyped is
-a gap in the generic engine, tracked as
-[T57](type-inference.md#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it).
+either under `[stubs] paths`. `global $wpdb;` takes its type from a
+`@global` tag on the function, else from the `@global` tags of the stubs,
+else from those of core and any other indexed code.
 PHPStan's WordPress extension
 (`szepeviktor/phpstan-wordpress`) is the checklist of what a WordPress
 developer expects from types; PhpStorm's built-in WordPress support and
 PHP Tools' hook navigation are what they expect from an editor.
+
+`examples/wordpress/` is the demo project: a plugin and a theme with core
+from the stubs, and an `assertions.php` that checks their claims against
+WordPress installed on SQLite. The real-world baseline is Contact Form 7
+(a plugin) and GeneratePress (a classic theme), analysed with the stubs
+installed. Of their 104 and 232 diagnostics (2026-11-02), most are what
+the stubs or the projects' own docblocks declare, and PHPStan reports
+them too. What they show PHPantom getting wrong is filed below under
+WP3, WP9 and WP15. Hooks and template parts produce no diagnostics
+today, so the baseline cannot rank WP5 and WP6; they rank by what an
+editor user compares first.
+
+**Benchmarks.** `benches/wordpress_completion.rs` measures hook name
+completion, going from a listener to the places that fire its hook, and
+member completion on values the stubs type, over a generated plugin and
+the plugins Composer installs beside it. Every item that adds a hook or
+template feature adds its case to it.
 
 Items are ordered by **impact** (descending), then **complexity** (ascending)
 within the same impact tier.
@@ -27,61 +56,59 @@ within the same impact tier.
 
 ---
 
-## WP1. WordPress demo project and a real-world baseline
+## WP9. The argument types the WordPress stubs declare
 
-**Impact: High · Complexity: Low-Medium**
+**Impact: Medium · Complexity: Low-Medium**
 
-Every other WordPress item is measured against this one. Without a demo
-project and a baseline from real code, WordPress support would be built
-untested and could regress silently.
+```php
+add_menu_page('Acme', 'Acme', 'manage_options', 'acme', 'notACallable');
+// Parameter #5 $callback of function add_menu_page expects ''|(callable(): mixed), 'notACallable' given.
+```
 
-- **`examples/wordpress/`**: a small plugin and a theme, in the same
-  shape as `examples/laravel/` and `examples/symfony/`, with "Try:"
-  comments at each site and a README listing what to try. It installs
-  `php-stubs/wordpress-stubs` through Composer, which is how most typed
-  WordPress projects get core's declarations.
-- **Runtime assertions**: an `assertions.php` that checks the demo's
-  claims against real WordPress, as `examples/laravel/assertions.php`
-  does for Eloquent. Decide whether that boots WordPress (core from
-  Composer plus the SQLite database drop-in, so no server is needed) or
-  only checks what can be read without booting.
-- **A real-world baseline**: run `analyze` on an actively maintained
-  open-source plugin and theme, bucket the diagnostics by cause, and
-  file what WordPress-specific gaps they show. That ranks the rest of
-  this document by what actually breaks.
+The stubs narrow many parameters with `@phpstan-param`: shapes for
+`$args` arrays, callables with their signatures, literal unions for
+modes. Their own rule tests (`tests/data/param/` and
+`ParameterTypeTest.php` of `php-stubs/wordpress-stubs`, 31 files) list
+the calls each declaration accepts and the errors it must report. The
+stubs' type tests are ported in `tests/wordpress_stubs/`; port these
+beside them as diagnostics fixtures (as `tests/fixtures/phpstan_symfony/`
+does for the Symfony extension's rule tests), extending the slice of the
+stubs `scripts/extract-wordpress-stubs.php` copies, and file every call
+the argument-type check judges differently.
+
+The baseline also found parameters the stubs declare narrower than core
+accepts. `wp_hash()` takes `'auth'|'logged_in'|'nonce'|'secure_auth'` as
+its scheme, but `wp_salt()` makes a salt for any scheme, and Contact
+Form 7 hashes with its own. `the_title_attribute()` and its siblings take
+only an array shape, though core runs `wp_parse_args()` on a query string
+like `'echo=0'` too. `WP_Customize_Manager::add_control()` and
+`add_section()` close their `$args` shapes, but the control or section
+class reads keys of its own (GeneratePress passes `pro_text` and
+`pro_url`), and `settings` is a setting ID as often as an array. Correct
+these in `src/wordpress/overrides.php`, which replaces only return types
+today, and offer them to the stubs.
 
 ---
 
-## WP2. Audit what the WordPress stubs declare against the engine
+## WP15. `analyze` leaves out a plugin's files outside its PSR-4 roots
 
-**Impact: High · Complexity: Low**
+**Impact: Medium · Complexity: Low**
 
-`php-stubs/wordpress-stubs` carries more than signatures. Recent
-versions declare argument-dependent return types, `@phpstan-assert`
-narrowing and never-returning functions for a large part of core,
-absorbed from PHPStan's WordPress extension. Examples to check:
-
-```php
-$post = get_post($id, ARRAY_A);   // array shape, not WP_Post
-if (is_wp_error($result)) { … }   // narrows $result to WP_Error
-wp_die();                         // nothing after it is reachable
+```json
+{ "autoload": { "psr-4": { "Acme\\Shop\\": "src/" } } }
 ```
 
-One gap is already known. Core's output constants (`OBJECT`, `ARRAY_A`,
-`ARRAY_N`) are `define()`d at runtime and are not in `wordpress-stubs`,
-so a default argument of `$output = OBJECT` cannot be told apart from the
-other branches, and `get_post($id)` comes back as
-`non-empty-array<string, mixed>|non-empty-array<int, mixed>|WP_Post|null`
-instead of `WP_Post|null`. PHPStan's WordPress extension declares these
-constants in its bootstrap, and `php-stubs/wordpress-globals` ships them.
-Ship them with the WordPress support (their values are fixed), so the
-conditional return types over `$output` resolve on the default.
+A plugin that autoloads its classes with Composer keeps the rest of its
+code outside the PSR-4 root: the main file with the `Plugin Name:`
+header, `uninstall.php`, `templates/`, `views/`. `analyze` walks only
+the PSR-4 roots when a `composer.json` declares any, so none of those
+files are checked, and a theme next to the plugin is skipped as a whole.
+The editor still reports them when they are open. Analyse a plugin's or
+theme's whole directory (one holding a file with a `Plugin Name:` or
+`Theme Name:` header, minus `vendor/` and `node_modules/`), the way
+Blade view directories are added today.
 
-Go through what the stubs declare, write an assertion fixture for each
-construct, and file every one the engine reads wrongly as a bug in
-`bugs.md` or `type-inference.md`. Fixing those fixes them for every
-library that uses the same annotations, not just WordPress. What the
-stubs do not declare at all goes to WP7.
+**Where to look:** `discover_user_files` in `src/analyse/run.rs`.
 
 ---
 
@@ -102,9 +129,20 @@ plugins the code calls into (WooCommerce, ACF) are the same question one
 level over; decide whether to index the whole `wp-content/plugins/`
 tree or only what the workspace references.
 
+The hooks core and the sibling plugins fire belong with them: today
+`src/wordpress/hook_sources.rs` reads the hooks of the WordPress packages
+Composer installs, and falls back to its list of core's hook names, so a
+plugin opened on its own completes core's hooks but cannot go to them.
+
 This follows the rule in `external-stubs.md`: Drupal's web root and
 sibling editor folders are detected, never typed by the user, and every
 new source of PHP maps onto an existing role.
+
+Contact Form 7 shows what a sibling plugin that is not installed costs
+today. It calls Akismet behind `is_callable(['Akismet', 'get_api_key'])`,
+which still reports `Akismet` as an unknown class, and Really Simple
+CAPTCHA behind `class_exists('ReallySimpleCaptcha')`, which is accepted
+but leaves 18 members "could not be resolved" on the object it builds.
 
 **Where to look:** `src/classmap_scanner/discovery.rs`
 (`scan_drupal_directories` is the closest precedent),
@@ -112,54 +150,9 @@ new source of PHP maps onto an existing role.
 
 ---
 
-## WP4. Hook names
-
-**Impact: High · Complexity: Medium**
-
-```php
-add_action('acme_order_placed', [$this, 'sendReceipt']);
-
-do_action('acme_order_placed', $order);
-```
-
-The hook name is the string that ties a listener to the place that fires
-it, and nothing navigates between the two today. Treat it as a string
-key, the way Laravel's route, config, and translation names are:
-
-- **Declarations**: `do_action()`, `do_action_ref_array()`,
-  `do_action_deprecated()`, `apply_filters()`,
-  `apply_filters_ref_array()`, `apply_filters_deprecated()`.
-- **Uses**: `add_action()`, `add_filter()`, `remove_action()`,
-  `remove_filter()`, `has_action()`, `has_filter()`, `did_action()`,
-  `doing_action()`.
-- **Features**: completion of hook names in a use, go-to-definition from
-  a use to every place that fires it, find references, rename, and
-  document highlight.
-- **Dynamic names**: core fires many hooks with an interpolated name
-  (`"save_post_{$post->post_type}"`). Match a use against the literal
-  parts, and offer the pattern in completion.
-
-Reporting a hook nothing fires is not safe as a default: a plugin
-listens to hooks that other plugins or a future core version fire. If it
-is done at all, it belongs behind an opt-in.
-
-PHP Tools added hook navigation in 2026, and PhpStorm has it built in,
-so this is the feature a WordPress developer will compare first.
-PhpStorm, pointed at a WordPress install, completes core's and the
-project's own hook names in `add_action('…')`, navigates from a use to
-where the hook fires, and marks both ends in the gutter. Its completion
-only opens on an explicit Ctrl+Space; ours opens on the quote, since `'`
-and `"` are already completion triggers.
-
-**Where to look:** the string-key machinery Laravel and Symfony names
-use (`src/virtual_members/laravel/string_keys.rs`,
-`src/symbol_map/extraction/symfony.rs`).
-
----
-
 ## WP5. Hook callback parameter and return types
 
-**Impact: Medium-High · Complexity: Medium-High** (depends on WP4)
+**Impact: Medium-High · Complexity: Medium-High**
 
 ```php
 /**
@@ -177,7 +170,7 @@ add_filter('the_content', function ($content) {
 Core documents every hook with a docblock above the call that fires it.
 Its `@param` tags type the callback's parameters, and a filter's first
 `@param` is also what the callback must return and what
-`apply_filters()` returns. With WP4 linking a callback to its hook, the
+`apply_filters()` returns. With a callback linked to its hook by name, the
 closure parameter inference that already feeds `array_map()` callbacks
 can feed hook callbacks from the same docblock.
 
@@ -185,6 +178,11 @@ PHPStan's WordPress extension also checks a callback against the hook:
 too few accepted arguments for the parameters it declares (the fourth
 argument of `add_action()`), and a filter callback that returns nothing.
 Those are good diagnostics once the types are there.
+
+A project with only the stubs has no core to read the docblocks from: the
+list of core's hooks in `src/wordpress/core_hooks.txt` holds names only.
+The hook list `wp-hooks/wordpress-core` publishes has every core hook with
+its docblock, and could take its place.
 
 **Where to look:**
 `src/type_engine/variable/forward_walk/callable_inference.rs`, and PHPStan's
@@ -213,24 +211,6 @@ and the Twig template-name support.
 
 ---
 
-## WP7. Return types the WordPress stubs do not declare
-
-**Impact: Medium · Complexity: Medium** (depends on WP2)
-
-Whatever WP2 finds that PHPStan's WordPress extension types and the
-stubs do not, typically a return type an argument decides:
-`get_posts(['fields' => 'ids'])` returning `int[]`,
-`get_post_meta($id, $key, true)` returning a single value rather than an
-array, `wp_parse_url($url, PHP_URL_HOST)`. Roots' Sage theme shows more:
-`wp_list_comments([..., 'echo' => false])` is declared `void|string`
-whatever `echo` says, and `get_post_time('c')` keeps the `int` only the
-`'U'` and `'G'` formats return. Write each as a conditional
-`@return` in an override stub
-([E7](external-stubs.md#e7-stub-based-framework-patches)) rather than in
-Rust, and offer the ones that hold upstream to `php-stubs/wordpress-stubs`.
-
----
-
 ## WP8. Sage view composers
 
 **Impact: Medium · Complexity: Medium**
@@ -254,3 +234,96 @@ return type.
 `src/virtual_members/laravel/view_data.rs`; Acorn's
 `Roots\Acorn\View\Composer` and its `Composers\Concerns\Extractable`
 for exactly which members count.
+
+---
+
+## WP10. Hook docblocks that do not match the call
+
+**Impact: Low-Medium · Complexity: Medium** (depends on WP5)
+
+```php
+/**
+ * Filters the order total.
+ *
+ * @param float $total The total.
+ */
+$total = apply_filters('acme_order_total', $total, $order);   // 2 arguments, 1 @param
+```
+
+WP5 reads the docblock above `do_action()` and `apply_filters()` as the
+hook's signature, so a docblock that disagrees with the call types every
+callback wrongly. PHPStan's WordPress extension (`HookDocsRule`) reports
+three mismatches: a `@param` count that differs from the arguments after
+the hook name, a `@param` named `$this` or written with invalid syntax,
+and a `@param` type the argument passed does not satisfy. Report the
+same, on the docblock, for the plugin and theme authors who document
+their own hooks. Its rule test (`tests/data/hook-docs.php`) lists the
+cases.
+
+---
+
+## WP11. `assertWPError()` and `assertNotWPError()` narrow
+
+**Impact: Low · Complexity: Low**
+
+```php
+$result = wp_insert_post($data, true);   // int|WP_Error
+$this->assertNotWPError($result);
+$result + 1;                             // still int|WP_Error
+```
+
+WordPress's PHPUnit base class (`WP_UnitTestCase_Base`) asserts a value
+is or is not a `WP_Error`, and the test stubs do not say so. PHPStan's
+WordPress extension narrows through both
+(`AssertWpErrorTypeSpecifyingExtension`, tested in
+`tests/data/assert_wp_error.php` and `assert_not_wp_error.php`). Declare
+them with `@phpstan-assert WP_Error $actual` and
+`@phpstan-assert !WP_Error $actual` in an override stub
+([E7](external-stubs.md#e7-stub-based-framework-patches)) rather than in
+Rust.
+
+---
+
+## WP12. Constants `wp-config.php` defines keep the value of one install
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+// wp-config.php
+define('WP_CONTENT_DIR', '/var/www/wp-content');
+
+// a plugin
+if (WP_CONTENT_DIR === '/srv/site/wp-content') { … }   // read as `false`
+```
+
+A constant from a `define()` in `wp-config.php` is typed as the literal
+it holds on this machine, so a comparison against another install's value
+is decided as `false`. The
+value differs between installs, so its type is the general one (`string`,
+`bool`). PHPStan's WordPress extension lists these
+(`dynamicConstantNames` in `extension.neon`: `WP_DEBUG`, `ABSPATH`,
+`WP_CONTENT_DIR`, `WP_PLUGIN_DIR`, `FS_CHMOD_FILE`, …). `WP_DEBUG` and the
+other `bool` constants already widen to `bool`; the string and integer
+ones do not. Widen every constant `wp-config.php` (or
+`wp-config-sample.php`) defines, rather than keeping a list of names.
+
+---
+
+## WP14. `wp_parse_args()` of an object
+
+**Impact: Low · Complexity: Medium**
+
+```php
+$args = wp_parse_args($post, ['extra' => 1]);   // array, want an array with an `extra` key
+```
+
+`wp_parse_args()` reads an object through `get_object_vars()`, called
+from inside WordPress, so the result holds the object's public
+properties merged under the defaults. PHPStan's WordPress extension
+types it `non-empty-array<mixed>&hasOffset('extra')` outside a class,
+and keeps the declared `array` inside one, where the caller sees more
+properties than WordPress does. PHPantom keeps the declared `array`
+everywhere: it has no `hasOffset()` type, and does not type
+`get_object_vars()` by the scope it is called from. The fixture is
+ported in `tests/wordpress_stubs/data/phpstan-wordpress/`, marked
+`// SKIP`.

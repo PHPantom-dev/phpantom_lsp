@@ -48,7 +48,12 @@ pub(crate) fn unary_prefix_result_type(
             }
             return Some(signed_numeric_type(&resolved, negated));
         }
-        UnaryPrefixOperator::ObjectCast(..) => return Some(object_cast_type(resolve_operand())),
+        UnaryPrefixOperator::ObjectCast(..) => {
+            let resolved = resolve_operand();
+            return Some(object_cast_type(
+                (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved)),
+            ));
+        }
         UnaryPrefixOperator::BitwiseNot(_) => {
             let resolved = resolve_operand();
             if OverloadedNumber::of_operand(&resolved) == Some(OverloadedNumber::Gmp) {
@@ -286,34 +291,22 @@ fn push_unique_type(types: &mut Vec<PhpType>, member: PhpType) {
     }
 }
 
-/// The object shape `(object) $expr` produces: an array shape casts
-/// key-for-key, a scalar becomes `object{scalar: T}`, and anything else
-/// (including an unresolved operand) falls back to `stdClass`. A cast
+/// The object shape `(object) $expr` produces from the operand's type
+/// (`None` when the operand did not resolve): an array shape casts
+/// key-for-key, keeping its values as they are, a scalar becomes
+/// `object{scalar: T}`, and anything else falls back to `stdClass`. A cast
 /// always produces a `stdClass` instance, so a shape result keeps
 /// `stdClass`'s class identity via an intersection.
-///
-/// The cast does not preserve literal precision, so shape values widen.
-fn object_cast_type(operand: Vec<ResolvedType>) -> PhpType {
-    let inner =
-        (!operand.is_empty()).then(|| ResolvedType::types_joined(&operand).widen_scalar_literals());
+pub(crate) fn object_cast_type(operand: Option<PhpType>) -> PhpType {
+    let inner = operand.map(|ty| ty.widen_scalar_literals());
     let std_class = || PhpType::named(atom("stdClass"));
     match inner.as_ref().map(PhpType::kind) {
         // `(object) []` is a `stdClass` with no properties; an `object{}`
         // shape would say the same thing in a spelling nothing else uses.
         Some(TypeKind::ArrayShape(entries)) if entries.is_empty() => std_class(),
-        Some(TypeKind::ArrayShape(entries)) => PhpType::intersection(vec![
-            PhpType::object_shape(
-                entries
-                    .iter()
-                    .map(|e| ShapeEntry {
-                        key: e.key.clone(),
-                        value_type: e.value_type.widen_scalar_literals(),
-                        optional: e.optional,
-                    })
-                    .collect(),
-            ),
-            std_class(),
-        ]),
+        Some(TypeKind::ArrayShape(entries)) => {
+            PhpType::intersection(vec![PhpType::object_shape(entries.to_vec()), std_class()])
+        }
         Some(_) if inner.as_ref().is_some_and(is_object_cast_scalar_type) => {
             PhpType::intersection(vec![
                 PhpType::object_shape(vec![ShapeEntry {

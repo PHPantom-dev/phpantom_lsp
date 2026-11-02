@@ -65,13 +65,16 @@ fn classify_arg_form(arg: &str) -> ArgForm {
     if arg_is_float_literal(t) {
         return ArgForm::FloatLit;
     }
-    if t.eq_ignore_ascii_case("true") {
+    // Stub generators write the keywords fully qualified (`\true`), which
+    // PHP reads as the same value.
+    let keyword = t.strip_prefix('\\').unwrap_or(t);
+    if keyword.eq_ignore_ascii_case("true") {
         return ArgForm::True;
     }
-    if t.eq_ignore_ascii_case("false") {
+    if keyword.eq_ignore_ascii_case("false") {
         return ArgForm::False;
     }
-    if t.eq_ignore_ascii_case("null") {
+    if keyword.eq_ignore_ascii_case("null") {
         return ArgForm::Null;
     }
     if t.starts_with('[') || t.to_ascii_lowercase().starts_with("array(") {
@@ -133,8 +136,57 @@ pub(super) fn condition_result_from_text(condition: &PhpType, arg_text: &str) ->
                 _ => None,
             },
         },
-        _ => condition_result_from_form(condition, classify_arg_form(arg_text)),
+        // An empty array literal is `array{}`, whatever the condition asks
+        // of it. A non-empty one's syntax says nothing about the keys and
+        // values an `array{…}` or `array<K, V>` condition asks for.
+        _ if classify_arg_form(arg_text) == ArgForm::ArrayLit => {
+            if is_empty_array_literal(arg_text) {
+                super::type_condition_result(&PhpType::array_shape(Vec::new()), condition, &|_| {
+                    None
+                })
+            } else if condition.shape_parts().is_some()
+                || matches!(condition.kind(), TypeKind::Generic(_) | TypeKind::Array(_))
+            {
+                None
+            } else {
+                condition_result_from_form(condition, ArgForm::ArrayLit)
+            }
+        }
+        // A scalar literal's type is its value, which the type check reads
+        // refinements off (`'foo'` is a `non-falsy-string`, `-1` is in
+        // `int<min, 0>`); its syntax alone only gives the category.
+        _ => match scalar_type_from_text(arg_text) {
+            Some(arg_ty) => super::type_condition_result(&arg_ty, condition, &|_| None),
+            None => condition_result_from_form(condition, classify_arg_form(arg_text)),
+        },
     }
+}
+
+/// The type of a scalar literal argument (`'foo'`, `-1`, `1.5`, `true`,
+/// `null`), or `None` for any other text.
+fn scalar_type_from_text(arg_text: &str) -> Option<PhpType> {
+    match classify_arg_form(arg_text) {
+        ArgForm::StringLit | ArgForm::IntLit | ArgForm::FloatLit => {
+            literal_value_from_text(arg_text).map(PhpType::literal)
+        }
+        ArgForm::True => Some(PhpType::true_()),
+        ArgForm::False => Some(PhpType::false_()),
+        ArgForm::Null => Some(PhpType::null()),
+        _ => None,
+    }
+}
+
+/// Whether `arg_text` is `[]` or `array()`.
+fn is_empty_array_literal(arg_text: &str) -> bool {
+    let t = arg_text.trim();
+    let inner = if let Some(rest) = t.strip_prefix('[') {
+        rest.strip_suffix(']')
+    } else {
+        t.get(..6)
+            .filter(|head| head.eq_ignore_ascii_case("array("))
+            .and_then(|_| t[6..].strip_suffix(')'))
+    };
+    inner.is_some_and(|inner| inner.trim().is_empty())
 }
 
 /// Decide a value condition (`$flags is 15`) against an argument's *resolved*
@@ -157,6 +209,9 @@ pub(super) fn literal_condition_result(condition: &PhpType, arg_ty: &PhpType) ->
             // cannot hold one: an `int` argument is never `'array'`.
             None => match type_category(arg_ty) {
                 Some(category) if category != literal_category(expected) => Some(false),
+                // Nor can a range or a string refinement that leaves the
+                // value out: `int<1, max>` is never `0`.
+                _ if super::refinements::excludes_literal(arg_ty, expected) => Some(false),
                 _ => None,
             },
         },
@@ -289,20 +344,35 @@ pub(super) fn type_category(t: &PhpType) -> Option<&'static str> {
         Some("null")
     } else if t.is_array_like() {
         Some("array")
-    } else if matches!(t.kind(), TypeKind::Callable(_)) || t.base_name().is_some() {
+    } else if is_resource(t) {
+        Some("resource")
+    } else if matches!(t.kind(), TypeKind::Callable(_) | TypeKind::ObjectShape(_))
+        || t.is_object()
+        || t.base_name().is_some()
+    {
         // A closure/callable or any class instance — not a scalar or array.
         Some("object")
+    } else if let TypeKind::Intersection(members) = t.kind() {
+        // Each member narrows the same value, which is of the category
+        // any one of them names.
+        members.iter().find_map(type_category)
     } else {
         None
     }
 }
 
+/// Whether `t` is `resource` or one of its open/closed refinements.
+fn is_resource(t: &PhpType) -> bool {
+    t.is_resource()
+        || matches!(t.kind(), TypeKind::Named(name) if matches!(name.as_str(), "open-resource" | "closed-resource"))
+}
+
 /// The category named by a (non-union) `is <Type>` condition, or `None` when
 /// the condition is not a plain scalar/array type we can categorise.
 pub(super) fn condition_category(condition: &PhpType) -> Option<&'static str> {
-    if condition.is_string_type() {
+    if condition.is_string_subtype() {
         Some("string")
-    } else if condition.is_int() {
+    } else if condition.is_int_subtype() {
         Some("int")
     } else if condition.is_float() {
         Some("float")
@@ -312,6 +382,8 @@ pub(super) fn condition_category(condition: &PhpType) -> Option<&'static str> {
         Some("null")
     } else if condition.is_array_like() {
         Some("array")
+    } else if is_resource(condition) {
+        Some("resource")
     } else if condition.is_object() {
         // The one category [`type_category`] reports that has no keyword of
         // its own below: `is object` asks the same question it answers for

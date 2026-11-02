@@ -105,7 +105,7 @@ pub(in crate::symbol_map::extraction) fn try_emit_laravel_config_resource_span_f
     }
 }
 
-pub(super) fn argument_expr_for_parameter<'a>(
+pub(in crate::symbol_map::extraction) fn argument_expr_for_parameter<'a>(
     argument_list: &ArgumentList<'a>,
     parameter: &str,
 ) -> Option<&'a Expression<'a>> {

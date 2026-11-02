@@ -37,6 +37,19 @@ impl Backend {
     /// in.  One outside every configured view root is dropped: no template
     /// under it has a view name to be matched against in the first place.
     pub(crate) fn anonymous_component_namespaces(&self) -> Vec<AnonymousNamespace> {
+        self.anonymous_component_registrations().0
+    }
+
+    /// [`Self::anonymous_component_namespaces`], plus the path
+    /// registrations it had to drop because no view root holds them, as
+    /// `(tag prefix, directory on disk)`.
+    ///
+    /// Laravel still reaches a template under such a directory (the
+    /// registration gives it a view namespace of its own), so a tag under
+    /// the prefix may name one even though no view name here says so.
+    pub(crate) fn anonymous_component_registrations(
+        &self,
+    ) -> (Vec<AnonymousNamespace>, Vec<(String, std::path::PathBuf)>) {
         let (mut namespaces, paths) = {
             let resources = self.laravel.provider_resources.read();
             (
@@ -44,8 +57,9 @@ impl Backend {
                 resources.anonymous_component_paths.clone(),
             )
         };
+        let mut unmapped = Vec::new();
         if paths.is_empty() {
-            return namespaces;
+            return (namespaces, unmapped);
         }
         let roots = self.laravel_view_roots();
         for (prefix, path) in paths {
@@ -55,11 +69,12 @@ impl Backend {
                 let rel = path.strip_prefix(root).ok()?;
                 Some(rel.to_string_lossy().replace(['/', '\\'], "."))
             });
-            if let Some(directory) = directory {
-                namespaces.push((prefix, directory));
+            match directory {
+                Some(directory) => namespaces.push((prefix, directory)),
+                None => unmapped.push((prefix, path)),
             }
         }
-        namespaces
+        (namespaces, unmapped)
     }
 
     /// The view an `<x-…>` tag with no class behind it renders: an
@@ -88,6 +103,35 @@ impl Backend {
 /// names make it addressable by: `components.brand.boxes` becomes
 /// `brand.boxes` (so `<x-brand.boxes>` matches it), and a namespaced name
 /// drops the `components.` segment after the namespace the same way
+/// The view names a new anonymous component written as `<x-{tag}>` could
+/// be created as, best first: the directory registered for the tag's own
+/// prefix, then the `components.` convention, then a prefix-less
+/// registration.  Only the plain forms, not the index-component ones,
+/// since a new component has no reason to be an index.
+pub(crate) fn view_names_to_create_for_component_tag(
+    tag: &str,
+    anonymous: &[AnonymousNamespace],
+) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut push = |name: String| {
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    };
+    for (prefix, directory) in anonymous.iter().filter(|(prefix, _)| !prefix.is_empty()) {
+        if let Some(rest) = strip_tag_prefix(tag, prefix) {
+            push(guess_view_name(rest, directory));
+        }
+    }
+    push(guess_view_name(tag, "components"));
+    for (_, directory) in anonymous.iter().filter(|(prefix, _)| prefix.is_empty()) {
+        if !tag.contains("::") {
+            push(guess_view_name(tag, directory));
+        }
+    }
+    names
+}
+
 /// Laravel's `ComponentTagCompiler::guessViewName` inserts it —
 /// `webshop::components.brand.boxes` is what `<x-webshop::brand.boxes>`
 /// compiles to.

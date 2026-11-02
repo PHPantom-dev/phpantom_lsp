@@ -624,6 +624,42 @@ final class QodanaCheckerTest
         );
     }
 
+    #[test]
+    fn no_diagnostic_for_uses_tag_naming_a_global_or_variable() {
+        // phpDocumentor's `@uses`, as WordPress writes it.
+        let php = r#"<?php
+/**
+ * @uses global $wp_meta_boxes Used to retrieve registered meta boxes.
+ * @uses $fn_get_css To run the function that gets the CSS.
+ */
+function do_meta_boxes(): void {}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "@uses with a global or a variable should not produce diagnostics, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn still_flags_uses_tag_naming_a_missing_function() {
+        let php = r#"<?php
+/**
+ * @uses missing_helper()
+ */
+function caller(): void {}
+"#;
+        let diags = collect(php);
+        assert!(
+            diags
+                .iter()
+                .any(|d| message_text(&d.message).contains("missing_helper")),
+            "@uses with a `name()` target is still checked, got: {:?}",
+            diags,
+        );
+    }
+
     /// A file may declare several `namespace` blocks. A call in the second
     /// block resolves against that block's namespace, so a function defined
     /// there (in another file) must not be reported as missing.

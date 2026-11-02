@@ -25,6 +25,7 @@ pub(super) fn extract_instantiation_expr<'a>(
             try_emit_mailable_content_view_spans(args, ctx.content, &mut ctx.spans);
         }
         emit_symfony_instantiation_spans(inst.class, args, ctx);
+        emit_twig_callable_instantiation(inst.class, args, ctx);
         if !class_text.is_empty() {
             emit_call_site(
                 format!("new {}", class_text),
@@ -402,6 +403,7 @@ fn extract_function_call<'a>(
                 &func_call.argument_list,
                 ctx,
             );
+            emit_wordpress_hook_span(raw, &func_call.argument_list, ctx);
             if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
                 ctx.content,
                 name_clean,

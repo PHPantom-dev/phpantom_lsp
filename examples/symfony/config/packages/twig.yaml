@@ -1,0 +1,5 @@
+twig:
+    globals:
+        # Try: find references on support_url. templates/demo/index.html.twig
+        # reads it.
+        support_url: 'https://example.com/support'

@@ -117,13 +117,15 @@ pub(super) fn laravel_helper_call(
         let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
         match arg_texts.first() {
             Some(first_arg) => {
-                let ty = translation_type(first_arg, resolver);
-                return Some(vec![ResolvedType::from_type_string(ty)]);
+                if let Some(ty) = translation_type(first_arg, resolver) {
+                    return Some(vec![ResolvedType::from_type_string(ty)]);
+                }
             }
             // `trans()` with no key hands back the translator itself, a
             // shape this narrowing does not model; `__()` returns the
-            // null it was given.
-            None if normalized_func == "__" => {
+            // null it was given.  The resolver answers any key in a
+            // Laravel project, and none outside one.
+            None if normalized_func == "__" && resolver("").is_some() => {
                 return Some(vec![ResolvedType::from_type_string(PhpType::null())]);
             }
             None => {}
@@ -151,12 +153,13 @@ fn config_value_type(
 
 /// The type of the translation whose key is written as `key_text`: the
 /// entry's own type for a literal key the catalog knows, and the type any
-/// translation can have otherwise.
-fn translation_type(key_text: &str, resolver: &dyn Fn(&str) -> Option<PhpType>) -> PhpType {
-    crate::util::unescape_php_string_literal(key_text.trim())
-        .filter(|key| !key.is_empty() && !key.contains('$'))
-        .and_then(|key| resolver(&key))
-        .unwrap_or_else(crate::virtual_members::laravel::unresolved_trans_type)
+/// translation can have otherwise.  `None` outside a Laravel project.
+fn translation_type(key_text: &str, resolver: &dyn Fn(&str) -> Option<PhpType>) -> Option<PhpType> {
+    // A key built at runtime is looked up as written, which no entry
+    // matches, so it gets the type any translation can have.
+    let key_text = key_text.trim();
+    let key = crate::util::unescape_php_string_literal(key_text);
+    resolver(key.as_deref().unwrap_or(key_text))
 }
 
 /// Narrow `Illuminate\Config\Repository::get()` / `array()` (and the
@@ -216,7 +219,7 @@ pub(super) fn try_resolve_trans_method_type(
     }
     let resolver = ctx.loaders.trans_resolver?;
     let arg_texts = extract_arg_texts_from_ast(argument_list, ctx.file.content);
-    let ty = translation_type(arg_texts.first()?, resolver);
+    let ty = translation_type(arg_texts.first()?, resolver)?;
     Some(vec![ResolvedType::from_type_string(ty)])
 }
 

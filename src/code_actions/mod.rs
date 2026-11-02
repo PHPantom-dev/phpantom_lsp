@@ -72,6 +72,15 @@
 //!   diagnostic), offer to create the `.blade.php` file under the
 //!   project's configured view root (or the matching package namespace's
 //!   own view directory) and open it.
+//! - **Create missing component** — when a `<x-…>` or `<livewire:…>` tag
+//!   names no component (`unknown_blade_component`,
+//!   `unknown_livewire_component`), offer the closest component names and
+//!   to create the component: an anonymous component's template, or a
+//!   component class and its template.
+//! - **Data provider fixes** — when a PHPUnit data provider is not
+//!   `public` (or, from PHPUnit 10, not `static`), offer to add the
+//!   modifier; when the provider a test names does not exist, offer to
+//!   create it on the test class.
 //!
 //! ## Deferred edit computation (`codeAction/resolve`)
 //!
@@ -94,8 +103,10 @@ mod convert_to_arrow_function;
 mod convert_to_closure;
 mod convert_to_instance_variable;
 mod convert_to_interpolation;
+mod create_missing_component;
 mod create_missing_view;
 pub(crate) mod cursor_context;
+mod data_provider_fixes;
 mod extract_constant;
 mod extract_function;
 mod extract_interface;

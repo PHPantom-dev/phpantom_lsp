@@ -1,0 +1,17 @@
+// test: array_intersect_key keeps the element type of the array it filters
+// feature: hover
+// expect_hover: $feed => array{file: 'a.xml', job: 'A'}|array{file: 'b.xml', job: 'B'}
+---
+<?php
+
+const FEEDS = [
+    'a' => ['file' => 'a.xml', 'job' => 'A'],
+    'b' => ['file' => 'b.xml', 'job' => 'B'],
+];
+
+function test(string $only): void {
+    $feeds = $only !== '' ? array_intersect_key(FEEDS, [$only => true]) : FEEDS;
+    foreach ($feeds as $feed) {
+        $<>feed;
+    }
+}

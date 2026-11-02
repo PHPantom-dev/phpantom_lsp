@@ -46,6 +46,7 @@ impl Backend {
         kind: &crate::symbol_map::StringKeyKind,
         key: &str,
         uri: &str,
+        offset: u32,
     ) -> Option<Hover> {
         use crate::symbol_map::StringKeyKind;
 
@@ -57,6 +58,16 @@ impl Backend {
         let (label, detail) = match kind {
             StringKeyKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
             StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
+            StringKeyKind::TwigBlock => (
+                "Block",
+                self.twig_block_detail(uri, Some(offset as usize), key),
+            ),
+            StringKeyKind::TwigFilter => ("Twig filter", self.twig_callable_detail(*kind, key)),
+            StringKeyKind::TwigFunction => ("Twig function", self.twig_callable_detail(*kind, key)),
+            StringKeyKind::TwigVariable => (
+                "Twig variable",
+                self.twig_variable_detail(uri, Some(offset as usize), key),
+            ),
             StringKeyKind::Route => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,
@@ -328,6 +339,7 @@ impl Backend {
                     );
                 ("View", detail)
             }
+            StringKeyKind::WordPressHook => ("Hook", self.wordpress_hook_detail(key)),
         };
 
         Some(make_hover(format!(

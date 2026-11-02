@@ -523,11 +523,18 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
             let condition = convert(src, c.target);
             let then_type = convert(src, c.then);
             let else_type = convert(src, c.r#else);
-            match literal_subject_satisfies(&convert(src, c.subject), &condition) {
+            let subject = convert(src, c.subject);
+            match literal_subject_satisfies(&subject, &condition) {
                 Some(satisfied) if satisfied ^ c.is_negated() => then_type,
                 Some(_) => else_type,
                 None => PhpType::conditional(
-                    c.subject.to_string(),
+                    // The syntax tree prints a type operator's parameter
+                    // list with its brackets doubled (`value-of<<T>>`).
+                    if matches!(subject.kind(), TypeKind::KeyOf(_) | TypeKind::ValueOf(_)) {
+                        subject.to_string()
+                    } else {
+                        c.subject.to_string()
+                    },
                     c.is_negated(),
                     condition,
                     then_type,

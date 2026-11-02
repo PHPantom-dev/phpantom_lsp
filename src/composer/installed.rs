@@ -198,6 +198,7 @@ pub(crate) fn path_repo_psr4_mappings(
                     mappings.push(Psr4Mapping {
                         prefix: normalised.clone(),
                         base_path: abs_path.to_string_lossy().into_owned(),
+                        is_dev: false,
                     });
                 }
             }

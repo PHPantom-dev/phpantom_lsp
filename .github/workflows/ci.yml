@@ -156,6 +156,7 @@ jobs:
       - run: php -l examples/laravel/app/Demo.php
       - run: find examples/symfony/src examples/symfony/config -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: find examples/yii/src examples/yii/config examples/yii/resources -name '*.php' -print0 | xargs -0 -n1 php -l
+      - run: find examples/wordpress/wp-content -name '*.php' -print0 | xargs -0 -n1 php -l
 
   benchmark:
     name: Benchmark
@@ -202,6 +203,7 @@ jobs:
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
             --bench symfony_completion --bench yii_completion \
+            --bench wordpress_completion \
             -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         shell: bash
@@ -266,6 +268,7 @@ jobs:
           cargo bench --bench completion --bench references \
             --bench laravel_completion --bench custom_builder \
             --bench symfony_completion --bench yii_completion \
+            --bench wordpress_completion \
             --no-run --message-format=json \
             > benchmark-build.jsonl
           python3 benches/ci_benchmarks.py prepare \

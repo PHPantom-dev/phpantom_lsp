@@ -13,9 +13,11 @@
 
 require_once __DIR__ . '/vendor/autoload.php';
 
+use App\Admin\DashboardController;
 use App\Controller\DemoController;
 use App\DependencyInjection\Configuration;
 use App\Entity\User;
+use App\DependencyInjection\AcmeDemoExtension;
 use App\EventListener\OrderPlacedListener;
 use App\Form\RegistrationType;
 use App\Message\CountWelcomeEmails;
@@ -24,15 +26,19 @@ use App\MessageHandler\CountWelcomeEmailsHandler;
 use App\MessageHandler\SendWelcomeEmailHandler;
 use App\Query\QueryBus;
 use App\Service\WelcomeMailer;
+use App\Twig\AppExtension;
+use App\Twig\Badges;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Symfony\Bridge\Twig\Extension\RoutingExtension;
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
 use Symfony\Bundle\FrameworkBundle\DependencyInjection\Configuration as FrameworkConfiguration;
+use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Bundle\FrameworkBundle\Routing\AttributeRouteControllerLoader;
 use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\Config\Loader\DelegatingLoader;
 use Symfony\Component\Config\Loader\LoaderResolver;
+use Symfony\Component\DependencyInjection\ChildDefinition;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader\PhpFileLoader;
 use Symfony\Component\DependencyInjection\Loader\YamlFileLoader as ServicesYamlLoader;
@@ -42,6 +48,7 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Messenger\HandleTrait;
 use Symfony\Component\Routing\Generator\UrlGenerator;
 use Symfony\Component\Routing\Loader\AttributeDirectoryLoader;
+use Symfony\Component\Routing\Loader\PhpFileLoader as RoutesPhpLoader;
 use Symfony\Component\Routing\Loader\YamlFileLoader as RoutesYamlLoader;
 use Symfony\Component\Routing\RequestContext;
 use Symfony\Component\Translation\Loader\XliffFileLoader;
@@ -50,6 +57,7 @@ use Symfony\Component\Translation\Translator;
 use Symfony\Component\Validator\Validation;
 use Symfony\Component\Yaml\Yaml;
 use Twig\Environment;
+use Twig\Extension\AttributeExtension;
 use Twig\Loader\FilesystemLoader;
 
 $passed = 0;
@@ -96,6 +104,18 @@ check('app_demo is declared by the #[Route] on DemoController::index()', $routes
 check('app_demo_legacy is declared in config/routes.yaml', $routes->get('app_demo_legacy')?->getDefault('_controller') === DemoController::class . '::legacy');
 check('The legacy route points at a method that exists', method_exists(DemoController::class, 'legacy'));
 
+check("The admin import's name_prefix names DashboardController's route admin_dashboard", $routes->get('admin_dashboard')?->getDefault('_controller') === DashboardController::class . '::index');
+check("'dashboard' on its own is not a route", $routes->get('dashboard') === null);
+
+// config/routes/framework.yaml imports FrameworkBundle's own routing file,
+// which declares _preview_error. The bundle's path is its class's directory.
+$errorsResource = Yaml::parseFile("$config/routes/framework.yaml")['when@dev']['_errors']['resource'];
+$frameworkBundleDir = dirname((new ReflectionClass(FrameworkBundle::class))->getFileName());
+$errorRoutes = (new RoutesPhpLoader(new FileLocator()))->load(str_replace('@FrameworkBundle', $frameworkBundleDir, $errorsResource));
+check("FrameworkBundle's errors.php declares _preview_error", $errorRoutes->get('_preview_error') !== null);
+$errorRoutes->addPrefix('/_error');
+$routes->addCollection($errorRoutes);
+
 $urls = new UrlGenerator($routes, new RequestContext());
 check("generateUrl('app_demo', ['userId' => ...]) builds its URL", $urls->generate('app_demo', ['userId' => 42]) === '/demo/42');
 
@@ -116,6 +136,21 @@ check('app.support_email is a parameter declared in config/services.yaml', $cont
 check('app.welcome_mailer, which app.mailer aliases, is built from WelcomeMailer', $container->getDefinition('app.welcome_mailer')->getClass() === WelcomeMailer::class);
 check('app.support_email is a string', is_string($container->getParameter('app.support_email')));
 check('The App\\ resource registers the controller as a service', $container->hasDefinition(DemoController::class));
+check("app.greeting's %app.sender_name% placeholder reads app.sender_name", $container->getParameterBag()->resolveValue($container->getParameter('app.greeting')) === 'Hello from PHPantom');
+$demoCache = $container->getDefinition('app.demo_cache');
+check('app.demo_cache is a child of cache.app', $demoCache instanceof ChildDefinition && $demoCache->getParent() === 'cache.app');
+
+// FrameworkBundle declares cache.app in its own configuration, read from
+// the bundle's directory.
+$frameworkServices = new ContainerBuilder();
+(new PhpFileLoader($frameworkServices, new FileLocator("$frameworkBundleDir/Resources/config")))->load('cache.php');
+check("FrameworkBundle's Resources/config/cache.php declares cache.app", $frameworkServices->hasDefinition('cache.app'));
+
+// The demo's own extension declares services through the container builder.
+(new AcmeDemoExtension())->load([Yaml::parseFile("$config/packages/acme_demo.yaml")['acme_demo']], $container);
+check('AcmeDemoExtension registers app.dsn_mailer from WelcomeMailer', $container->getDefinition('app.dsn_mailer')->getClass() === WelcomeMailer::class);
+check('app.default_mailer is an alias of app.dsn_mailer', (string) $container->getAlias('app.default_mailer') === 'app.dsn_mailer');
+check('AcmeDemoExtension sets app.mailer_dsn from the bundle configuration', $container->getParameter('app.mailer_dsn') === 'smtp://localhost');
 
 // ─── Events ─────────────────────────────────────────────────────────────────
 
@@ -177,6 +212,8 @@ check('demo.title is declared in the messages domain', $translator->trans('demo.
 check('demo.card is declared in the messages domain', $translator->trans('demo.card') === 'Every string links back to its declaration');
 check('user.invalid_email is declared in the validators domain', $translator->trans('user.invalid_email', [], 'validators') === 'Please enter a valid email address.');
 check('user.invalid_email is not in the messages domain', $translator->trans('user.invalid_email') === 'user.invalid_email');
+check('A message no catalogue declares is its own translation', $translator->trans('Save') === 'Save');
+check('symfony/validator ships a catalogue of the validators domain', is_file(__DIR__ . '/vendor/symfony/validator/Resources/translations/validators.en.xlf'));
 
 // ─── Templates ──────────────────────────────────────────────────────────────
 
@@ -185,13 +222,30 @@ check('user.invalid_email is not in the messages domain', $translator->trans('us
 $twig = new Environment(new FilesystemLoader(__DIR__ . '/templates'), ['strict_variables' => true]);
 $twig->addExtension(new TranslationExtension($translator));
 $twig->addExtension(new RoutingExtension($urls));
-$html = $twig->render('demo/index.html.twig', ['sender' => 'PHPantom', 'support' => '', 'title' => '']);
+$twig->addExtension(new AppExtension());
+$twig->addExtension(new AttributeExtension(Badges::class));
+foreach (Yaml::parseFile("$config/packages/twig.yaml")['twig']['globals'] as $name => $value) {
+    $twig->addGlobal($name, $value);
+}
+$html = $twig->render('demo/index.html.twig', [
+    'sender' => 'PHPantom',
+    'support' => '',
+    'title' => '',
+    'user' => new User('ada@example.com', 'Ada'),
+]);
 
 check('demo/index.html.twig extends base.html.twig', str_contains($html, '<!doctype html>'));
+check("demo/index.html.twig's title block overrides base.html.twig's, and parent() renders it", str_contains($html, '<title>Demo · Symfony demo</title>'));
 check('demo/index.html.twig includes demo/_card.html.twig', str_contains($html, 'Every string links back to its declaration'));
 check("The template's 'demo.title'|trans is translated", str_contains($html, 'Symfony intelligence'));
 check("The template's path('app_demo', ...) resolves", str_contains($html, 'href="/demo/42"'));
 check("The template's path('app_demo_legacy') resolves", str_contains($html, 'href="/legacy"'));
+check("The template's path('admin_dashboard') resolves", str_contains($html, 'href="/admin"'));
+check("The template's path('_preview_error', ...) resolves", str_contains($html, 'href="/_error/404"'));
+check("The template's |initials filter is AppExtension::initials()", str_contains($html, '<p>P <span class="badge">demo</span> PHPANTOM</p>'));
+check('demo/_card.html.twig is handed the sender demo/index.html.twig is rendered with', str_contains($html, 'Every string links back to its declaration, PHPantom'));
+check('config/packages/twig.yaml declares support_url as a global', str_contains($html, 'href="https://example.com/support"'));
+check("The template's user.displayName and user.email read User's getters", str_contains($html, '<p>Ada &lt;ada@example.com&gt;</p>'));
 
 // ─── Forms ──────────────────────────────────────────────────────────────────
 

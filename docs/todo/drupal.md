@@ -6,6 +6,12 @@ core, contrib, and the Drupal file extensions (`.module`, `.install`,
 `.theme`, …) are indexed past `.gitignore`. Nothing reads Drupal's own
 declarations: services, entity types, fields, routes, or hooks.
 
+The requests in
+[#48](https://github.com/PHPantom-dev/phpantom_lsp/issues/48) are the
+scope of this document: the indexing it asked for first has shipped, and
+every Drupal-specific feature its discussion lists is one of the items
+below.
+
 Drupal is built on Symfony components, so its service container and
 YAML files are close to what the Symfony support already reads. PHPStan's
 Drupal extension (`mglaman/phpstan-drupal`) is the checklist of what a
@@ -44,6 +50,10 @@ untested and could regress silently.
   contrib module and a site build, bucket the diagnostics by cause, and
   file what Drupal-specific gaps they show. That ranks the rest of this
   document by what actually breaks.
+- **What already works**: the Symfony support reads some of the same
+  shapes Drupal uses (event subscribers' `getSubscribedEvents()` maps,
+  `Class::method` strings in YAML). Check each against the demo and note
+  it in the README, so the items below only build what is missing.
 
 ---
 
@@ -62,7 +72,10 @@ public static function create(ContainerInterface $container): static {
 A module declares its services in `<module>.services.yml`, in Symfony's
 service format. Type `\Drupal::service()` and `$container->get()` by the
 class the declaration names, and complete and navigate the service IDs,
-including `@service_id` arguments in the YAML.
+including `@service_id` arguments in the YAML. Newer code registers a
+service under its interface and fetches it with
+`\Drupal::service(OrderManagerInterface::class)`; that ID is a class
+name and types as that class without any lookup.
 
 The Symfony container reading already parses this format and follows
 aliases and parameter placeholders. Start by checking what it picks up from a
@@ -91,7 +104,9 @@ entity class and its storage handler through the entity type's
 declaration: the `#[ContentEntityType]` / `#[ConfigEntityType]`
 attribute, or the annotation older code uses. Read those statically,
 type `getStorage()`, `load()`, `loadMultiple()`, and `create()` from
-them, and complete and navigate entity type IDs.
+them, and complete and navigate entity type IDs. Entity queries
+(`\Drupal::entityQuery('node')`, `$storage->getQuery()`) take the same
+IDs and return IDs of that entity type.
 
 **Where to look:** PHPStan's Drupal extension (its entity data
 repository and the storage return-type extensions).
@@ -148,6 +163,12 @@ maps that read `Class::method` strings in YAML; check before building
 anything for them. The parameter keys are the same problem as Symfony's
 [F27](lsp-features.md#f27-symfony-route-parameters).
 
+A path parameter named after an entity type (`/node/{node}`) is upcast
+by Drupal's parameter converters, so the controller method's `$node`
+receives a `NodeInterface`, not the ID. Type an untyped controller
+parameter from the route that names it, and check a typed one against
+it.
+
 ---
 
 ## DR6. Hooks
@@ -192,9 +213,9 @@ return [
   (`#[RenderElement('details')]`, `#[FormElement('textfield')]`).
 - **Libraries** in `#attached` name entries in `<module>.libraries.yml`.
 
-The Twig support already finds templates outside Symfony; the
-template's variables are the same problem as
-[F37](lsp-features.md#f37-twig-template-variables).
+The Twig support already finds templates outside Symfony, and a
+template's variables from the renders that name it; a theme hook's
+variables would be one more source of them (see `src/twig/variables.rs`).
 
 ---
 
@@ -211,3 +232,138 @@ Permissions are declared in `<module>.permissions.yml` (and by
 permission callbacks), configuration objects in `config/install` and
 `config/schema`. Complete and navigate both, and complete the keys
 `get()` reads from the schema.
+
+---
+
+## DR9. Drupal directories outside `contrib` and `custom`
+
+**Impact: Medium-High · Complexity: Low-Medium**
+
+The scan that bypasses `.gitignore` covers `core`, `modules/contrib`,
+`modules/custom`, `themes/contrib`, `themes/custom`, `profiles`, and
+`sites` under the web root. Sites also group modules by vendor
+(`modules/acme/`) or keep them directly under `modules/`, and profiles
+carry their own `modules/` and `themes/`; a module a site's `.gitignore`
+hides in any of those places is not indexed, and its classes read as
+unknown. Scan `modules`, `themes`, and `profiles` whole.
+
+The scan also runs only when the Drupal site is the workspace's Composer
+root. A workspace that holds the site beside other Composer projects, or
+opens a Drupal tree without a `composer.json`, gets none of it. Run it
+for each Composer project in the workspace that requires `drupal/core`,
+and give the scanned classes the same origin (project, vendor) other
+classes get, so completion ranks and filters them the same way.
+
+**Where to look:** `scan_drupal_directories` in
+`src/classmap_scanner/discovery.rs`, its caller in
+`src/indexing/init.rs`, and how per-project Composer roots are handled
+there.
+
+---
+
+## DR10. Plugin IDs
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+#[Block(id: 'acme_order_summary', admin_label: new TranslatableMarkup('Order summary'))]
+final class OrderSummaryBlock extends BlockBase { … }
+
+$block = $this->blockManager->createInstance('acme_order_summary');
+```
+
+Blocks, field types, formatters, widgets, queue workers, and the other
+plugin types declare an ID in an attribute (or, in older code, a
+docblock annotation). Complete and navigate plugin IDs where a plugin
+manager takes one (`createInstance()`, `getDefinition()`,
+`hasDefinition()`), and in the YAML and render arrays that name them
+(`'#type'` is [DR7](#dr7-render-arrays-theme-hooks-and-libraries)), and
+type `createInstance()` as the plugin class.
+
+---
+
+## DR11. Form and render callbacks
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+$form['actions']['submit']['#submit'][] = '::submitOrder';
+$form['country']['#ajax'] = ['callback' => '::updateRegions'];
+```
+
+`#submit`, `#validate`, `#element_validate`, `#pre_render`,
+`#after_build`, and an `#ajax` `callback` name methods of the form class
+as `'::method'`, or a function or `Class::method`. Navigate, rename, and
+complete them, and report one that names nothing.
+
+---
+
+## DR12. Translation placeholders
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+$this->t('Order @number was placed by %name', ['@number' => $id, '%nmae' => $name]);
+```
+
+`t()`, `$this->t()`, `new TranslatableMarkup()`, and `formatPlural()`
+replace `@`, `%`, and `:` placeholders from the array they are given.
+Report a placeholder the string uses that the array does not supply, and
+a key the string never uses.
+
+---
+
+## DR13. Module names and `*.info.yml`
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+\Drupal::moduleHandler()->moduleExists('acme_shop');
+```
+
+```yaml
+dependencies:
+  - drupal:node
+  - acme:acme_shop
+```
+
+A module's machine name is the basename of its `*.info.yml`. Complete
+and navigate machine names in `moduleExists()`, `getModule()`, and the
+`dependencies` of an info file, and report one that names no module.
+Check an info file's required keys (`name`, `type`,
+`core_version_requirement`) and their shapes.
+
+---
+
+## DR14. Port PHPStan's Drupal extension tests
+
+**Impact: Medium · Complexity: Medium**
+
+PHPStan's Drupal extension (`mglaman/phpstan-drupal`) is this
+document's checklist, but its tests are not ported, as the Symfony,
+Doctrine, and WordPress extensions' are (`tests/phpstan_symfony/`,
+`tests/phpstan_doctrine/`, `tests/wordpress_stubs/`). Its type tests
+cover `\Drupal::service()` and container lookups, entity storage and
+entity queries, field item lists, and the rule tests deprecated and
+discouraged calls. Port them into `tests/phpstan_drupal/` the same way:
+the `assertType()` fixtures run by `tests/assert_type_runner.rs`, the
+rule tests as `.fixture` files, a slice of `drupal/core` copied by
+`scripts/extract-framework-stubs.php`, and upstream's test modules and
+their `*.services.yml` as the project. Until DR2 to DR4 ship most
+assertions are a `// SKIP` pointing at the item that covers them; file
+any that no item does. Rules about Drupal's own deprecations are listed
+in the README as not ported.
+
+---
+
+## DR15. Benchmark for Drupal names
+
+**Impact: Low-Medium · Complexity: Low** (depends on DR2)
+
+Laravel, Symfony, and Yii have Criterion benchmarks in `benches/`.
+Once Drupal service IDs complete (DR2), add
+`benches/drupal_completion.rs` in the shape of
+`benches/symfony_completion.rs`: generate a site with many modules,
+each declaring services, routes, and hooks, and time completion of
+service IDs, route names, and hook names as each ships. Register it in
+`Cargo.toml` so `benches/ci_benchmarks.py` picks it up.

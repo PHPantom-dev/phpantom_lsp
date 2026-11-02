@@ -652,6 +652,7 @@ impl<'a> FileLoaders<'a> {
         )
         .with_imports(Some(self.file.use_map_at(offset)))
         .with_backend(Some(self.backend))
+        .with_uri(self.file.uri.as_deref())
     }
 
     /// The context for resolving an expression written at `offset` of
