@@ -163,3 +163,22 @@ a PHP `alias()` declares is reported. The receiver class decides which
 kind the call declares, so the call wants one receiver whose targets hold
 both configurators, gated on either configurator namespace, with the
 second argument a route the alias reads.
+
+### B724. Hovering the variable of a `global` statement shows nothing
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @global Foo $x */
+function f(): void
+{
+    global $x;   // hover $x: nothing
+    $x;          // hover $x: Foo
+}
+```
+
+The variable a `global` statement imports has a type from the next
+statement on, whether it comes from the function's `@global` tag, a `@var`
+above the statement, the file's top level, or the stubs' `@global` tags.
+Hovering it in the statement itself shows no hover at all, where an
+assignment's target or a parameter shows the type it gets.

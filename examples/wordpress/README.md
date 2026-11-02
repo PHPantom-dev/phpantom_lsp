@@ -30,8 +30,9 @@ most typed WordPress projects get core's declarations.
   `'acme_shop_saved_acme_product'` goes to a hook the plugin fires under a
   name it builds at runtime.
 - A `@global` tag types the global a function imports. Complete after
-  `$wpdb->` in `ProductRepository::countInStock()`, or after `$wp_query->`
-  in the theme's `acme_theme_last_page()`.
+  `$wpdb->` in `ProductRepository::countInStock()`. Without one, the global
+  takes the type the stubs' own `@global` tags give it: complete after
+  `$wp_query->` in the theme's `acme_theme_last_page()`.
 
 ## Getting started
 

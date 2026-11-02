@@ -707,38 +707,35 @@ over one, loses the value. 2 assertions of the WordPress stubs fixtures.
 
 ---
 
-## T61. A `global` variable is untyped without a type in the same file
+## T62. `@global` tags in library code do not type a global
 
-**Impact: Medium-High · Complexity: Medium-High**
+**Impact: Medium · Complexity: Medium-High**
 
 ```php
 function acme_count_orders(): int {
-    global $wpdb;
+    global $wpdb; // untyped when core is indexed instead of the stubs
     return (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}acme_orders");
 }
 ```
 
-`global $x` takes its type from a `@global Type $x` tag on the enclosing
-function, a `@var` docblock directly above the statement, or the same
-file's top-level scope. Plugin and theme code often writes `global $wpdb;`
-with none of those, and then `$wpdb` is untyped. PhpStorm types it once it
-is pointed at a WordPress install, from the assignments core makes in
-other files.
+A `global $x;` with no type of its own takes the type the `@global` tags of
+the stub files give `$x` (`ExternalStubIndex::globals`). Tags anywhere else
+are not read: WordPress core indexed as library code (WP3, or a whole
+install opened as the workspace) writes the same tags on its functions, and
+on the top-level `$GLOBALS['wp_query'] = new WP_Query();` assignments of
+`wp-settings.php`, but a project that has core without the stubs leaves
+`$wpdb` untyped. A plugin's own global documented on one function and
+imported untagged in another is untyped the same way.
 
-WordPress core assigns its globals during bootstrap, at the top level of
-`wp-settings.php` through `$GLOBALS['wp_query'] = new WP_Query();` (each
-with a `@global` docblock above it), and inside functions such as
-`require_wp_db()` through `global $wpdb; $wpdb = new wpdb(...);`.
-`php-stubs/wordpress-stubs` declares no globals at all, so a project that
-has only the stubs needs either core indexed (WP3) or a globals stub file
-that declares them with `@var`.
+The stub index is rebuilt whole, so its tags are read once per rebuild.
+Library and project files are discovered by several scans and merged
+incrementally (`SymbolIndex::merge_scan`, `replace_tree`, the watcher's
+`reindex`), so feeding them in means carrying a name-to-files map through
+each of those, and deciding which files may count: a project file a
+Composer project autoloads by class is only parsed on demand, and reading
+its tags only once it happens to be parsed would make a type depend on
+what was opened first.
 
-This needs an index of global variable assignments, which must stay
-cheap: decide which files may feed it (stubs, and files the project
-includes at top level) before building it, and whether a `@global` tag on
-one function may type the same global in another.
-
-**Where to look:** `src/type_engine/variable/forward_walk/statements.rs`
-(`Statement::Global`), `declared_global_types` and
-`apply_global_var_docblocks` in
-`src/type_engine/variable/forward_walk/var_docblocks.rs`.
+**Where to look:** `load_external_stub_global` in
+`src/resolution/external_stubs.rs`, `scan_global_tags` in
+`src/classmap_scanner/discovery.rs`.

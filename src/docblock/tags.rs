@@ -222,6 +222,37 @@ pub fn extract_global_tags(docblock: &str) -> Vec<(String, PhpType)> {
         .collect()
 }
 
+/// The docblocks of `content` that hold an `@global` tag, each with the
+/// offset it starts at, found without parsing the file.
+pub fn docblocks_with_global_tags(content: &str) -> Vec<(usize, &str)> {
+    use memchr::memmem;
+
+    let bytes = content.as_bytes();
+    let mut found: Vec<(usize, &str)> = Vec::new();
+    for pos in memmem::find_iter(bytes, b"@global") {
+        // A second tag of a docblock already taken.
+        if found
+            .last()
+            .is_some_and(|&(start, doc)| pos < start + doc.len())
+        {
+            continue;
+        }
+        let Some(start) = memmem::rfind(&bytes[..pos], b"/**") else {
+            continue;
+        };
+        // The nearest opener belongs to a docblock that closed before the
+        // tag: the tag sits in some other comment, or in code.
+        if memmem::find(&bytes[start + 3..pos], b"*/").is_some() {
+            continue;
+        }
+        let Some(end) = memmem::find(&bytes[pos..], b"*/") else {
+            continue;
+        };
+        found.push((start, &content[start..pos + end + 2]));
+    }
+    found
+}
+
 /// Extract all `@see` references from a PHPDoc block.
 ///
 /// Returns the raw text after each `@see` tag, which may be:

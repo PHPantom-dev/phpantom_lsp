@@ -1935,3 +1935,21 @@ fn method_tag_with_template_params() {
     assert_eq!(methods[0].template_bindings()[0].0.as_str(), "TVal");
     assert_eq!(methods[0].template_bindings()[0].1.as_str(), "$default");
 }
+
+#[test]
+fn docblocks_with_global_tags_finds_each_docblock_once() {
+    let content = "<?php\n/**\n * @global wpdb $wpdb\n * @global WP_Query $wp_query\n */\nfunction a() {}\n/** Not this one. */\n// @global Other $other\nfunction b() {}\n/** @global WP_Post $post */\nfunction c() {}\n";
+    let found = docblocks_with_global_tags(content);
+    let starts: Vec<usize> = found.iter().map(|&(start, _)| start).collect();
+    assert_eq!(
+        starts,
+        vec![6, content.find("/** @global WP_Post").unwrap()]
+    );
+    assert!(found[0].1.ends_with("*/"));
+    let names: Vec<String> = found
+        .iter()
+        .flat_map(|&(_, doc)| extract_global_tags(doc))
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(names, ["$wpdb", "$wp_query", "$post"]);
+}

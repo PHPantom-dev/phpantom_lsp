@@ -136,12 +136,20 @@ pub(crate) fn process_statement<'b>(
                     if let Some((_, php_type)) = declared.iter().find(|(name, _)| name == var_name)
                     {
                         scope.set(var_name, resolve_type_to_resolved_types(php_type, ctx));
-                    } else if let Some(top_scope) = &ctx.top_level_scope {
-                        if let Some(types) = top_scope.get(&atom(var_name)) {
-                            scope.set(var_name, types.clone());
-                        } else {
-                            scope.set_empty(var_name);
-                        }
+                    } else if let Some(types) = ctx
+                        .top_level_scope
+                        .as_ref()
+                        .and_then(|top_scope| top_scope.get(&atom(var_name)))
+                    {
+                        scope.set(var_name, types.clone());
+                    } else if let Some(php_type) = ctx
+                        .file
+                        .backend
+                        .and_then(|backend| backend.load_external_stub_global(var_name))
+                    {
+                        // Already qualified against the stub file it is
+                        // written in.
+                        scope.set(var_name, ctx.resolved_types_for(php_type));
                     } else {
                         scope.set_empty(var_name);
                     }

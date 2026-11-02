@@ -52,13 +52,13 @@ pub use tag_kind::{TagKind, TagVendor};
 // Core tags
 pub(crate) use tags::merge_param_docblock_into_parameters;
 pub use tags::{
-    declares_impure, declares_pure, extract_all_param_tags, extract_all_param_tags_from_info,
-    extract_deprecation_message, extract_deprecation_message_from_info,
-    extract_deprecation_with_see, extract_deprecation_with_see_from_info,
-    extract_doc_readonly_from_info, extract_global_tags, extract_if_this_is_type,
-    extract_if_this_is_type_from_info, extract_link_urls, extract_link_urls_from_info,
-    extract_mixin_tags, extract_mixin_tags_from_info, extract_param_closure_this,
-    extract_param_closure_this_from_info, extract_param_description,
+    declares_impure, declares_pure, docblocks_with_global_tags, extract_all_param_tags,
+    extract_all_param_tags_from_info, extract_deprecation_message,
+    extract_deprecation_message_from_info, extract_deprecation_with_see,
+    extract_deprecation_with_see_from_info, extract_doc_readonly_from_info, extract_global_tags,
+    extract_if_this_is_type, extract_if_this_is_type_from_info, extract_link_urls,
+    extract_link_urls_from_info, extract_mixin_tags, extract_mixin_tags_from_info,
+    extract_param_closure_this, extract_param_closure_this_from_info, extract_param_description,
     extract_param_description_from_info, extract_param_raw_type, extract_param_raw_type_from_info,
     extract_param_types_positional_from_info, extract_removed_version, extract_require_extends,
     extract_require_extends_from_info, extract_require_implements,

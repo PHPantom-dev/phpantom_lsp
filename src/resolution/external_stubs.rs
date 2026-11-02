@@ -11,6 +11,9 @@ use std::sync::Arc;
 
 use super::inflight::InflightGuard;
 use crate::Backend;
+use crate::names::qualify_written_type_names;
+use crate::php_type::PhpType;
+use crate::text_scan::NamespaceDecls;
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo};
 
 impl Backend {
@@ -80,6 +83,51 @@ impl Backend {
             .get(&name)
             .filter(|define| define.file_uri == uri)
             .map(read)
+    }
+
+    /// The type the `@global` tags of the stub paths give the global
+    /// variable `name` (with its `$`), joined over every tag that
+    /// documents it, or `None` when none does.
+    ///
+    /// A tag documents what a function reads from the global, which is
+    /// what the global holds wherever it is imported. Each type is read
+    /// with the imports of the file it is written in.
+    pub(crate) fn load_external_stub_global(&self, name: &str) -> Option<PhpType> {
+        if !self.has_external_stubs() {
+            return None;
+        }
+        let stubs = self.external_stubs();
+        let paths = stubs.globals.get(name)?;
+        if let Some(cached) = stubs.global_types.lock().get(name) {
+            return cached.clone();
+        }
+        let mut members: Vec<PhpType> = Vec::new();
+        for path in paths {
+            let Some(uri) = self.parse_external_stub_globals(path) else {
+                continue;
+            };
+            let Some(content) = self.get_file_content_arc(&uri) else {
+                continue;
+            };
+            let imports = self.file_use_map(&uri);
+            let namespaces = NamespaceDecls::scan(&content);
+            for (start, doc) in crate::docblock::docblocks_with_global_tags(&content) {
+                for (tag_name, php_type) in crate::docblock::extract_global_tags(doc) {
+                    if tag_name != name {
+                        continue;
+                    }
+                    let namespace = namespaces.at(&content, start);
+                    let qualified = qualify_written_type_names(&php_type, namespace, &imports);
+                    members.extend(qualified.union_members().into_iter().cloned());
+                }
+            }
+        }
+        let php_type = (!members.is_empty()).then(|| PhpType::union(members));
+        stubs
+            .global_types
+            .lock()
+            .insert(name.to_owned(), php_type.clone());
+        php_type
     }
 
     /// Parse the stub file at `path` for its classes, functions and

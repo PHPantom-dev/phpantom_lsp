@@ -30,12 +30,11 @@ function acme_theme_price(int $post_id): string
 
 /**
  * The number of the last page of the main query.
- *
- * @global WP_Query $wp_query
  */
 function acme_theme_last_page(): int
 {
-    // Try: complete after $wp_query->. The @global tag above types it.
+    // Try: complete after $wp_query->. This function has no @global tag,
+    // so the type comes from the ones the WordPress stubs write.
     global $wp_query;
 
     return (int) $wp_query->max_num_pages;

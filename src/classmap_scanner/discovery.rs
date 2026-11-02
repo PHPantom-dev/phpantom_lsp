@@ -514,6 +514,34 @@ pub(crate) fn scan_stub_paths(
     result
 }
 
+/// The global variables `files` document with an `@global Type $name` tag,
+/// each with the files that do, in the order of `files`.
+///
+/// Only the names are read here. The types are written against each
+/// file's own imports, which only a parse of it knows.
+pub(crate) fn scan_global_tags(files: &[PathBuf]) -> HashMap<String, Vec<PathBuf>> {
+    let scanned =
+        crate::parallel::map_in_blocks("scan_global_tags", files, SCAN_BLOCK_FILES, |path| {
+            let content = crate::util::read_php_source(path)?;
+            let mut names: Vec<String> = Vec::new();
+            for (_, doc) in crate::docblock::docblocks_with_global_tags(&content) {
+                for (name, _) in crate::docblock::extract_global_tags(doc) {
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+            }
+            (!names.is_empty()).then_some((path, names))
+        });
+    let mut globals: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    for (path, names) in scanned {
+        for name in names {
+            globals.entry(name).or_default().push(path.clone());
+        }
+    }
+    globals
+}
+
 /// Remove from `scan` every declaration whose file marks it `@removed` at
 /// or before `php_version`.
 fn drop_removed_declarations(

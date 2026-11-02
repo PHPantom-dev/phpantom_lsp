@@ -41,7 +41,7 @@ contributor even though it's short.
 | F36 | [Twig block navigation](todo/lsp-features.md#f36-twig-block-navigation) (blocks full Twig support) | Medium      | Medium      |
 | F50 | [Twig filters and functions](todo/lsp-features.md#f50-twig-filters-and-functions) (blocks full Twig support) | Medium      | Medium      |
 | F26 | [Symfony service IDs a bundle or a definition API declares](todo/lsp-features.md#f26-symfony-service-ids-a-bundle-or-a-definition-api-declares) | Low-Medium  | Medium      |
-| T61 | [A `global` variable is untyped without a type in the same file](todo/type-inference.md#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file) | Medium-High | Medium-High |
+| T62 | [`@global` tags in library code do not type a global](todo/type-inference.md#t62-global-tags-in-library-code-do-not-type-a-global) | Medium | Medium-High |
 | F37 | [Twig template variables](todo/lsp-features.md#f37-twig-template-variables) (blocks full Twig support) | Medium-High | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
@@ -112,7 +112,7 @@ ships, remove every row that names it.
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | WP9 | [The argument types the WordPress stubs declare](todo/wordpress.md#wp9-the-argument-types-the-wordpress-stubs-declare) | Medium      | Low-Medium  |
 | WP16 | [Core's hook names outside the project's own files](todo/wordpress.md#wp16-cores-hook-names-outside-the-projects-own-files) | Medium-High | Medium      |
-| T61 | [A `global` variable is untyped without a type in the same file](todo/type-inference.md#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file) | Medium-High | Medium-High |
+| T62 | [`@global` tags in library code do not type a global](todo/type-inference.md#t62-global-tags-in-library-code-do-not-type-a-global) | Medium | Medium-High |
 | WP3 | [WordPress core for a plugin or theme opened on its own](todo/wordpress.md#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own) | Medium-High | Medium      |
 | WP15 | [`analyze` leaves out a plugin's files outside its PSR-4 roots](todo/wordpress.md#wp15-analyze-leaves-out-a-plugins-files-outside-its-psr-4-roots) | Medium      | Low         |
 | WP6 | [Template parts](todo/wordpress.md#wp6-template-parts) | Medium      | Medium      |

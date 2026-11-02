@@ -130,3 +130,155 @@ async fn a_theme_subproject_resolves_through_its_composer_stub_packages() {
         Uri::from_file_path(wordpress.canonicalize().unwrap()).unwrap()
     );
 }
+
+/// A workspace whose `[stubs]` path holds `stubs`, with `main` open as
+/// `main.php`, and the hover on the first `needle` of `main` (past its
+/// indentation).
+async fn hover_with_stubs(stubs: &[(&str, &str)], main: &str, needle: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("stubs")).unwrap();
+    for (name, content) in stubs {
+        fs::write(root.join("stubs").join(name), content).unwrap();
+    }
+    fs::write(
+        root.join(".phpantom.toml"),
+        "[stubs]\npaths = [\"stubs\"]\n",
+    )
+    .unwrap();
+    fs::write(root.join("main.php"), main).unwrap();
+
+    let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
+    backend.initialized(InitializedParams {}).await;
+    let uri = Uri::from_file_path(root.join("main.php")).unwrap();
+    open_php(&backend, &uri, main).await;
+
+    let (line, character) = crate::common::line_char_of(main, needle);
+    let indent = needle.len() - needle.trim_start().len();
+    crate::common::markup_hover_at(
+        &backend,
+        &uri,
+        line,
+        (character as usize + indent + 1) as u32,
+    )
+    .await
+}
+
+const WPDB_STUBS: &str = r#"<?php
+namespace {
+    class wpdb
+    {
+        public function get_var(): ?string { return null; }
+    }
+
+    /**
+     * Retrieves an option value.
+     *
+     * @global wpdb $wpdb WordPress database abstraction object.
+     */
+    function get_option($option) {}
+}
+"#;
+
+/// `global $wpdb;` with no type in its own file takes the type an `@global`
+/// tag of the stubs gives it, on any function.
+#[tokio::test]
+async fn a_global_takes_its_type_from_the_global_tags_of_the_stubs() {
+    let main =
+        "<?php\nfunction acme_count(): void\n{\n    global $wpdb;\n    $wpdb->get_var();\n}\n";
+    let hover = hover_with_stubs(&[("wordpress.php", WPDB_STUBS)], main, "$wpdb->").await;
+    assert!(hover.contains("$wpdb = wpdb\n"), "{hover}");
+}
+
+/// Every tag the stubs write for a global counts, so one that allows `null`
+/// keeps it.
+#[tokio::test]
+async fn the_global_tags_of_the_stubs_are_joined() {
+    let stubs = r#"<?php
+namespace {
+    class WP_Post {}
+
+    /** @global WP_Post $post */
+    function get_the_title() {}
+
+    /** @global WP_Post|null $post Global post object. */
+    function setup_postdata() {}
+}
+"#;
+    let main = "<?php\nfunction acme_title(): void\n{\n    global $post;\n    $post;\n}\n";
+    let hover = hover_with_stubs(&[("wordpress.php", stubs)], main, "    $post;").await;
+    assert!(hover.contains("$post = WP_Post|null\n"), "{hover}");
+}
+
+/// A stub's `@global` type names the class its own file's imports and
+/// namespace say, not the one of the same short name the caller sees.
+#[tokio::test]
+async fn a_stub_global_tag_is_read_with_the_stub_files_names() {
+    let library = r#"<?php
+namespace Lib {
+    class Db {}
+}
+
+namespace Acme {
+    use Lib\Db;
+
+    class Cache {}
+
+    /**
+     * @global Db $acme_db
+     * @global Cache $acme_cache
+     */
+    function acme_boot() {}
+}
+"#;
+    let global = "<?php\nclass Db {}\nclass Cache {}\n";
+    let main = r#"<?php
+namespace App;
+
+class Db {}
+
+function report(): void
+{
+    global $acme_db, $acme_cache;
+    $acme_db;
+    $acme_cache;
+}
+"#;
+    let stubs = [("library.php", library), ("global.php", global)];
+    let db = hover_with_stubs(&stubs, main, "    $acme_db;").await;
+    assert!(db.contains("namespace Lib;\n$acme_db = Db\n"), "{db}");
+    let cache = hover_with_stubs(&stubs, main, "    $acme_cache;").await;
+    assert!(
+        cache.contains("namespace Acme;\n$acme_cache = Cache\n"),
+        "{cache}"
+    );
+}
+
+/// The function's own `@global` tag and a `@var` above the statement still
+/// decide over the stubs.
+#[tokio::test]
+async fn the_functions_own_types_win_over_the_stubs() {
+    let main = r#"<?php
+class AcmeDb {}
+class OtherDb {}
+
+/** @global AcmeDb $wpdb */
+function tagged(): void
+{
+    global $wpdb;
+    $wpdb; // tagged
+}
+
+function annotated(): void
+{
+    /** @var OtherDb $wpdb */
+    global $wpdb;
+    $wpdb; // annotated
+}
+"#;
+    let stubs = [("wordpress.php", WPDB_STUBS)];
+    let tagged = hover_with_stubs(&stubs, main, "$wpdb; // tagged").await;
+    assert!(tagged.contains("$wpdb = AcmeDb\n"), "{tagged}");
+    let annotated = hover_with_stubs(&stubs, main, "$wpdb; // annotated").await;
+    assert!(annotated.contains("$wpdb = OtherDb\n"), "{annotated}");
+}
