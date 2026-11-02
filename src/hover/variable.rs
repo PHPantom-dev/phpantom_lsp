@@ -36,10 +36,10 @@ impl Backend {
         } = *site;
         // Suppress hover when the cursor is on a variable at its
         // definition site where the type is already visible in
-        // the signature (properties, static/global declarations).
-        // For parameters, assignments, foreach bindings, and catch
-        // bindings, hover is useful to show the resolved type and
-        // any docblock descriptions.
+        // the signature (properties, static declarations).
+        // For parameters, assignments, foreach bindings, catch
+        // bindings, and `global` imports, hover is useful to show the
+        // resolved type and any docblock descriptions.
         if let Some(def_kind) = self.lookup_var_def_kind_at(uri, name, cursor_offset)
             && (!matches!(
                 def_kind,
@@ -48,6 +48,7 @@ impl Backend {
                     | VarDefKind::Parameter
                     | VarDefKind::Foreach
                     | VarDefKind::Catch
+                    | VarDefKind::GlobalDecl
                     | VarDefKind::ArrayDestructuring
                     | VarDefKind::ListDestructuring
             ) || (def_kind == VarDefKind::Parameter

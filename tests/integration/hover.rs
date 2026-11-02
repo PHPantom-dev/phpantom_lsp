@@ -1465,6 +1465,43 @@ function draw(Pen $tool): void {
     );
 }
 
+/// The variable a `global` statement imports shows the type it gets there,
+/// whether it comes from the function's `@global` tag, a `@var` above the
+/// statement, or the file's top level.
+#[test]
+fn hover_active_on_global_statement_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Foo {}
+class Bar {}
+class Baz {}
+$top = new Baz();
+/** @global Foo $x */
+function f(): void
+{
+    global $x;
+    /** @var Bar $y */
+    global $y;
+    global $top;
+}
+"#;
+
+    for (line, col, var, ty) in [
+        (8, 12, "$x", "Foo"),
+        (10, 12, "$y", "Bar"),
+        (11, 12, "$top", "Baz"),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, col)
+            .unwrap_or_else(|| panic!("hover should be active on `global {var}`"));
+        let text = hover_text(&hover);
+        assert!(
+            text.contains(&format!("{var} = {ty}")),
+            "hover on `global {var}` should show {ty}: {text}"
+        );
+    }
+}
+
 #[test]
 fn hover_active_on_foreach_variable_definition_site() {
     let backend = create_test_backend();

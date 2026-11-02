@@ -86,6 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Hover on a `global` statement's variable.** Hovering the variable in `global $x;` now shows the type it imports, instead of nothing.
 - **WordPress's `__()` returns a string.** Outside a Laravel project, `__()` and `trans()` keep the return type their own declaration gives, instead of Laravel's `string|array`, so passing a translated string to WordPress functions is no longer reported.
 - **Nullable columns stay nullable through a cast.** A model attribute cast to `boolean`, `integer`, a date, an enum or another cast that hands `null` back untouched is now nullable when its column is, and so is a nullable `updated_at` or other timestamp column. A null check on a nullable date column, the soft-delete column included, leaves the date class with all its members.
 - **Relations whose model comes from config.** A relation that reads its related class from `config()`, like the `roles` and `permissions` relations of spatie/laravel-permission, now loads the model the config file names instead of the base `Model`.
