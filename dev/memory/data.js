@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793575245781,
+  "lastUpdate": 1793577857022,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8381,6 +8381,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 100.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "abs@stubbe.dev",
+            "name": "Alexander Bugge Stage",
+            "username": "stubbedev"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "86352e68d40ae4205f3b0262370f4333b7d11d83",
+          "message": "A mismatch only `null` or `false` causes is opt-in\n\nWhen every member of a value's type fits except a `null` or `false`, the\ncode is not wrong, only wrong if the value turns out empty. Reporting that\nby default buries the mismatches that always fail: PHPStan reports these\nonly from levels 7 and 8, and PhpStorm not at all.\n\n`possibly-empty-mismatches` now decides this for arguments, returns and\nproperty assignments alike, off by default. A mismatch where another\nmember fails is reported as before, as is a value that can only be empty,\nsince no case of it fits. `bool` is not an empty member: it also holds\n`true`.\n\nThe setting replaces `downgrade-nullable-argument-mismatch`. That name\nwould be wrong for a key that turns a report on and covers `false`, returns\nand properties, and a warning tier has nothing left to apply to once the\nreport is opt-in.\n\nTests of the type engine observe what a value can hold through these\nmismatches, so a test that narrowing removed a `null` asserts that nothing\nis reported. With the default off, those would pass whether or not narrowing\nworked. The test environment therefore keeps the report on, and only the\ntests of the setting ask for the real default.",
+          "timestamp": "2026-11-02T00:37:11+01:00",
+          "tree_id": "e7a9edcd97bba95c4839f9054f6015134e308b41",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/86352e68d40ae4205f3b0262370f4333b7d11d83"
+        },
+        "date": 1793577844432,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 46.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 85.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 76.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 104.4,
             "unit": "MiB"
           }
         ]
