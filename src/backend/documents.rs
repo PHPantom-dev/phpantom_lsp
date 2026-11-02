@@ -26,6 +26,12 @@ impl Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        // A template the workspace walk has not seen, one just created to
+        // fix a name nothing declared, makes that name declared.
+        let template_names = crate::twig::roots::is_candidate_uri(&uri)
+            .then(|| self.twig_template_names())
+            .flatten();
+
         // A file that can be a Twig template is one only once root
         // discovery has seen what it references.
         self.note_twig_source(&uri, &text);
@@ -35,6 +41,10 @@ impl Backend {
         // all consume the same indexed occurrences.
         if self.is_resource_uri(&uri) {
             self.update_resource_symbol_index(&uri, &text);
+            self.rediagnose_template_namers(template_names);
+            if self.is_twig_template_uri(&uri) {
+                self.schedule_diagnostics(uri.clone());
+            }
             self.log(MessageType::Info, format!("Opened resource file: {}", uri))
                 .await;
             return;
@@ -42,6 +52,9 @@ impl Backend {
 
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
+        // An HTML file that is no template may still have moved the roots
+        // the templates are named from.
+        self.rediagnose_template_namers(template_names);
 
         // Opening a Blade template is the discrete point where its
         // call-site variable inference runs (update_ast itself only
@@ -139,10 +152,15 @@ impl Backend {
         // queued for is still the current one.  Scanning a large XML on the
         // service loop for every keystroke would stall interactive
         // requests, and refreshing lenses per keystroke would make the
-        // client re-pull them faster than it can render them.
+        // client re-pull them faster than it can render them.  A
+        // template's names are judged against the scan, so its diagnostics
+        // follow it.
         if self.is_resource_uri(&uri) {
             if self.sync_ast_updates {
                 self.update_resource_symbol_index(&uri, &text);
+                if self.is_twig_template_uri(&uri) {
+                    self.schedule_diagnostics(uri);
+                }
                 return;
             }
             let backend = self.clone_for_blocking();
@@ -158,6 +176,9 @@ impl Backend {
                         return false;
                     }
                     backend.update_resource_symbol_index(&uri, &text);
+                    if backend.is_twig_template_uri(&uri) {
+                        backend.schedule_diagnostics(uri);
+                    }
                     true
                 })
                 .await;

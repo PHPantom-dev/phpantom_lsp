@@ -30,7 +30,7 @@ catalogues together, the way a real Symfony project does.
   the same template, `admin_dashboard` is `src/Admin/DashboardController.php`'s
   `dashboard` under the import's `name_prefix`, and `_preview_error` is
   declared by FrameworkBundle's own routing file. A route name nothing
-  declares is reported.
+  declares is reported, in a template too.
 - Translation keys navigate between the YAML and XLIFF catalogues in
   `translations/` and the PHP and Twig that translate them, within the
   domain each call names. In `DemoController`, go to the definition of
@@ -42,8 +42,8 @@ catalogues together, the way a real Symfony project does.
   extend, or include them and the files in `templates/`. In
   `DemoController`, go to the definition of `demo/index.html.twig`, or
   complete a name inside `render('')` or `{% include '' %}`. A template that
-  does not exist is reported, with quick fixes that change it to a close
-  name or create it.
+  does not exist is reported, in PHP and Twig alike, with quick fixes that
+  change it to a close name or create it.
 - Form fields and validation mappings name the properties of the class they
   map. In `src/Form/RegistrationType.php` or `config/validator/User.yaml`, go
   to the definition of `email`, find the references of `$displayName` in

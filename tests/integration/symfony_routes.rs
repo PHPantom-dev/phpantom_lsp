@@ -433,6 +433,37 @@ final class CheckController extends AbstractController
     );
 }
 
+#[tokio::test]
+async fn undeclared_routes_a_template_names_are_reported() {
+    let twig = "{# path('commented_out') #}\n<a href=\"{{ path('app_home') }}\">Home</a>\n<a href=\"{{ path('app_hme') }}\">Typo</a>\n";
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", ROUTES_YAML),
+        ("src/Controller/PostController.php", CONTROLLER_PHP),
+        ("templates/home.html.twig", twig),
+    ])
+    .await;
+    let uri = uri_for(&dir, "templates/home.html.twig");
+
+    let mut diagnostics = Vec::new();
+    backend.collect_template_diagnostics(uri.as_str(), twig, &mut diagnostics);
+    let reported: Vec<(String, u32)> = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(Code::String(code)) if code == "invalid_symfony_route"
+            )
+        })
+        .map(|diagnostic| {
+            (
+                message_text(&diagnostic.message).to_string(),
+                diagnostic.range.start.line,
+            )
+        })
+        .collect();
+    assert_eq!(reported, vec![("Unknown route: 'app_hme'".to_string(), 2)]);
+}
+
 /// An application whose routes are put together by the imports that load
 /// them: a name prefix on an attribute import, on an XML file it imports,
 /// and on a configurator's `import()`, configurator collections, `@Route`

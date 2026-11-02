@@ -504,30 +504,6 @@ registered for.
 
 ---
 
-## F32. Report unknown Symfony names in Twig templates
-
-**Impact: Medium-High · Complexity: Medium**
-
-Blocks full Twig support: the README keeps Twig marked as partial until this lands.
-
-```twig
-{% include 'partials/crad.html.twig' %}
-<a href="{{ path('app_hme') }}">Home</a>
-```
-
-An unknown template or route is reported where PHP names it, but not
-in a Twig template: diagnostics are not run on resource documents at all.
-They need scheduling for a Twig file the way a PHP file's are, the
-string-key check reading the template's resource symbol map, and the
-"Create missing template" quick fix offered there too. A template being
-created or deleted should also refresh the open files that name it.
-
-**Where to look:** `src/backend/documents.rs` (`did_open`, `did_change`
-for resource documents), `src/diagnostics/laravel_string_keys.rs`,
-`src/code_actions/create_missing_view.rs`.
-
----
-
 ## F58. Configured Twig roots and namespaces
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -678,8 +654,9 @@ lets an array node take any, `canBeEnabled()` and `canBeDisabled()` add an
 `enabled` key no string names, and `fixXmlConfig()` lets the YAML spell a
 key in its plural. A key is only worth judging under a root a project
 schema declares, and only once its parent is a closed array node the schema
-fully describes. Diagnostics are not run on resource documents yet either
-(see F32).
+fully describes. Diagnostics are not run on YAML files yet either: only a
+Twig template's names are judged outside PHP (see
+`Backend::collect_template_diagnostics`).
 
 **Where to look:** `src/symfony/config_tree.rs` (`tree_builder_keys`),
 `src/diagnostics/laravel_string_keys.rs` (`CheckedStringKind::of`).

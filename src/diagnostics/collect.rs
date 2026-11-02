@@ -187,8 +187,10 @@ pub(crate) type SlowDiagnosticObserver<'a> =
 
 impl Backend {
     /// Returns `true` if the URI should be skipped for diagnostics: stub
-    /// files (embedded or under a stub path), and resource documents (Twig
-    /// templates, YAML and XML files), which are not PHP.  Vendor files are
+    /// files (embedded or under a stub path), and resource documents (YAML,
+    /// XML, and XLIFF files), which are not PHP.  A Twig template is a
+    /// resource document too, but the names it holds are judged (see
+    /// [`Self::collect_template_diagnostics`]).  Vendor files are
     /// not skipped here: users
     /// working in monorepos or with `--prefer-source` packages
     /// legitimately edit vendor files, so the live per-file pass
@@ -198,7 +200,28 @@ impl Backend {
     pub(super) fn should_skip_diagnostics(&self, uri_str: &str) -> bool {
         crate::stubs::is_stub_uri(uri_str)
             || self.is_external_stub_uri(uri_str)
-            || self.is_resource_uri(uri_str)
+            || (self.is_resource_uri(uri_str) && !self.is_twig_template_uri(uri_str))
+    }
+
+    /// Collect the diagnostics of a Twig template: the template, route,
+    /// and translation names it holds that nothing declares.  A template
+    /// is not PHP, so this is all that is judged there.
+    pub fn collect_template_diagnostics(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        if !self.is_twig_project() {
+            return;
+        }
+        let ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
+        // The spans index the text the map was scanned from, which an edit
+        // whose scan has not landed yet has moved on from.
+        if !ctx.symbol_map.matches_source(content) {
+            return;
+        }
+        self.collect_invalid_laravel_string_key_diagnostics(&ctx, uri_str, content, out);
     }
 
     /// Collect Phase 1 (fast) diagnostics: syntax errors, unused

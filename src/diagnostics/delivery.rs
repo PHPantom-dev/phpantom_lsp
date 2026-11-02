@@ -46,6 +46,11 @@ impl Backend {
             return;
         }
 
+        if self.is_twig_template_uri(uri_str) {
+            self.publish_template_diagnostics(uri_str, content).await;
+            return;
+        }
+
         // The native collectors are expensive (a full-file forward walk and
         // type resolution — hundreds of ms to several seconds on a large
         // file). They are pure CPU work and must never run inline on an async
@@ -212,6 +217,40 @@ impl Backend {
         }
 
         // Update again with fresh slow results merged in.
+        self.assemble_and_refresh(uri_str).await;
+    }
+
+    /// [`Self::publish_diagnostics_for_file`] for a Twig template, which
+    /// has no PHP to parse or walk: only the names it holds are judged, on
+    /// the blocking pool since enumerating what the project declares can
+    /// read other files.
+    async fn publish_template_diagnostics(&self, uri_str: &str, content: &Arc<String>) {
+        let backend = self.clone_for_blocking();
+        let uri = uri_str.to_string();
+        let content = Arc::clone(content);
+        let diagnostics =
+            crate::server::run_blocking_cancel_safe("template diagnostics", move || {
+                let _project_guard = backend.enter_project_scope(&uri);
+                crate::util::catch_panic_unwind_safe("template diagnostics", &uri, None, || {
+                    let mut out = Vec::new();
+                    backend.collect_template_diagnostics(&uri, &content, &mut out);
+                    out
+                })
+            })
+            .await
+            .flatten()
+            .unwrap_or_default();
+
+        // A close that landed mid-compute must not resurrect the caches
+        // `clear_diagnostics_for_file` purged.
+        if !self.open_files.read().contains_key(uri_str) {
+            return;
+        }
+        self.diag.last_fast.lock().remove(uri_str);
+        self.diag
+            .last_slow
+            .lock()
+            .insert(uri_str.to_string(), diagnostics);
         self.assemble_and_refresh(uri_str).await;
     }
 
@@ -616,7 +655,13 @@ impl Backend {
         }
 
         let uris = self.open_files_affected_by_save(exclude_uri);
-        if uris.is_empty() {
+        self.rediagnose_open_files(uris);
+    }
+
+    /// Re-diagnose `uris`, open files that something they depend on changed
+    /// under, keeping nothing of their last passes.
+    pub(crate) fn rediagnose_open_files(&self, uris: Vec<String>) {
+        if uris.is_empty() || !self.init_complete.load(Ordering::Acquire) {
             return;
         }
 

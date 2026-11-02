@@ -20,6 +20,7 @@ use std::sync::atomic::Ordering;
 use parking_lot::RwLock;
 
 use crate::Backend;
+use crate::symbol_map::{StringKeyKind, SymbolKind};
 use roots::TwigRoots;
 
 /// The project's template files and the roots discovered from them.
@@ -173,6 +174,53 @@ impl Backend {
         if moved {
             self.refresh_twig_templates(|_| false);
         }
+    }
+
+    /// The template names the project declares, sorted, to hand to
+    /// [`Self::rediagnose_template_namers`] once a template may have been
+    /// created or deleted.  `None` in a project without Twig.
+    pub(crate) fn twig_template_names(&self) -> Option<Vec<String>> {
+        self.is_twig_project()
+            .then(|| self.symfony_declared_names(StringKeyKind::TwigTemplate))
+    }
+
+    /// Re-diagnose the open files that name a template the project
+    /// declared in `before` and no longer does, or one it declares now and
+    /// did not: whether such a name is reported has changed.
+    pub(crate) fn rediagnose_template_namers(&self, before: Option<Vec<String>>) {
+        let Some(before) = before else {
+            return;
+        };
+        let after = self.symfony_declared_names(StringKeyKind::TwigTemplate);
+        if before == after {
+            return;
+        }
+        let changed = |name: &str| {
+            before.binary_search_by(|n| n.as_str().cmp(name)).is_ok()
+                != after.binary_search_by(|n| n.as_str().cmp(name)).is_ok()
+        };
+        let open: Vec<String> = self.open_files.read().keys().cloned().collect();
+        let namers: Vec<String> = open
+            .into_iter()
+            .filter(|uri| {
+                let Some(map) = self.symbol_map_for(uri) else {
+                    return false;
+                };
+                let typed = self.typed_receiver_spans_for(uri, &map);
+                map.spans.iter().chain(typed.iter()).any(|span| {
+                    matches!(
+                        &span.kind,
+                        SymbolKind::StringKey {
+                            kind: StringKeyKind::TwigTemplate,
+                            key,
+                            is_write: false,
+                            ..
+                        } if changed(key)
+                    )
+                })
+            })
+            .collect();
+        self.rediagnose_open_files(namers);
     }
 
     /// Rediscover the roots from `files`, and say whether they moved.

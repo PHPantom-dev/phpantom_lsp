@@ -135,7 +135,16 @@ impl Backend {
         }
 
         if !batch.resource_changes.is_empty() {
+            // A template created or deleted on disk changes whether the open
+            // files naming it are reported.
+            let template_names = batch
+                .resource_changes
+                .iter()
+                .any(|(uri, ..)| crate::twig::roots::is_candidate_uri(uri))
+                .then(|| self.twig_template_names())
+                .flatten();
             self.reindex_watched_resource_files(&batch.resource_changes);
+            self.rediagnose_template_namers(template_names);
         }
 
         if batch.schema_full_rebuild {

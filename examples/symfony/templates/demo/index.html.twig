@@ -5,7 +5,9 @@
      and translations/messages.en.yaml declares it. #}
   <h1>{{ 'demo.title'|trans }}</h1>
   {# Try: go-to-definition on the template names in the extends and include
-     tags, or find references on 'demo/_card.html.twig'. #}
+     tags, or find references on 'demo/_card.html.twig'. Misspell one, or a
+     route name below, and it is reported here as it is in PHP, with quick
+     fixes that change a template name or create the template. #}
   {% include 'demo/_card.html.twig' %}
   {# Try: go-to-definition on a route name below. app_demo is declared by the
      #[Route] on DemoController::index(), app_demo_legacy in
