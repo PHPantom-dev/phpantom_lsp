@@ -512,13 +512,16 @@ fn is_checked_site(call_site: &CallSite) -> bool {
 }
 
 /// The parameter argument `arg_idx` fills: by name for a named argument,
-/// else the next positional one, counted by `positional_idx`.
+/// else the next positional one, counted by `positional_idx`.  A trailing
+/// variadic parameter collects the positional arguments past it and the
+/// named ones no other parameter answers to.
 fn param_for_argument<'p>(
     call_site: &CallSite,
     params: &'p [ParameterInfo],
     arg_idx: usize,
     positional_idx: &mut usize,
 ) -> Option<&'p ParameterInfo> {
+    let variadic = || params.last().filter(|p| p.is_variadic);
     let index = arg_idx as u32;
     if call_site.named_arg_indices.contains(&index) {
         let name_pos = call_site
@@ -528,11 +531,33 @@ fn param_for_argument<'p>(
         let param_name = call_site.named_arg_names.get(name_pos);
         return params
             .iter()
-            .find(|p| Some(p.name.trim_start_matches('$')) == param_name);
+            .find(|p| Some(p.name.trim_start_matches('$')) == param_name)
+            .or_else(variadic);
     }
-    let param = params.get(*positional_idx);
+    let param = params.get(*positional_idx).or_else(variadic);
     *positional_idx += 1;
     param
+}
+
+/// The type each argument to an untyped variadic must have, given the
+/// type its `@param` tag declares.  A tag spelling an array type
+/// (Mockery's `@param array<class-string<T>|T> $args` on `...$args`)
+/// describes the array the arguments are collected into, so each
+/// argument is one of its elements, as PHPStan reads it.
+fn variadic_tag_element(tag_type: &PhpType) -> &PhpType {
+    let is_array = match tag_type.kind() {
+        TypeKind::Array(_) => true,
+        TypeKind::Generic(g) => matches!(
+            g.name.to_ascii_lowercase().as_str(),
+            "array" | "list" | "non-empty-array" | "non-empty-list"
+        ),
+        _ => false,
+    };
+    if is_array {
+        tag_type.extract_value_type(false).unwrap_or(tag_type)
+    } else {
+        tag_type
+    }
 }
 
 /// What every argument check in one file shares.
@@ -667,12 +692,11 @@ impl ArgumentCheck<'_> {
             Some(t) if !t.is_untyped() && !t.is_mixed() => t,
             _ => return,
         };
-
-        // Skip variadic parameters — hard to match individual
-        // arg types to the variadic param's inner type.
-        if param.is_variadic {
-            return;
-        }
+        let param_type = if param.is_variadic && param.native_type_hint.is_none() {
+            variadic_tag_element(param_type)
+        } else {
+            param_type
+        };
 
         let arg_type = &arg.ty;
         // Skip unresolved / empty / Raw("") sentinel types.
@@ -853,7 +877,10 @@ impl ArgumentCheck<'_> {
         call.target.overloads.iter().any(|alt_params| {
             // An overload with fewer params has no parameter for this
             // argument, so it is not relevant for this check.
-            let Some(alt_param) = alt_params.get(positional_idx.saturating_sub(1)) else {
+            let Some(alt_param) = alt_params
+                .get(positional_idx.saturating_sub(1))
+                .or_else(|| alt_params.last().filter(|p| p.is_variadic))
+            else {
                 return false;
             };
             match &alt_param.type_hint {

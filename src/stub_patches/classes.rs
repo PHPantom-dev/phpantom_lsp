@@ -135,6 +135,23 @@ const THIRD_PARTY_ASSERT_IF_TRUE: &[(&str, &str, &str)] = &[(
 /// it does nothing at all for a class whose FQN is not in the list.
 pub fn apply_third_party_class_patches(class: &mut ClassInfo) {
     let fqn = class.fqn();
+    if let Some(methods) = super::mockery::mock_methods_of(fqn.as_str()) {
+        for idx in 0..class.methods.len() {
+            if !methods.contains(&class.methods[idx].name.as_str())
+                || !super::mockery::declares_mock_args(
+                    &class.methods[idx].parameters,
+                    class.methods[idx].template_params(),
+                )
+            {
+                continue;
+            }
+            update_method_at(class, idx, |method| {
+                let templates = method.template_params().to_vec();
+                super::mockery::widen_mock_args(method.parameters.make_mut(), &templates);
+            });
+        }
+        return;
+    }
     for (class_fqn, method_name, subject) in THIRD_PARTY_ASSERT_IF_TRUE {
         if fqn.as_str() != *class_fqn {
             continue;

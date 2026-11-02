@@ -86,6 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Arguments to a variadic parameter are type-checked.** Each argument collected by a `...$rest` parameter is now checked against the type the parameter declares, the same as any other argument. Mockery's `Mockery::mock(Foo::class, [...])` and `spy()` accept the mocked class's constructor arguments.
+- **A template named twice in one parameter checks its bound.** A parameter typed `T|class-string<T>`, as `new ReflectionClass()` takes, now reports a plain `string` argument instead of accepting anything.
 - **`array_udiff()` and its siblings accept their callback.** Passing the comparison callback to `array_udiff()`, `array_diff_ukey()`, `array_uintersect()` and the rest of the family is no longer reported as an argument that should be an array, and hover and signature help no longer list parameters PHP 8 removed from built-in functions.
 - **Hover on a `global` statement's variable.** Hovering the variable in `global $x;` now shows the type it imports, instead of nothing.
 - **WordPress's `__()` returns a string.** Outside a Laravel project, `__()` and `trans()` keep the return type their own declaration gives, instead of Laravel's `string|array`, so passing a translated string to WordPress functions is no longer reported.

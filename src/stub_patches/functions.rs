@@ -71,6 +71,16 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "bcadd" | "bcsub" | "bcmul" | "bcdiv" | "bcmod" | "bcpow" | "bcpowmod" | "bcsqrt"
         | "bcfloor" | "bcceil" | "bcround" => func.return_type = Some(PhpType::numeric_string()),
         "define" => widen_parameter_to_mixed(func, "$value"),
+        "array_udiff"
+        | "array_udiff_assoc"
+        | "array_udiff_uassoc"
+        | "array_diff_ukey"
+        | "array_diff_uassoc"
+        | "array_uintersect"
+        | "array_uintersect_assoc"
+        | "array_uintersect_uassoc"
+        | "array_intersect_ukey"
+        | "array_intersect_uassoc" => patch_callback_terminated_rest(func),
         name if name.starts_with("ctype_") => widen_parameter_to_mixed(func, "$text"),
         _ => {}
     }
@@ -90,6 +100,22 @@ fn mark_benevolent(return_type: &mut Option<PhpType>) {
     }
 }
 
+/// Correct a function parsed from the user's project or its vendor tree
+/// whose own docblock is wrong.
+///
+/// Separate from [`apply_function_stub_patches`], which is confined to the
+/// embedded stubs. Only Mockery's global `mock()` / `spy()` /
+/// `namedMock()` helpers are patched, recognised by their `$args`
+/// docblock as well as their name; see [`super::mockery`].
+pub fn apply_third_party_function_patches(func: &mut FunctionInfo) {
+    if func.namespace.is_none()
+        && super::mockery::is_mock_helper(&func.name)
+        && super::mockery::declares_mock_args(&func.parameters, &func.template_params)
+    {
+        super::mockery::widen_mock_args(func.parameters.make_mut(), &func.template_params);
+    }
+}
+
 /// Widen a parameter the stubs type more narrowly than php-src does.
 ///
 /// `ctype_digit()` and its siblings take `mixed $text` (passing an int is a
@@ -103,6 +129,20 @@ fn widen_parameter_to_mixed(func: &mut FunctionInfo, param_name: &str) {
         if param.name == param_name {
             param.type_hint = Some(PhpType::mixed());
             param.native_type_hint = Some(PhpType::mixed());
+        }
+    }
+}
+
+/// Patch a member of the `array_udiff()` family so its variadic takes the
+/// callbacks that end it.
+///
+/// Since PHP 8.0 these take `array $array, ...$rest`, where `$rest` is the
+/// other arrays followed by one or two comparison callbacks. The stubs tag
+/// `$rest` as `array`, which every call's trailing callback would contradict.
+fn patch_callback_terminated_rest(func: &mut FunctionInfo) {
+    for param in func.parameters.make_mut() {
+        if param.is_variadic {
+            param.type_hint = Some(PhpType::parse("array|callable"));
         }
     }
 }

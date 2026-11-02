@@ -846,7 +846,8 @@ class ScaffoldingEventBus
     {
         $params = (new \ReflectionFunction($callback))->getParameters();
         $type = $params[0]->getType();
-        $class = $type instanceof \ReflectionNamedType ? $type->getName() : 'stdClass';
+        $name = $type instanceof \ReflectionNamedType ? $type->getName() : '';
+        $class = class_exists($name) ? $name : \stdClass::class;
         return (new \ReflectionClass($class))->newInstanceWithoutConstructor();
     }
 }
@@ -862,7 +863,8 @@ class ScaffoldingBatchProcessor
     {
         $params = (new \ReflectionFunction($handler))->getParameters();
         $type = $params[1]->getType();
-        $class = $type instanceof \ReflectionNamedType ? $type->getName() : 'stdClass';
+        $name = $type instanceof \ReflectionNamedType ? $type->getName() : '';
+        $class = class_exists($name) ? $name : \stdClass::class;
         return (new \ReflectionClass($class))->newInstanceWithoutConstructor();
     }
 }
@@ -1882,7 +1884,7 @@ class ServiceLocator
 
     /**
      * @template T of object
-     * @param array<class-string<T>|T|array<T>> ...$args
+     * @param class-string<T>|T|array<T> ...$args
      * @return T
      */
     public function build(mixed ...$args): object

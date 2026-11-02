@@ -2050,7 +2050,7 @@ class MethodTemplateDemo
         $boxed->unwrap()->write();                        // Scaffolding\Box<T>::unwrap() → Scaffolding\Pen
 
         // A `class-string<T>|T` union parameter (the Mockery::mock()
-        // shape, here nested in a variadic array hint) binds T to the
+        // shape, here on a variadic) binds T to the
         // named class itself, so a `::class` argument and an instance
         // argument both resolve to a Scaffolding\Pen instance.
         $locator->build(Scaffolding\Pen::class)->write();             // class-string<T>|T with Scaffolding\Pen::class → Scaffolding\Pen

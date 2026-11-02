@@ -16460,3 +16460,133 @@ function test(array $b): void {
         "expected the string argument to be reported: {msgs:?}"
     );
 }
+
+#[test]
+fn array_udiff_checks_its_trailing_arguments() {
+    let php = r#"<?php
+function test(array $a): void {
+    array_udiff($a, 42, fn($x, $y) => $x <=> $y);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "expected the int argument to be reported: {msgs:?}"
+    );
+}
+
+#[test]
+fn arguments_to_a_variadic_are_checked_against_its_element_type() {
+    let php = r#"<?php
+class Item {}
+function tags(int $count, string ...$tags): void {}
+tags(1, 'a', 'b', new Item());
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(msgs.len(), 1, "expected one mismatch: {msgs:?}");
+    assert!(
+        msgs[0].starts_with("Argument 4 ($tags) expects string, got Item"),
+        "{msgs:?}"
+    );
+}
+
+#[test]
+fn named_argument_collected_by_a_variadic_is_checked() {
+    let php = r#"<?php
+class Item {}
+function tags(string ...$tags): void {}
+tags(first: 'a', second: new Item());
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(msgs.len(), 1, "expected one mismatch: {msgs:?}");
+}
+
+#[test]
+fn variadic_typed_by_docblock_is_checked_against_the_tag() {
+    let php = r#"<?php
+class Item {}
+/** @param Item ...$items */
+function items(...$items): void {}
+items(new Item(), new Item());
+items(new Item(), 'nope');
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(msgs.len(), 1, "expected one mismatch: {msgs:?}");
+}
+
+#[test]
+fn mockery_constructor_arguments_are_not_checked_against_the_mocked_class() {
+    let php = r#"<?php
+interface LegacyMockInterface {}
+interface MockInterface {}
+class Connector { public function __construct(string $key) {} }
+
+class Mockery
+{
+    /**
+     * @template TMock of object
+     *
+     * @param array<class-string<TMock>|TMock|Closure(LegacyMockInterface&MockInterface&TMock):LegacyMockInterface&MockInterface&TMock|array<TMock>> $args
+     *
+     * @return LegacyMockInterface&MockInterface&TMock
+     */
+    public static function mock(...$args) {}
+}
+
+/**
+ * @template TSpy of object
+ *
+ * @param array<class-string<TSpy>|TSpy|Closure(LegacyMockInterface&MockInterface&TSpy):LegacyMockInterface&MockInterface&TSpy|array<TSpy>> $args
+ *
+ * @return LegacyMockInterface&MockInterface&TSpy
+ */
+function spy(...$args) {}
+
+function takes(Connector $c): void {}
+
+function test(): void
+{
+    takes(Mockery::mock(Connector::class, ['api_key']));
+    takes(spy(Connector::class, ['api_key']));
+    Mockery::mock(Connector::class, 42);
+}
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "only the int argument should be reported: {msgs:?}"
+    );
+    assert!(msgs[0].starts_with("Argument 2 ($args)"), "{msgs:?}");
+}
+
+#[test]
+fn template_named_twice_in_one_parameter_is_checked_against_its_bound() {
+    let php = r#"<?php
+/** @template T of object */
+class Mirror {
+    /** @param T|class-string<T> $objectOrClass */
+    public function __construct(object|string $objectOrClass) {}
+}
+class Item {}
+function test(string $name): void {
+    new Mirror(Item::class);
+    new Mirror(new Item());
+    new Mirror($name);
+}
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "only the plain string should be reported: {msgs:?}"
+    );
+    assert!(msgs[0].ends_with("got string"), "{msgs:?}");
+}

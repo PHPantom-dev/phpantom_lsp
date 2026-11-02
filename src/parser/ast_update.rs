@@ -464,6 +464,10 @@ impl Backend {
             for (cls, _, _) in &mut decls.classes_with_ns {
                 crate::stub_patches::apply_class_stub_patches(cls);
             }
+        } else if !self.is_external_stub_uri(uri) {
+            for func in &mut functions {
+                crate::stub_patches::apply_third_party_function_patches(func);
+            }
         }
 
         Self::qualify_function_names(

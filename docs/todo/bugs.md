@@ -117,22 +117,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B723. Arguments passed to a variadic parameter are never type-checked
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-function tags(string ...$tags): void {}
-tags('a', new stdClass());   // not reported
-array_udiff($a, 'nope', fn($x, $y) => $x <=> $y);   // not reported
-```
-
-The argument check skips every argument that lands on a variadic
-parameter, so nothing after the last fixed parameter is compared with the
-declared type. Each such argument should be checked against the
-variadic's element type, the same as a fixed parameter. Before turning
-this on, the standard-library variadics that mix types need their stubs
-corrected: phpstorm-stubs declare `array ...$rest` for `array_udiff()`,
-`array_diff_ukey()` and the rest of that family, whose trailing arguments
-end with one or two callbacks, so the rest would need to read as
-`array|callable`.
+No outstanding items.
