@@ -108,6 +108,7 @@ struct ExtractionCtx<'a> {
     drupal_route_aliases: Vec<String>,
     /// The Drupal routes the file's `#[Route]` attributes declare.
     drupal_routes: Vec<crate::symbol_map::DrupalRouteSite>,
+    drupal_hooks: Vec<crate::symbol_map::HookSite>,
     /// What the file holds of Drupal hooks, which its path says.
     drupal_file: crate::drupal::hooks::DrupalFile,
     /// A procedural function with `#[ProceduralHookScanStop]` was read:
@@ -526,6 +527,7 @@ fn extract_symbol_map_inner(
         drupal_route_patterns: Vec::new(),
         drupal_route_aliases: Vec::new(),
         drupal_routes: Vec::new(),
+        drupal_hooks: Vec::new(),
         drupal_file,
         drupal_hook_scan_stopped: false,
         cond_nesting_depth: 0,
@@ -680,6 +682,8 @@ fn extract_symbol_map_inner(
     ctx.morph_column_sites.sort_by_key(|s| s.start);
     ctx.container_values.sort_by_key(|s| s.start);
     ctx.entity_types.sort_by_key(|s| s.start);
+    ctx.drupal_hooks.sort_by_key(|s| s.start);
+    ctx.drupal_hooks.dedup_by_key(|s| s.start);
     ctx.routes.shrink_to_fit();
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
@@ -724,6 +728,7 @@ fn extract_symbol_map_inner(
         drupal_route_patterns: ctx.drupal_route_patterns,
         drupal_route_aliases: ctx.drupal_route_aliases,
         drupal_routes: ctx.drupal_routes,
+        drupal_hooks: ctx.drupal_hooks,
         routes: ctx.routes,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx

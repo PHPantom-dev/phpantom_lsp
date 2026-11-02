@@ -248,3 +248,113 @@ async fn install_files_themes_and_other_extensions_implement_hooks() {
         "{found:?}"
     );
 }
+
+const INVOKER_STUBS: &[(&str, &str)] = &[
+    (
+        "web/core/lib/Drupal/Core/Extension/ModuleHandlerInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Extension;\ninterface ModuleHandlerInterface {\n    public function invokeAll($hook, array $args = []);\n    public function invoke($module, $hook, array $args = []);\n    public function alter($type, &$data, &$context1 = NULL, &$context2 = NULL);\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Theme/ThemeManagerInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Theme;\ninterface ThemeManagerInterface {\n    public function alter($type, &$data, &$context1 = NULL, &$context2 = NULL);\n}\n",
+    ),
+];
+
+const INVOKED_API: &str = "<?php\nfunction hook_cron() {\n}\nfunction hook_form_alter(&$form) {\n}\nfunction hook_help($route_name) {\n}\nfunction hook_install() {\n}\n";
+const INVOKED_API_PATH: &str = "web/core/core.api.php";
+
+const INVOKED_MODULE: &str = "<?php\nfunction acme_cron() {\n}\nfunction acme_form_alter(&$form) {\n}\nfunction acme_help($route_name) {\n}\n";
+const INVOKED_INSTALL: &str = "<?php\nfunction acme_install() {\n}\n";
+const INVOKED_THEME: &str = "<?php\nfunction olivero_form_alter(&$form) {\n}\n";
+
+const INVOKER: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Extension\ModuleHandlerInterface;
+use Drupal\Core\Theme\ThemeManagerInterface;
+
+final class Invoker {
+    public function __construct(private ModuleHandlerInterface $modules, private ThemeManagerInterface $themes) {}
+
+    public function run(array $form): void {
+        $this->modules->invokeAll('cron');
+        $this->modules->alter('form', $form);
+        $this->themes->alter(['form', 'other'], $form);
+        $this->modules->invoke('acme', 'help');
+        $this->modules->invoke('other', 'help');
+        $this->modules->invoke('acme', 'install');
+    }
+}
+"#;
+const INVOKER_PATH: &str = "web/modules/custom/acme/src/Invoker.php";
+
+/// An invocation leads to the implementations of its group and extension
+/// that Drupal collects, an implementation to the invocations that reach
+/// it, and both to the documentation.
+#[tokio::test]
+async fn invocations_and_implementations_lead_to_each_other() {
+    let (backend, dir) = drupal(
+        &[
+            INVOKER_STUBS[0],
+            INVOKER_STUBS[1],
+            (INVOKED_API_PATH, INVOKED_API),
+            ("web/core/themes/olivero/olivero.info.yml", "type: theme\n"),
+        ],
+        &[
+            ("web/modules/custom/acme/acme.module", INVOKED_MODULE),
+            ("web/modules/custom/acme/acme.install", INVOKED_INSTALL),
+            ("web/core/themes/olivero/olivero.theme", INVOKED_THEME),
+            (INVOKER_PATH, INVOKER),
+        ],
+    )
+    .await;
+    let php = uri_for(&dir, INVOKER_PATH);
+    let api = uri_for(&dir, INVOKED_API_PATH);
+    let module = uri_for(&dir, "web/modules/custom/acme/acme.module");
+    let theme = uri_for(&dir, "web/core/themes/olivero/olivero.theme");
+    references_at(&backend, &php, position_in(INVOKER, "'cron'", 2)).await;
+
+    let at = |needle: &str| {
+        let inside = needle.rfind('\'').unwrap() - 1;
+        position_in(INVOKER, needle, inside)
+    };
+    let lines = |found: Vec<tower_lsp_server::gen_lsp_types::Location>| {
+        found
+            .into_iter()
+            .map(|location| (location.uri, location.range.start.line))
+            .collect::<Vec<_>>()
+    };
+    for (needle, expected) in [
+        (
+            "invokeAll('cron'",
+            vec![(module.clone(), 1), (api.clone(), 1)],
+        ),
+        (
+            "modules->alter('form'",
+            vec![(module.clone(), 3), (api.clone(), 3)],
+        ),
+        (
+            "themes->alter(['form'",
+            vec![(theme.clone(), 1), (api.clone(), 3)],
+        ),
+        (
+            "invoke('acme', 'help'",
+            vec![(module.clone(), 5), (api.clone(), 5)],
+        ),
+        ("invoke('other', 'help'", vec![(api.clone(), 5)]),
+        ("invoke('acme', 'install'", vec![(api.clone(), 7)]),
+    ] {
+        let found = lines(definitions_at(&backend, &php, at(needle)).await);
+        assert_eq!(found, expected, "{needle}");
+    }
+
+    let found = lines(
+        definitions_at(
+            &backend,
+            &module,
+            position_in(INVOKED_MODULE, "acme_cron", 6),
+        )
+        .await,
+    );
+    assert_eq!(found, vec![(php, 10), (api, 1)]);
+}

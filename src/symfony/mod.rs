@@ -282,9 +282,10 @@ impl Backend {
         let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
         uris.sort_unstable();
         // Only Symfony declares names through calls the type engine has to
-        // confirm; a Drupal project records none.
+        // confirm, and Drupal its hooks, which the calls that invoke them
+        // declare; Drupal's other names never are.
         let needs_typed = match kind.framework() {
-            KeyFramework::Drupal => false,
+            KeyFramework::Drupal => kind == StringKeyKind::DrupalHook,
             KeyFramework::ServiceContainer => self.is_symfony_project(),
             KeyFramework::Laravel
             | KeyFramework::Symfony

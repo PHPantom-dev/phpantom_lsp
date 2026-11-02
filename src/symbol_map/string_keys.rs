@@ -619,6 +619,30 @@ pub(crate) struct ContainerValueSite {
     pub value: ContainerValue,
 }
 
+/// What a Drupal hook span is, keyed back to its [`SymbolKind::StringKey`]
+/// span by `start`.  A hook span with no site is the documentation.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HookSite {
+    pub start: u32,
+    pub role: HookRole,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum HookRole {
+    /// An implementation, for `extension`.  Whether that extension is a
+    /// theme is known for a procedural function, whose file says, and
+    /// looked up by name for a hook class.  An implementation Drupal does
+    /// not collect (an install-time hook, an update function) only links
+    /// to its documentation.
+    Implementation {
+        extension: Atom,
+        is_theme: Option<bool>,
+        collected: bool,
+    },
+    /// An invocation, limited to `extension` when it names one.
+    Invocation { extension: Option<Atom> },
+}
+
 /// What a Drupal entity type declaration gives its ID: the entity class,
 /// and the storage handler that loads it.
 #[derive(Debug, Clone, PartialEq)]
@@ -822,6 +846,8 @@ const DRUPAL_FORM_BASE: &str = "Drupal\\Core\\Form\\FormBase";
 const DRUPAL_ENTITY_CONTROLLER: &str = "Drupal\\Core\\Entity\\Controller\\EntityController";
 const DRUPAL_ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterface";
 const DRUPAL_ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
+pub(crate) const DRUPAL_MODULE_HANDLER: &str = "Drupal\\Core\\Extension\\ModuleHandlerInterface";
+pub(crate) const DRUPAL_THEME_MANAGER: &str = "Drupal\\Core\\Theme\\ThemeManagerInterface";
 
 /// The namespace of the PHP configurators that build Symfony's service
 /// container.
@@ -940,6 +966,14 @@ pub(crate) enum ReceiverClass {
     /// Drupal's access manager, for the route parameters its
     /// `checkNamedRoute()` takes after the route name.
     AccessCheckParameters,
+    /// Drupal's module handler, whose `invokeAll()`, `alter()`, and the
+    /// rest invoke the hooks of modules and install profiles.
+    ModuleHooks,
+    /// Drupal's theme manager, whose `invoke()`, `alter()`, and the rest
+    /// invoke the hooks of themes.
+    ThemeHooks,
+    /// Either of the two, for the methods they share.
+    Hooks,
 }
 
 impl ReceiverClass {
@@ -1053,6 +1087,12 @@ impl ReceiverClass {
             Self::AccessCheckParameters => {
                 &[(DRUPAL_ACCESS_MANAGER, StringKeyKind::DrupalRouteParameter)]
             }
+            Self::ModuleHooks => &[(DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook)],
+            Self::ThemeHooks => &[(DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook)],
+            Self::Hooks => &[
+                (DRUPAL_MODULE_HANDLER, StringKeyKind::DrupalHook),
+                (DRUPAL_THEME_MANAGER, StringKeyKind::DrupalHook),
+            ],
         }
     }
 

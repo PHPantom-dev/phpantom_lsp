@@ -80,8 +80,8 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::YiiRoute
         | StringKeyKind::DrupalEntityType
         | StringKeyKind::DrupalRoute
-        | StringKeyKind::DrupalRouteParameter
-        | StringKeyKind::DrupalHook => backend.symfony_declaration_locations(*kind, key),
+        | StringKeyKind::DrupalRouteParameter => backend.symfony_declaration_locations(*kind, key),
+        StringKeyKind::DrupalHook => backend.drupal_hook_documentation(key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
         StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),

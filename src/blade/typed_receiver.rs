@@ -120,7 +120,7 @@ impl Backend {
 
     /// Resolve the receiver of every candidate site and keep the spans of
     /// the ones that turn out to be renders.
-    fn confirm_typed_receiver_sites(
+    pub(crate) fn confirm_typed_receiver_sites(
         &self,
         uri: &str,
         content: &str,

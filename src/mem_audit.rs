@@ -1404,6 +1404,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             sym.add(sm.entity_types.capacity() * size_of::<crate::symbol_map::EntityTypeSite>());
             sym.add(sm.drupal_route_patterns.capacity() * size_of::<String>());
             sym.add(sm.drupal_route_aliases.capacity() * size_of::<String>());
+            sym.add(sm.drupal_hooks.capacity() * size_of::<crate::symbol_map::HookSite>());
             for name in sm
                 .drupal_route_patterns
                 .iter()

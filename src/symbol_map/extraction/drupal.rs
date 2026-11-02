@@ -6,7 +6,10 @@ use super::*;
 use crate::symbol_map::extraction::symfony::{
     RouteDeclaration, RouteName, is_route_attribute, push_route_spans, route_declarations,
 };
-use crate::symbol_map::{DeclaredParameter, DrupalRouteSite, EntityTypeSite, StringKeyKind};
+use crate::symbol_map::{
+    DeclaredParameter, DrupalRouteSite, EntityTypeSite, ReceiverClass, StringKeyKind,
+    TypedReceiverSite,
+};
 use crate::virtual_members::laravel::helpers::resolved_string_literal;
 
 const CONTENT_STORAGE: &str = "Drupal\\Core\\Entity\\Sql\\SqlContentEntityStorage";
@@ -789,7 +792,18 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_procedural_hook_span(
         return;
     };
     let start = function.name.span.start.offset + prefix as u32 + 1;
+    let collected = !procedural.post_update
+        && !crate::drupal::hooks::NOT_COLLECTED.contains(&hook)
+        && !starts_with_update_number(hook)
+        && !ends_with_update_number(name);
+    let role = crate::symbol_map::HookRole::Implementation {
+        extension: crate::atom::atom(&name[..prefix]),
+        is_theme: Some(procedural.is_theme),
+        collected,
+    };
     let key = hook.to_string();
+    ctx.drupal_hooks
+        .push(crate::symbol_map::HookSite { start, role });
     ctx.spans.push(SymbolSpan {
         start,
         end: start + key.len() as u32,
@@ -800,6 +814,12 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_procedural_hook_span(
             is_optional: false,
         },
     });
+}
+
+/// `update_` followed by digits only, at the end: an update function.
+fn ends_with_update_number(name: &str) -> bool {
+    let digits = name.trim_end_matches(|c: char| c.is_ascii_digit());
+    digits.len() < name.len() && digits.ends_with("update_")
 }
 
 /// `update_` followed by a digit: an update function, which only the
@@ -813,7 +833,8 @@ fn starts_with_update_number(hook: &str) -> bool {
 /// one on a method implements the hook for that method, one on the class
 /// for `__invoke()` or the `method:` it names.  Drupal discovers hook
 /// classes under an extension's `src/Hook`, whose namespace is
-/// `Drupal\<extension>\Hook`.
+/// `Drupal\<extension>\Hook`; a `module:` argument implements the hook for
+/// that extension instead.
 pub(in crate::symbol_map::extraction) fn emit_drupal_hook_attribute_spans(
     class: &Class<'_>,
     ctx: &mut ExtractionCtx<'_>,
@@ -821,13 +842,13 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_hook_attribute_spans(
     if !ctx.drupal || ctx.drupal_file == crate::drupal::hooks::DrupalFile::Test {
         return;
     }
-    let is_hook_class = ctx
+    let Some(extension) = ctx
         .resolved_name_at(class.name.span.start.offset)
         .and_then(crate::drupal::hooks::hook_class_extension)
-        .is_some();
-    if !is_hook_class {
+        .map(crate::atom::atom)
+    else {
         return;
-    }
+    };
     let methods = class.members.iter().filter_map(|member| match member {
         ClassLikeMember::Method(method) => Some(&method.attribute_lists),
         _ => None,
@@ -835,16 +856,33 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_hook_attribute_spans(
     let mut found = Vec::new();
     for attribute_lists in std::iter::once(&class.attribute_lists).chain(methods) {
         for attribute in attributes_named(attribute_lists, HOOK_ATTRIBUTE, ctx) {
-            let hook = attribute_arguments(attribute, &["hook", "method", "module"])
-                .into_iter()
-                .find(|(parameter, _)| *parameter == "hook")
-                .and_then(|(_, value)| resolved_string_literal(value, ctx.content));
+            let mut hook = None;
+            let mut module = None;
+            for (parameter, value) in attribute_arguments(attribute, &["hook", "method", "module"])
+            {
+                match parameter {
+                    "hook" => hook = resolved_string_literal(value, ctx.content),
+                    "module" => module = resolved_string_literal(value, ctx.content),
+                    _ => {}
+                }
+            }
             if let Some((key, start, end)) = hook.filter(|(key, _, _)| !key.is_empty()) {
-                found.push((key.to_string(), start as u32, end as u32));
+                let extension = module
+                    .map(|(module, _, _)| crate::atom::atom(module))
+                    .unwrap_or(extension);
+                found.push((key.to_string(), start as u32, end as u32, extension));
             }
         }
     }
-    for (key, start, end) in found {
+    for (key, start, end, extension) in found {
+        ctx.drupal_hooks.push(crate::symbol_map::HookSite {
+            start,
+            role: crate::symbol_map::HookRole::Implementation {
+                extension,
+                is_theme: None,
+                collected: true,
+            },
+        });
         ctx.spans.push(SymbolSpan {
             start,
             end,
@@ -854,6 +892,133 @@ pub(in crate::symbol_map::extraction) fn emit_drupal_hook_attribute_spans(
                 is_write: false,
                 is_optional: false,
             },
+        });
+    }
+}
+
+/// A method invoking hooks: where its hook name is, whether that name is
+/// an alter type (`form` for `form_alter`), and where the extension it is
+/// limited to is.
+struct HookInvoker {
+    method: &'static str,
+    hook: usize,
+    alter: bool,
+    extension: Option<usize>,
+}
+
+const fn invoker(
+    method: &'static str,
+    hook: usize,
+    alter: bool,
+    extension: Option<usize>,
+) -> HookInvoker {
+    HookInvoker {
+        method,
+        hook,
+        alter,
+        extension,
+    }
+}
+
+/// The module handler's invoking methods, which reach modules and
+/// profiles.
+const MODULE_INVOKERS: [HookInvoker; 7] = [
+    invoker("invoke", 1, false, Some(0)),
+    invoker("invokeAll", 0, false, None),
+    invoker("invokeAllWith", 0, false, None),
+    invoker("invokeDeprecated", 2, false, Some(1)),
+    invoker("invokeAllDeprecated", 1, false, None),
+    invoker("alter", 0, true, None),
+    invoker("alterDeprecated", 1, true, None),
+];
+
+/// The theme manager's invoking methods, which reach themes.
+const THEME_INVOKERS: [HookInvoker; 4] = [
+    invoker("invoke", 1, false, Some(0)),
+    invoker("invokeAllWith", 0, false, None),
+    invoker("alter", 0, true, None),
+    invoker("alterForTheme", 1, true, None),
+];
+
+/// Record the hooks a call may invoke, for the type engine to confirm
+/// against its receiver: a module handler's or a theme manager's.  An
+/// alter type names the hook `<type>_alter`, and a list of them names one
+/// hook each.
+pub(in crate::symbol_map::extraction) fn record_drupal_hook_invocations(
+    member_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal
+        || !matches!(
+            member_name.as_bytes().first(),
+            Some(b'i' | b'a' | b'I' | b'A')
+        )
+    {
+        return;
+    }
+    let positional: Vec<&Expression<'_>> = argument_list
+        .arguments
+        .iter()
+        .map_while(|argument| match argument {
+            Argument::Positional(positional) => Some(positional.value),
+            Argument::Named(_) => None,
+        })
+        .collect();
+    let find = |invokers: &'static [HookInvoker]| {
+        invokers
+            .iter()
+            .find(|invoker| invoker.method.eq_ignore_ascii_case(member_name))
+    };
+    // The methods both have take their arguments in the same places; only
+    // the type engine tells which one a call is on.
+    let (invoker, receiver) = match (find(&MODULE_INVOKERS), find(&THEME_INVOKERS)) {
+        (Some(invoker), Some(_)) => (invoker, ReceiverClass::Hooks),
+        (Some(invoker), None) => (invoker, ReceiverClass::ModuleHooks),
+        (None, Some(invoker)) => (invoker, ReceiverClass::ThemeHooks),
+        (None, None) => return,
+    };
+    let Some(hook) = positional.get(invoker.hook) else {
+        return;
+    };
+    let extension = invoker
+        .extension
+        .and_then(|at| positional.get(at))
+        .and_then(|value| resolved_string_literal(value, ctx.content))
+        .map(|(extension, _, _)| crate::atom::atom(extension));
+    let names: Vec<(String, usize, usize)> = match hook {
+        Expression::Array(array) if invoker.alter => array
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                ArrayElement::Value(value) => resolved_string_literal(value.value, ctx.content)
+                    .map(|(name, start, end)| (name.to_string(), start, end)),
+                _ => None,
+            })
+            .collect(),
+        _ => resolved_string_literal(hook, ctx.content)
+            .map(|(name, start, end)| (name.to_string(), start, end))
+            .into_iter()
+            .collect(),
+    };
+    for (name, start, end) in names.into_iter().filter(|(name, _, _)| !name.is_empty()) {
+        let key = if invoker.alter {
+            format!("{name}_alter")
+        } else {
+            name
+        };
+        ctx.typed_receiver_sites.push(TypedReceiverSite {
+            start: start as u32,
+            end: end as u32,
+            key,
+            is_write: true,
+            is_optional: false,
+            guards: 0,
+            receiver,
+        });
+        ctx.drupal_hooks.push(crate::symbol_map::HookSite {
+            start: start as u32,
+            role: crate::symbol_map::HookRole::Invocation { extension },
         });
     }
 }

@@ -415,6 +415,12 @@ impl Backend {
                 if !self.string_key_kind_enabled(*kind) {
                     return None;
                 }
+                // A hook leads from where it is fired to where it is
+                // implemented, and back, as well as to its documentation.
+                if *kind == crate::symbol_map::StringKeyKind::DrupalHook {
+                    let locs = self.drupal_hook_definitions(uri, symbol.start, key);
+                    return (!locs.is_empty()).then_some(locs);
+                }
                 let locs = laravel::resolve_laravel_string_key(self, kind, key, uri);
                 if locs.is_empty() { None } else { Some(locs) }
             }

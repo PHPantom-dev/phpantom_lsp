@@ -54,7 +54,21 @@ pub(crate) struct Procedural {
     /// The file is a `.post_update.php`, whose functions implement
     /// `hook_post_update_NAME` and nothing Drupal collects.
     pub post_update: bool,
+    /// The extension is a theme.
+    pub is_theme: bool,
 }
+
+/// Hooks Drupal's hook collector leaves out of procedural code: they are
+/// called at install time by name, and only link to their documentation.
+pub(crate) const NOT_COLLECTED: [&str; 7] = [
+    "install",
+    "install_tasks",
+    "install_tasks_alter",
+    "schema",
+    "uninstall",
+    "update_last_removed",
+    "update_dependencies",
+];
 
 /// The extensions of the workspace, by directory, and the names of each
 /// group, longest first.
@@ -84,6 +98,14 @@ impl ExtensionIndex {
         };
         self.modules = group(false);
         self.themes = group(true);
+    }
+
+    /// Whether the extension `name` is a theme, when the walk found it.
+    fn is_theme(&self, name: &str) -> Option<bool> {
+        self.by_dir
+            .values()
+            .find(|(known, _)| known == name)
+            .map(|(_, is_theme)| *is_theme)
     }
 
     /// The extension a file belongs to: the one of its nearest ancestor
@@ -226,7 +248,225 @@ impl Backend {
             extension,
             group,
             post_update,
+            is_theme,
         })
+    }
+}
+
+/// Where a hook is named, and as what.
+#[derive(Debug, Clone)]
+struct HookOccurrence {
+    uri: String,
+    start: u32,
+    end: u32,
+    role: Occurrence,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Occurrence {
+    Documentation,
+    /// An invocation of the module handler's (or the theme manager's)
+    /// hooks, limited to one extension when it names one.
+    Invocation {
+        themes: bool,
+        extension: Option<crate::atom::Atom>,
+    },
+    Implementation {
+        extension: crate::atom::Atom,
+        is_theme: bool,
+        collected: bool,
+    },
+}
+
+impl Occurrence {
+    /// Whether an invocation reaches an implementation: of its group, of
+    /// the extension it names if any, and collected by Drupal.
+    fn reaches(invocation: &Self, implementation: &Self) -> bool {
+        match (invocation, implementation) {
+            (
+                Self::Invocation { themes, extension },
+                Self::Implementation {
+                    extension: implemented_for,
+                    is_theme,
+                    collected,
+                },
+            ) => {
+                *collected
+                    && themes == is_theme
+                    && extension.is_none_or(|extension| extension == *implemented_for)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Backend {
+    /// Every place the hook `key` is named, with what it is there.
+    fn hook_occurrences(&self, key: &str) -> Vec<HookOccurrence> {
+        use crate::symbol_map::{HookRole, ReceiverClass, StringKeyKind, SymbolKind};
+        let reference_key =
+            crate::reference_index::string_key_reference_key(StringKeyKind::DrupalHook, key);
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(&[reference_key]);
+        let extensions = self.drupal.extensions.read();
+        let mut found = Vec::new();
+        for (uri, map) in &snapshot {
+            let typed = if map
+                .typed_receiver_sites
+                .iter()
+                .any(|site| site.may_name(StringKeyKind::DrupalHook, key))
+            {
+                self.typed_receiver_spans_for(uri, map)
+            } else {
+                std::sync::Arc::default()
+            };
+            for span in map.spans.iter().chain(typed.iter()) {
+                let SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalHook,
+                    key: named,
+                    is_write,
+                    ..
+                } = &span.kind
+                else {
+                    continue;
+                };
+                if named != key {
+                    continue;
+                }
+                let site = map
+                    .drupal_hooks
+                    .binary_search_by_key(&span.start, |site| site.start)
+                    .ok()
+                    .map(|at| &map.drupal_hooks[at].role);
+                let role = match site {
+                    None if *is_write => Occurrence::Documentation,
+                    None => continue,
+                    Some(HookRole::Implementation {
+                        extension,
+                        is_theme,
+                        collected,
+                    }) => Occurrence::Implementation {
+                        extension: *extension,
+                        is_theme: is_theme
+                            .or_else(|| extensions.is_theme(extension))
+                            .unwrap_or(false),
+                        collected: *collected,
+                    },
+                    Some(HookRole::Invocation { extension }) => {
+                        // A method both have is asked about again as the
+                        // theme manager's.
+                        let themes = map
+                            .typed_receiver_sites
+                            .iter()
+                            .find(|site| site.start == span.start)
+                            .is_some_and(|site| match site.receiver {
+                                ReceiverClass::ThemeHooks => true,
+                                ReceiverClass::Hooks => {
+                                    let mut theme = site.clone();
+                                    theme.receiver = ReceiverClass::ThemeHooks;
+                                    self.confirms_typed_receiver_site(uri, &theme)
+                                }
+                                _ => false,
+                            });
+                        Occurrence::Invocation {
+                            themes,
+                            extension: *extension,
+                        }
+                    }
+                };
+                found.push(HookOccurrence {
+                    uri: uri.clone(),
+                    start: span.start,
+                    end: span.end,
+                    role,
+                });
+            }
+        }
+        found.sort_by(|a, b| (&a.uri, a.start).cmp(&(&b.uri, b.start)));
+        found
+    }
+
+    /// Whether the type engine confirms `site` of the file at `uri`.
+    fn confirms_typed_receiver_site(
+        &self,
+        uri: &str,
+        site: &crate::symbol_map::TypedReceiverSite,
+    ) -> bool {
+        self.get_file_content_arc(uri).is_some_and(|content| {
+            !self
+                .confirm_typed_receiver_sites(uri, &content, std::slice::from_ref(site))
+                .is_empty()
+        })
+    }
+
+    /// Where go-to-definition on the hook `key`, named at `start` in `uri`,
+    /// leads: from an invocation, the implementations it reaches; from an
+    /// implementation, the invocations that reach it; from the
+    /// documentation, the implementations; then the documentation.
+    pub(crate) fn drupal_hook_definitions(
+        &self,
+        uri: &str,
+        start: u32,
+        key: &str,
+    ) -> Vec<tower_lsp_server::gen_lsp_types::Location> {
+        let occurrences = self.hook_occurrences(key);
+        let Some(here) = occurrences
+            .iter()
+            .find(|occurrence| occurrence.uri == uri && occurrence.start == start)
+            .map(|occurrence| occurrence.role.clone())
+        else {
+            return Vec::new();
+        };
+        let mut targets: Vec<&HookOccurrence> = occurrences
+            .iter()
+            .filter(|other| match (&here, &other.role) {
+                (Occurrence::Invocation { .. }, Occurrence::Implementation { .. }) => {
+                    Occurrence::reaches(&here, &other.role)
+                }
+                (Occurrence::Implementation { .. }, Occurrence::Invocation { .. }) => {
+                    Occurrence::reaches(&other.role, &here)
+                }
+                (Occurrence::Documentation, Occurrence::Implementation { .. }) => true,
+                _ => false,
+            })
+            .collect();
+        targets.extend(occurrences.iter().filter(|other| {
+            other.role == Occurrence::Documentation && here != Occurrence::Documentation
+        }));
+        self.hook_locations(&targets)
+    }
+
+    /// The documentation of the hook `key`.
+    pub(crate) fn drupal_hook_documentation(
+        &self,
+        key: &str,
+    ) -> Vec<tower_lsp_server::gen_lsp_types::Location> {
+        let occurrences = self.hook_occurrences(key);
+        let docs: Vec<&HookOccurrence> = occurrences
+            .iter()
+            .filter(|occurrence| occurrence.role == Occurrence::Documentation)
+            .collect();
+        self.hook_locations(&docs)
+    }
+
+    fn hook_locations(
+        &self,
+        occurrences: &[&HookOccurrence],
+    ) -> Vec<tower_lsp_server::gen_lsp_types::Location> {
+        occurrences
+            .iter()
+            .filter_map(|occurrence| {
+                let parsed = crate::util::parse_url(&occurrence.uri)?;
+                let content = self.get_file_content_arc(&occurrence.uri)?;
+                let lines = crate::text_position::LineIndex::new(&content);
+                Some(tower_lsp_server::gen_lsp_types::Location {
+                    uri: parsed,
+                    range: tower_lsp_server::gen_lsp_types::Range {
+                        start: lines.position(occurrence.start as usize),
+                        end: lines.position(occurrence.end as usize),
+                    },
+                })
+            })
+            .collect()
     }
 }
 

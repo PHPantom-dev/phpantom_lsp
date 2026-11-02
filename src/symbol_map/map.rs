@@ -320,6 +320,9 @@ pub(crate) struct SymbolMap {
     /// The Drupal routes the file declares, in source order.  Empty for
     /// every file that declares none.
     pub drupal_routes: Vec<DrupalRouteSite>,
+    /// What each Drupal hook implementation and invocation of the file is,
+    /// sorted by `start`.  Empty for every file that has none.
+    pub drupal_hooks: Vec<HookSite>,
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,
