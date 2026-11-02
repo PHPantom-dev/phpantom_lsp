@@ -318,7 +318,9 @@ fn the_computing_thread_does_not_wait_on_a_claimed_class() {
         scope.spawn(|| {
             let key = (atom("Claimed"), Vec::new());
             assert!(matches!(
-                cache.write().claim_pending(&key),
+                cache
+                    .write()
+                    .claim_pending(std::thread::current().id(), &key),
                 PendingClaim::Fresh
             ));
         });
