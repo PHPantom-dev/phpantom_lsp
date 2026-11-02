@@ -1006,23 +1006,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b725-a-twig-template-opened-during-indexing-keeps-its-early-diagnostics" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B725. A Twig template opened during indexing keeps its early diagnostics
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1669,23 +1652,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b725-a-twig-template-opened-during-indexing-keeps-its-early-diagnostics" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B725. A Twig template opened during indexing keeps its early diagnostics
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1793,25 +1759,7 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b725-a-twig-template-opened-during-indexing-keeps-its-early-diagnostics">B725. A Twig template opened during indexing keeps its early diagnostics<a class="headerlink" href="#b725-a-twig-template-opened-during-indexing-keeps-its-early-diagnostics" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Complexity: Medium</strong></p>
-<p>Open a Twig template right after the server starts, before it has read
-the project's templates and translation catalogues, and the template's
-diagnostics are computed against the partial index: the parent in
-<code>{% extends 'base.html.twig' %}</code>, every <code>include()</code>, and every <code>|trans</code>
-key are reported as unknown although all of them exist. Nothing
-recomputes them when indexing finishes, so they stay until the file is
-edited. On <code>symfony-demo</code>'s <code>blog/post_show.html.twig</code> that is ten false
-reports (two templates and eight translation keys) that one keystroke
-clears. Whether a given run hits it depends on timing; a PHP file opened
-at the same moment comes out right.</p>
-<p>Diagnostics for an open document must either wait for the indexes their
-checks read, or be republished once those indexes are complete, for
-resource documents (Twig, and likely YAML and XML) the same as for PHP.
-A check whose index is not ready yet should report nothing rather than
-"unknown".</p>
-<p>Found by driving the server from a scripted LSP client that opens the
-template and waits; the first <code>publishDiagnostics</code> was never replaced.</p>
+<p>No outstanding items.</p>
 
 
 
