@@ -826,6 +826,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#bl20-port-bladestans-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL20. Port Bladestan's tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1344,6 +1355,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#bl20-port-bladestans-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL20. Port Bladestan's tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1459,7 +1481,20 @@ dependency.</p>
   produce invalid PHP.</li>
 </ul>
 <hr />
-<p>No outstanding items.</p>
+<h2 id="bl20-port-bladestans-tests">BL20. Port Bladestan's tests<a class="headerlink" href="#bl20-port-bladestans-tests" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>PHPantom reads the same template contract Bladestan does (the
+<code>@bladestan-signature</code> chain, <code>@props</code>/<code>@aware</code>, component scope,
+layouts), but checks it only against tests of its own. Bladestan's
+suite covers the variables a template sees, from its signature, its
+component, and its layouts, and the errors it reports for them. Port its fixtures into
+<code>tests/fixtures/bladestan/</code> as diagnostics and hover fixtures run by
+<code>tests/fixture_runner.rs</code>, with a project under <code>tests/bladestan/</code>
+holding the views and the slice of <code>laravel/framework</code> they need, and
+file every case PHPantom answers differently as a <code>// SKIP: reason</code>
+entry in <code>docs/todo/</code>. Tests of Bladestan's own compiler output (the
+PHP it generates for PHPStan) have no counterpart here; list them in
+the README as not ported.</p>
 
 
 

@@ -1485,6 +1485,45 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#test-suites-and-benchmarks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Test suites and benchmarks
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Test suites and benchmarks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#l68-port-larastans-type-and-rule-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L68. Port Larastan's type and rule tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l69-benchmarks-for-laravel-string-names-and-blade" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L69. Benchmarks for Laravel string names and Blade
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2219,6 +2258,45 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L67. Laravel refactoring intentions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-suites-and-benchmarks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Test suites and benchmarks
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Test suites and benchmarks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#l68-port-larastans-type-and-rule-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L68. Port Larastan's type and rule tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l69-benchmarks-for-laravel-string-names-and-blade" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L69. Benchmarks for Laravel string names and Blade
       </span>
     </span>
   </a>
@@ -3035,6 +3113,43 @@ because each is a small, independent code action:</p>
   new component.</li>
 </ul>
 <p>Pick them off individually; none depends on another.</p>
+<hr />
+<h2 id="test-suites-and-benchmarks">Test suites and benchmarks<a class="headerlink" href="#test-suites-and-benchmarks" title="Permanent link">&para;</a></h2>
+<h4 id="l68-port-larastans-type-and-rule-tests">L68. Port Larastan's type and rule tests<a class="headerlink" href="#l68-port-larastans-type-and-rule-tests" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: High · Complexity: Medium</strong></p>
+<p>The Symfony, Doctrine, and WordPress extensions' tests are ported in
+<code>tests/phpstan_symfony/</code>, <code>tests/phpstan_doctrine/</code>, and
+<code>tests/wordpress_stubs/</code>. Larastan's are not, though Laravel is the
+framework PHPantom is measured on most. Its <code>tests/Type/data/</code> holds
+about ninety <code>assertType()</code> fixtures (Eloquent builders and relations,
+collections, <code>config()</code>, <code>app()-&gt;make()</code>, facades, <code>abort()</code>, request
+input, model properties), and <code>tests/Rules/</code> nineteen rule tests.</p>
+<p>Port them into <code>tests/larastan/</code> the same way: the type fixtures run by
+<code>tests/assert_type_runner.rs</code>, the rule tests as <code>.fixture</code> files in
+<code>tests/fixtures/larastan/</code>, a slice of <code>laravel/framework</code> copied by
+<code>scripts/extract-framework-stubs.php</code> as the stubs, and upstream's
+<code>tests/application/</code> (models, migrations, config) as the project they
+run in. Larastan boots that application; we read the same files
+statically.</p>
+<p>Larastan's types are not the reference: where one disagrees with what
+the framework actually returns, assert the correct type and say why in
+the README. Rule tests for checks PHPantom has no counterpart for and
+does not plan one (Octane compatibility, <code>env()</code> outside config,
+unnecessary collection calls) are listed in the README as not ported,
+not marked <code>SKIP</code>. Every other gap is a <code>// SKIP: reason</code> filed in
+<code>docs/todo/</code>.</p>
+<h4 id="l69-benchmarks-for-laravel-string-names-and-blade">L69. Benchmarks for Laravel string names and Blade<a class="headerlink" href="#l69-benchmarks-for-laravel-string-names-and-blade" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<p><code>benches/laravel_completion.rs</code> measures Eloquent member and morph
+column completion only. Symfony and Yii benchmark their name completion
+over a generated application (<code>benches/symfony_completion.rs</code>,
+<code>benches/yii_completion.rs</code>); Laravel, with the most string contexts of
+any framework, has no equivalent. Add one that generates an application
+with a few hundred routes, config keys, views, and translation keys, and
+times completion inside <code>route('…')</code>, <code>config('…')</code>, <code>view('…')</code>, and
+<code>__('…')</code>, plus completion of a variable and a member inside a Blade
+template whose type comes from its signature. Register it in
+<code>Cargo.toml</code> so <code>benches/ci_benchmarks.py</code> picks it up.</p>
 
 
 

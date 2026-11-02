@@ -1333,6 +1333,83 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#dr9-drupal-directories-outside-contrib-and-custom" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR9. Drupal directories outside <code>contrib</code> and <code>custom</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr10-plugin-ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR10. Plugin IDs
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr11-form-and-render-callbacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR11. Form and render callbacks
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr12-translation-placeholders" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR12. Translation placeholders
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr13-module-names-and-infoyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR13. Module names and <code>*.info.yml</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr14-port-phpstans-drupal-extension-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR14. Port PHPStan's Drupal extension tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dr15-benchmark-for-drupal-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        DR15. Benchmark for Drupal names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1364,6 +1441,11 @@ Drupal support is project discovery only: the web root is detected, and
 core, contrib, and the Drupal file extensions (<code>.module</code>, <code>.install</code>,
 <code>.theme</code>, …) are indexed past <code>.gitignore</code>. Nothing reads Drupal's own
 declarations: services, entity types, fields, routes, or hooks.</p>
+<p>The requests in
+<a href="https://github.com/PHPantom-dev/phpantom_lsp/issues/48">#48</a> are the
+scope of this document: the indexing it asked for first has shipped, and
+every Drupal-specific feature its discussion lists is one of the items
+below.</p>
 <p>Drupal is built on Symfony components, so its service container and
 YAML files are close to what the Symfony support already reads. PHPStan's
 Drupal extension (<code>mglaman/phpstan-drupal</code>) is the checklist of what a
@@ -1410,6 +1492,10 @@ untested and could regress silently.</p>
   contrib module and a site build, bucket the diagnostics by cause, and
   file what Drupal-specific gaps they show. That ranks the rest of this
   document by what actually breaks.</li>
+<li><strong>What already works</strong>: the Symfony support reads some of the same
+  shapes Drupal uses (event subscribers' <code>getSubscribedEvents()</code> maps,
+  <code>Class::method</code> strings in YAML). Check each against the demo and note
+  it in the README, so the items below only build what is missing.</li>
 </ul>
 <hr />
 <h2 id="dr2-service-ids-from-servicesyml">DR2. Service IDs from <code>*.services.yml</code><a class="headerlink" href="#dr2-service-ids-from-servicesyml" title="Permanent link">&para;</a></h2>
@@ -1423,7 +1509,10 @@ untested and could regress silently.</p>
 <p>A module declares its services in <code>&lt;module&gt;.services.yml</code>, in Symfony's
 service format. Type <code>\Drupal::service()</code> and <code>$container-&gt;get()</code> by the
 class the declaration names, and complete and navigate the service IDs,
-including <code>@service_id</code> arguments in the YAML.</p>
+including <code>@service_id</code> arguments in the YAML. Newer code registers a
+service under its interface and fetches it with
+<code>\Drupal::service(OrderManagerInterface::class)</code>; that ID is a class
+name and types as that class without any lookup.</p>
 <p>The Symfony container reading already parses this format and follows
 aliases and parameter placeholders. Start by checking what it picks up from a
 Drupal module unchanged, then teach it where Drupal keeps the files
@@ -1444,7 +1533,9 @@ entity class and its storage handler through the entity type's
 declaration: the <code>#[ContentEntityType]</code> / <code>#[ConfigEntityType]</code>
 attribute, or the annotation older code uses. Read those statically,
 type <code>getStorage()</code>, <code>load()</code>, <code>loadMultiple()</code>, and <code>create()</code> from
-them, and complete and navigate entity type IDs.</p>
+them, and complete and navigate entity type IDs. Entity queries
+(<code>\Drupal::entityQuery('node')</code>, <code>$storage-&gt;getQuery()</code>) take the same
+IDs and return IDs of that entity type.</p>
 <p><strong>Where to look:</strong> PHPStan's Drupal extension (its entity data
 repository and the storage return-type extensions).</p>
 <hr />
@@ -1484,6 +1575,11 @@ and report a name nothing declares. The <code>_controller</code>, <code>_form</c
 maps that read <code>Class::method</code> strings in YAML; check before building
 anything for them. The parameter keys are the same problem as Symfony's
 <a href="../lsp-features/#f27-symfony-route-parameters">F27</a>.</p>
+<p>A path parameter named after an entity type (<code>/node/{node}</code>) is upcast
+by Drupal's parameter converters, so the controller method's <code>$node</code>
+receives a <code>NodeInterface</code>, not the ID. Type an untyped controller
+parameter from the route that names it, and check a typed one against
+it.</p>
 <hr />
 <h2 id="dr6-hooks">DR6. Hooks<a class="headerlink" href="#dr6-hooks" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
@@ -1531,6 +1627,101 @@ variables would be one more source of them (see <code>src/twig/variables.rs</cod
 permission callbacks), configuration objects in <code>config/install</code> and
 <code>config/schema</code>. Complete and navigate both, and complete the keys
 <code>get()</code> reads from the schema.</p>
+<hr />
+<h2 id="dr9-drupal-directories-outside-contrib-and-custom">DR9. Drupal directories outside <code>contrib</code> and <code>custom</code><a class="headerlink" href="#dr9-drupal-directories-outside-contrib-and-custom" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Low-Medium</strong></p>
+<p>The scan that bypasses <code>.gitignore</code> covers <code>core</code>, <code>modules/contrib</code>,
+<code>modules/custom</code>, <code>themes/contrib</code>, <code>themes/custom</code>, <code>profiles</code>, and
+<code>sites</code> under the web root. Sites also group modules by vendor
+(<code>modules/acme/</code>) or keep them directly under <code>modules/</code>, and profiles
+carry their own <code>modules/</code> and <code>themes/</code>; a module a site's <code>.gitignore</code>
+hides in any of those places is not indexed, and its classes read as
+unknown. Scan <code>modules</code>, <code>themes</code>, and <code>profiles</code> whole.</p>
+<p>The scan also runs only when the Drupal site is the workspace's Composer
+root. A workspace that holds the site beside other Composer projects, or
+opens a Drupal tree without a <code>composer.json</code>, gets none of it. Run it
+for each Composer project in the workspace that requires <code>drupal/core</code>,
+and give the scanned classes the same origin (project, vendor) other
+classes get, so completion ranks and filters them the same way.</p>
+<p><strong>Where to look:</strong> <code>scan_drupal_directories</code> in
+<code>src/classmap_scanner/discovery.rs</code>, its caller in
+<code>src/indexing/init.rs</code>, and how per-project Composer roots are handled
+there.</p>
+<hr />
+<h2 id="dr10-plugin-ids">DR10. Plugin IDs<a class="headerlink" href="#dr10-plugin-ids" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">#[Block(id: 'acme_order_summary', admin_label: new TranslatableMarkup('Order summary'))]</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">final class OrderSummaryBlock extends BlockBase { … }</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">$block = $this-&gt;blockManager-&gt;createInstance('acme_order_summary');</span>
+</code></pre></div>
+<p>Blocks, field types, formatters, widgets, queue workers, and the other
+plugin types declare an ID in an attribute (or, in older code, a
+docblock annotation). Complete and navigate plugin IDs where a plugin
+manager takes one (<code>createInstance()</code>, <code>getDefinition()</code>,
+<code>hasDefinition()</code>), and in the YAML and render arrays that name them
+(<code>'#type'</code> is <a href="#dr7-render-arrays-theme-hooks-and-libraries">DR7</a>), and
+type <code>createInstance()</code> as the plugin class.</p>
+<hr />
+<h2 id="dr11-form-and-render-callbacks">DR11. Form and render callbacks<a class="headerlink" href="#dr11-form-and-render-callbacks" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$form['actions']['submit']['#submit'][] = '::submitOrder';</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">$form['country']['#ajax'] = ['callback' =&gt; '::updateRegions'];</span>
+</code></pre></div>
+<p><code>#submit</code>, <code>#validate</code>, <code>#element_validate</code>, <code>#pre_render</code>,
+<code>#after_build</code>, and an <code>#ajax</code> <code>callback</code> name methods of the form class
+as <code>'::method'</code>, or a function or <code>Class::method</code>. Navigate, rename, and
+complete them, and report one that names nothing.</p>
+<hr />
+<h2 id="dr12-translation-placeholders">DR12. Translation placeholders<a class="headerlink" href="#dr12-translation-placeholders" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">$this-&gt;t('Order @number was placed by %name', ['@number' =&gt; $id, '%nmae' =&gt; $name]);</span>
+</code></pre></div>
+<p><code>t()</code>, <code>$this-&gt;t()</code>, <code>new TranslatableMarkup()</code>, and <code>formatPlural()</code>
+replace <code>@</code>, <code>%</code>, and <code>:</code> placeholders from the array they are given.
+Report a placeholder the string uses that the array does not supply, and
+a key the string never uses.</p>
+<hr />
+<h2 id="dr13-module-names-and-infoyml">DR13. Module names and <code>*.info.yml</code><a class="headerlink" href="#dr13-module-names-and-infoyml" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">\Drupal::moduleHandler()-&gt;moduleExists('acme_shop');</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">dependencies</span><span class="p">:</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">drupal:node</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">acme:acme_shop</span>
+</code></pre></div>
+<p>A module's machine name is the basename of its <code>*.info.yml</code>. Complete
+and navigate machine names in <code>moduleExists()</code>, <code>getModule()</code>, and the
+<code>dependencies</code> of an info file, and report one that names no module.
+Check an info file's required keys (<code>name</code>, <code>type</code>,
+<code>core_version_requirement</code>) and their shapes.</p>
+<hr />
+<h2 id="dr14-port-phpstans-drupal-extension-tests">DR14. Port PHPStan's Drupal extension tests<a class="headerlink" href="#dr14-port-phpstans-drupal-extension-tests" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>PHPStan's Drupal extension (<code>mglaman/phpstan-drupal</code>) is this
+document's checklist, but its tests are not ported, as the Symfony,
+Doctrine, and WordPress extensions' are (<code>tests/phpstan_symfony/</code>,
+<code>tests/phpstan_doctrine/</code>, <code>tests/wordpress_stubs/</code>). Its type tests
+cover <code>\Drupal::service()</code> and container lookups, entity storage and
+entity queries, field item lists, and the rule tests deprecated and
+discouraged calls. Port them into <code>tests/phpstan_drupal/</code> the same way:
+the <code>assertType()</code> fixtures run by <code>tests/assert_type_runner.rs</code>, the
+rule tests as <code>.fixture</code> files, a slice of <code>drupal/core</code> copied by
+<code>scripts/extract-framework-stubs.php</code>, and upstream's test modules and
+their <code>*.services.yml</code> as the project. Until DR2 to DR4 ship most
+assertions are a <code>// SKIP</code> pointing at the item that covers them; file
+any that no item does. Rules about Drupal's own deprecations are listed
+in the README as not ported.</p>
+<hr />
+<h2 id="dr15-benchmark-for-drupal-names">DR15. Benchmark for Drupal names<a class="headerlink" href="#dr15-benchmark-for-drupal-names" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong> (depends on DR2)</p>
+<p>Laravel, Symfony, and Yii have Criterion benchmarks in <code>benches/</code>.
+Once Drupal service IDs complete (DR2), add
+<code>benches/drupal_completion.rs</code> in the shape of
+<code>benches/symfony_completion.rs</code>: generate a site with many modules,
+each declaring services, routes, and hooks, and time completion of
+service IDs, route names, and hook names as each ships. Register it in
+<code>Cargo.toml</code> so <code>benches/ci_benchmarks.py</code> picks it up.</p>
 
 
 

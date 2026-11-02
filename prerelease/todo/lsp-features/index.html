@@ -2285,6 +2285,19 @@ Laravel views. TwigStan's context collectors (the ones that find
 <code>render()</code> calls and <code>#[Template]</code> returns) show which call shapes it
 recognises as rendering a template.</p>
 <hr />
+<h2 id="f61-port-twigstans-tests">F61. Port TwigStan's tests<a class="headerlink" href="#f61-port-twigstans-tests" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>PHPantom types Twig template variables from the render calls and
+navigates templates, blocks, filters, and functions, but tests that
+against fixtures of its own only. TwigStan's <code>tests/EndToEnd/</code> holds
+templates with the variables, filters, functions, and globals they use
+and the errors and types it reports for each. Port them as fixtures in
+<code>tests/fixtures/twigstan/</code> with a project under <code>tests/twigstan/</code> holding
+the templates and a slice of <code>twig/twig</code>, and file every case PHPantom
+answers differently as a <code>// SKIP: reason</code> entry in <code>docs/todo/</code>. Tests
+of TwigStan's compiler and its PHPStan baseline have no counterpart here;
+list them in the README as not ported.</p>
+<hr />
 <h2 id="f38-twig-components">F38. Twig components<a class="headerlink" href="#f38-twig-components" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">&lt;twig:Alert type="success" message="Saved" /&gt;</span>

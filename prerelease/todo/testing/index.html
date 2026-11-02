@@ -1333,6 +1333,39 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#ts8-port-phpstans-phpunit-and-mockery-extension-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        TS8. Port PHPStan's PHPUnit and Mockery extension tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ts9-phpunit-and-pest-demo-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        TS9. PHPUnit and Pest demo project
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ts10-benchmark-for-test-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        TS10. Benchmark for test code
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1503,6 +1536,51 @@ Check what PHPantom does with current Prophecy, which declares
 a call on the prophecy should complete the mocked class's methods and
 give a <code>MethodProphecy</code>. PHPUnit 10 removed <code>prophesize()</code>, so Prophecy
 is declining; fix only what is cheap.</p>
+<hr />
+<h2 id="ts8-port-phpstans-phpunit-and-mockery-extension-tests">TS8. Port PHPStan's PHPUnit and Mockery extension tests<a class="headerlink" href="#ts8-port-phpstans-phpunit-and-mockery-extension-tests" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<p>PHPStan's PHPUnit extension (<code>phpstan/phpstan-phpunit</code>) is this
+document's checklist, and the Mockery support follows what
+<code>phpstan/phpstan-mockery</code> types, but neither's tests are ported, as
+the Symfony, Doctrine, and WordPress extensions' are. Their type tests
+cover assertion narrowing, <code>createMock()</code> and <code>createStub()</code>
+intersections, <code>getMockBuilder()</code> chains, and <code>Mockery::mock()</code> and
+its expectation chains; the rule tests cover assertion misuse
+(<code>assertSame(true, …)</code> where <code>assertTrue()</code> is meant, <code>assertEquals()</code>
+where <code>assertSame()</code> is), mocked methods that do not exist, data
+providers, coverage metadata, and <code>setUp()</code> that skips the parent. Port them into
+<code>tests/phpstan_phpunit/</code> the same way: the <code>assertType()</code> fixtures run
+by <code>tests/assert_type_runner.rs</code>, the rule tests as <code>.fixture</code> files,
+and slices of <code>phpunit/phpunit</code> and <code>mockery/mockery</code> copied by
+<code>scripts/extract-framework-stubs.php</code> as the stubs. File every
+gap as a <code>// SKIP: reason</code> in this document or <code>docs/todo/</code>; rule tests
+TS1, TS4, or TS6 already cover point at it.</p>
+<hr />
+<h2 id="ts9-phpunit-and-pest-demo-project">TS9. PHPUnit and Pest demo project<a class="headerlink" href="#ts9-phpunit-and-pest-demo-project" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<p>The PHPUnit demos in <code>examples/php/definition.php</code> work without PHPUnit
+installed, so the attributes, Pest, and Mockery are described there
+rather than shown. Add <code>examples/testing/</code>, a Composer project in the
+shape of <code>examples/symfony/</code> that installs <code>phpunit/phpunit</code>,
+<code>pestphp/pest</code>, and <code>mockery/mockery</code>, with a small library under
+<code>src/</code> and its tests under <code>tests/</code>: assertion narrowing, data
+providers and <code>@depends</code> in both annotation and attribute form,
+coverage attributes and the lens they feed, a <code>Pest.php</code> binding a test
+case, and a Mockery mock. Put a "Try:" comment at each site and a line
+in its README. Since the tests can actually run, <code>vendor/bin/phpunit</code>
+and <code>vendor/bin/pest</code> passing is the runtime check the other demos
+need an <code>assertions.php</code> for, and <code>analyze</code> on it must report no
+errors.</p>
+<hr />
+<h2 id="ts10-benchmark-for-test-code">TS10. Benchmark for test code<a class="headerlink" href="#ts10-benchmark-for-test-code" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>Laravel, Symfony, and Yii have Criterion benchmarks in <code>benches/</code>; test
+code has none, though the coverage lens on a class looks through every
+test that names it. Add <code>benches/testing.rs</code>: generate a few hundred
+test classes covering a few dozen source classes, with data providers
+and Pest files, and time the code lens on a covered class, completion of
+a data provider name, and member completion inside a Pest closure.
+Register it in <code>Cargo.toml</code> so <code>benches/ci_benchmarks.py</code> picks it up.</p>
 
 
 
