@@ -3,9 +3,9 @@
 Known gaps in PHPantom's support for test code. What works today:
 PHPUnit's assertions narrow types; data providers, `@depends`, and
 coverage metadata navigate, rename, and report a name that matches
-nothing; covered classes show a lens listing their tests; Pest closures
-know the test case `Pest.php` binds them to; and Mockery mocks keep the
-mocked class.
+nothing; a data provider PHPUnit cannot call is reported; covered
+classes show a lens listing their tests; Pest closures know the test
+case `Pest.php` binds them to; and Mockery mocks keep the mocked class.
 
 PHPStan's PHPUnit extension (`phpstan/phpstan-phpunit`) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
@@ -109,25 +109,6 @@ project, write a Pest file instead.
 
 ---
 
-## TS4. Data provider declaration checks
-
-**Impact: Low-Medium · Complexity: Low**
-
-A data provider name that matches no method is reported. Two more
-checks PHPStan's PHPUnit extension makes are not:
-
-- The provider must be `public`, and from PHPUnit 10 on also `static`
-  (`phpunit.dataProviderPublic`, `phpunit.dataProviderStatic`). Read the
-  PHPUnit version from `composer.lock`, and offer a quick fix that adds
-  the modifier.
-- For an unknown name, offer a "Create data provider" quick fix that
-  writes a `public static function name(): iterable` returning an empty
-  array, as PhpStorm does.
-
-**Where to look:** `src/symbol_map/extraction/phpunit.rs`.
-
----
-
 ## TS5. Assertion libraries
 
 **Impact: Low-Medium · Complexity: Low**
@@ -192,7 +173,7 @@ by `tests/assert_type_runner.rs`, the rule tests as `.fixture` files,
 and slices of `phpunit/phpunit` and `mockery/mockery` copied by
 `scripts/extract-framework-stubs.php` as the stubs. File every
 gap as a `// SKIP: reason` in this document or `docs/todo/`; rule tests
-TS1, TS4, or TS6 already cover point at it.
+TS1 or TS6 already cover point at it.
 
 ---
 

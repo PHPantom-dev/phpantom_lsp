@@ -314,6 +314,43 @@ pub(crate) fn has_runtime_permission_package(package: &ComposerPackage) -> bool 
         })
 }
 
+/// The major version of PHPUnit the project's `composer.lock` installs,
+/// `None` when there is no lock file or it does not list PHPUnit.
+pub(crate) fn locked_phpunit_major(project_root: &Path) -> Option<u8> {
+    let content = super::read_composer_file(&project_root.join("composer.lock"))?;
+    phpunit_major_from_lock(&content)
+}
+
+/// [`locked_phpunit_major`] for the text of a `composer.lock`.
+fn phpunit_major_from_lock(content: &str) -> Option<u8> {
+    #[derive(serde::Deserialize)]
+    struct Lock {
+        #[serde(default)]
+        packages: Vec<LockedPackage>,
+        #[serde(default, rename = "packages-dev")]
+        packages_dev: Vec<LockedPackage>,
+    }
+    #[derive(serde::Deserialize)]
+    struct LockedPackage {
+        name: String,
+        #[serde(default)]
+        version: String,
+    }
+
+    let lock: Lock = serde_json::from_str(content).ok()?;
+    let package = lock
+        .packages_dev
+        .iter()
+        .chain(&lock.packages)
+        .find(|package| package.name.eq_ignore_ascii_case("phpunit/phpunit"))?;
+    let version = package.version.trim_start_matches(['v', 'V']);
+    version
+        .split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse()
+        .ok()
+}
+
 pub(crate) fn explicit_dependency_names(package: &ComposerPackage) -> HashSet<String> {
     package
         .require
@@ -381,6 +418,28 @@ mod tests {
     /// Helper: parse a JSON string into a [`ComposerPackage`].
     fn pkg(json: &str) -> ComposerPackage {
         json.parse::<ComposerPackage>().unwrap()
+    }
+
+    // ── locked_phpunit_major ────────────────────────────────────────
+
+    #[test]
+    fn reads_the_locked_phpunit_major() {
+        let lock = r#"{
+            "packages": [{"name": "symfony/console", "version": "v7.1.0"}],
+            "packages-dev": [{"name": "phpunit/phpunit", "version": "10.5.38"}]
+        }"#;
+        assert_eq!(phpunit_major_from_lock(lock), Some(10));
+        let lock = r#"{"packages": [{"name": "phpunit/phpunit", "version": "v9.6.0"}]}"#;
+        assert_eq!(phpunit_major_from_lock(lock), Some(9));
+    }
+
+    #[test]
+    fn a_lock_without_phpunit_has_no_phpunit_major() {
+        let lock = r#"{"packages": [], "packages-dev": [{"name": "mockery/mockery", "version": "1.6.0"}]}"#;
+        assert_eq!(phpunit_major_from_lock(lock), None);
+        assert_eq!(phpunit_major_from_lock("not json"), None);
+        let lock = r#"{"packages-dev": [{"name": "phpunit/phpunit", "version": "dev-main"}]}"#;
+        assert_eq!(phpunit_major_from_lock(lock), None);
     }
 
     // ── is_doctrine_project ─────────────────────────────────────────

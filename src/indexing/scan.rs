@@ -174,6 +174,21 @@ impl Backend {
             }
         }
 
+        // An update may have moved PHPUnit to another major version.
+        let project_roots: Vec<PathBuf> = self
+            .workspace
+            .composer_projects
+            .read()
+            .iter()
+            .map(|project| project.root.clone())
+            .collect();
+        self.set_phpunit_major(
+            std::iter::once(root)
+                .chain(project_roots.iter().map(PathBuf::as_path))
+                .filter_map(composer::locked_phpunit_major)
+                .min(),
+        );
+
         // After the rescans above, whose `replace_tree` over the vendor
         // directory also dropped the discovery entries of the stub
         // packages inside it, and which re-read which stub packages are

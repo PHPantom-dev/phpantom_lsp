@@ -147,6 +147,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_override_attribute_diagnostics_with_context,
     ),
     always(
+        "invalid_data_provider",
+        Backend::collect_data_provider_diagnostics_with_context,
+    ),
+    always(
         "invalid_member_name",
         Backend::collect_dynamic_member_name_diagnostics_with_context,
     ),

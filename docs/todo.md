@@ -32,7 +32,6 @@ contributor even though it's short.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| TS4 | [Data provider declaration checks](todo/testing.md#ts4-data-provider-declaration-checks) | Low-Medium  | Low         |
 | TS6 | [`setUp()` and `tearDown()` that skip the parent](todo/testing.md#ts6-setup-and-teardown-that-skip-the-parent) | Low         | Low         |
 | DR1 | [Drupal demo project and a real-world baseline](todo/drupal.md#dr1-drupal-demo-project-and-a-real-world-baseline) | High        | Low-Medium  |
 | DR9 | [Drupal directories outside `contrib` and `custom`](todo/drupal.md#dr9-drupal-directories-outside-contrib-and-custom) | Medium-High | Low-Medium |
@@ -161,7 +160,6 @@ ships, remove every row that names it.
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| TS4 | [Data provider declaration checks](todo/testing.md#ts4-data-provider-declaration-checks) | Low-Medium  | Low         |
 | TS5 | [Assertion libraries](todo/testing.md#ts5-assertion-libraries) | Low-Medium  | Low         |
 | TS10 | [Benchmark for test code](todo/testing.md#ts10-benchmark-for-test-code) | Low-Medium | Low |
 | TS6 | [`setUp()` and `tearDown()` that skip the parent](todo/testing.md#ts6-setup-and-teardown-that-skip-the-parent) | Low         | Low         |

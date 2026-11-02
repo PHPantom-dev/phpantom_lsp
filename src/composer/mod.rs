@@ -49,7 +49,7 @@ pub(crate) use project::{
     detect_drupal_web_root, explicit_dependency_names, has_dependency, has_laravel_aware_phpstan,
     has_require_dev, has_runtime_permission_package, is_application_project, is_doctrine_project,
     is_laravel_application, is_laravel_project, is_symfony_project, is_twig_project,
-    is_yii_project,
+    is_yii_project, locked_phpunit_major,
 };
 pub use project::{detect_php_version, detect_php_version_from_package};
 pub use psr4::{

@@ -255,6 +255,7 @@ mod class_init_facts;
 pub(crate) mod class_name_mismatch;
 mod collect;
 pub(crate) mod cross_file;
+pub(crate) mod data_providers;
 mod delivery;
 mod deprecated;
 mod destructuring_offsets;

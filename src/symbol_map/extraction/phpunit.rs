@@ -35,13 +35,16 @@ enum TargetKind {
     Method,
     /// `#[CoversFunction('bar')]` — a global function.
     Function,
-    /// `#[DataProvider('bar')]`, `#[Depends('testBar')]` — a method of the
-    /// test class itself.
+    /// `#[Depends('testBar')]` — a method of the test class itself.
     TestMethod,
-    /// `#[DataProviderExternal(Foo::class, 'bar')]`,
     /// `#[DependsExternal(FooTest::class, 'testBar')]` — a method of another
     /// class.
     ExternalTestMethod,
+    /// `#[DataProvider('bar')]` — a method of the test class itself.
+    DataProvider,
+    /// `#[DataProviderExternal(Foo::class, 'bar')]` — a method of another
+    /// class.
+    ExternalDataProvider,
 }
 
 fn target_kind(short_name: &str) -> Option<TargetKind> {
@@ -56,11 +59,12 @@ fn target_kind(short_name: &str) -> Option<TargetKind> {
         | "UsesClassesThatExtendClass" => Some(TargetKind::ClassLike),
         "CoversMethod" | "UsesMethod" => Some(TargetKind::Method),
         "CoversFunction" | "UsesFunction" => Some(TargetKind::Function),
-        "DataProvider" | "Depends" | "DependsUsingDeepClone" | "DependsUsingShallowClone" => {
+        "Depends" | "DependsUsingDeepClone" | "DependsUsingShallowClone" => {
             Some(TargetKind::TestMethod)
         }
-        "DataProviderExternal"
-        | "DependsExternal"
+        "DataProvider" => Some(TargetKind::DataProvider),
+        "DataProviderExternal" => Some(TargetKind::ExternalDataProvider),
+        "DependsExternal"
         | "DependsExternalUsingDeepClone"
         | "DependsExternalUsingShallowClone" => Some(TargetKind::ExternalTestMethod),
         _ => None,
@@ -132,7 +136,7 @@ pub(super) fn try_emit_phpunit_attribute_spans(
             }
             return;
         }
-        TargetKind::TestMethod => {
+        TargetKind::TestMethod | TargetKind::DataProvider => {
             // PHPUnit looks the method up on the test class, which is what
             // `static` names at the attribute's position.
             if let Some((name, span)) = string_argument(first, content)
@@ -142,11 +146,15 @@ pub(super) fn try_emit_phpunit_attribute_spans(
                     SubjectText::owned("static".to_owned()),
                     name,
                     span,
+                    test_method_ref(kind),
                 ));
             }
             return;
         }
-        TargetKind::ClassLike | TargetKind::Method | TargetKind::ExternalTestMethod => {}
+        TargetKind::ClassLike
+        | TargetKind::Method
+        | TargetKind::ExternalTestMethod
+        | TargetKind::ExternalDataProvider => {}
     }
 
     // The class-like name is either `Foo::class` or a string holding its FQN.
@@ -165,7 +173,11 @@ pub(super) fn try_emit_phpunit_attribute_spans(
         ));
     }
 
-    if kind != TargetKind::ExternalTestMethod {
+    let is_external = matches!(
+        kind,
+        TargetKind::ExternalTestMethod | TargetKind::ExternalDataProvider
+    );
+    if !is_external {
         // Mark the target as coverage metadata, for both spellings: the
         // string reference pushed just above, and the `Foo::class` one the
         // expression extractor recorded before this ran
@@ -196,8 +208,13 @@ pub(super) fn try_emit_phpunit_attribute_spans(
         content,
     );
 
-    if kind == TargetKind::ExternalTestMethod {
-        spans.push(named_method_span(subject_text, member_name, member_span));
+    if is_external {
+        spans.push(named_method_span(
+            subject_text,
+            member_name,
+            member_span,
+            test_method_ref(kind),
+        ));
         return;
     }
 
@@ -227,7 +244,12 @@ pub(super) fn try_emit_phpunit_attribute_spans(
 /// named reference rather than a call, so neither the static-ness of the
 /// `::` it is modelled with nor the method's visibility is held against it
 /// (PHPUnit reaches both through reflection).
-fn named_method_span(subject_text: SubjectText, name: &str, span: Span) -> SymbolSpan {
+fn named_method_span(
+    subject_text: SubjectText,
+    name: &str,
+    span: Span,
+    docblock_ref: DocblockMemberRef,
+) -> SymbolSpan {
     SymbolSpan {
         start: span.start.offset,
         end: span.end.offset,
@@ -236,10 +258,20 @@ fn named_method_span(subject_text: SubjectText, name: &str, span: Span) -> Symbo
             member_name: crate::atom::atom(name),
             is_static: true,
             is_method_call: true,
-            docblock_ref: DocblockMemberRef::PhpUnit,
+            docblock_ref,
             is_array_callable: false,
             is_nullsafe: false,
         },
+    }
+}
+
+/// How a test-method attribute of `kind` names its method.
+fn test_method_ref(kind: TargetKind) -> DocblockMemberRef {
+    match kind {
+        TargetKind::DataProvider | TargetKind::ExternalDataProvider => {
+            DocblockMemberRef::PhpUnitDataProvider { attribute: true }
+        }
+        _ => DocblockMemberRef::PhpUnit,
     }
 }
 
