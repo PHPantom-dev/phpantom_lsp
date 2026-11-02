@@ -186,7 +186,7 @@ impl Backend {
     }
 
     /// The Blade file a view named `view_key` would be.
-    fn missing_view_file(&self, view_key: &str) -> Option<PathBuf> {
+    pub(super) fn missing_view_file(&self, view_key: &str) -> Option<PathBuf> {
         let target_dir = self.laravel_view_create_target(view_key)?;
         let rel = match view_key.split_once("::") {
             Some((_, name)) => name,
@@ -240,7 +240,7 @@ const MAX_SUGGESTIONS: usize = 3;
 /// case-insensitive edit distance, nearest first.  A short name allows
 /// one edit and a longer one two, so an unrelated name of similar length
 /// is not offered.
-fn close_names<'a>(name: &str, declared: &'a [String]) -> Vec<(usize, &'a str)> {
+pub(super) fn close_names<'a>(name: &str, declared: &'a [String]) -> Vec<(usize, &'a str)> {
     if name.is_empty() || name.len() > 255 {
         return Vec::new();
     }

@@ -24,6 +24,7 @@ pub(crate) mod state;
 pub(crate) mod template_edits;
 pub(crate) mod translate;
 pub(crate) mod typed_receiver;
+pub(crate) mod unknown_components;
 pub(crate) mod use_block;
 pub(crate) mod use_directive;
 pub(crate) mod view_call_walker;

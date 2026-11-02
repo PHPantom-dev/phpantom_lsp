@@ -277,8 +277,21 @@ impl Backend {
         planned_in_template: bool,
     ) -> bool {
         let mut applies = true;
+        // A template the edit itself creates is written from scratch, so
+        // its text is already the template's own.
+        let created: Vec<tower_lsp_server::gen_lsp_types::Uri> = edit
+            .document_changes
+            .iter()
+            .flatten()
+            .filter_map(|change| match change {
+                tower_lsp_server::gen_lsp_types::DocumentChange::CreateFile(create) => {
+                    Some(create.uri.clone())
+                }
+                _ => None,
+            })
+            .collect();
         visit_file_text_edits(edit, |uri, mut edits| {
-            if !applies || !self.is_blade_file(uri.as_str()) {
+            if !applies || !self.is_blade_file(uri.as_str()) || created.contains(uri) {
                 return;
             }
             let read;

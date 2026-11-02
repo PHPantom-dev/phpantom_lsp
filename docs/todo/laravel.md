@@ -737,26 +737,6 @@ established.
 `virtual_members/laravel/route_names/` for the discovered routes and
 their actions.
 
-#### L65. Unknown Blade and Livewire components
-
-**Impact: Medium-High · Complexity: Medium**
-
-`<x-buttons.bakc />` and `<livewire:orders.overveiw />` name nothing, and
-nothing says so: component tags complete and navigate, but a tag that
-resolves to no class and no view is not reported (the tag diagnostics in
-`diagnostics/blade_component_tags.rs` only check that tags balance).
-Laravel Idea reports both, though on a project that keeps its Blade views
-outside `resources/views` it also flags components that exist. Report a
-tag that `blade/discovery.rs` cannot resolve, keeping the world open for
-component namespaces and paths the project registers in a way we cannot
-read.
-
-Pair it with a "Create component" quick fix, as an unknown view already
-offers "Create view" (`create_missing_view.rs`). Offer to create the anonymous component's Blade file at the path the tag
-resolves to (`resources/views/components/alert.blade.php`, honouring
-anonymous component namespaces and nested names), and as a second option
-the class-backed pair (`app/View/Components/Alert.php` plus its view).
-
 #### L66. Related-file navigation for models, events, and listeners
 
 **Impact: Medium · Complexity: Medium**

@@ -119,7 +119,10 @@
          the only thing that can fill one: `<x-widgets::badge ` offers
          `label` and `author`, and `<x-alert ` offers `messages`.
          Ctrl+Click any tag name below to open what it renders: the class
-         for a class-backed component, the template for an anonymous one. --}}
+         for a class-backed component, the template for an anonymous one.
+         Try: misspell a tag name (`<x-alret>`) and see it reported as an
+         unknown component, with quick fixes that change it to `alert` or
+         create the component it names. --}}
 
     {{-- The <x-alert> component view is where $attributes and $slot come
          from: resources/views/components/alert.blade.php

@@ -20,6 +20,7 @@ pub mod blade_regression;
 mod blade_render_sites;
 mod blade_sections;
 mod blade_shared_vars;
+mod blade_unknown_components;
 mod builtin_return_types;
 mod call_hierarchy;
 mod callable_invocation;

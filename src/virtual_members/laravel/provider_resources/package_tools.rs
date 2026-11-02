@@ -7,7 +7,7 @@ use mago_syntax::cst::*;
 
 use super::super::const_eval::{Scope, const_string};
 use super::extract::ProviderFile;
-use super::views::push_view_dir_registration;
+use super::views::{push_view_dir_registration, record_component_alias};
 use super::{ProviderResource, ProviderResources};
 
 /// How many `->` links a `$package->name(…)->hasTranslations()->hasViews()
@@ -38,6 +38,12 @@ pub(super) fn record_package_call(
     call: &MethodCall<'_>,
     resources: &mut ProviderResources,
 ) -> bool {
+    if matches!(method, b"hasviewcomponent" | b"hasviewcomponents")
+        && chain_roots_at_package_var(call.object, PACKAGE_TOOLS_CHAIN_DEPTH)
+    {
+        record_package_view_components(file, &call.argument_list, resources);
+        return true;
+    }
     if !PACKAGE_TOOLS_RESOURCE_METHODS.contains(&method)
         || !chain_roots_at_package_var(call.object, PACKAGE_TOOLS_CHAIN_DEPTH)
     {
@@ -68,6 +74,23 @@ pub(super) fn record_package_call(
         resources,
     );
     true
+}
+
+/// `$package->hasViewComponents('spatie', Calendar::class, …)`: each class
+/// is registered through `loadViewComponentsAs()` under the prefix, so it
+/// gets the alias `BladeCompiler::component()` derives from its name.
+fn record_package_view_components(
+    file: &ProviderFile<'_, '_>,
+    argument_list: &ArgumentList<'_>,
+    resources: &mut ProviderResources,
+) {
+    let mut args = argument_list.arguments.iter();
+    let prefix = args
+        .next()
+        .and_then(|arg| const_string(arg.value(), file.content, file.scope));
+    for arg in args {
+        record_component_alias(file, Some(arg.value()), None, prefix.clone(), resources);
+    }
 }
 
 /// Walk at most `depth` links down a method chain to check whether it

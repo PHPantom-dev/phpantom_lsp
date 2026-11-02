@@ -173,6 +173,9 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
     laravel("blade_component_tag_balance", |backend, _, uri, _, out| {
         backend.collect_blade_component_tag_diagnostics(uri, out)
     }),
+    laravel("blade_unknown_component", |backend, _, uri, _, out| {
+        backend.collect_blade_unknown_component_diagnostics(uri, out)
+    }),
     laravel("blade_section", |backend, _, uri, _, out| {
         backend.collect_blade_section_diagnostics(uri, out)
     }),
