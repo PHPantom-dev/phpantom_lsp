@@ -633,6 +633,74 @@ impl Backend {
         hooks
     }
 
+    /// The documentation function of the hook the function or method
+    /// declared at `decl_start` of `content` implements: a procedural
+    /// function's (`name` `None`, read from the content), or a hook class
+    /// method's (`name`, on the class `class_fqn`).  Read from the symbol
+    /// map of the file that declares it, which has to be `content`.
+    pub(crate) fn drupal_hook_documentation_function(
+        &self,
+        content: &str,
+        decl_start: u32,
+        method: Option<&str>,
+        class_fqn: &str,
+    ) -> Option<crate::types::FunctionInfo> {
+        use crate::symbol_map::{StringKeyKind, SymbolKind};
+        if !self.is_drupal_project() {
+            return None;
+        }
+        let rest = content.get(decl_start as usize..)?;
+        let keyword = rest.find("function")?;
+        let after = &rest[keyword + "function".len()..];
+        let name_from = after.len() - after.trim_start().len();
+        let name_start = decl_start as usize + keyword + "function".len() + name_from;
+        let name_len = content[name_start..]
+            .bytes()
+            .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            .count();
+        let name = &content[name_start..name_start + name_len];
+        let uri = match method {
+            None => self
+                .symbols
+                .global_functions
+                .read()
+                .get(name)
+                .map(|(uri, _)| uri.clone())?,
+            Some(_) => self.class_declaration_uri(class_fqn.trim_start_matches('\\'))?,
+        };
+        let map = self
+            .symbol_map_for(&uri)
+            .filter(|map| map.matches_source(content))?;
+        // A procedural function names its hook after its extension; a
+        // method's `#[Hook]` stands among the attributes before its name.
+        let (from, to) = match method {
+            None => (name_start as u32, (name_start + name_len) as u32),
+            Some(_) => (decl_start, name_start as u32),
+        };
+        let at = map.spans.partition_point(|span| span.start < from);
+        let hook = map.spans[at..]
+            .iter()
+            .take_while(|span| span.start < to)
+            .find_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalHook,
+                    key,
+                    is_write: false,
+                    ..
+                } => Some(key.clone()),
+                _ => None,
+            })?;
+        let exact = format!("hook_{hook}");
+        if let Some(function) = self.find_or_load_function(&[exact.as_str()]) {
+            return Some(function);
+        }
+        let is_entity_type = |id: &str| !self.drupal_entity_types(id).is_empty();
+        self.documented_hook_patterns()
+            .iter()
+            .filter(|pattern| matches_hook_pattern(pattern, &hook, &is_entity_type))
+            .find_map(|pattern| self.find_or_load_function(&[format!("hook_{pattern}").as_str()]))
+    }
+
     /// Every hook the workspace names, implemented or documented, that the
     /// documented `pattern` stands for.
     fn hooks_matching(&self, pattern: &str) -> Vec<String> {

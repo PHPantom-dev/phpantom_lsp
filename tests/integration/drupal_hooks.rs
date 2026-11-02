@@ -3,7 +3,9 @@
 //! procedural function names make.
 
 use crate::common::hover_text_at;
-use crate::drupal_services::{definitions_at, position_in, references_at, uri_for, workspace_in};
+use crate::drupal_services::{
+    definitions_at, position_in, references_at, uri_for, workspace_in, workspace_opened_early,
+};
 
 const FORM_API: &str = "<?php\n/**\n * Perform alterations before a form is rendered.\n */\nfunction hook_form_alter(&$form, \\Drupal\\Core\\Form\\FormStateInterface $form_state, $form_id) {\n}\n\nfunction hook_cron() {\n}\n";
 const FORM_API_PATH: &str = "web/core/lib/Drupal/Core/Form/form.api.php";
@@ -50,6 +52,11 @@ async fn drupal(
     extra: &[(&str, &str)],
     open: &[(&str, &str)],
 ) -> (phpantom_lsp::Backend, tempfile::TempDir) {
+    workspace_in(drupal_dir(extra), open).await
+}
+
+/// The directory of [`drupal`]'s workspace, before `open` joins it.
+fn drupal_dir(extra: &[(&str, &str)]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     for (path, content) in [
         (".git/HEAD", "ref: refs/heads/main\n"),
@@ -66,7 +73,7 @@ async fn drupal(
         std::fs::create_dir_all(full.parent().unwrap()).unwrap();
         std::fs::write(full, content).unwrap();
     }
-    workspace_in(dir, open).await
+    dir
 }
 
 #[tokio::test]
@@ -558,4 +565,103 @@ async fn a_closure_in_a_module_file_is_not_offered_hooks() {
         !labels.iter().any(|label| label == "acme_form_alter"),
         "{labels:?}"
     );
+}
+
+/// An implementation that leaves a parameter untyped reads it as the hook's
+/// documentation types it, unless it types it itself.
+#[tokio::test]
+async fn untyped_hook_parameters_take_the_documented_types() {
+    let api = "<?php\n/**\n * @param array $form\n * @param \\Drupal\\Core\\Form\\FormStateInterface $form_state\n * @param string $form_id\n */\nfunction hook_form_alter(&$form, \\Drupal\\Core\\Form\\FormStateInterface $form_state, $form_id) {\n}\nfunction hook_form_FORM_ID_alter(&$form, \\Drupal\\Core\\Form\\FormStateInterface $form_state, $form_id) {\n}\n";
+    let module = "<?php\nfunction acme_form_alter(&$form, $form_state, $form_id) {\n    $form_state;\n}\nfunction acme_form_user_login_alter(&$form, $form_state, $form_id) {\n    $form_state;\n}\n/**\n * @param \\stdClass $form_state\n */\nfunction acme_form_node_form_alter(&$form, $form_state, $form_id) {\n    $form_state;\n}\n";
+    let hooks = "<?php\nnamespace Drupal\\acme\\Hook;\n\nuse Drupal\\Core\\Hook\\Attribute\\Hook;\n\nfinal class FormHooks {\n    #[Hook('form_alter')]\n    public function formAlter(array &$form, $form_state): void {\n        $form_state;\n    }\n}\n";
+    let (backend, dir) = drupal(
+        &[
+            (FORM_API_PATH, api),
+            HOOK_ATTRIBUTE,
+            (
+                "web/core/lib/Drupal/Core/Form/FormStateInterface.php",
+                "<?php\nnamespace Drupal\\Core\\Form;\ninterface FormStateInterface {}\n",
+            ),
+        ],
+        &[
+            ("web/modules/custom/acme/acme.module", module),
+            ("web/modules/custom/acme/src/Hook/FormHooks.php", hooks),
+        ],
+    )
+    .await;
+    let module_uri = uri_for(&dir, "web/modules/custom/acme/acme.module");
+    references_at(
+        &backend,
+        &module_uri,
+        position_in(module, "acme_form_alter", 6),
+    )
+    .await;
+
+    let hover = |uri: tower_lsp_server::gen_lsp_types::Uri, content: &'static str, nth: usize| {
+        let offset = content.match_indices("$form_state;").nth(nth).unwrap().0 + 2;
+        let position = crate::common::offset_position(content, offset);
+        (uri, position)
+    };
+    for (uri, content, nth, expected) in [
+        (module_uri.clone(), module, 0, "FormStateInterface"),
+        (module_uri.clone(), module, 1, "FormStateInterface"),
+        (module_uri.clone(), module, 2, "stdClass"),
+        (
+            uri_for(&dir, "web/modules/custom/acme/src/Hook/FormHooks.php"),
+            hooks,
+            0,
+            "FormStateInterface",
+        ),
+    ] {
+        let (uri, position) = hover(uri, content, nth);
+        let text = hover_text_at(&backend, &uri, position.line, position.character)
+            .await
+            .unwrap_or_default();
+        assert!(text.contains(expected), "{nth}: {text}");
+    }
+}
+
+/// A hook implementation the editor opens before the workspace walk finds
+/// the Drupal site takes the documented types once it does.
+#[tokio::test]
+async fn a_hook_file_opened_before_the_walk_ends_takes_the_documented_types() {
+    let api = "<?php\n/**\n * @param \\Drupal\\Core\\Form\\FormStateInterface $form_state\n */\nfunction hook_form_alter(&$form, \\Drupal\\Core\\Form\\FormStateInterface $form_state, $form_id) {\n}\n";
+    let module =
+        "<?php\nfunction acme_form_alter(&$form, $form_state, $form_id) {\n    $form_state;\n}\n";
+    let hooks = "<?php\nnamespace Drupal\\acme\\Hook;\n\nuse Drupal\\Core\\Hook\\Attribute\\Hook;\n\nfinal class FormHooks {\n    #[Hook('form_alter')]\n    public function formAlter(array &$form, $form_state): void {\n        $form_state;\n    }\n}\n";
+    let module_path = "web/modules/custom/acme/acme.module";
+    let hooks_path = "web/modules/custom/acme/src/Hook/FormHooks.php";
+    let (backend, dir) = workspace_opened_early(
+        drupal_dir(&[
+            (FORM_API_PATH, api),
+            HOOK_ATTRIBUTE,
+            (
+                "web/core/lib/Drupal/Core/Form/FormStateInterface.php",
+                "<?php\nnamespace Drupal\\Core\\Form;\ninterface FormStateInterface {}\n",
+            ),
+        ]),
+        &[(module_path, module), (hooks_path, hooks)],
+    )
+    .await;
+    let module_uri = uri_for(&dir, module_path);
+    // Finding references indexes the workspace, core's hook documentation
+    // included.
+    references_at(
+        &backend,
+        &module_uri,
+        position_in(module, "acme_form_alter", 6),
+    )
+    .await;
+    for (path, content) in [(module_path, module), (hooks_path, hooks)] {
+        let position = position_in(content, "$form_state;", 2);
+        let text = hover_text_at(
+            &backend,
+            &uri_for(&dir, path),
+            position.line,
+            position.character,
+        )
+        .await
+        .unwrap_or_default();
+        assert!(text.contains("FormStateInterface"), "{path}: {text}");
+    }
 }
