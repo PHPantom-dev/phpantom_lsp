@@ -36,7 +36,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | PHPUnit & Pest                           | 🚧       | ❌           | 🚧         | 🚧          | ✅          |
 | Other frameworks                         | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
 | **Refactoring**                          |          |              |            |             |             |
-| Rename                                   | ✅       | ✅🔒         | ✅🔒       | ✅          | ✅          |
+| Rename                                   | ✅       | ✅🔒         | ✅       | ✅          | ✅          |
 | Extract & generate<sup>8</sup>           | ✅       | ❌           | 🚧🔒       | 🚧          | ✅          |
 | Simplify & modernize<sup>9</sup>         | ✅       | ❌           | ✅🔒       | ❌          | ✅          |
 | **Performance**                          |          |              |            |             |             |
