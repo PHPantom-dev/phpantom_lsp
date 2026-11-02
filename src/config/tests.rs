@@ -1064,3 +1064,58 @@ fn client_options_carry_only_the_two_filter_lists() {
     let options = ClientIndexingOptions::from_client_settings(&settings).unwrap();
     assert_eq!(options.exclude, ["generated"]);
 }
+
+#[test]
+fn parse_inlay_hints_section() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(CONFIG_FILE_NAME),
+        "[inlay_hints]\nparameter-names = false\n",
+    )
+    .unwrap();
+    let config = load_config(dir.path()).unwrap();
+    assert_eq!(config.inlay_hints.parameter_names, Some(false));
+    assert_eq!(config.inlay_hints.closure_types, None);
+}
+
+#[test]
+fn client_inlay_hint_options_read_either_shape() {
+    for settings in [
+        serde_json::json!({ "inlayHints": { "parameterNames": false } }),
+        serde_json::json!({ "phpantom": { "inlayHints": { "parameterNames": false } } }),
+    ] {
+        let options = ClientInlayHintOptions::from_client_settings(&settings).unwrap();
+        assert_eq!(options.parameter_names, Some(false));
+        assert_eq!(options.closure_types, None);
+    }
+    assert!(
+        ClientInlayHintOptions::from_client_settings(&serde_json::json!({
+            "phpantom": { "trace": { "server": "verbose" } }
+        }))
+        .is_none()
+    );
+}
+
+/// Either layer can switch a kind off, and neither can switch it back
+/// on over the other.
+#[test]
+fn inlay_hint_kinds_need_both_layers_on() {
+    let file_off = InlayHintsConfig {
+        parameter_names: Some(false),
+        closure_types: None,
+    };
+    let editor_on = ClientInlayHintOptions {
+        parameter_names: Some(true),
+        closure_types: Some(false),
+    };
+    let kinds = InlayHintKinds::resolve(&file_off, &editor_on);
+    assert!(!kinds.parameter_names);
+    assert!(!kinds.closure_types);
+    assert!(kinds.none());
+
+    let kinds = InlayHintKinds::resolve(
+        &InlayHintsConfig::default(),
+        &ClientInlayHintOptions::default(),
+    );
+    assert!(kinds.parameter_names && kinds.closure_types);
+}

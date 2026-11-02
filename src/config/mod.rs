@@ -20,6 +20,7 @@ use serde::Deserialize;
 
 mod diagnostics;
 mod indexing;
+mod inlay_hints;
 mod laravel;
 mod stubs;
 #[cfg(test)]
@@ -28,6 +29,7 @@ mod tools;
 
 pub use diagnostics::{DiagnosticsConfig, IgnoreRule};
 pub use indexing::{ClientIndexingOptions, IndexingConfig, IndexingStrategy};
+pub use inlay_hints::{ClientInlayHintOptions, InlayHintKinds, InlayHintsConfig};
 pub use laravel::{LaravelConfig, LaravelMigrationsConfig, LaravelSchemaConfig};
 pub use stubs::{ClientStubOptions, StubsConfig};
 pub use tools::{FormattingConfig, MagoConfig, PhpStanConfig, PhpcsConfig, PhpmdConfig};
@@ -46,6 +48,8 @@ pub struct Config {
     pub stubs: StubsConfig,
     /// Semantic token highlighting settings.
     pub semantic_tokens: SemanticTokensConfig,
+    /// Inlay hint toggles.
+    pub inlay_hints: InlayHintsConfig,
     /// Formatting proxy settings.
     pub formatting: FormattingConfig,
     /// PHPStan proxy settings.

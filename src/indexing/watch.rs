@@ -450,6 +450,7 @@ impl Backend {
         // below can tell which way the discovery inputs moved.
         let previous_inputs = self.discovery_inputs();
         let was_diagnosing = self.diagnostics_enabled();
+        let previous_hint_kinds = self.inlay_hint_kinds();
 
         match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
             Ok(cfg) => self.set_config(cfg),
@@ -460,6 +461,10 @@ impl Backend {
                 );
                 return;
             }
+        }
+
+        if self.inlay_hint_kinds() != previous_hint_kinds {
+            self.request_inlay_hint_refresh_detached();
         }
 
         // Resolved classes and completions may depend on config-driven

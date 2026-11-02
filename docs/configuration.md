@@ -230,6 +230,15 @@ highlighting remains in charge of ordinary PHP syntax.
 | `"full"` | Emit the complete semantic token stream, including ordinary classes, variables, functions, methods, properties, comments, keywords, attributes, and Blade tokens. |
 | `"off"` | Return no semantic tokens. |
 
+### `[inlay_hints]`
+
+| Key               | Type | Default | Description |
+| ----------------- | ---- | ------- | ----------- |
+| `parameter-names` | bool | `true`  | Parameter names before the arguments of a call, such as `needle:`, along with the `&` of a by-reference parameter. |
+| `closure-types`   | bool | `true`  | Inferred parameter and return types on closures and arrow functions that do not declare them. |
+
+Your editor can switch these off too, see [Editor-supplied inlay hint toggles](#editor-supplied-inlay-hint-toggles). Editing this section takes effect in open files without a restart.
+
 ### `[formatting]`
 
 | Key            | Type    | Default | Description |
@@ -337,6 +346,18 @@ An editor extension that ships stubs alongside the server (phpstorm-stubs as pla
 ```
 
 It is read from `initializationOptions` and `workspace/didChangeConfiguration`, also under a `phpantom` key, and a notification without a `stubs` block leaves it as it is. The directory is treated exactly like a [`[stubs]`](#stubs) path listed after the project's own, so the project's choices win where both declare a name. This is meant for extensions, not users: to add stubs yourself, use `[stubs] paths`.
+
+## Editor-supplied inlay hint toggles
+
+An editor extension can offer its own switches for the `[inlay_hints]` kinds and pass them the same way:
+
+```json
+{ "inlayHints": { "parameterNames": false, "closureTypes": true } }
+```
+
+It is read from `initializationOptions` and `workspace/didChangeConfiguration`, also under a `phpantom` key, and a notification without an `inlayHints` block leaves the toggles as they are. A key left out has no opinion. When a toggle changes, PHPantom asks the editor to re-request the hints of open files, so the change shows at once.
+
+A kind is shown only when neither `.phpantom.toml` nor the editor turns it off. Editors send their default `true` along with every other setting, so an editor's `true` never brings back a kind the config file switched off.
 
 ## Code Formatting
 

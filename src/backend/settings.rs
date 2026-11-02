@@ -117,6 +117,23 @@ impl Backend {
         true
     }
 
+    /// The inlay hint kinds in force, from `[inlay_hints]` and the
+    /// editor's toggles together. Reads the one section without cloning
+    /// the whole config.
+    pub(crate) fn inlay_hint_kinds(&self) -> config::InlayHintKinds {
+        let client = *self.workspace.client_inlay_hints.read();
+        config::InlayHintKinds::resolve(&self.workspace.config.lock().inlay_hints, &client)
+    }
+
+    /// Replace the editor's inlay hint toggles. Returns whether the kinds
+    /// in force changed, so a settings push that leaves them as they were
+    /// does not make the editor re-pull every hint.
+    pub fn set_client_inlay_hint_options(&self, options: config::ClientInlayHintOptions) -> bool {
+        let before = self.inlay_hint_kinds();
+        *self.workspace.client_inlay_hints.write() = options;
+        self.inlay_hint_kinds() != before
+    }
+
     /// Return the configured PHP version.
     pub fn php_version(&self) -> types::PhpVersion {
         *self.workspace.php_version.lock()
