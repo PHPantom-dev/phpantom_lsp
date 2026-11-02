@@ -1268,17 +1268,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ts2-go-to-the-test-and-back" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        TS2. Go to the test, and back
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#ts3-create-a-test-for-a-class" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1384,9 +1373,10 @@
 <p>Known gaps in PHPantom's support for test code. What works today:
 PHPUnit's assertions narrow types; data providers, <code>@depends</code>, and
 coverage metadata navigate, rename, and report a name that matches
-nothing; a data provider PHPUnit cannot call is reported; covered
-classes show a lens listing their tests; Pest closures know the test
-case <code>Pest.php</code> binds them to; and Mockery mocks keep the mocked class.</p>
+nothing; a data provider PHPUnit cannot call is reported; a class
+shows a lens listing the tests that cover it or are named after it, and
+a test one back to its class; Pest closures know the test case
+<code>Pest.php</code> binds them to; and Mockery mocks keep the mocked class.</p>
 <p>PHPStan's PHPUnit extension (<code>phpstan/phpstan-phpunit</code>) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
 PHPUnit support and Phpactor's PHPUnit and Prophecy integrations are
@@ -1455,25 +1445,12 @@ use (<code>src/virtual_members/laravel/string_keys.rs</code>), the Mockery patch
 in <code>src/virtual_members/laravel/patches.rs</code>, and phpstan-phpunit's
 <code>MockMethodCallRule</code>.</p>
 <hr />
-<h2 id="ts2-go-to-the-test-and-back">TS2. Go to the test, and back<a class="headerlink" href="#ts2-go-to-the-test-and-back" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>PhpStorm jumps between a class and its test (Ctrl+Shift+T). PHPantom
-links them only through coverage metadata: the lens on a covered class
-lists the tests whose <code>#[CoversClass]</code> or <code>@covers</code> names it. Most
-projects write no coverage metadata, so the link should fall back to
-the naming convention: the class's path under its <code>autoload</code> PSR-4
-root, mirrored under an <code>autoload-dev</code> root with a <code>Test</code> suffix
-(<code>App\Billing\Invoice</code> → <code>Tests\Unit\Billing\InvoiceTest</code>), and Pest
-test files named the same way.</p>
-<p>LSP has no "go to test" request. Decide between a code lens (the
-existing coverage lens can carry the convention match too) and a code
-action, and what the test side shows.</p>
-<p><strong>Where to look:</strong> <code>src/references/covers.rs</code>, <code>src/code_lens.rs</code>.</p>
-<hr />
 <h2 id="ts3-create-a-test-for-a-class">TS3. Create a test for a class<a class="headerlink" href="#ts3-create-a-test-for-a-class" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong> (depends on TS2)</p>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>A code action on a class (or one of its methods) that writes the test
-class at the path TS2 would look for: the right namespace, the project's
+class at the path the class's test lens looks for (its path under its
+<code>autoload</code> root, mirrored under an <code>autoload-dev</code> root with a <code>Test</code>
+suffix): the right namespace, the project's
 base test case, a <code>#[CoversClass]</code> attribute, and a test method per
 public method chosen. PhpStorm and Phpactor both offer it. It shares the
 file-creation path with
