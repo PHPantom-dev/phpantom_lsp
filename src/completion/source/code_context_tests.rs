@@ -251,3 +251,18 @@ fn a_word_after_the_operators_callee_clears_it() {
     let call = ctx.enclosing_paren().expect("bar's call");
     assert!(call.callee_operator.is_none());
 }
+
+#[test]
+fn call_closing_paren_skips_comments_strings_and_documents() {
+    use super::closing_call_paren;
+    for source in [
+        "f(') <?php', /* ) */ [g(')')]) trailing",
+        "f(['body' => <<<TEXT\n)\nTEXT, 'name' => 1]) trailing",
+        "f(['body' => <<<'TEXT'\n)\nTEXT, 'name' => 1]) trailing",
+    ] {
+        assert_eq!(closing_call_paren(source, 1), source.rfind(')'), "{source}");
+    }
+    for (source, open) in [("f(", 1), ("f(/*", 1), ("f", 0), ("f()", 99)] {
+        assert!(closing_call_paren(source, open).is_none());
+    }
+}

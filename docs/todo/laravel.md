@@ -274,6 +274,51 @@ Until then the properties stay, so this is a precision gap rather
 than a missing feature. Reported as a follow-up on
 [#312](https://github.com/PHPantom-dev/phpantom_lsp/issues/312).
 
+#### L70. Read-only accessors are offered as columns
+
+**Impact: Low-Medium · Complexity: Low**
+
+`collect_column_names` reads the fully resolved model, so every virtual
+property counts as a column, including an accessor with no backing
+column and no mutator (a legacy `getDisplayNameAttribute()`, or an
+`Attribute::make(get: ...)` with no `set:`). `display_name` then
+completes in `where('…')`, `orderBy('…')` and `create([...])`. None of
+these work at runtime: the query hits a column that does not exist, and
+mass assignment of a computed-only attribute does nothing. `$appends`
+entries are counted as columns for the same reason, though they only
+name accessors to serialize.
+
+Skip `PropertySource::Accessor { column: None, mutator: None }` and
+`ComputedProperty { mutator: None }` in `collect_column_names`, and stop
+treating `$appends` as a column source there. An accessor that
+overrides a real column (one that `$casts`, `$fillable` or the
+migration schema also declares) stays. `create()` and `fill()` still
+want accessors that have a mutator.
+
+**Where to look:** `collect_column_names` in
+`virtual_members/laravel/where_property.rs` and its callers in
+`completion/eloquent_string.rs`; `extract_column_names` in
+`virtual_members/laravel/model_extraction/` for `$appends`.
+
+#### L71. Model-level attributes as column sources
+
+**Impact: Medium · Complexity: Low-Medium**
+
+Laravel models can declare their column lists with class attributes
+instead of properties: `#[Fillable(['name'])]`, `#[Guarded([...])]`,
+`#[Hidden([...])]`, `#[Visible([...])]` and `#[Appends([...])]` from
+`Illuminate\Database\Eloquent\Attributes`, which the framework merges
+into the matching property when the model boots. PHPantom reads only the
+properties. A model that uses the attributes gets no column completion
+from them, no fillable-first ordering in `create([...])`, and none of
+the column names they list. Read their `columns` argument alongside the
+property it stands in for, so the two forms behave the same. L49 needs
+the same read for `#[Fillable]`, `#[Guarded]` and `#[Unguarded]`.
+
+**Where to look:** `extract_column_names` and the `$fillable`/`$guarded`
+reads in `virtual_members/laravel/model_extraction/`, which already
+reads the `#[Table]` attribute.
+
 #### L8. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
 
 **Impact: Low-Medium · Complexity: High**
@@ -529,24 +574,6 @@ in its view are implemented (`blade/discovery.rs`). Three gaps remain:
   Neither value completes, navigates, or reports a name the component
   does not declare. Laravel Idea reports an unknown `wire:click` action.
 
-#### L30. Eloquent attribute-array key completion
-
-**Impact: High · Complexity: Medium**
-
-Our Eloquent string completion covers where-style column arguments and
-relation names, but not **attribute-array keys**: `User::create(['name'
-=> …])`, `fill()`, `make()`, `update()`, `updateOrCreate()`,
-`firstOrCreate()`, `firstOrNew()`, `createOrFirst()` should complete
-array keys from the model's column sources (preferring fillable
-columns, skipping keys already present in the literal). Also extend the
-scalar column list with `firstWhere()`, `whereColumn()`, and the
-aggregate methods (`min`/`max`/`sum`/`avg`), and cover the model-level
-PHP attributes that take column-name arguments where the installed
-framework version has them. The Laravel LSP gets its column list from
-`artisan model:show --json` (live DB required); ours comes from the
-same static sources the model provider already uses (casts, fillable,
-accessors, `@property` tags) — no database needed.
-
 #### L31. String-key rename, highlight, and semantic tokens
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -669,9 +696,9 @@ individually) and whose target model declares neither `$fillable` nor
 `$guarded`, nor the `#[Fillable]`/`#[Guarded]`/`#[Unguarded]` model
 attributes, and the project never calls `Model::unguard()`, on `create()`, `fill()`, `update()`,
 `updateOrCreate()`, `firstOrCreate()`, and `firstOrNew()`. The model
-resolution and column-source machinery L30 already needs (and the
-diagnostic's model-argument matching) share the same receiver-typing
-path, so build them together.
+resolution and column-source machinery used by attribute-array key
+completion shares the same receiver-typing path as the diagnostic's
+model-argument matching, so reuse it.
 
 **Where to look:** `virtual_members/laravel/model_extraction/` for
 existing `$fillable`/`$guarded` reads; `diagnostics/` for the

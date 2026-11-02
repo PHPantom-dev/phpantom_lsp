@@ -15,4 +15,5 @@
 pub(crate) mod code_context;
 pub mod comment_position;
 pub(crate) mod helpers;
+pub(crate) mod string_argument;
 pub(crate) mod throws_analysis;

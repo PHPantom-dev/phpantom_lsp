@@ -59,6 +59,77 @@ check(
     ($danish->getCasts()['is_vegan'] ?? null) === 'boolean'
 );
 
+// ─── Eloquent attribute arrays and column arguments ─────────────────────────
+
+$capsule->schema()->create('customers', function (\Illuminate\Database\Schema\Blueprint $table) {
+    $table->id();
+    $table->string('name');
+    $table->string('email');
+    $table->timestamps();
+});
+$customerDraft = \App\Models\Customer::make(['name' => 'Ada', 'email' => 'ada@example.test']);
+check(
+    'The Hidden model attribute accepts column names',
+    $customerDraft->getHidden() === ['email']
+        && ! array_key_exists('email', $customerDraft->toArray())
+        && $customerDraft->toArray()['name'] === 'Ada'
+);
+check(
+    'Model::make fills an unsaved model from attribute-array keys',
+    $customerDraft instanceof \App\Models\Customer
+        && ! $customerDraft->exists
+        && $customerDraft->name === 'Ada'
+        && $customerDraft->email === 'ada@example.test'
+);
+check(
+    'Model::fill returns the model and applies its fillable attributes',
+    $customerDraft->fill(['name' => 'Ada Lovelace']) === $customerDraft
+        && $customerDraft->name === 'Ada Lovelace'
+);
+$customerRecord = \App\Models\Customer::create(['name' => 'Ada', 'email' => 'ada@example.test']);
+check(
+    'Model::create persists the attribute array',
+    $customerRecord->exists && \App\Models\Customer::firstWhere('email', 'ada@example.test')->is($customerRecord)
+);
+check(
+    'Model::update saves its attribute array',
+    $customerRecord->update(['name' => 'Ada Lovelace'])
+        && $customerRecord->fresh()->name === 'Ada Lovelace'
+);
+$updatedCustomer = \App\Models\Customer::updateOrCreate(['email' => 'ada@example.test'], ['name' => 'Ada']);
+check(
+    'updateOrCreate matches its first array and saves its second array',
+    $updatedCustomer->is($customerRecord)
+        && $updatedCustomer->name === 'Ada'
+        && \App\Models\Customer::count() === 1
+);
+check(
+    'whereColumn treats both arguments as column names',
+    \App\Models\Customer::whereColumn('name', 'email')->count() === 0
+        && \App\Models\Customer::whereColumn('name', '!=', 'email')->count() === 1
+);
+$fillableBakery = \App\Models\Bakery::make(['flour' => 'whole wheat']);
+check(
+    'Bakery exposes flour as fillable and kitchen_id as guarded',
+    $fillableBakery->isFillable('flour')
+        && ! $fillableBakery->isFillable('kitchen_id')
+        && $fillableBakery->flour === 'whole wheat'
+);
+$capsule->schema()->create('bakeries', function (\Illuminate\Database\Schema\Blueprint $table) {
+    $table->id();
+    $table->integer('egg_count');
+});
+\App\Models\Bakery::query()->insert([['egg_count' => 2], ['egg_count' => 4]]);
+check(
+    'Eloquent aggregates accept a column name',
+    \App\Models\Bakery::min('egg_count') === 2
+        && \App\Models\Bakery::max('egg_count') === 4
+        && \App\Models\Bakery::sum('egg_count') === 6
+        && (float) \App\Models\Bakery::avg('egg_count') === 3.0
+);
+$capsule->schema()->drop('customers');
+$capsule->schema()->drop('bakeries');
+
 // ─── Scope vs Model method shadowing ────────────────────────────────────────
 
 // Model::fresh() is public — a subclass CANNOT define a #[Scope] named "fresh"

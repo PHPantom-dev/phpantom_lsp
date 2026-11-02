@@ -167,13 +167,32 @@ enum State {
 /// `offset`, and in code otherwise, so a bare fragment with no `<?php` (as
 /// tests and synthesised snippets use) is read as code throughout.
 pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContext<'_>> {
+    scan_code_context(content, 0, offset, false).map(|(context, _)| context)
+}
+
+/// Find a call's closing parenthesis, including across heredoc/nowdoc values.
+///
+/// Reuses the lexical scan starting at the known opening parenthesis, so
+/// neither quoted delimiters nor PHP-looking text in a string ends the call.
+pub(crate) fn closing_call_paren(content: &str, open: usize) -> Option<usize> {
+    if content.as_bytes().get(open) != Some(&b'(') {
+        return None;
+    }
+    scan_code_context(content, open, content.len(), true)?.1
+}
+
+fn scan_code_context(
+    content: &str,
+    start: usize,
+    end: usize,
+    stop_at_close: bool,
+) -> Option<(CodeContext<'_>, Option<usize>)> {
     let bytes = content.as_bytes();
-    let end = offset;
     if end > bytes.len() {
         return None;
     }
 
-    let mut state = if memmem::find(&bytes[..end], b"<?").is_some() {
+    let mut state = if !stop_at_close && memmem::find(&bytes[..end], b"<?").is_some() {
         State::Html
     } else {
         State::Code
@@ -182,7 +201,8 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
     // One past the last byte of code seen so far.
     let mut code_end = 0usize;
     let mut heredoc_label: &[u8] = &[];
-    let mut i = 0usize;
+    let mut i = start;
+    let mut matching_close = None;
     // The most recent `->` / `?->` / `::` since the last time it was
     // invalidated, and whether the identifier run that is its callee has
     // been seen yet.  A second identifier run (e.g. the `bar` of `$a->foo
@@ -398,6 +418,10 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
                         // belongs to an unbalanced edit; dropping it keeps
                         // the brackets that do pair up intact.
                         if let Some(popped) = open_brackets.pop_if(|b| b.byte == opener) {
+                            if stop_at_close && popped.offset == start {
+                                matching_close = Some(i);
+                                break;
+                            }
                             // A call that just closed right before an
                             // operator lets that operator's receiver be
                             // traced through it (the `safe()` hop).
@@ -476,11 +500,14 @@ pub(crate) fn code_context_at(content: &str, offset: usize) -> Option<CodeContex
         State::DoubleString(quote) => Some((quote, '"')),
         State::Html | State::LineComment | State::BlockComment | State::Heredoc => return None,
     };
-    Some(CodeContext {
-        code_before: content.get(..code_end)?,
-        open_brackets,
-        open_string,
-    })
+    Some((
+        CodeContext {
+            code_before: content.get(..code_end)?,
+            open_brackets,
+            open_string,
+        },
+        matching_close,
+    ))
 }
 
 /// Read a `<<<LABEL` heredoc/nowdoc opener starting at `start`.
