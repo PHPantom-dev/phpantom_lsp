@@ -30,6 +30,7 @@
 
 use crate::atom::atom;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use crate::Backend;
@@ -125,24 +126,58 @@ pub(crate) fn resolve_auth_user_type(
         return cached.clone();
     }
     // Break re-entry: resolving the floor scans the class index and re-loads
-    // the auth entry points, which would re-invoke this patch.  Seed the cache
-    // with `None` so a re-entrant load resolves to the raw (unpatched) class —
-    // exactly what the implementor scan needs — then overwrite with the real
-    // result once computed.
-    backend
-        .laravel
-        .auth_user_type_cache
-        .write()
-        .insert(key.clone(), None);
-    let result = compute_auth_user_type(backend, guard, class_loader);
+    // the auth entry points, which would re-invoke this patch.  A re-entrant
+    // load on this thread resolves to the raw (unpatched) class — exactly what
+    // the implementor scan needs.
+    if AUTH_MODELS_BEING_COMPUTED.with_borrow(|keys| keys.contains(&key)) {
+        return None;
+    }
+    let _compute_lock = backend.laravel.auth_user_type_compute_lock.lock();
+    if let Some(cached) = backend.laravel.auth_user_type_cache.read().get(&key) {
+        return cached.clone();
+    }
+    let result = {
+        let _computing = AuthModelBeingComputed::start(&key);
+        compute_auth_user_type(backend, guard, class_loader)
+    };
     backend
         .laravel
         .auth_user_type_cache
         .write()
         .insert(key, result.clone());
-    // A class loaded during the computation saw the seeded `None`.
+    // A class loaded during the computation saw the raw class.
     backend.laravel.note_config_facts_change();
     result
+}
+
+thread_local! {
+    /// The guards whose auth model this thread is computing.
+    static AUTH_MODELS_BEING_COMPUTED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Whether this thread is computing an auth model, and so holds the lock other
+/// threads wait on to read it.
+pub(crate) fn is_computing_auth_model() -> bool {
+    AUTH_MODELS_BEING_COMPUTED.with_borrow(|keys| !keys.is_empty())
+}
+
+/// RAII marker that a guard's auth model is being computed on this thread,
+/// cleared when the computation ends, normally or by panic.
+struct AuthModelBeingComputed;
+
+impl AuthModelBeingComputed {
+    fn start(key: &str) -> Self {
+        AUTH_MODELS_BEING_COMPUTED.with_borrow_mut(|keys| keys.push(key.to_string()));
+        Self
+    }
+}
+
+impl Drop for AuthModelBeingComputed {
+    fn drop(&mut self) {
+        AUTH_MODELS_BEING_COMPUTED.with_borrow_mut(|keys| {
+            keys.pop();
+        });
+    }
 }
 
 fn compute_auth_user_type(

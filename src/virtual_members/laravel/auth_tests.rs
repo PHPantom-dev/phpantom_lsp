@@ -223,3 +223,123 @@ fn unresolvable_config_falls_back_to_implementors() {
         ]))
     );
 }
+
+/// A backend whose `config/auth.php` names `App\Models\User`, kept alive by the
+/// returned directory, and a loader that knows that one class.
+fn backend_configuring_user_model() -> (
+    Backend,
+    tempfile::TempDir,
+    impl Fn(Fqn<'_>) -> Option<Arc<ClassInfo>> + Sync,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("config")).unwrap();
+    std::fs::write(
+        dir.path().join("config/auth.php"),
+        r"<?php return [
+            'defaults' => ['guard' => 'web'],
+            'guards' => ['web' => ['provider' => 'users']],
+            'providers' => ['users' => ['model' => 'App\Models\User']],
+        ];",
+    )
+    .unwrap();
+    let backend = crate::test_fixtures::make_backend();
+    *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+
+    let mut user = crate::test_fixtures::make_class("User");
+    user.file_namespace = Some(atom("App\\Models"));
+    user.interfaces.push(atom(AUTHENTICATABLE_FQN));
+    let user = Arc::new(user);
+    let load_user =
+        move |name: Fqn<'_>| (name.as_str() == "App\\Models\\User").then(|| user.clone());
+    (backend, dir, load_user)
+}
+
+/// A thread that asks for the auth model while another is computing it gets
+/// the model.  Seeing "no model" here would leave `user()` unrefined in
+/// whatever class that thread caches, depending only on thread timing.
+#[test]
+fn a_thread_asking_during_the_computation_gets_the_model() {
+    use std::sync::Barrier;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let (backend, _dir, load_user) = backend_configuring_user_model();
+
+    let computing = Barrier::new(2);
+    let paused = AtomicBool::new(false);
+    let pausing_loader = |name: Fqn<'_>| {
+        if !paused.swap(true, Ordering::Relaxed) {
+            computing.wait();
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        load_user(name)
+    };
+
+    let during = std::thread::scope(|scope| {
+        scope.spawn(|| resolve_auth_user_type(&backend, None, &pausing_loader));
+        computing.wait();
+        resolve_auth_user_type(&backend, None, &load_user)
+    });
+
+    assert_eq!(during, Some(named("App\\Models\\User")));
+}
+
+/// The loads a computation triggers ask for the model too, and must get the
+/// raw class rather than recurse or block on the lock their own thread holds.
+#[test]
+fn the_computing_thread_asking_again_gets_no_model() {
+    let (backend, _dir, load_user) = backend_configuring_user_model();
+
+    let during = std::cell::OnceCell::new();
+    let reentrant_loader = |name: Fqn<'_>| {
+        during.get_or_init(|| resolve_auth_user_type(&backend, None, &load_user));
+        load_user(name)
+    };
+
+    let computed = resolve_auth_user_type(&backend, None, &reentrant_loader);
+
+    assert_eq!(during.get(), Some(&None));
+    assert_eq!(computed, Some(named("App\\Models\\User")));
+}
+
+/// A claim's owner may be queued on the lock the computing thread holds, so
+/// waiting on that claim could only end at the timeout.
+#[test]
+fn the_computing_thread_does_not_wait_on_a_claimed_class() {
+    use crate::virtual_members::cache::PendingClaim;
+    use crate::virtual_members::new_resolved_class_cache;
+    use crate::virtual_members::resolve::{PENDING_WAIT_ESCAPE_HATCH, resolve_class_fully_cached};
+
+    let (backend, _dir, load_user) = backend_configuring_user_model();
+
+    let claimed = Arc::new(crate::test_fixtures::make_class("Claimed"));
+    let load_claimed = |_: Fqn<'_>| Some(claimed.clone());
+    let cache = new_resolved_class_cache();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let key = (atom("Claimed"), Vec::new());
+            assert!(matches!(
+                cache.write().claim_pending(&key),
+                PendingClaim::Fresh
+            ));
+        });
+    });
+
+    let resolved = std::cell::OnceCell::new();
+    let resolving_loader = |name: Fqn<'_>| {
+        resolved.get_or_init(|| resolve_class_fully_cached(&claimed, &load_claimed, &cache));
+        load_user(name)
+    };
+
+    let started = std::time::Instant::now();
+    resolve_auth_user_type(&backend, None, &resolving_loader);
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed < PENDING_WAIT_ESCAPE_HATCH,
+        "waited on the claim: {elapsed:?}"
+    );
+    assert_eq!(
+        resolved.get().map(|class| class.fqn().as_str()),
+        Some("Claimed")
+    );
+}

@@ -83,7 +83,7 @@ impl Drop for PendingGuard<'_> {
 /// above normal contention and only fires if the owning thread is
 /// abnormally stuck — mirroring `ParseInflight`'s escape hatch in
 /// `resolution/inflight.rs`.
-const PENDING_WAIT_ESCAPE_HATCH: std::time::Duration = std::time::Duration::from_secs(5);
+pub(super) const PENDING_WAIT_ESCAPE_HATCH: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Wait for another thread's first-time resolution of `key` to land in
 /// the cache.
@@ -91,12 +91,16 @@ const PENDING_WAIT_ESCAPE_HATCH: std::time::Duration = std::time::Duration::from
 /// Returns `None` when the caller should give up waiting and resolve
 /// the class itself instead: either the owning thread released its
 /// claim without inserting a result (e.g. it hit its own cycle break
-/// at this very key from a different angle), or the wait exceeded
-/// [`PENDING_WAIT_ESCAPE_HATCH`].
+/// at this very key from a different angle), this thread is computing
+/// the auth model, or the wait exceeded [`PENDING_WAIT_ESCAPE_HATCH`].
 fn wait_for_pending(
     cache: &ResolvedClassCache,
     key: &ResolvedClassCacheKey,
 ) -> Option<Arc<ClassInfo>> {
+    // The owner may be waiting for the auth model this thread is computing.
+    if laravel::is_computing_auth_model() {
+        return None;
+    }
     let deadline = std::time::Instant::now() + PENDING_WAIT_ESCAPE_HATCH;
     loop {
         std::thread::sleep(std::time::Duration::from_micros(50));
