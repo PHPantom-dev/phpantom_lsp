@@ -109,6 +109,7 @@ struct ExtractionCtx<'a> {
     /// The Drupal routes the file's `#[Route]` attributes declare.
     drupal_routes: Vec<crate::symbol_map::DrupalRouteSite>,
     drupal_hooks: Vec<crate::symbol_map::HookSite>,
+    drupal_computed_hooks: Vec<crate::symbol_map::ComputedHookSite>,
     /// What the file holds of Drupal hooks, which its path says.
     drupal_file: crate::drupal::hooks::DrupalFile,
     /// A procedural function with `#[ProceduralHookScanStop]` was read:
@@ -529,6 +530,7 @@ fn extract_symbol_map_inner(
         drupal_route_aliases: Vec::new(),
         drupal_routes: Vec::new(),
         drupal_hooks: Vec::new(),
+        drupal_computed_hooks: Vec::new(),
         drupal_file,
         drupal_hook_scan_stopped: false,
         cond_nesting_depth: 0,
@@ -730,6 +732,7 @@ fn extract_symbol_map_inner(
         drupal_route_aliases: ctx.drupal_route_aliases,
         drupal_routes: ctx.drupal_routes,
         drupal_hooks: ctx.drupal_hooks,
+        drupal_computed_hooks: ctx.drupal_computed_hooks,
         routes: ctx.routes,
         declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx

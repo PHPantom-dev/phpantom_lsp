@@ -643,6 +643,25 @@ pub(crate) enum HookRole {
     Invocation { extension: Option<Atom> },
 }
 
+/// An invoking call inside one of the core methods that fire hooks under
+/// computed names (see `drupal::computed_hooks`), with the shape of the
+/// name it builds: `*` for each part not written out, and `_alter` after
+/// an alter type.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ComputedHookSite {
+    /// The method the call is in.
+    pub method: Atom,
+    /// The byte range of the call's hook argument.
+    pub start: u32,
+    pub end: u32,
+    pub shape: String,
+    /// The call is an alter call.
+    pub alter: bool,
+    /// The call reaches themes (a theme manager's) or modules (a module
+    /// handler's), when its receiver says which.
+    pub themes: Option<bool>,
+}
+
 /// What a Drupal entity type declaration gives its ID: the entity class,
 /// and the storage handler that loads it.
 #[derive(Debug, Clone, PartialEq)]

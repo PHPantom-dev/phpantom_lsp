@@ -1039,6 +1039,124 @@ pub(in crate::symbol_map::extraction) fn record_drupal_hook_invocations(
     }
 }
 
+/// Record the invoking calls of the core methods that fire hooks under
+/// computed names, with the shape of the name each builds (see
+/// [`crate::drupal::computed_hooks`]).  A hook name held in a variable is
+/// all `*`; an alter call adds `_alter`, and a list of alter types gives
+/// one shape each.
+pub(in crate::symbol_map::extraction) fn emit_drupal_computed_hook_sites(
+    members: &Sequence<'_, ClassLikeMember<'_>>,
+    name_offset: u32,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || ctx.drupal_file == crate::drupal::hooks::DrupalFile::Test {
+        return;
+    }
+    let Some(class) = ctx.resolved_name_at(name_offset).map(str::to_string) else {
+        return;
+    };
+    for member in members.iter() {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        let method_name = bytes_to_str(method.name.value);
+        if !crate::drupal::computed_hooks::is_computing_method(&class, method_name) {
+            continue;
+        }
+        let mut calls = Vec::new();
+        mago_syntax::walker::Walker::walk_method(&InvokingCallWalker, method, &mut calls);
+        for (receiver, callee, arguments) in calls {
+            let positional: Vec<&Expression<'_>> = arguments
+                .arguments
+                .iter()
+                .map_while(|argument| match argument {
+                    Argument::Positional(positional) => Some(positional.value),
+                    Argument::Named(_) => None,
+                })
+                .collect();
+            let invoker = MODULE_INVOKERS
+                .iter()
+                .chain(THEME_INVOKERS.iter())
+                .find(|invoker| invoker.method.eq_ignore_ascii_case(callee));
+            let Some(invoker) = invoker else {
+                continue;
+            };
+            let Some(hook) = positional.get(invoker.hook) else {
+                continue;
+            };
+            // The receiver's spelling says which group a call reaches: the
+            // theme manager calls its own `alterForTheme()`, and the module
+            // handler and the theme manager are injected under their names.
+            let receiver_text = expr_to_subject_text(receiver);
+            let themes = if callee.eq_ignore_ascii_case("alterForTheme")
+                || receiver_text.contains("themeManager")
+                || (receiver_text == "$this"
+                    && class
+                        .trim_start_matches('\\')
+                        .ends_with("Theme\\ThemeManager"))
+            {
+                Some(true)
+            } else if receiver_text.contains("moduleHandler") {
+                Some(false)
+            } else {
+                None
+            };
+            let parts: Vec<&Expression<'_>> = match hook {
+                Expression::Array(array) => array
+                    .elements
+                    .iter()
+                    .filter_map(|element| match element {
+                        ArrayElement::Value(value) => Some(value.value),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => vec![*hook],
+            };
+            for part in parts {
+                let mut shape = String::new();
+                push_name_parts(part, &mut shape);
+                if invoker.alter {
+                    shape.push_str("_alter");
+                }
+                let span = part.span();
+                ctx.drupal_computed_hooks
+                    .push(crate::symbol_map::ComputedHookSite {
+                        method: crate::atom::atom(method_name),
+                        start: span.start.offset,
+                        end: span.end.offset,
+                        shape,
+                        alter: invoker.alter,
+                        themes,
+                    });
+            }
+        }
+    }
+}
+
+/// The method calls of a method body.
+struct InvokingCallWalker;
+
+/// A method call: its receiver, its name, and its arguments.
+type FoundCall<'ast, 'arena> = (
+    &'ast Expression<'arena>,
+    &'arena str,
+    &'ast ArgumentList<'arena>,
+);
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Vec<FoundCall<'ast, 'arena>>>
+    for InvokingCallWalker
+{
+    fn walk_in_method_call(
+        &self,
+        call: &'ast MethodCall<'arena>,
+        calls: &mut Vec<FoundCall<'ast, 'arena>>,
+    ) {
+        if let ClassLikeMemberSelector::Identifier(name) = &call.method {
+            calls.push((call.object, bytes_to_str(name.value), &call.argument_list));
+        }
+    }
+}
+
 /// Record the route name `new Url('…')` reads.
 pub(in crate::symbol_map::extraction) fn emit_drupal_url_spans(
     class: &Expression<'_>,

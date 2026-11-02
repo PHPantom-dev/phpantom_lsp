@@ -323,6 +323,9 @@ pub(crate) struct SymbolMap {
     /// What each Drupal hook implementation and invocation of the file is,
     /// sorted by `start`.  Empty for every file that has none.
     pub drupal_hooks: Vec<HookSite>,
+    /// The invoking calls of the core methods that fire hooks under
+    /// computed names.  Empty for every other file.
+    pub drupal_computed_hooks: Vec<ComputedHookSite>,
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,

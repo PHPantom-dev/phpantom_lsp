@@ -665,3 +665,91 @@ async fn a_hook_file_opened_before_the_walk_ends_takes_the_documented_types() {
         assert!(text.contains("FormStateInterface"), "{path}: {text}");
     }
 }
+
+const FORM_BUILDER: &str = r#"<?php
+namespace Drupal\Core\Form;
+
+class FormBuilder {
+    public function prepareForm($form_id, &$form, $form_state) {
+        $hooks = ['form'];
+        $hooks[] = 'form_' . $form_id;
+        $this->moduleHandler->alter($hooks, $form, $form_state, $form_id);
+        $this->themeManager->alter($hooks, $form, $form_state, $form_id);
+    }
+}
+"#;
+
+const STORAGES: &[(&str, &str)] = &[
+    (
+        "web/core/lib/Drupal/Core/Entity/EntityStorageBase.php",
+        "<?php\nnamespace Drupal\\Core\\Entity;\nabstract class EntityStorageBase {\n    protected function invokeHook($hook, $entity) {\n        $this->moduleHandler()->invokeAll($this->entityTypeId . '_' . $hook, [$entity]);\n        $this->moduleHandler()->invokeAll('entity_' . $hook, [$entity]);\n    }\n}\n",
+    ),
+    (
+        "web/core/lib/Drupal/Core/Config/Entity/ConfigEntityStorage.php",
+        "<?php\nnamespace Drupal\\Core\\Config\\Entity;\nclass ConfigEntityStorage extends \\Drupal\\Core\\Entity\\EntityStorageBase {\n    protected function invokeHook($hook, $entity) {\n        $this->moduleHandler()->invokeAll($this->entityTypeId . '_' . $hook, [$entity]);\n    }\n}\n",
+    ),
+    (
+        "web/core/modules/node/src/Entity/Node.php",
+        "<?php\nnamespace Drupal\\node\\Entity;\n/**\n * @ContentEntityType(\n *   id = \"node\",\n * )\n */\nclass Node {}\n",
+    ),
+];
+
+/// An implementation of a computed hook reaches the call in core that
+/// fires it: the module handler's for a module, and the storage that
+/// stores its entity type.
+#[tokio::test]
+async fn computed_hooks_reach_the_core_call_that_fires_them() {
+    let builder_path = "web/core/lib/Drupal/Core/Form/FormBuilder.php";
+    let (backend, dir) = drupal(
+        &[
+            ("web/core/lib/Drupal/Core/Form/form.api.php", PATTERN_API),
+            (builder_path, FORM_BUILDER),
+            STORAGES[0],
+            STORAGES[1],
+            STORAGES[2],
+        ],
+        &[("web/modules/custom/acme/acme.module", PATTERN_MODULE)],
+    )
+    .await;
+    let module = uri_for(&dir, "web/modules/custom/acme/acme.module");
+    references_at(
+        &backend,
+        &module,
+        position_in(PATTERN_MODULE, "acme_node", 6),
+    )
+    .await;
+    let lines = |found: Vec<tower_lsp_server::gen_lsp_types::Location>| {
+        found
+            .into_iter()
+            .map(|location| (location.uri, location.range.start.line))
+            .collect::<Vec<_>>()
+    };
+    let api = uri_for(&dir, "web/core/lib/Drupal/Core/Form/form.api.php");
+
+    let found = lines(
+        definitions_at(
+            &backend,
+            &module,
+            position_in(PATTERN_MODULE, "acme_form_user_login_form_alter", 6),
+        )
+        .await,
+    );
+    assert_eq!(
+        found,
+        vec![(uri_for(&dir, builder_path), 7), (api.clone(), 1)]
+    );
+
+    let found = lines(
+        definitions_at(
+            &backend,
+            &module,
+            position_in(PATTERN_MODULE, "acme_node_presave", 6),
+        )
+        .await,
+    );
+    assert_eq!(
+        found,
+        vec![(uri_for(&dir, STORAGES[0].0), 4), (api, 3)],
+        "only the content storage stores nodes"
+    );
+}

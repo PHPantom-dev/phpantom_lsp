@@ -520,6 +520,27 @@ impl Backend {
             return self.hook_locations(&targets);
         }
         let docs = self.hook_documentation_occurrences(key, &occurrences);
+        // Then the calls in core that fire it under a computed name.
+        let computed: Vec<HookOccurrence> = match &here {
+            Occurrence::Implementation {
+                is_theme,
+                collected: true,
+                ..
+            } => self
+                .computed_hook_call_sites(key, *is_theme)
+                .into_iter()
+                .map(|(uri, start, end)| HookOccurrence {
+                    uri,
+                    start,
+                    end,
+                    role: Occurrence::Invocation {
+                        themes: *is_theme,
+                        extension: None,
+                    },
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
         let targets: Vec<&HookOccurrence> = occurrences
             .iter()
             .filter(|other| match (&here, &other.role) {
@@ -531,6 +552,7 @@ impl Backend {
                 }
                 _ => false,
             })
+            .chain(computed.iter())
             .chain(docs.iter())
             .collect();
         self.hook_locations(&targets)
