@@ -274,7 +274,9 @@ impl Backend {
         let mut spans = Vec::new();
         let mut container_values = Vec::new();
         let mut route_imports = Vec::new();
+        let mut declares_twig_loader = false;
         if is_symfony && crate::symfony::resources::is_container_config_uri(uri) {
+            declares_twig_loader = crate::symfony::tags::tags_twig_loader(content);
             // A bus is declared by a key under `config/packages/`, which is
             // a configuration key too; the bus is the one that means
             // something, and the first of two spans over the same text is
@@ -290,6 +292,17 @@ impl Backend {
                 let (routes, imports) = crate::symfony::routes::routing_declarations(uri, content);
                 spans.extend(routes);
                 route_imports = imports;
+            } else if uri.contains("/config/packages/")
+                && crate::symfony::config_tree::configures_foreign_router_resource(uri, content)
+            {
+                // The router loads its routes from somewhere else than the
+                // routing files, which is a loader whose routes cannot be
+                // read.
+                route_imports.push(crate::symbol_map::RouteImport {
+                    resource: None,
+                    loader: None,
+                    name_prefix: String::new(),
+                });
             }
         }
         if is_symfony {
@@ -346,6 +359,7 @@ impl Backend {
             member_access_indices,
             container_values,
             route_imports,
+            declares_twig_loader,
             source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
             ..SymbolMap::default()
         }

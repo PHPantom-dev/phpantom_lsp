@@ -126,7 +126,8 @@ pub(crate) struct SymfonyState {
 /// Whether `map` declares a service ID, a container parameter, a route, a
 /// translation key, a template, a Twig filter or function, a configuration
 /// key, an event listener, or a Messenger bus, outright or through a configurator call still to be
-/// confirmed, or registers a Messenger handler, or imports routes.
+/// confirmed, or registers a Messenger handler, or imports routes, or
+/// declares a Twig loader.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that
 /// uses Twig declares its templates, filters, and functions and nothing
@@ -140,6 +141,7 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
+        || (map.declares_twig_loader && enabled(StringKeyKind::TwigTemplate))
         || map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
@@ -314,6 +316,14 @@ impl Backend {
         (names, world)
     }
 
+    /// Whether the project declares a Twig loader of its own, which can
+    /// serve template names no file under the Twig roots holds.
+    pub(crate) fn declares_twig_loader(&self) -> bool {
+        let mut declares = false;
+        self.visit_declaring_symbol_maps(|_, map| declares |= map.declares_twig_loader);
+        declares
+    }
+
     /// The service IDs or parameters the project's own configuration
     /// declares, sorted, leaving out the installed bundles'.
     pub(crate) fn symfony_project_declared_names(&self, kind: StringKeyKind) -> Vec<String> {
@@ -346,8 +356,17 @@ impl Backend {
                 },
             );
         } else {
+            // A parameter set under a name built at runtime is declared as a
+            // pattern (`app.*`), which is no name anyone writes, and a route
+            // is named after its controller (`App\Controller\Foo::bar`) as
+            // well as by its own name, which is the one to offer.
+            let is_unlisted = |key: &str| match kind {
+                StringKeyKind::ContainerParameter => key.ends_with('*'),
+                StringKeyKind::SymfonyRoute => key.contains('\\'),
+                _ => false,
+            };
             self.visit_symfony_declarations(kind, |uri, _, start, _, key| {
-                if except != Some((uri, start)) {
+                if except != Some((uri, start)) && !is_unlisted(key) {
                     names.push(key.to_string());
                 }
             });

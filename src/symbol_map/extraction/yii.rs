@@ -146,6 +146,7 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
         key,
         is_write: false,
         is_optional: false,
+        guards: 0,
         receiver: ReceiverClass::YiiViewRenderer,
     });
 }

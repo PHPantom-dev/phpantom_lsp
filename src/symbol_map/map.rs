@@ -307,9 +307,14 @@ pub(crate) struct SymbolMap {
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,
+    /// Whether the file declares a Twig loader of the project's own: a
+    /// class that is one, or a service tagged `twig.loader`.  Such a loader
+    /// can serve any template name, so no name can be told missing.
+    pub declares_twig_loader: bool,
     /// The Symfony routes the file loads from elsewhere, and the ones it
-    /// declares in a way that cannot be read.  Empty for every file that
-    /// is not a routing configuration file.
+    /// declares in a way that cannot be read, including every route of a
+    /// kernel that loads them itself or a router configured to load them
+    /// from elsewhere.  Empty for every file that does neither.
     pub route_imports: Vec<RouteImport>,
     /// Byte length of the source text this map was extracted from, or
     /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit

@@ -26,6 +26,29 @@ fn named_attribute(tag: &str) -> Option<(&'static str, StringKeyKind, bool)> {
     }
 }
 
+/// The tag that registers a service as a Twig loader.
+const TWIG_LOADER_TAG: &str = "twig.loader";
+
+/// Whether one YAML or XML configuration file tags a service as a Twig
+/// loader: `twig.loader` written as a whole name, in any of the shapes a
+/// tag takes, rather than as the start of a service ID such as
+/// `twig.loader.native_filesystem`, a reference to the service of that name
+/// (`'@twig.loader'`), or an XML `id="twig.loader"`.
+pub(crate) fn tags_twig_loader(content: &str) -> bool {
+    content.match_indices(TWIG_LOADER_TAG).any(|(at, _)| {
+        let before = &content[..at];
+        let after = content[at + TWIG_LOADER_TAG.len()..].bytes().next();
+        let bounds = |byte: Option<u8>| {
+            byte.is_none_or(|byte| {
+                !(byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'@'))
+            })
+        };
+        bounds(before.bytes().next_back())
+            && bounds(after)
+            && !before.trim_end_matches(['"', '\'']).ends_with("id=")
+    })
+}
+
 /// The event and bus names the service tags of one YAML or XML
 /// configuration file hold, including the ones still being typed.
 pub(crate) fn tag_slots(uri: &str, content: &str) -> Vec<NameSlot> {
@@ -230,6 +253,27 @@ fn scan_xml(content: &str, slots: &mut Vec<NameSlot>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_twig_loader_tag_is_found_in_any_shape() {
+        assert!(tags_twig_loader(
+            "services:\n    App\\Twig\\DbLoader:\n        tags: [twig.loader]\n"
+        ));
+        assert!(tags_twig_loader(
+            "services:\n    App\\Twig\\DbLoader:\n        tags:\n            - { name: 'twig.loader', priority: 10 }\n"
+        ));
+        assert!(tags_twig_loader(
+            r#"<service id="app.loader" class="App\Twig\DbLoader"><tag name="twig.loader"/></service>"#
+        ));
+        // A service the name is the start of, or the service itself, is
+        // not the tag.
+        assert!(!tags_twig_loader(
+            "services:\n    App\\Twig\\Wrapper:\n        arguments: ['@twig.loader', '@twig.loader.native_filesystem']\n"
+        ));
+        assert!(!tags_twig_loader(
+            r#"<argument type="service" id="twig.loader"/>"#
+        ));
+    }
 
     fn named(uri: &str, content: &str) -> Vec<(StringKeyKind, String, bool)> {
         tag_slots(uri, content)

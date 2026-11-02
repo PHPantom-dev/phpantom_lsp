@@ -81,6 +81,48 @@ No outstanding items.
 
 No outstanding items.
 
+## Framework names in strings
+
+### B712. A router resource set in PHP configuration still lets route names be judged
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+// config/packages/routing.php
+return static function (FrameworkConfig $framework): void {
+    $framework->router()->resource('app.route_loader');
+};
+```
+
+A `framework.router.resource` that points anywhere but
+`kernel::loadRoutes` means the routing files are not what Symfony
+loads, so no route name can be told missing. That is noticed in
+`config/packages/` YAML and XML (`config_tree::configures_foreign_router_resource`),
+but PHP package configuration is not read at all, whether written with
+the fluent `FrameworkConfig` builders, `$container->extension('framework', [...])`,
+or the array shape `App::config()` takes. Every route name the custom
+loader defines is still reported unknown. Read the router's resource from
+PHP configuration too.
+
+### B713. A localized `@Route` annotation declares no per-locale names
+
+**Impact: Low · Complexity: Low**
+
+```php
+/**
+ * @Route({"en": "/contact", "nl": "/contact-nl"}, name="contact")
+ */
+public function contact(): Response { … }
+
+$this->generateUrl('contact.en');   // reported unknown
+```
+
+A localized `#[Route]` attribute declares `contact.en` and `contact.nl`
+beside `contact`, but the `@Route` annotation reader
+(`annotation_routes` in `symbol_map/extraction/symfony.rs`) reads a path
+written as a mapping as no path at all, so its locales are lost. Read the
+locale keys of an annotation's path the way the attribute's are read.
+
 ## Name resolution
 
 ### B704. A function declared in two files resolves to whichever is found first
@@ -117,4 +159,27 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B705. Find References skips Drupal's `.module` and `.install` files
+
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+// web/core/modules/navigation/navigation.install
+$file = \Drupal::entityTypeManager()->getStorage('file')->load($logo_fid);
+```
+
+Find References on `EntityStorageInterface::load()` in a Drupal site
+returns no result from a `.module`, `.install`, `.theme`, `.profile`,
+`.inc` or `.engine` file, though their classes and functions are
+indexed. On Drupal core the call above and one in `search.install` are
+missing. Setting `[indexing] extensions` to those six extensions brings
+them back.
+
+When the web root is detected, `scan_drupal_directories` reads those
+files with its own `is_drupal_php_file`, but `IndexFilters::is_php_file`,
+which decides which files the workspace walk turns into symbol maps,
+knows only `.php` and the configured extensions. Add the Drupal
+extensions to the filter's extension list when a Drupal web root is
+detected, so every workspace walk sees the same files the class scan
+does. Check which other workspace-wide features (rename, workspace
+symbols, `analyze`) read the same filter.

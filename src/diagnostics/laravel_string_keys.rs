@@ -324,7 +324,9 @@ impl<'a> DeclaredKeys<'a> {
         } else {
             backend.symfony_declared_names(crate::symbol_map::StringKeyKind::SymfonyTranslation)
         };
-        let twig_templates = if has_twig_template {
+        // A loader of the project's own can serve any name, so none is
+        // missing.
+        let twig_templates = if has_twig_template && !backend.declares_twig_loader() {
             backend.symfony_declared_names(crate::symbol_map::StringKeyKind::TwigTemplate)
         } else {
             Vec::new()
@@ -414,10 +416,7 @@ impl<'a> DeclaredKeys<'a> {
             // `Backend::gate_ability_problem`.
             CheckedStringKind::GateAbility => None,
             CheckedStringKind::ServiceId => self.judge_service(key),
-            CheckedStringKind::ContainerParameter => {
-                Self::judge_application_key(&self.parameters, "app.", key)
-                    .map(|valid| (valid, "container parameter", "invalid_symfony_parameter"))
-            }
+            CheckedStringKind::ContainerParameter => self.judge_parameter(key),
             CheckedStringKind::SymfonyRoute => self.judge_symfony_route(key),
             CheckedStringKind::SymfonyTranslation => self.judge_symfony_translation(key),
             CheckedStringKind::TwigTemplate => self.judge_twig_template(key),
@@ -557,6 +556,21 @@ impl<'a> DeclaredKeys<'a> {
             Self::judge_application_key(&self.services, "app.", key)?
         };
         Some((valid, "service", "invalid_symfony_service"))
+    }
+
+    /// A parameter set under a name built at runtime is declared as the
+    /// pattern its literal start makes (`app.*`), under which no name can be
+    /// told missing.
+    fn judge_parameter(&self, key: &str) -> Verdict {
+        if self.parameters.iter().any(|declared| {
+            declared
+                .strip_suffix('*')
+                .is_some_and(|prefix| key.starts_with(prefix))
+        }) {
+            return None;
+        }
+        Self::judge_application_key(&self.parameters, "app.", key)
+            .map(|valid| (valid, "container parameter", "invalid_symfony_parameter"))
     }
 
     /// Whether `key`, a service ID or parameter, is among the `declared`

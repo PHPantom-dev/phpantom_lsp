@@ -444,6 +444,7 @@ struct CollectCtx<'w, 'ast, 'arena, 'sites> {
 /// A candidate lies inside a string its call's argument list spells: the
 /// whole of its contents, or a `%name%` placeholder among them.  Strings
 /// do not overlap, so a call owns exactly the candidates inside its own.
+/// A name built at runtime starts where the argument that builds it does.
 struct ReceiverCallWalker<'a, 'sites> {
     /// Sorted by offset.
     sites: &'a [&'sites TypedReceiverSite],
@@ -473,7 +474,19 @@ impl<'sites> ReceiverCallWalker<'_, 'sites> {
             }
             Expression::Array(array) => &array.elements,
             Expression::LegacyArray(array) => &array.elements,
-            _ => return,
+            // A name built at runtime is a candidate over the whole
+            // expression that builds it.
+            other => {
+                let start = other.span().start.offset;
+                let from = self.sites.partition_point(|site| site.start < start);
+                out.extend(
+                    self.sites[from..]
+                        .iter()
+                        .take_while(|site| site.start == start)
+                        .map(|site| (*site, index)),
+                );
+                return;
+            }
         };
         for element in elements.iter() {
             match element {

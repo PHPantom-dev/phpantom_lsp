@@ -83,8 +83,17 @@ Drupal module unchanged, then teach it where Drupal keeps the files
 (every enabled module's and core's `*.services.yml`) instead of
 `config/services.yaml`.
 
+Most of Drupal's navigation depends on this. On Drupal core, Find
+References on `EntityStorageInterface::load()` misses about 240 calls
+of the shape
+`$this->container->get('entity_type.manager')->getStorage('node')->load(1)`.
+They are the bulk of what a tool that types service lookups finds and
+we don't.
+
 **Where to look:** `src/symfony/container.rs`, `src/symfony/resources.rs`,
-and PHPStan's Drupal extension (its service map).
+PHPStan's Drupal extension (its service map), and PHPlumb
+(`crates/phplumb-index/src/frameworks/drupal/services.rs`, MIT), which
+reads the same files.
 
 ---
 

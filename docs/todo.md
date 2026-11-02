@@ -69,6 +69,11 @@ ships, remove every row that names it.
 | F57 | ["Add translation" quick fix for an undeclared Symfony key](todo/lsp-features.md#f57-add-translation-quick-fix-for-an-undeclared-symfony-key) | Medium      | Medium      |
 | F58 | [Configured Twig roots and namespaces](todo/lsp-features.md#f58-configured-twig-roots-and-namespaces) | Low-Medium  | Medium      |
 | F31 | [Symfony Twig templates outside `templates/`](todo/lsp-features.md#f31-symfony-twig-templates-outside-templates) | Low-Medium  | Medium      |
+| F66 | [Report Twig template diagnostics from `analyze`](todo/lsp-features.md#f66-report-twig-template-diagnostics-from-analyze) | Low-Medium  | Low-Medium  |
+| F64 | [Report unknown parameters in YAML and XML configuration](todo/lsp-features.md#f64-report-unknown-parameters-in-yaml-and-xml-configuration) | Low-Medium  | Low-Medium  |
+| F63 | [Check container parameters outside `app.*`](todo/lsp-features.md#f63-check-container-parameters-outside-app) | Low-Medium  | Medium      |
+| F62 | [Check Symfony logout route names](todo/lsp-features.md#f62-check-symfony-logout-route-names) | Low         | Low-Medium  |
+| F65 | [Check interpolated and listed Twig names](todo/lsp-features.md#f65-check-interpolated-and-listed-twig-names) | Low         | Medium      |
 | F30 | [Symfony translations outside YAML, XLIFF, and the `trans` filter](todo/lsp-features.md#f30-symfony-translations-outside-yaml-xliff-and-the-trans-filter) | Low-Medium  | Medium      |
 | T54 | [Messenger handlers a service tag registers](todo/type-inference.md#t54-messenger-handlers-a-service-tag-registers) | Low-Medium  | Medium      |
 | F61 | [Port TwigStan's tests](todo/lsp-features.md#f61-port-twigstans-tests) | Low-Medium | Medium |
@@ -207,6 +212,7 @@ ships, remove every row that names it.
 | T26 | [Class constants named as docblock types (`Foo::BAR`, `Foo::BAR_*`)](todo/type-inference.md#t26-class-constants-named-as-docblock-types-foobar-foobar_) | Medium      | Medium      |
 | T49 | [A closure passed to a constructor gets no parameter types from it](todo/type-inference.md#t49-a-closure-passed-to-a-constructor-gets-no-parameter-types-from-it) | Medium      | Medium      |
 | T59 | [`T[K]` on a class template is not resolved](todo/type-inference.md#t59-tk-on-a-class-template-is-not-resolved) | Medium      | Medium      |
+| T61 | [A regression that changes where a call resolves goes unnoticed](todo/type-inference.md#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed) | Medium      | Medium      |
 | C13 | [`self::`/`static::` inside a `@require-extends` trait does not see the required class's static members](todo/completion.md#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members) | Low-Medium  | Medium      |
 | D23 | [A rebound closure's scope is added to the lexical one rather than replacing it](todo/diagnostics.md#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it) | Low-Medium  | Medium      |
 | T43 | [`self::TypeAlias` inside `@extends`'s generic argument is not resolved](todo/type-inference.md#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved) | Low         | Medium      |

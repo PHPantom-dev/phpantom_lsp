@@ -232,7 +232,7 @@ pub(crate) use higher_order_proxy::{
 };
 pub(crate) use string_keys::{find_laravel_string_key_references, resolve_laravel_string_key};
 
-pub(crate) use expr_walker::walk_all_php_expressions;
+pub(crate) use expr_walker::{walk_all_php_expressions, walk_block_expressions};
 pub use helpers::extends_eloquent_model;
 pub(crate) use helpers::{accessor_method_candidates, camel_to_snake};
 pub use model_provider::LaravelModelProvider;

@@ -12,6 +12,7 @@ pub(super) fn extract_assignment_expr<'a>(
     extract_from_expression(assign.lhs, ctx, scope_start);
     extract_from_expression(assign.rhs, ctx, scope_start);
     note_route_configurator_assignment(assign, ctx);
+    note_own_receiver_assignment(assign, ctx);
 
     // The definition only becomes visible *after* the entire
     // assignment expression — the RHS still sees the previous

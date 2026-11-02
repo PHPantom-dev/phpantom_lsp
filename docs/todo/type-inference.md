@@ -97,6 +97,31 @@ and use it from both walks so diagnostics and completion agree.
 
 ---
 
+## T61. A regression that changes where a call resolves goes unnoticed
+
+**Impact: Medium · Complexity: Medium**
+
+The only real-project check for type-engine changes is
+`phpantom_lsp analyze`, which counts diagnostics. A change that sends
+`$x->save()` to a different class, or drops the target of a call that
+never produced a diagnostic, leaves the count unchanged: go-to-definition,
+hover and references regress silently. A change that resolves more calls
+shows up only as fewer `unknown_member` reports, never as an increase in
+coverage.
+
+**Plan.** Add a mode to `analyze` that writes, for every member access,
+function call, and class reference in the project, its position and the
+FQN of each declaration it resolves to (or nothing), one line per access
+in a stable order. The `semantic_export` occurrence records already
+contain this data. Here they would be fed by the analyze
+workspace pipeline instead of caller-supplied documents. A small script
+diffs two dumps (the branch and `main`) and reports targets lost,
+changed, and gained, plus the share of member accesses resolved. Run it
+on a few real projects before merging type-engine changes, and record
+coverage alongside the diagnostic counts.
+
+---
+
 ## T34. `static::CONST` over-narrows to the declaring class's value
 **Impact: Medium · Complexity: Medium-High**
 

@@ -476,6 +476,154 @@ function send(ContainerInterface $container): void {
     );
 }
 
+/// The `invalid_symfony_parameter` messages a slow-diagnostics pass reports
+/// for `content`.
+fn parameter_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<String> {
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(Code::String(code)) if code == "invalid_symfony_parameter"
+            )
+        })
+        .map(|diagnostic| message_text(&diagnostic.message).to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn parameters_set_outside_the_configuration_are_declared() {
+    let kernel = r#"<?php
+namespace App;
+
+use Symfony\Component\HttpKernel\Kernel as BaseKernel;
+
+class Kernel extends BaseKernel
+{
+    protected function getKernelParameters(): array
+    {
+        return parent::getKernelParameters() + ['app.from_kernel' => true];
+    }
+}
+"#;
+    let pass = r#"<?php
+namespace App\DependencyInjection;
+
+final class UntypedPass
+{
+    public function process($container): void
+    {
+        $container->setParameter('app.untyped', true);
+    }
+}
+"#;
+    let consumer = r#"<?php
+use Symfony\Component\DependencyInjection\ContainerInterface;
+
+function read(ContainerInterface $container): void {
+    $container->getParameter('app.from_kernel');
+    $container->getParameter('app.untyped');
+    $container->getParameter('app.missing_parameter');
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/services.yaml", SERVICES_YAML),
+        ("src/Kernel.php", kernel),
+        ("src/DependencyInjection/UntypedPass.php", pass),
+        ("src/consumer.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/consumer.php");
+    assert_eq!(
+        parameter_problems(&backend, &consumer_uri, consumer),
+        vec!["Unknown container parameter: 'app.missing_parameter'".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn a_parameter_name_built_at_runtime_leaves_its_prefix_unjudged() {
+    let pass = r#"<?php
+namespace App\DependencyInjection;
+
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+
+final class ConfigPass
+{
+    public function process(ContainerBuilder $container, array $config): void
+    {
+        foreach ($config as $key => $value) {
+            $container->setParameter('app.' . $key, $value);
+        }
+    }
+}
+"#;
+    // A query's parameters are no container's.
+    let repository = r#"<?php
+namespace App\Repository;
+
+final class Query
+{
+    public function setParameter(string $key, mixed $value): void {}
+}
+
+final class Repository
+{
+    public function find(Query $query, string $key): void
+    {
+        $query->setParameter('app.' . $key, 1);
+    }
+}
+"#;
+    let consumer = r#"<?php
+use Symfony\Component\DependencyInjection\ContainerInterface;
+
+function read(ContainerInterface $container): void {
+    $container->getParameter('app.from_config');
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/services.yaml", SERVICES_YAML),
+        ("src/DependencyInjection/ConfigPass.php", pass),
+        ("src/consumer.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/consumer.php");
+    assert!(parameter_problems(&backend, &consumer_uri, consumer).is_empty());
+
+    let (backend, dir) = workspace(&[
+        ("config/services.yaml", SERVICES_YAML),
+        ("src/Repository/Repository.php", repository),
+        ("src/consumer.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/consumer.php");
+    assert_eq!(
+        parameter_problems(&backend, &consumer_uri, consumer),
+        vec!["Unknown container parameter: 'app.from_config'".to_string()]
+    );
+
+    // The pattern is no name to offer.
+    let (backend, dir) = workspace(&[
+        ("config/services.yaml", SERVICES_YAML),
+        ("src/DependencyInjection/ConfigPass.php", pass),
+        ("src/consumer.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/consumer.php");
+    let labels = completion_labels(
+        &backend,
+        &consumer_uri,
+        position_in(consumer, "'app.from_config'", 5),
+    )
+    .await;
+    assert!(
+        !labels.iter().any(|label| label.ends_with('*')),
+        "{labels:?}"
+    );
+}
+
 const KERNEL_PHP: &str = r#"<?php
 namespace App;
 

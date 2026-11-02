@@ -209,8 +209,39 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             continue;
         }
         let Some((key, start, end)) = resolved_string_literal(argument.value, ctx.content) else {
+            // A parameter set under a name built at runtime declares every
+            // name its literal start begins, which the pattern stands for.
+            if receiver == ReceiverClass::ParameterHolder && is_write {
+                let span = argument.value.span();
+                ctx.typed_receiver_sites.push(TypedReceiverSite {
+                    start: span.start.offset,
+                    end: span.end.offset,
+                    key: format!("{}*", literal_name_prefix(argument.value, ctx.content)),
+                    is_write,
+                    is_optional: false,
+                    guards: 0,
+                    receiver,
+                });
+            }
             continue;
         };
+        // Nothing but a Symfony container sets a parameter in the
+        // application's own `app.` namespace, so the call declares it
+        // whether or not its receiver's type is known.
+        if receiver == ReceiverClass::ParameterHolder && is_write && key.starts_with("app.") {
+            ctx.spans.push(SymbolSpan {
+                start: start as u32,
+                end: end as u32,
+                kind: SymbolKind::StringKey {
+                    kind: StringKeyKind::ContainerParameter,
+                    key: key.to_string(),
+                    is_write,
+                    is_optional: false,
+                },
+            });
+            record_declared_value(receiver, member_name, start as u32, argument_list, ctx);
+            continue;
+        }
         // `render('…')` is common enough elsewhere that only a string that
         // looks like a template is worth asking the type engine about.
         if key.is_empty()
@@ -246,8 +277,12 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             key,
             is_write,
             is_optional: false,
+            guards: 0,
             receiver,
         });
+        if !is_write {
+            note_own_receiver_lookup(receiver, object, start as u32, ctx);
+        }
         if receiver.names_twig_templates() {
             record_twig_render_context(receiver, object, member_name, argument_list, start, ctx);
         }
@@ -255,6 +290,311 @@ pub(in crate::symbol_map::extraction) fn record_symfony_receiver_sites(
             record_declared_value(receiver, member_name, start as u32, argument_list, ctx);
         }
     }
+}
+
+/// What a router or a Twig environment the file builds itself (`new
+/// UrlGenerator($routes, …)`, `new Environment($loader)`) looks names up
+/// in: the routes and templates the file gives it, not the application's.
+/// The guard bit of the kind of name, when `class` is one of them.
+fn own_names_of(class: &Expression<'_>, ctx: &ExtractionCtx<'_>) -> u8 {
+    const ROUTERS: &[&str] = &[
+        "Symfony\\Component\\Routing\\Router",
+        "Symfony\\Component\\Routing\\Generator\\UrlGenerator",
+        "Symfony\\Component\\Routing\\Generator\\CompiledUrlGenerator",
+    ];
+    const TWIG_ENVIRONMENT: &str = "Twig\\Environment";
+    let Expression::Identifier(identifier) = class else {
+        return 0;
+    };
+    let written = bytes_to_str(identifier.value());
+    let resolved = ctx
+        .resolved_name_at(identifier.span().start.offset)
+        .unwrap_or(written)
+        .trim_start_matches('\\');
+    if ROUTERS
+        .iter()
+        .any(|router| resolved.eq_ignore_ascii_case(router))
+    {
+        crate::symbol_map::LookupGuards::ROUTE
+    } else if resolved.eq_ignore_ascii_case(TWIG_ENVIRONMENT) {
+        crate::symbol_map::LookupGuards::TEMPLATE
+    } else {
+        0
+    }
+}
+
+/// Note a variable or property assigned a router or Twig environment the
+/// file builds itself (see [`own_names_of`]).
+pub(in crate::symbol_map::extraction) fn note_own_receiver_assignment(
+    assign: &Assignment<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if (!ctx.symfony && !ctx.twig) || !assign.operator.is_assign() {
+        return;
+    }
+    let Expression::Instantiation(instantiation) = assign.rhs else {
+        return;
+    };
+    let names = own_names_of(instantiation.class, ctx);
+    if names == 0 {
+        return;
+    }
+    let receiver = expr_to_subject_text(assign.lhs);
+    if !receiver.is_empty() {
+        ctx.own_receivers.push((receiver, names));
+    }
+}
+
+/// Note a lookup whose `receiver` may be a router or Twig environment the
+/// file builds itself, for [`apply_lookup_guards`] to tell once the whole
+/// file is read.  A controller's own `render()` and `generateUrl()` never
+/// are.
+fn note_own_receiver_lookup(
+    receiver: ReceiverClass,
+    object: &Expression<'_>,
+    start: u32,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    let kind = match receiver {
+        ReceiverClass::UrlGenerator => crate::symbol_map::LookupGuards::ROUTE,
+        ReceiverClass::TemplateRenderer => crate::symbol_map::LookupGuards::TEMPLATE,
+        _ => return,
+    };
+    let mut object = object;
+    while let Expression::Parenthesized(inner) = object {
+        object = inner.expression;
+    }
+    match object {
+        Expression::Variable(Variable::Direct(variable)) if variable.name == b"$this" => {}
+        // `(new UrlGenerator($routes, $context))->generate('x')`.
+        Expression::Instantiation(instantiation) => {
+            if own_names_of(instantiation.class, ctx) & kind != 0
+                && let Some(site) = ctx
+                    .typed_receiver_sites
+                    .iter_mut()
+                    .rev()
+                    .find(|site| site.start == start)
+            {
+                site.guards |= kind;
+            }
+        }
+        _ => {
+            let text = expr_to_subject_text(object);
+            if !text.is_empty() {
+                ctx.own_receiver_lookups.push((start, text, kind));
+            }
+        }
+    }
+}
+
+/// Note a `try` whose `catch` copes with a name its lookups miss: one that
+/// catches the exception the lookup throws, or one of its parents.
+pub(in crate::symbol_map::extraction) fn note_lookup_guards(
+    try_stmt: &Try<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.symfony && !ctx.twig {
+        return;
+    }
+    let guards = try_stmt
+        .catch_clauses
+        .iter()
+        .flat_map(|catch| hint_classes(&catch.hint, ctx))
+        .fold(0, |guards, caught| {
+            guards | crate::symbol_map::LookupGuards::caught_by(&caught)
+        });
+    if guards != 0 {
+        let block = try_stmt.block.span();
+        ctx.lookup_guards
+            .push((block.start.offset, block.end.offset, guards));
+    }
+}
+
+/// Mark the lookups the file is written to do without as such: the ones
+/// inside a guarding `try` (see [`note_lookup_guards`]), and the ones on a
+/// router or Twig environment the file builds itself.
+pub(in crate::symbol_map::extraction) fn apply_lookup_guards(ctx: &mut ExtractionCtx<'_>) {
+    let own_receivers = std::mem::take(&mut ctx.own_receivers);
+    let own_lookups = std::mem::take(&mut ctx.own_receiver_lookups);
+    if ctx.lookup_guards.is_empty() && own_receivers.is_empty() {
+        return;
+    }
+    let guards_at = |offset: u32| {
+        ctx.lookup_guards
+            .iter()
+            .filter(|(start, end, _)| *start <= offset && offset < *end)
+            .fold(0, |guards, (_, _, guard)| guards | guard)
+    };
+    for site in ctx.typed_receiver_sites.iter_mut() {
+        if site.is_write {
+            continue;
+        }
+        site.guards |= guards_at(site.start);
+        site.guards |= own_lookups
+            .iter()
+            .filter(|(start, receiver, kind)| {
+                *start == site.start
+                    && own_receivers
+                        .iter()
+                        .any(|(own, names)| own == receiver && names & kind != 0)
+            })
+            .fold(0, |guards, (_, _, kind)| guards | kind);
+    }
+    if ctx.lookup_guards.is_empty() {
+        return;
+    }
+    for span in ctx.spans.iter_mut() {
+        if let SymbolKind::StringKey {
+            kind,
+            is_write: false,
+            is_optional,
+            ..
+        } = &mut span.kind
+            && kind.guard_bit() != 0
+            && guards_at(span.start) & kind.guard_bit() != 0
+        {
+            *is_optional = true;
+        }
+    }
+}
+
+/// The kernel class an application's kernel extends.
+const KERNEL: &str = "Symfony\\Component\\HttpKernel\\Kernel";
+/// The interface every Twig loader implements.
+const TWIG_LOADER_INTERFACE: &str = "Twig\\Loader\\LoaderInterface";
+
+/// The literal text a name built at runtime starts with: the leftmost
+/// literal of a concatenation (`'app.' . $key`), or nothing.
+fn literal_name_prefix<'a>(value: &Expression<'a>, content: &str) -> &'a str {
+    match value {
+        Expression::Binary(binary) if binary.operator.is_concatenation() => {
+            literal_name_prefix(binary.lhs, content)
+        }
+        Expression::Parenthesized(inner) => literal_name_prefix(inner.expression, content),
+        _ => resolved_string_literal(value, content).map_or("", |(text, _, _)| text),
+    }
+}
+
+/// What a class that is part of the framework's plumbing says about the
+/// names the project has, beyond what it declares outright.
+///
+/// A Twig loader of the project's own can serve any template.  A kernel
+/// that overrides `loadRoutes()` loads routes some other way than the
+/// routing files read (see [`crate::symfony::route_world`]), and the
+/// parameters a kernel's `getKernelParameters()` adds are declared there.
+pub(in crate::symbol_map::extraction) fn note_symfony_framework_class(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.symfony && !ctx.twig {
+        return;
+    }
+    let names = |ident: &Identifier<'_>, name: &str| {
+        let written = bytes_to_str(ident.value());
+        ctx.resolved_name_at(ident.span().start.offset)
+            .unwrap_or(written)
+            .trim_start_matches('\\')
+            .eq_ignore_ascii_case(name)
+    };
+    let parent = class
+        .extends
+        .as_ref()
+        .and_then(|extends| extends.types.first());
+    let in_twig_loader_namespace = |ident: &Identifier<'_>| {
+        let written = bytes_to_str(ident.value());
+        let resolved = ctx
+            .resolved_name_at(ident.span().start.offset)
+            .unwrap_or(written)
+            .trim_start_matches('\\');
+        resolved
+            .get(.."Twig\\Loader\\".len())
+            .is_some_and(|namespace| namespace.eq_ignore_ascii_case("Twig\\Loader\\"))
+    };
+    let is_loader = parent.is_some_and(in_twig_loader_namespace)
+        || class.implements.as_ref().is_some_and(|implements| {
+            implements
+                .types
+                .iter()
+                .any(|ident| names(ident, TWIG_LOADER_INTERFACE))
+        });
+    let is_kernel = parent.is_some_and(|parent| names(parent, KERNEL));
+    if is_loader {
+        ctx.declares_twig_loader = true;
+    }
+    if !ctx.symfony || !is_kernel {
+        return;
+    }
+    for member in class.members.iter() {
+        let ClassLikeMember::Method(method) = member else {
+            continue;
+        };
+        let name = bytes_to_str(method.name.value);
+        if name.eq_ignore_ascii_case("loadRoutes") {
+            record_unreadable_routes(String::new(), ctx);
+        } else if name.eq_ignore_ascii_case("getKernelParameters")
+            && let MethodBody::Concrete(body) = &method.body
+        {
+            push_kernel_parameter_spans(body, ctx);
+        }
+    }
+}
+
+/// Declare the parameters a kernel's `getKernelParameters()` adds: the keys
+/// of the arrays it builds (not of the arrays inside them), and the
+/// offsets it sets.  A key built at runtime is declared as the pattern its
+/// literal start makes (see [`literal_name_prefix`]).
+fn push_kernel_parameter_spans(body: &Block<'_>, ctx: &mut ExtractionCtx<'_>) {
+    let content = ctx.content;
+    let mut spans = Vec::new();
+    let mut nested: Vec<u32> = Vec::new();
+    let mut declare = |key: &Expression<'_>| {
+        let (name, start, end) = match resolved_string_literal(key, content) {
+            Some((name, start, end)) => (name.to_string(), start as u32, end as u32),
+            None => {
+                let span = key.span();
+                (
+                    format!("{}*", literal_name_prefix(key, content)),
+                    span.start.offset,
+                    span.end.offset,
+                )
+            }
+        };
+        spans.push(SymbolSpan {
+            start,
+            end,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::ContainerParameter,
+                key: name,
+                is_write: true,
+                is_optional: false,
+            },
+        });
+    };
+    crate::virtual_members::laravel::walk_block_expressions(body, &mut |expr| {
+        match expr {
+            Expression::Array(array) => {
+                if nested.contains(&array.span().start.offset) {
+                    return std::ops::ControlFlow::Continue(());
+                }
+                for element in array.elements.iter() {
+                    if let ArrayElement::KeyValue(entry) = element {
+                        declare(entry.key);
+                        if let Expression::Array(inner) = entry.value {
+                            nested.push(inner.span().start.offset);
+                        }
+                    }
+                }
+            }
+            Expression::Assignment(assign) if assign.operator.is_assign() => {
+                if let Expression::ArrayAccess(access) = assign.lhs {
+                    declare(access.index);
+                }
+            }
+            _ => {}
+        }
+        std::ops::ControlFlow::Continue(())
+    });
+    ctx.spans.extend(spans);
 }
 
 /// Record what a declaring call says its name is, keyed by the name's site
@@ -445,6 +785,7 @@ fn record_configurator_placeholders(
                 key: name.to_string(),
                 is_write: false,
                 is_optional: false,
+                guards: 0,
                 receiver: ReceiverClass::ConfiguratorArgument,
             });
         });
@@ -795,6 +1136,7 @@ fn record_translator_sites(argument_list: &ArgumentList<'_>, ctx: &mut Extractio
             key: translation_key(domain, message),
             is_write: false,
             is_optional: false,
+            guards: 0,
             receiver: ReceiverClass::Translator,
         });
     }
@@ -805,6 +1147,7 @@ fn record_translator_sites(argument_list: &ArgumentList<'_>, ctx: &mut Extractio
             key: domain.to_string(),
             is_write: false,
             is_optional: false,
+            guards: 0,
             receiver: ReceiverClass::TranslatorDomain,
         });
     }
@@ -1096,6 +1439,25 @@ struct RouteDeclaration {
     at: (usize, usize),
     /// The aliases, each with the byte range of its text.
     aliases: Vec<(String, usize, usize)>,
+    /// The locales of a localized path (`path: ['en' => …, 'nl' => …]`),
+    /// in order.  Empty for a path that is one string.
+    locales: Vec<String>,
+}
+
+/// The locales a localized path (`['en' => '/contact', …]`) is keyed by.
+fn route_locales(value: &Expression<'_>, content: &str) -> Vec<String> {
+    let Expression::Array(array) = value else {
+        return Vec::new();
+    };
+    array
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            ArrayElement::KeyValue(entry) => resolved_string_literal(entry.key, content),
+            _ => None,
+        })
+        .map(|(locale, _, _)| locale.to_string())
+        .collect()
 }
 
 /// The name a `#[Route]`'s `name:` gives: a literal, or a constant of
@@ -1181,6 +1543,7 @@ fn route_declarations(
                 attribute_span.end.offset as usize,
             ),
             aliases: Vec::new(),
+            locales: Vec::new(),
         };
         if let Some(arguments) = &attribute.argument_list {
             for (index, argument) in arguments.arguments.iter().enumerate() {
@@ -1199,6 +1562,7 @@ fn route_declarations(
                         if let Some((_, start, end)) = resolved_string_literal(value, ctx.content) {
                             route.at = (start, end);
                         }
+                        route.locales = route_locales(value, ctx.content);
                     }
                     "name" => {
                         route.name = match route_name_value(value, class, ctx) {
@@ -1320,6 +1684,7 @@ fn annotation_routes(doc: &str, offset: usize) -> Vec<RouteDeclaration> {
             name: RouteName::Absent,
             at: (offset + tag, offset + cursor),
             aliases: Vec::new(),
+            locales: Vec::new(),
         };
         let mut index = 0;
         loop {
@@ -1386,6 +1751,13 @@ fn annotation_routes(doc: &str, offset: usize) -> Vec<RouteDeclaration> {
 /// `__invoke()` is a single action, and its own routes are its routes.  An
 /// alias is declared as it is written, without the prefix.  A name that is
 /// not a literal is recorded as one that cannot be read.
+///
+/// Symfony names a route more ways than its declaration writes.  A
+/// localized path (`['en' => '/contact', …]`, on the route or the class's
+/// prefix) adds a route per locale, `contact.en`; the base name still
+/// generates the current locale's.  An action with exactly one route also
+/// answers to `App\Controller\Foo::bar`, and a class whose only route is
+/// its `__invoke()` to `App\Controller\Foo` and `App\Controller\Foo::__invoke`.
 pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
     class: &Class<'_>,
     ctx: &mut ExtractionCtx<'_>,
@@ -1404,7 +1776,8 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
     // which an abstract one never is.
     let derive = (!class.modifiers.contains_abstract())
         .then(|| ctx.resolved_name_at(class.name.span.start.offset))
-        .flatten();
+        .flatten()
+        .map(|class| class.trim_start_matches('\\'));
     let mut spans = Vec::new();
 
     let prefix = match class_routes.first().map(|route| &route.name) {
@@ -1416,15 +1789,23 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
         }
         _ => "",
     };
+    let class_locales: &[String] = class_routes
+        .first()
+        .map_or(&[], |route| route.locales.as_slice());
     let mut any_method_route = false;
     let mut unreadable = false;
     let mut invoke = None;
+    // The routes the class adds, and where the last one is declared.
+    let mut count = 0;
+    let mut last_at = (0, 0);
+    let mut routes_invoke = false;
     for member in class.members.iter() {
         let ClassLikeMember::Method(method) = member else {
             continue;
         };
         let method_name = bytes_to_str(method.name.value);
-        if method_name.eq_ignore_ascii_case("__invoke") {
+        let is_invoke = method_name.eq_ignore_ascii_case("__invoke");
+        if is_invoke {
             invoke = Some(method_name);
         }
         let method_doc = if annotations {
@@ -1433,19 +1814,65 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_route_spans(
             None
         };
         let routes = route_declarations(&method.attribute_lists, method_doc, class, ctx);
-        any_method_route |= !routes.is_empty();
-        unreadable |= push_action_route_spans(&routes, prefix, derive, method_name, &mut spans);
+        if routes.is_empty() {
+            continue;
+        }
+        any_method_route = true;
+        routes_invoke |= is_invoke;
+        let action = push_action_route_spans(
+            &routes,
+            prefix,
+            class_locales,
+            derive,
+            method_name,
+            &mut spans,
+        );
+        unreadable |= action.unreadable;
+        if action.count == 1
+            && let Some(class) = derive
+        {
+            declare_route(&mut spans, format!("{class}::{method_name}"), action.at);
+        }
+        count += action.count;
+        last_at = action.at;
     }
     if unreadable {
         record_unreadable_routes(prefix.to_string(), ctx);
     }
     if !any_method_route
         && let Some(invoke) = invoke
-        && push_action_route_spans(&class_routes, "", derive, invoke, &mut spans)
+        && !class_routes.is_empty()
     {
-        record_unreadable_routes(String::new(), ctx);
+        let action = push_action_route_spans(&class_routes, "", &[], derive, invoke, &mut spans);
+        if action.unreadable {
+            record_unreadable_routes(String::new(), ctx);
+        }
+        routes_invoke = true;
+        count = action.count;
+        last_at = action.at;
+    }
+    if routes_invoke
+        && count == 1
+        && let Some(class) = derive
+    {
+        declare_route(&mut spans, class.to_string(), last_at);
+        declare_route(&mut spans, format!("{class}::__invoke"), last_at);
     }
     ctx.spans.extend(spans);
+}
+
+/// Declare the route `key` over the byte range `at`.
+fn declare_route(spans: &mut Vec<SymbolSpan>, key: String, at: (usize, usize)) {
+    spans.push(SymbolSpan {
+        start: at.0 as u32,
+        end: at.1 as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::SymfonyRoute,
+            key,
+            is_write: true,
+            is_optional: false,
+        },
+    });
 }
 
 /// Emit the fields a form type maps to its data class, as accesses to the
@@ -1859,19 +2286,35 @@ fn hint_classes(hint: &Hint<'_>, ctx: &ExtractionCtx<'_>) -> Vec<String> {
     }
 }
 
+/// What the routes of one action add.
+struct ActionRoutes {
+    /// Whether one of them has a name that cannot be read.
+    unreadable: bool,
+    /// How many routes they add: one per locale of a localized path.
+    count: usize,
+    /// Where the last of them is declared.
+    at: (usize, usize),
+}
+
 /// The spans the routes of one action declare.  `derive_from` is the class
 /// to derive a name from for a route that has none; Symfony numbers the
-/// unnamed routes of one action from the second one on.  Whether one of
-/// them has a name that cannot be read.
+/// unnamed routes of one action from the second one on.  A route whose own
+/// path is not localized takes the locales of the class's prefix,
+/// `class_locales`.
 fn push_action_route_spans(
     routes: &[RouteDeclaration],
     prefix: &str,
+    class_locales: &[String],
     derive_from: Option<&str>,
     method: &str,
     spans: &mut Vec<SymbolSpan>,
-) -> bool {
+) -> ActionRoutes {
     let mut unnamed = 0;
-    let mut unreadable = false;
+    let mut action = ActionRoutes {
+        unreadable: false,
+        count: 0,
+        at: (0, 0),
+    };
     for route in routes {
         let derived = match (&route.name, derive_from) {
             (RouteName::Absent, Some(class)) => {
@@ -1880,46 +2323,57 @@ fn push_action_route_spans(
             }
             _ => None,
         };
-        unreadable |= push_route_spans(route, prefix, derived, spans);
+        let locales = if route.locales.is_empty() {
+            class_locales
+        } else {
+            &route.locales
+        };
+        action.unreadable |= push_route_spans(route, prefix, derived, locales, spans);
+        action.count += locales.len().max(1);
+        action.at = route.at;
     }
-    unreadable
+    action
 }
 
 /// The spans one route declares: its name, or the `derived` one, and its
-/// aliases.  Whether its name cannot be read.
+/// aliases, each under every one of its `locales`.  A localized route's own
+/// name still generates the current locale's route; an alias's does not.
+/// Whether its name cannot be read.
 fn push_route_spans(
     route: &RouteDeclaration,
     prefix: &str,
     derived: Option<String>,
+    locales: &[String],
     spans: &mut Vec<SymbolSpan>,
 ) -> bool {
-    let declare = |spans: &mut Vec<SymbolSpan>, key: String, start: usize, end: usize| {
-        spans.push(SymbolSpan {
-            start: start as u32,
-            end: end as u32,
-            kind: SymbolKind::StringKey {
-                kind: StringKeyKind::SymfonyRoute,
-                key,
-                is_write: true,
-                is_optional: false,
-            },
-        });
+    let localized = |spans: &mut Vec<SymbolSpan>, name: &str, at: (usize, usize)| {
+        for locale in locales {
+            declare_route(spans, format!("{name}.{locale}"), at);
+        }
+    };
+    let declare = |spans: &mut Vec<SymbolSpan>, name: String, at: (usize, usize)| {
+        localized(spans, &name, at);
+        declare_route(spans, name, at);
     };
     let unreadable = match &route.name {
         RouteName::Literal(name, start, end) => {
-            declare(spans, format!("{prefix}{name}"), *start, *end);
+            declare(spans, format!("{prefix}{name}"), (*start, *end));
             false
         }
         RouteName::Absent => {
             if let Some(derived) = derived {
-                declare(spans, format!("{prefix}{derived}"), route.at.0, route.at.1);
+                declare(spans, format!("{prefix}{derived}"), route.at);
             }
             false
         }
         RouteName::Unreadable => true,
     };
     for (alias, start, end) in &route.aliases {
-        declare(spans, alias.clone(), *start, *end);
+        if locales.is_empty() {
+            declare_route(spans, alias.clone(), (*start, *end));
+        } else {
+            localized(spans, alias, (*start, *end));
+        }
     }
     unreadable
 }
@@ -2146,7 +2600,17 @@ mod tests {
         assert_eq!(attribute, vec!["attr.html.twig"]);
     }
 
+    /// The route names `map` declares and the text each spans, leaving out
+    /// the ones Symfony names after the controller (see
+    /// [`all_declared_routes`]).
     fn declared_routes(map: &SymbolMap, php: &str) -> Vec<(String, String)> {
+        all_declared_routes(map, php)
+            .into_iter()
+            .filter(|(name, _)| !name.contains('\\'))
+            .collect()
+    }
+
+    fn all_declared_routes(map: &SymbolMap, php: &str) -> Vec<(String, String)> {
         map.spans
             .iter()
             .filter_map(|span| match &span.kind {
@@ -2226,6 +2690,161 @@ mod tests {
                 name_prefix: "admin_".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn an_action_with_one_route_is_named_after_its_controller_too() {
+        let php = "<?php\nnamespace App\\Controller;\nuse Symfony\\Component\\Routing\\Attribute\\Route;\nclass BlogController {\n    #[Route('/', name: 'index')]\n    public function index() {}\n    #[Route('/a')]\n    #[Route('/b')]\n    public function show() {}\n    #[Route(path: ['en' => '/about', 'nl' => '/over'], name: 'about')]\n    public function about() {}\n}\n#[Route('/about', name: 'about_us')]\nclass AboutController {\n    public function __invoke() {}\n}\nabstract class BaseController {\n    #[Route('/x', name: 'x')]\n    public function x() {}\n}\n";
+        // An action with two routes, or one localized into two, has no
+        // controller name, and an abstract class is never loaded.
+        assert_eq!(
+            all_declared_routes(&map_of(php), php),
+            vec![
+                (
+                    "App\\Controller\\BlogController::index".to_string(),
+                    "/".to_string()
+                ),
+                ("index".to_string(), "index".to_string()),
+                ("app_blog_show".to_string(), "/a".to_string()),
+                ("app_blog_show_1".to_string(), "/b".to_string()),
+                ("about.en".to_string(), "about".to_string()),
+                ("about.nl".to_string(), "about".to_string()),
+                ("about".to_string(), "about".to_string()),
+                (
+                    "App\\Controller\\AboutController".to_string(),
+                    "/about".to_string()
+                ),
+                (
+                    "App\\Controller\\AboutController::__invoke".to_string(),
+                    "/about".to_string()
+                ),
+                ("about_us".to_string(), "about_us".to_string()),
+                ("x".to_string(), "x".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_localized_route_is_declared_per_locale() {
+        let php = "<?php\nnamespace App\\Controller;\nuse Symfony\\Component\\Routing\\Attribute\\Route;\n#[Route(['en' => '/en', 'de' => '/de'], name: 'shop_')]\nclass ShopController {\n    #[Route('/cart', name: 'cart', alias: 'basket')]\n    public function cart() {}\n}\n#[Route(path: ['en' => '/contact', 'nl' => '/contact-nl'], name: 'contact')]\nclass ContactController {\n    public function __invoke() {}\n}\n";
+        // The class's localized prefix localizes every route in it, and an
+        // alias is only declared per locale.
+        assert_eq!(
+            declared_routes(&map_of(php), php),
+            vec![
+                ("shop_cart.en".to_string(), "cart".to_string()),
+                ("shop_cart.de".to_string(), "cart".to_string()),
+                ("shop_cart".to_string(), "cart".to_string()),
+                ("basket.en".to_string(), "basket".to_string()),
+                ("basket.de".to_string(), "basket".to_string()),
+                ("contact.en".to_string(), "contact".to_string()),
+                ("contact.nl".to_string(), "contact".to_string()),
+                ("contact".to_string(), "contact".to_string()),
+            ]
+        );
+    }
+
+    /// The key and the guards of each lookup site of `map`.
+    fn site_guards(map: &SymbolMap) -> Vec<(&str, u8)> {
+        map.typed_receiver_sites
+            .iter()
+            .filter(|site| !site.is_write)
+            .map(|site| (site.key.as_str(), site.guards))
+            .collect()
+    }
+
+    #[test]
+    fn a_catch_of_the_not_found_exception_guards_the_lookups_in_its_try() {
+        use crate::symbol_map::LookupGuards;
+        let php = "<?php\nnamespace App\\Controller;\nuse Symfony\\Component\\Routing\\Exception\\RouteNotFoundException;\nuse Twig\\Error\\LoaderError;\nfinal class Links {\n    public function links($urls, $twig, $container): void {\n        try {\n            $urls->generate('legacy');\n            $twig->render('legacy.html.twig');\n        } catch (RouteNotFoundException) {}\n        try {\n            $twig->render('maybe.html.twig');\n        } catch (\\RuntimeException|LoaderError $e) {}\n        try {\n            $container->getParameter('app.maybe');\n        } catch (\\Exception) {}\n        $urls->generate('outside');\n    }\n}\n";
+        assert_eq!(
+            site_guards(&map_of(php)),
+            vec![
+                ("legacy", LookupGuards::ROUTE),
+                ("legacy.html.twig", LookupGuards::ROUTE),
+                ("maybe.html.twig", LookupGuards::TEMPLATE),
+                (
+                    "app.maybe",
+                    LookupGuards::ROUTE | LookupGuards::TEMPLATE | LookupGuards::PARAMETER
+                ),
+                ("outside", 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn lookups_on_a_router_or_twig_the_file_builds_are_its_own() {
+        use crate::symbol_map::LookupGuards;
+        let php = "<?php\nnamespace App\\Tests;\nuse Symfony\\Component\\Routing\\Generator\\UrlGenerator;\nuse Symfony\\Component\\Routing\\RouteCollection;\nuse Twig\\Environment;\nuse Twig\\Loader\\ArrayLoader;\nfinal class GeneratorTest {\n    public function test(Environment $app): void {\n        $generator->generate('before_it_is_built');\n        $generator = new UrlGenerator(new RouteCollection(), $context);\n        $generator->generate('local_only');\n        (new UrlGenerator($routes, $context))->generate('inline');\n        $this->twig->render('a.html.twig');\n        $app->render('app.html.twig');\n        $this->render('page.html.twig');\n    }\n    protected function setUp(): void {\n        $this->twig = new Environment(new ArrayLoader(['a.html.twig' => '']));\n    }\n}\n";
+        // What a variable is assigned anywhere in the file is what it holds,
+        // and an environment handed in, or a controller's own `render()`,
+        // is the application's.
+        assert_eq!(
+            site_guards(&map_of(php)),
+            vec![
+                ("before_it_is_built", LookupGuards::ROUTE),
+                ("local_only", LookupGuards::ROUTE),
+                ("inline", LookupGuards::ROUTE),
+                ("a.html.twig", LookupGuards::TEMPLATE),
+                ("app.html.twig", 0),
+                ("page.html.twig", 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_kernel_says_how_routes_and_parameters_are_loaded() {
+        let php = "<?php\nnamespace App;\nuse Symfony\\Component\\HttpKernel\\Kernel as BaseKernel;\nclass Kernel extends BaseKernel {\n    public function loadRoutes($loader): object {}\n    protected function getKernelParameters(): array {\n        $parameters = parent::getKernelParameters() + ['app.from_kernel' => ['nested' => true]];\n        $parameters['app.set'] = 1;\n        $parameters['app.' . $this->name] = 2;\n        return $parameters;\n    }\n}\n";
+        let map = map_of(php);
+        assert_eq!(
+            keys_of(&map, crate::symbol_map::StringKeyKind::ContainerParameter),
+            vec![
+                ("app.from_kernel".to_string(), true),
+                ("app.set".to_string(), true),
+                ("app.*".to_string(), true),
+            ]
+        );
+        // Every route the kernel loads is one that cannot be read.
+        assert_eq!(
+            map.route_imports,
+            vec![RouteImport {
+                resource: None,
+                loader: None,
+                name_prefix: String::new(),
+            }]
+        );
+        // A class that is no kernel says nothing.
+        let php = php.replace("extends BaseKernel", "");
+        let map = map_of(&php);
+        assert!(map.route_imports.is_empty());
+        assert!(keys_of(&map, crate::symbol_map::StringKeyKind::ContainerParameter).is_empty());
+    }
+
+    #[test]
+    fn set_parameter_declares_what_it_can_read() {
+        let php = "<?php\nnamespace App;\nfinal class Pass {\n    public function process($container, array $config): void {\n        $container->setParameter('app.untyped', true);\n        foreach ($config as $key => $value) {\n            $container->setParameter('app.' . $key, $value);\n        }\n    }\n}\n";
+        let map = map_of(php);
+        // A literal `app.` name is declared outright; one built at runtime
+        // is left for the receiver's type to confirm, as a pattern.
+        assert_eq!(
+            keys_of(&map, crate::symbol_map::StringKeyKind::ContainerParameter),
+            vec![("app.untyped".to_string(), true)]
+        );
+        assert_eq!(
+            receivers(&map),
+            vec![("app.*", ReceiverClass::ParameterHolder, true)]
+        );
+    }
+
+    #[test]
+    fn a_twig_loader_of_the_project_is_noted() {
+        let loader = "<?php\nnamespace App\\Twig;\nfinal class DatabaseLoader implements \\Twig\\Loader\\LoaderInterface {}\n";
+        assert!(map_of(loader).declares_twig_loader);
+        let subclass = "<?php\nnamespace App\\Twig;\nuse Twig\\Loader\\FilesystemLoader;\nfinal class ThemeLoader extends FilesystemLoader {}\n";
+        assert!(map_of(subclass).declares_twig_loader);
+        let other =
+            "<?php\nnamespace App\\Twig;\nfinal class Loader implements LoaderInterface {}\n";
+        assert!(!map_of(other).declares_twig_loader);
     }
 
     #[test]

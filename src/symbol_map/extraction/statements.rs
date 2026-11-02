@@ -176,6 +176,7 @@ pub(super) fn extract_from_statement<'a>(
                 extract_from_statement(s, ctx, scope_start);
             }
             pop_cond_nesting(ctx);
+            note_lookup_guards(try_stmt, ctx);
             for catch in try_stmt.catch_clauses.iter() {
                 emit_keyword(&catch.r#catch, ctx);
                 extract_from_hint_ctx(&catch.hint, &mut ctx.spans, ClassRefContext::Catch);

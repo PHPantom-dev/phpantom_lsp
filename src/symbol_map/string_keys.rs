@@ -202,6 +202,95 @@ impl StringKeyKind {
     pub(crate) const fn is_wordpress(self) -> bool {
         matches!(self, Self::WordPressHook)
     }
+
+    /// The bit a [`LookupGuards`] mask holds this kind under: the kinds a
+    /// lookup of can be written to cope with the name not existing.
+    pub(crate) const fn guard_bit(self) -> u8 {
+        match self {
+            Self::SymfonyRoute => LookupGuards::ROUTE,
+            Self::TwigTemplate => LookupGuards::TEMPLATE,
+            Self::ContainerParameter => LookupGuards::PARAMETER,
+            _ => 0,
+        }
+    }
+}
+
+/// The kinds of name a lookup is written to do without, as a mask of
+/// [`StringKeyKind::guard_bit`]s: one inside a `try` that catches the
+/// exception a missing name throws, or one on a router or Twig environment
+/// the file builds itself, whose names are its own.
+pub(crate) struct LookupGuards;
+
+impl LookupGuards {
+    pub(crate) const ROUTE: u8 = 1;
+    pub(crate) const TEMPLATE: u8 = 2;
+    pub(crate) const PARAMETER: u8 = 4;
+
+    /// The kinds a `catch` of the class `caught` (resolved, without the
+    /// leading `\`) copes with a missing name of: the exception the lookup
+    /// throws, or one of its parents.
+    pub(crate) fn caught_by(caught: &str) -> u8 {
+        const ROUTE: &[&str] = &[
+            "Symfony\\Component\\Routing\\Exception\\RouteNotFoundException",
+            "Symfony\\Component\\Routing\\Exception\\ExceptionInterface",
+        ];
+        const TEMPLATE: &[&str] = &["Twig\\Error\\LoaderError", "Twig\\Error\\Error"];
+        const PARAMETER: &[&str] = &[
+            "Symfony\\Component\\DependencyInjection\\Exception\\ParameterNotFoundException",
+            "Symfony\\Component\\DependencyInjection\\Exception\\InvalidArgumentException",
+            "Symfony\\Component\\DependencyInjection\\Exception\\ExceptionInterface",
+            "Psr\\Container\\NotFoundExceptionInterface",
+            "Psr\\Container\\ContainerExceptionInterface",
+        ];
+        let is = |names: &[&str]| names.iter().any(|name| caught.eq_ignore_ascii_case(name));
+        if ["Throwable", "Exception"]
+            .iter()
+            .any(|name| caught.eq_ignore_ascii_case(name))
+        {
+            return Self::ROUTE | Self::TEMPLATE | Self::PARAMETER;
+        }
+        // A missing route or parameter is an `\InvalidArgumentException`,
+        // which is a `\LogicException`.
+        if ["InvalidArgumentException", "LogicException"]
+            .iter()
+            .any(|name| caught.eq_ignore_ascii_case(name))
+        {
+            return Self::ROUTE | Self::PARAMETER;
+        }
+        let mut guards = 0;
+        if is(ROUTE) {
+            guards |= Self::ROUTE;
+        }
+        if is(TEMPLATE) {
+            guards |= Self::TEMPLATE;
+        }
+        if is(PARAMETER) {
+            guards |= Self::PARAMETER;
+        }
+        guards
+    }
+}
+
+/// Whether two spans over the same text are two declarations of a kind of
+/// key, of different names, so that both are kept.
+pub(crate) fn declares_another_name(kept: &SymbolSpan, next: &SymbolSpan) -> bool {
+    matches!(
+        (&kept.kind, &next.kind),
+        (
+            SymbolKind::StringKey {
+                kind: kept_kind,
+                key: kept_key,
+                is_write: true,
+                ..
+            },
+            SymbolKind::StringKey {
+                kind: next_kind,
+                key: next_key,
+                is_write: true,
+                ..
+            },
+        ) if kept_kind == next_kind && kept_key != next_key
+    )
 }
 
 /// A workspace symbol whose presence suppresses an otherwise-valid framework
@@ -835,6 +924,9 @@ pub(crate) struct TypedReceiverSite {
     /// Whether the call does without the key naming anything, as a
     /// `first()` render of several candidate templates does.
     pub is_optional: bool,
+    /// The kinds of key the call is written to do without, as a mask of
+    /// [`StringKeyKind::guard_bit`]s (see [`LookupGuards`]).
+    pub guards: u8,
     /// What the receiver has to be for this to name a key at all.
     pub receiver: ReceiverClass,
 }
@@ -861,7 +953,7 @@ impl TypedReceiverSite {
                 key: self.key.clone(),
                 kind,
                 is_write: self.is_write,
-                is_optional: self.is_optional,
+                is_optional: self.is_optional || self.guards & kind.guard_bit() != 0,
             },
         }
     }

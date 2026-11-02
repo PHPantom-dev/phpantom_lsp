@@ -509,6 +509,54 @@ pub(crate) fn config_key_spans(content: &str) -> Vec<SymbolSpan> {
     spans
 }
 
+/// The resource the kernel's own route loading is configured with, which
+/// is what the routing files are read for (see
+/// [`crate::symfony::route_world`]).
+const KERNEL_ROUTE_RESOURCE: &str = "kernel::loadRoutes";
+
+/// Whether one `config/packages/` YAML or XML file points
+/// `framework.router.resource` (in any environment) anywhere but the
+/// kernel's own route loading, so that the routes the application has are
+/// loaded from somewhere the routing files do not say.
+pub(crate) fn configures_foreign_router_resource(uri: &str, content: &str) -> bool {
+    let is_foreign = |resource: &str| {
+        let resource = crate::framework::strip_yaml_quotes(resource.trim()).0;
+        !resource.is_empty() && resource != KERNEL_ROUTE_RESOURCE
+    };
+    match crate::symfony::config_format(uri) {
+        Some(crate::symfony::ConfigFormat::Yaml) => {
+            let mut walk = KeyPath::default();
+            crate::framework::line_offsets(content)
+                .into_iter()
+                .any(|(line_start, line)| {
+                    let Some((_, end)) = walk.feed(line, line_start) else {
+                        return false;
+                    };
+                    if walk.path().as_deref() != Some("framework.router.resource") {
+                        return false;
+                    }
+                    let semantic =
+                        crate::symfony::resources::yaml_content_before_comment(&content[end..]);
+                    let value = semantic.lines().next().unwrap_or("");
+                    value.trim_start().strip_prefix(':').is_some_and(is_foreign)
+                })
+        }
+        Some(crate::symfony::ConfigFormat::Xml) => content
+            .match_indices("router")
+            .filter(|(at, _)| {
+                content[..*at].ends_with("<framework:") || content[..*at].ends_with('<')
+            })
+            .any(|(at, _)| {
+                let tag_end = content[at..]
+                    .find('>')
+                    .map_or(content.len(), |end| at + end);
+                crate::framework::xml_attr_value(&content[at..tag_end], at, &["resource"])
+                    .is_some_and(|(resource, _, _)| is_foreign(&resource))
+            }),
+        None => false,
+    }
+}
+
 /// The key being typed at `cursor`, as the path of the key it is nested in
 /// (empty at the top level) and where the typed name starts.
 pub(crate) fn config_key_completion(content: &str, cursor: usize) -> Option<(String, usize)> {
@@ -557,6 +605,25 @@ pub(crate) fn child_keys(declared: &[String], parent: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_router_resource_other_than_the_kernels_is_noted() {
+        let foreign = |uri: &str, content: &str| configures_foreign_router_resource(uri, content);
+        let yaml = "framework:\n    router:\n        utf8: true\n        resource: 'app.route_loader' # a service\n";
+        assert!(foreign("file:///p/config/packages/routing.yaml", yaml));
+        let yaml = "framework:\n    router:\n        resource: kernel::loadRoutes\n";
+        assert!(!foreign("file:///p/config/packages/routing.yaml", yaml));
+        let yaml = "when@prod:\n    framework:\n        router:\n            resource: '%kernel.project_dir%/config/routes.php'\n";
+        assert!(foreign("file:///p/config/packages/routing.yaml", yaml));
+        // A `resource` key somewhere else is something else.
+        let yaml = "framework:\n    router:\n        default_uri: x\n    assets:\n        resource: x\nresource: y\n";
+        assert!(!foreign("file:///p/config/packages/framework.yaml", yaml));
+
+        let xml = r#"<container><framework:config><framework:router resource="app.loader" utf8="true"/></framework:config></container>"#;
+        assert!(foreign("file:///p/config/packages/framework.xml", xml));
+        let xml = r#"<container><framework:config><framework:router utf8="true"/></framework:config></container>"#;
+        assert!(!foreign("file:///p/config/packages/framework.xml", xml));
+    }
 
     fn declared(php: &str) -> Vec<(String, String)> {
         let arena = mago_allocator::LocalArena::new();

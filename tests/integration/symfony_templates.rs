@@ -342,6 +342,113 @@ async fn only_missing_project_templates_are_reported() {
     );
 }
 
+/// The `invalid_symfony_template` messages a slow-diagnostics pass reports
+/// for the PHP `content`.
+fn php_template_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<String> {
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(Code::String(code)) if code == "invalid_symfony_template"
+            )
+        })
+        .map(|diagnostic| message_text(&diagnostic.message).to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_template_rendered_where_it_may_be_missing_is_not_judged() {
+    let guarded = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Twig\Error\LoaderError;
+
+final class GuardedController extends AbstractController
+{
+    public function show(): object
+    {
+        try {
+            return $this->render('optional/banner.html.twig');
+        } catch (LoaderError) {
+            return $this->render('missing/fallback.html.twig');
+        }
+    }
+}
+"#;
+    let test = r#"<?php
+namespace App\Tests;
+
+use Twig\Environment;
+use Twig\Loader\ArrayLoader;
+
+final class TwigTest
+{
+    public function testRender(Environment $app): void
+    {
+        $twig = new Environment(new ArrayLoader(['inline.html.twig' => 'x']));
+        $twig->render('inline.html.twig');
+        $app->render('missing/app.html.twig');
+    }
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("templates/page.html.twig", PAGE_TWIG),
+        ("stubs/twig/Error/LoaderError.php", "<?php\nnamespace Twig\\Error;\nclass LoaderError extends \\Exception {}\n"),
+        ("stubs/twig/Loader/ArrayLoader.php", "<?php\nnamespace Twig\\Loader;\nclass ArrayLoader {\n    public function __construct(array $templates = []) {}\n}\n"),
+        ("src/Controller/GuardedController.php", guarded),
+        ("src/Tests/TwigTest.php", test),
+    ])
+    .await;
+
+    // The fallback is outside the `try`.
+    let uri = uri_for(&dir, "src/Controller/GuardedController.php");
+    assert_eq!(
+        php_template_problems(&backend, &uri, guarded),
+        vec!["Unknown template: 'missing/fallback.html.twig'".to_string()]
+    );
+    // An environment the file builds has its own templates, but one handed
+    // in is the application's.
+    let uri = uri_for(&dir, "src/Tests/TwigTest.php");
+    assert_eq!(
+        php_template_problems(&backend, &uri, test),
+        vec!["Unknown template: 'missing/app.html.twig'".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn a_project_twig_loader_leaves_template_names_unjudged() {
+    let loader = r#"<?php
+namespace App\Twig;
+
+final class DatabaseLoader implements \Twig\Loader\LoaderInterface
+{
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("templates/page.html.twig", PAGE_TWIG),
+        ("src/Controller/MissingController.php", MISSING_PHP),
+        ("src/Twig/DatabaseLoader.php", loader),
+    ])
+    .await;
+    let uri = uri_for(&dir, "src/Controller/MissingController.php");
+    assert!(php_template_problems(&backend, &uri, MISSING_PHP).is_empty());
+
+    // A service tagged as a loader is one too.
+    let services = "services:\n    app.db_loader:\n        class: App\\Twig\\Db\n        tags: ['twig.loader']\n";
+    let (backend, dir) = workspace(&[
+        ("templates/page.html.twig", PAGE_TWIG),
+        ("src/Controller/MissingController.php", MISSING_PHP),
+        ("config/services.yaml", services),
+    ])
+    .await;
+    let uri = uri_for(&dir, "src/Controller/MissingController.php");
+    assert!(php_template_problems(&backend, &uri, MISSING_PHP).is_empty());
+}
+
 #[tokio::test]
 async fn a_missing_template_can_be_created() {
     let (backend, dir) = workspace(&[

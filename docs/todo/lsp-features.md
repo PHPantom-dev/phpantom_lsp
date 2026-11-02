@@ -564,6 +564,97 @@ list them in the README as not ported.
 
 ---
 
+## F62. Check Symfony logout route names
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$this->generateUrl('_logout_mian');   // typo of _logout_main, not reported
+```
+
+Importing `security.route_loader.logout` leaves every name with the
+`_logout_` prefix open (`symfony/route_world.rs`), so a misspelled
+firewall passes. Symfony defines `_logout_<firewall>` for each firewall
+whose `security.yaml` entry configures `logout`. When the security
+configuration is readable, declare exactly those names, so they
+navigate to the firewall's `logout` setting and anything else with the
+prefix is reported.
+
+---
+
+## F63. Check container parameters outside `app.*`
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```yaml
+parameters:
+    mailer.from: 'noreply@example.com'
+```
+
+```php
+$this->getParameter('mailer.form');   // typo, not reported
+```
+
+Unknown-parameter diagnostics judge only the `app.*` family. A name
+outside it goes unchecked even when the project defines its whole
+family (`mailer.*` above) or every bundle extension that could set it
+has been read. Judge a family once every source that could add to it
+is readable. A computed `setParameter()` name already declares the
+family its literal start names as a pattern (`mailer.*`) that leaves it
+open; an extension whose `load()` cannot be read has to do the same.
+
+---
+
+## F64. Report unknown parameters in YAML and XML configuration
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```yaml
+services:
+    App\Mailer:
+        arguments: ['%mailer.form%']   # not reported
+```
+
+A `%param%` placeholder in `config/` names a container parameter just
+as `getParameter()` does, and it navigates, but configuration files
+are never diagnosed (`diagnostics/collect.rs` skips resource files other
+than Twig templates). Run the same unknown-parameter check over the
+placeholders in the YAML and XML files the container reads.
+
+---
+
+## F65. Check interpolated and listed Twig names
+
+**Impact: Low · Complexity: Medium**
+
+```twig
+{{ path("shop_#{kind}") }}
+{% include "cards/#{type}.html.twig" %}
+{% include ['cards/featured.html.twig', 'cards/default.html.twig'] %}
+```
+
+An interpolated route or template name is skipped entirely
+(`symfony/routes.rs`, `twig/templates.rs`), and every element of a
+template list is treated as optional. Match an interpolated name as a
+pattern (literal prefix and suffix) and report it when no declared
+route or template fits, and report a list only when none of its
+templates exist, since Twig renders the first one that does.
+
+---
+
+## F66. Report Twig template diagnostics from `analyze`
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+The editor reports unknown routes, templates and translation keys in
+`.twig` files (`collect_template_diagnostics`, called from
+`diagnostics/delivery.rs`), but `phpantom_lsp analyze` only diagnoses
+PHP files, so a CI run never sees a broken name in a template. Collect
+template diagnostics for every Twig template in the project during
+`analyze`, with the same vendor exclusion as PHP files.
+
+---
+
 ## F38. Twig components
 
 **Impact: Low-Medium · Complexity: Medium-High**

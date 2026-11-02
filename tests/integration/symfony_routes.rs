@@ -36,6 +36,18 @@ const STUBS: &[(&str, &str)] = &[
         "<?php\nnamespace Symfony\\Component\\Routing\\Generator;\ninterface UrlGeneratorInterface {\n    public function generate(string $name, array $parameters = []): string;\n}\n",
     ),
     (
+        "stubs/routing/Generator/UrlGenerator.php",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Generator;\nclass UrlGenerator implements UrlGeneratorInterface {\n    public function __construct(\\Symfony\\Component\\Routing\\RouteCollection $routes) {}\n    public function generate(string $name, array $parameters = []): string {}\n}\n",
+    ),
+    (
+        "stubs/routing/RouteCollection.php",
+        "<?php\nnamespace Symfony\\Component\\Routing;\nclass RouteCollection {\n    public function add(string $name, object $route): void {}\n}\n",
+    ),
+    (
+        "stubs/routing/Exception/RouteNotFoundException.php",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Exception;\nclass RouteNotFoundException extends \\InvalidArgumentException {}\n",
+    ),
+    (
         "stubs/routing/Loader/Configurator/RoutingConfigurator.php",
         "<?php\nnamespace Symfony\\Component\\Routing\\Loader\\Configurator;\nclass RoutingConfigurator {\n    public function add(string $name, string|array $path): RouteConfigurator {}\n    public function alias(string $name, string $alias): object {}\n    public function collection(string $name = ''): CollectionConfigurator {}\n    public function import(string|array $resource, ?string $type = null): ImportConfigurator {}\n}\n",
     ),
@@ -430,6 +442,175 @@ final class CheckController extends AbstractController
             "Unknown route: 'app_missing'".to_string(),
             "Unknown route: '_profiler'".to_string(),
         ]
+    );
+}
+
+#[tokio::test]
+async fn names_symfony_derives_from_a_route_are_declared() {
+    let contact = r#"<?php
+namespace App\Controller;
+
+use Symfony\Component\Routing\Attribute\Route;
+
+final class ContactController
+{
+    #[Route(path: ['en' => '/contact', 'nl' => '/contact-nl'], name: 'contact')]
+    public function contact(): void {}
+
+    #[Route('/team', name: 'team')]
+    public function team(): void {}
+}
+"#;
+    let consumer = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class LinkController extends AbstractController
+{
+    public function links(): void
+    {
+        $this->generateUrl('App\Controller\AboutController');
+        $this->generateUrl('App\Controller\AboutController::__invoke');
+        $this->generateUrl('App\Controller\ContactController::team');
+        $this->generateUrl('App\Controller\ContactController::contact');
+        $this->generateUrl('contact.en');
+        $this->generateUrl('contact');
+        $this->generateUrl('contact.de');
+    }
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", ROUTES_YAML),
+        ("src/Controller/AboutController.php", INVOKABLE_PHP),
+        ("src/Controller/ContactController.php", contact),
+        ("src/Controller/LinkController.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+
+    // A localized action has a route per locale, so no single one is named
+    // after it.
+    assert_eq!(
+        route_problems(&backend, &consumer_uri, consumer),
+        vec![
+            "Unknown route: 'App\\Controller\\ContactController::contact'".to_string(),
+            "Unknown route: 'contact.de'".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn routes_a_router_resource_loads_are_not_judged() {
+    let consumer = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class LinkController extends AbstractController
+{
+    public function links(): void
+    {
+        $this->generateUrl('from_the_custom_loader');
+    }
+}
+"#;
+    let routing = "when@prod:\n    framework:\n        router:\n            resource: 'app.route_loader'\n            type: service\n";
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", ROUTES_YAML),
+        ("config/packages/routing.yaml", routing),
+        ("src/Controller/LinkController.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+    assert!(route_problems(&backend, &consumer_uri, consumer).is_empty());
+
+    // A kernel that loads its routes itself is no different.
+    let kernel = r#"<?php
+namespace App;
+
+use Symfony\Component\HttpKernel\Kernel as BaseKernel;
+
+class Kernel extends BaseKernel
+{
+    public function loadRoutes(object $loader): object
+    {
+        return $loader->load('app.route_loader', 'service');
+    }
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", ROUTES_YAML),
+        ("src/Kernel.php", kernel),
+        ("src/Controller/LinkController.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+    assert!(route_problems(&backend, &consumer_uri, consumer).is_empty());
+}
+
+#[tokio::test]
+async fn a_route_looked_up_where_it_may_be_missing_is_not_judged() {
+    let consumer = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\Routing\Exception\RouteNotFoundException;
+
+final class LinkController extends AbstractController
+{
+    public function links(): string
+    {
+        try {
+            $url = $this->generateUrl('legacy_dashboard');
+        } catch (RouteNotFoundException) {
+            $url = '/';
+        }
+        try {
+            $this->generateUrl('caught_elsewhere');
+        } catch (\RuntimeException) {
+        }
+        return $url;
+    }
+}
+"#;
+    let test = r#"<?php
+namespace App\Tests;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\Routing\Generator\UrlGenerator;
+use Symfony\Component\Routing\RouteCollection;
+
+final class GeneratorTest extends AbstractController
+{
+    public function testGenerate(): void
+    {
+        $routes = new RouteCollection();
+        $generator = new UrlGenerator($routes);
+        $generator->generate('local_only');
+        $this->generateUrl('app_missing');
+    }
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", ROUTES_YAML),
+        ("src/Controller/LinkController.php", consumer),
+        ("src/Tests/GeneratorTest.php", test),
+    ])
+    .await;
+
+    // A `\RuntimeException` is not what a missing route throws.
+    let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+    assert_eq!(
+        route_problems(&backend, &consumer_uri, consumer),
+        vec!["Unknown route: 'caught_elsewhere'".to_string()]
+    );
+    // A router the file builds has its own routes; the application's are
+    // still the application's.
+    let test_uri = uri_for(&dir, "src/Tests/GeneratorTest.php");
+    assert_eq!(
+        route_problems(&backend, &test_uri, test),
+        vec!["Unknown route: 'app_missing'".to_string()]
     );
 }
 

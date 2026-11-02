@@ -169,6 +169,20 @@ struct ExtractionCtx<'a> {
     /// The routes the file loads from elsewhere, each with the offset of
     /// the `import()` call a later `namePrefix()` finds it by.
     route_imports: Vec<(u32, crate::symbol_map::RouteImport)>,
+    /// The `try` blocks whose `catch` copes with a missing name, by byte
+    /// range, with the kinds of name it copes with (see
+    /// [`crate::symbol_map::LookupGuards`]).
+    lookup_guards: Vec<(u32, u32, u8)>,
+    /// The variables and properties the file assigns a router or a Twig
+    /// environment it builds itself, by their text, with the kind of name
+    /// they hold as a guard bit (see [`crate::symbol_map::LookupGuards`]).
+    own_receivers: Vec<(String, u8)>,
+    /// Where the name of each lookup on something that may be one of
+    /// [`Self::own_receivers`] starts, with the text of the receiver and the
+    /// kind of name it looks up as a guard bit.
+    own_receiver_lookups: Vec<(u32, String, u8)>,
+    /// Whether the file declares a Twig loader class of its own.
+    declares_twig_loader: bool,
     /// Whether the project is a Yii application, which [`Self::yii_dir`]
     /// says.  Gates the route definitions, the route arguments, and the URL
     /// generator calls recorded for the type engine to confirm.
@@ -435,6 +449,10 @@ fn extract_symbol_map_inner(
         routing_configurator_params: Vec::new(),
         route_prefix_vars: Vec::new(),
         route_imports: Vec::new(),
+        lookup_guards: Vec::new(),
+        own_receivers: Vec::new(),
+        own_receiver_lookups: Vec::new(),
+        declares_twig_loader: false,
         yii_dir,
         yii_view_scope: YiiViewScope::Template,
         class_name_offset: None,
@@ -447,6 +465,7 @@ fn extract_symbol_map_inner(
     for stmt in program.statements.iter() {
         extract_from_statement(stmt, &mut ctx, 0);
     }
+    apply_lookup_guards(&mut ctx);
 
     // ── Sweep all docblock trivia for floating references ───────────
     // Docblocks attached to classes, functions, methods, properties, and
@@ -519,9 +538,13 @@ fn extract_symbol_map_inner(
     // Sort by start offset for binary search.
     ctx.spans.sort_by_key(|s| s.start);
 
-    // Deduplicate overlapping spans (keep the first / most specific).
-    ctx.spans
-        .dedup_by(|b, a| a.start == b.start && a.end == b.end);
+    // Deduplicate overlapping spans (keep the first / most specific).  One
+    // piece of text can declare several names of a kind, as a route
+    // declaration declares the names Symfony derives from it, and each
+    // stays a declaration.
+    ctx.spans.dedup_by(|b, a| {
+        a.start == b.start && a.end == b.end && !crate::symbol_map::declares_another_name(a, b)
+    });
     // Every workspace file keeps its map for the whole session, so drop
     // the growth slack and the room the dedup freed.
     ctx.spans.shrink_to_fit();
@@ -599,6 +622,7 @@ fn extract_symbol_map_inner(
         twig_contexts: ctx.twig_contexts,
         container_values: ctx.container_values,
         routes: ctx.routes,
+        declares_twig_loader: ctx.declares_twig_loader,
         route_imports: ctx
             .route_imports
             .into_iter()
