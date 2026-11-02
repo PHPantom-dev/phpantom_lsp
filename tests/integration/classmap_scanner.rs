@@ -400,6 +400,7 @@ async fn self_scan_classmap_populates_backend_classmap() {
     let mappings = vec![phpantom_lsp::composer::Psr4Mapping {
         prefix: "App\\".to_string(),
         base_path: "src/".to_string(),
+        is_dev: false,
     }];
     let backend =
         phpantom_lsp::Backend::new_test_with_workspace(dir.path().to_path_buf(), mappings);

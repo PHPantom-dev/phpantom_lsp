@@ -3,9 +3,10 @@
 Known gaps in PHPantom's support for test code. What works today:
 PHPUnit's assertions narrow types; data providers, `@depends`, and
 coverage metadata navigate, rename, and report a name that matches
-nothing; a data provider PHPUnit cannot call is reported; covered
-classes show a lens listing their tests; Pest closures know the test
-case `Pest.php` binds them to; and Mockery mocks keep the mocked class.
+nothing; a data provider PHPUnit cannot call is reported; a class
+shows a lens listing the tests that cover it or are named after it, and
+a test one back to its class; Pest closures know the test case
+`Pest.php` binds them to; and Mockery mocks keep the mocked class.
 
 PHPStan's PHPUnit extension (`phpstan/phpstan-phpunit`) is the
 checklist of what a test author expects from diagnostics; PhpStorm's
@@ -74,33 +75,14 @@ in `src/virtual_members/laravel/patches.rs`, and phpstan-phpunit's
 
 ---
 
-## TS2. Go to the test, and back
-
-**Impact: Medium · Complexity: Medium**
-
-PhpStorm jumps between a class and its test (Ctrl+Shift+T). PHPantom
-links them only through coverage metadata: the lens on a covered class
-lists the tests whose `#[CoversClass]` or `@covers` names it. Most
-projects write no coverage metadata, so the link should fall back to
-the naming convention: the class's path under its `autoload` PSR-4
-root, mirrored under an `autoload-dev` root with a `Test` suffix
-(`App\Billing\Invoice` → `Tests\Unit\Billing\InvoiceTest`), and Pest
-test files named the same way.
-
-LSP has no "go to test" request. Decide between a code lens (the
-existing coverage lens can carry the convention match too) and a code
-action, and what the test side shows.
-
-**Where to look:** `src/references/covers.rs`, `src/code_lens.rs`.
-
----
-
 ## TS3. Create a test for a class
 
-**Impact: Medium · Complexity: Medium-High** (depends on TS2)
+**Impact: Medium · Complexity: Medium-High**
 
 A code action on a class (or one of its methods) that writes the test
-class at the path TS2 would look for: the right namespace, the project's
+class at the path the class's test lens looks for (its path under its
+`autoload` root, mirrored under an `autoload-dev` root with a `Test`
+suffix): the right namespace, the project's
 base test case, a `#[CoversClass]` attribute, and a test method per
 public method chosen. PhpStorm and Phpactor both offer it. It shares the
 file-creation path with

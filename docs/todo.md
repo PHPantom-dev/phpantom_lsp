@@ -43,10 +43,9 @@ contributor even though it's short.
 | L64 | [Routes on controller methods](todo/laravel.md#l64-routes-on-controller-methods) | Medium-High | Medium |
 | DR5 | [Route names](todo/drupal.md#dr5-route-names) | Medium-High | Medium      |
 | DR6 | [Hooks](todo/drupal.md#dr6-hooks) | Medium-High | Medium      |
-| TS2 | [Go to the test, and back](todo/testing.md#ts2-go-to-the-test-and-back) | Medium      | Medium      |
 | DR8 | [Permission and configuration names](todo/drupal.md#dr8-permission-and-configuration-names) | Low-Medium  | Medium      |
 | DR7 | [Render arrays, theme hooks, and libraries](todo/drupal.md#dr7-render-arrays-theme-hooks-and-libraries) | Medium      | Medium-High |
-| TS3 | [Create a test for a class](todo/testing.md#ts3-create-a-test-for-a-class) (depends on TS2) | Medium      | Medium-High |
+| TS3 | [Create a test for a class](todo/testing.md#ts3-create-a-test-for-a-class) | Medium      | Medium-High |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
 
 # Feature Sets
@@ -167,8 +166,7 @@ ships, remove every row that names it.
 | TS9 | [PHPUnit and Pest demo project](todo/testing.md#ts9-phpunit-and-pest-demo-project) | Medium | Low-Medium |
 | TS7 | [Prophecy](todo/testing.md#ts7-prophecy) | Low         | Low-Medium  |
 | TS1 | [Mock method names](todo/testing.md#ts1-mock-method-names) | High        | Medium      |
-| TS2 | [Go to the test, and back](todo/testing.md#ts2-go-to-the-test-and-back) | Medium      | Medium      |
-| TS3 | [Create a test for a class](todo/testing.md#ts3-create-a-test-for-a-class) (depends on TS2) | Medium      | Medium-High |
+| TS3 | [Create a test for a class](todo/testing.md#ts3-create-a-test-for-a-class) | Medium      | Medium-High |
 
 ## Laravel & Blade
 
