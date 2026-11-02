@@ -7,7 +7,9 @@ use mago_syntax::cst::*;
 use crate::atom::{Atom, AtomMap, atom, atom_bytes, bytes_to_str};
 use crate::docblock;
 use crate::parser::signature::{Signature, extract_signature, template_bounds_in_scope};
-use crate::parser::{DocblockCtx, extract_hint_type, extract_visibility, merge_deprecation_info};
+use crate::parser::{
+    DocblockCtx, declares_parameter, extract_hint_type, extract_visibility, merge_deprecation_info,
+};
 use crate::php_type::PhpType;
 use crate::types::*;
 use crate::virtual_members::laravel::{has_scope_attribute, relationship_return_type};
@@ -91,6 +93,7 @@ pub(super) fn extract_method<'a>(
                 },
                 &method_template_param_bounds,
             ),
+            |name| declares_parameter(&method.parameter_list, name),
         );
     }
 

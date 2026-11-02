@@ -86,6 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`array_udiff()` and its siblings accept their callback.** Passing the comparison callback to `array_udiff()`, `array_diff_ukey()`, `array_uintersect()` and the rest of the family is no longer reported as an argument that should be an array, and hover and signature help no longer list parameters PHP 8 removed from built-in functions.
 - **Hover on a `global` statement's variable.** Hovering the variable in `global $x;` now shows the type it imports, instead of nothing.
 - **WordPress's `__()` returns a string.** Outside a Laravel project, `__()` and `trans()` keep the return type their own declaration gives, instead of Laravel's `string|array`, so passing a translated string to WordPress functions is no longer reported.
 - **Nullable columns stay nullable through a cast.** A model attribute cast to `boolean`, `integer`, a date, an enum or another cast that hands `null` back untouched is now nullable when its column is, and so is a nullable `updated_at` or other timestamp column. A null check on a nullable date column, the soft-delete column included, leaves the date class with all its members.

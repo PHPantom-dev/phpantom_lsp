@@ -16429,3 +16429,34 @@ abstract class Request
         "`$this` binds `T` to `Acme\\Requests\\Request`, not the global `Request`: {msgs:?}"
     );
 }
+
+#[test]
+fn array_udiff_family_accepts_trailing_callback() {
+    let php = r#"<?php
+function test(array $a, array $b, array $c): void {
+    array_udiff($a, $b, fn($x, $y) => $x <=> $y);
+    array_udiff($a, $b, $c, fn($x, $y) => $x <=> $y);
+    array_diff_ukey($a, $b, fn($x, $y) => $x <=> $y);
+    array_uintersect_uassoc($a, $b, fn($x, $y) => $x <=> $y, fn($x, $y) => $x <=> $y);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(msgs.is_empty(), "unexpected type errors: {msgs:?}");
+}
+
+#[test]
+fn array_udiff_still_checks_its_first_argument() {
+    let php = r#"<?php
+function test(array $b): void {
+    array_udiff('nope', $b, fn($x, $y) => $x <=> $y);
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "expected the string argument to be reported: {msgs:?}"
+    );
+}

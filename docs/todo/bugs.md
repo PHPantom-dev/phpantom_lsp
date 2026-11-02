@@ -117,27 +117,22 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B722. `array_udiff()` and its siblings reject their callback as the third argument
+### B723. Arguments passed to a variadic parameter are never type-checked
 
-**Impact: Low-Medium · Complexity: Low-Medium**
+**Impact: Medium · Complexity: Medium**
 
 ```php
-array_udiff($a, $b, fn($x, $y) => $x <=> $y);
-// Argument 3 ($array2) expects array, got Closure(mixed, mixed): int
-array_udiff($a, $b, $c, fn($x, $y) => $x <=> $y);   // not reported
+function tags(string ...$tags): void {}
+tags('a', new stdClass());   // not reported
+array_udiff($a, 'nope', fn($x, $y) => $x <=> $y);   // not reported
 ```
 
-Since PHP 8.0 phpstorm-stubs declare these as `array $array, ...$rest`,
-keeping the PHP 7 `array $array2, callable $data_compare_func` behind
-`#[PhpStormStubsElementAvailable(to: '7.4')]`. With exactly three
-arguments, the third is checked against `array` under the name
-`$array2`, a parameter PHP 8 does not have, so the callback is reported.
-With four arguments nothing is reported, and the second argument is
-never checked. `array_diff_ukey()`, `array_diff_uassoc()`,
-`array_intersect_ukey()`, `array_udiff_assoc()`, `array_uintersect()` and
-the rest of the family behave the same, with or without a PHP version in
-`composer.json`. Widening `$rest` in `src/stub_patches/functions.rs`
-does not change it, so the parameter comes from somewhere other than the
-version-filtered list.
-
-Found in Contact Form 7's HTML formatter (`array_diff_ukey()`).
+The argument check skips every argument that lands on a variadic
+parameter, so nothing after the last fixed parameter is compared with the
+declared type. Each such argument should be checked against the
+variadic's element type, the same as a fixed parameter. Before turning
+this on, the standard-library variadics that mix types need their stubs
+corrected: phpstorm-stubs declare `array ...$rest` for `array_udiff()`,
+`array_diff_ukey()` and the rest of that family, whose trailing arguments
+end with one or two callbacks, so the rest would need to read as
+`array|callable`.

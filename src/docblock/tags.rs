@@ -698,6 +698,11 @@ pub fn extract_param_raw_type_from_info(info: &DocblockInfo, var_name: &str) -> 
 /// parameter `func_get_args()` reads that the native signature has none
 /// for.
 ///
+/// `declares` says whether the native signature names a parameter,
+/// counting one that `#[PhpStormStubsElementAvailable]` left out of
+/// `parameters` for the target PHP version. A tag for such a parameter
+/// documents an older signature and is not appended.
+///
 /// A `@param` tag that omits its variable name (common in
 /// phpstorm-stubs, e.g. `@param callable(TValue, TKey): bool`) is matched
 /// by position instead, once the name-based pass leaves a parameter
@@ -706,6 +711,7 @@ pub(crate) fn merge_param_docblock_into_parameters(
     info: &DocblockInfo,
     parameters: &mut Vec<ParameterInfo>,
     template_bounds: &crate::atom::AtomMap<PhpType>,
+    declares: impl Fn(&str) -> bool,
 ) {
     for param in parameters.iter_mut() {
         let param_doc_type = extract_param_raw_type_from_info(info, &param.name);
@@ -784,11 +790,11 @@ pub(crate) fn merge_param_docblock_into_parameters(
         }
     }
 
-    // Append extra `@param` tags that don't match any native parameter.
+    // Append extra `@param` tags that don't name any native parameter.
     // These document parameters accessed via `func_get_args()` or
     // similar mechanisms and should appear in hover/signature.
     for (tag_name, tag_type) in extract_all_param_tags_from_info(info) {
-        if !parameters.iter().any(|p| p.name == tag_name) {
+        if !declares(&tag_name) {
             let description = extract_param_description_from_info(info, &tag_name);
             parameters.push(ParameterInfo {
                 name: atom(&tag_name),
