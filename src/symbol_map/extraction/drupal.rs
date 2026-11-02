@@ -691,6 +691,84 @@ fn extension_of(fqn: &str) -> Option<&str> {
     (!matches!(extension, "Core" | "Component") && segments.next().is_some()).then_some(extension)
 }
 
+const HOOK_ATTRIBUTE: &str = "Drupal\\Core\\Hook\\Attribute\\Hook";
+
+/// Record the hook a `hook_<name>()` function of an `*.api.php` file
+/// documents.  The span covers the name after `hook_`, so the function's
+/// own span still answers on `hook_`.
+pub(in crate::symbol_map::extraction) fn emit_drupal_hook_doc_span(
+    function: &Function<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || ctx.drupal_file != crate::drupal::hooks::DrupalFile::Api {
+        return;
+    }
+    let name = bytes_to_str(function.name.value);
+    let Some(hook) = name.strip_prefix("hook_").filter(|hook| !hook.is_empty()) else {
+        return;
+    };
+    let start = function.name.span.start.offset + 5;
+    ctx.spans.push(SymbolSpan {
+        start,
+        end: start + hook.len() as u32,
+        kind: SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalHook,
+            key: hook.to_string(),
+            is_write: true,
+            is_optional: false,
+        },
+    });
+}
+
+/// Record the hooks the `#[Hook]` attributes of a hook class implement:
+/// one on a method implements the hook for that method, one on the class
+/// for `__invoke()` or the `method:` it names.  Drupal discovers hook
+/// classes under an extension's `src/Hook`, whose namespace is
+/// `Drupal\<extension>\Hook`.
+pub(in crate::symbol_map::extraction) fn emit_drupal_hook_attribute_spans(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || ctx.drupal_file == crate::drupal::hooks::DrupalFile::Test {
+        return;
+    }
+    let is_hook_class = ctx
+        .resolved_name_at(class.name.span.start.offset)
+        .and_then(crate::drupal::hooks::hook_class_extension)
+        .is_some();
+    if !is_hook_class {
+        return;
+    }
+    let methods = class.members.iter().filter_map(|member| match member {
+        ClassLikeMember::Method(method) => Some(&method.attribute_lists),
+        _ => None,
+    });
+    let mut found = Vec::new();
+    for attribute_lists in std::iter::once(&class.attribute_lists).chain(methods) {
+        for attribute in attributes_named(attribute_lists, HOOK_ATTRIBUTE, ctx) {
+            let hook = attribute_arguments(attribute, &["hook", "method", "module"])
+                .into_iter()
+                .find(|(parameter, _)| *parameter == "hook")
+                .and_then(|(_, value)| resolved_string_literal(value, ctx.content));
+            if let Some((key, start, end)) = hook.filter(|(key, _, _)| !key.is_empty()) {
+                found.push((key.to_string(), start as u32, end as u32));
+            }
+        }
+    }
+    for (key, start, end) in found {
+        ctx.spans.push(SymbolSpan {
+            start,
+            end,
+            kind: SymbolKind::StringKey {
+                kind: StringKeyKind::DrupalHook,
+                key,
+                is_write: false,
+                is_optional: false,
+            },
+        });
+    }
+}
+
 /// Record the route name `new Url('…')` reads.
 pub(in crate::symbol_map::extraction) fn emit_drupal_url_spans(
     class: &Expression<'_>,
@@ -1434,6 +1512,49 @@ class NodeRouteProvider extends DefaultHtmlRouteProvider {
     fn a_file_without_symfony_routes_builds_none() {
         let php = "<?php\nnamespace Drupal\\acme;\nclass Cart {\n    public function run($items) { $items->add('acme.thing', 1); }\n}\n";
         assert_eq!(built(php), (Vec::new(), Vec::new()));
+    }
+
+    #[test]
+    fn api_files_document_hooks_after_the_hook_prefix() {
+        let php = "<?php\nfunction hook_form_alter(&$form) {}\nfunction other_thing() {}\n";
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let extract = |file: crate::drupal::hooks::DrupalFile| {
+            crate::symbol_map::extraction::extract_symbol_map_for_file(
+                program,
+                php,
+                &names,
+                crate::symbol_map::extraction::Frameworks {
+                    symfony: false,
+                    service_container: true,
+                    drupal: true,
+                    twig: false,
+                },
+                None,
+                file,
+            )
+        };
+        let map = extract(crate::drupal::hooks::DrupalFile::Api);
+        let name = php.find("hook_form_alter").unwrap() as u32;
+        assert!(matches!(
+            map.lookup(name).map(|span| &span.kind),
+            Some(SymbolKind::FunctionCall { .. })
+        ));
+        assert!(matches!(
+            map.lookup(name + 6).map(|span| &span.kind),
+            Some(SymbolKind::StringKey { kind: StringKeyKind::DrupalHook, key, is_write: true, .. }) if key == "form_alter"
+        ));
+        let other = extract(crate::drupal::hooks::DrupalFile::Other);
+        assert!(other.spans.iter().all(|span| !matches!(
+            span.kind,
+            SymbolKind::StringKey {
+                kind: StringKeyKind::DrupalHook,
+                ..
+            }
+        )));
     }
 
     #[test]

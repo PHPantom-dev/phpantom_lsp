@@ -711,7 +711,7 @@ fn drupal_scan_honors_exclude_globs() {
 }
 
 #[test]
-fn scan_drupal_directories_collects_services_files_outside_tests() {
+fn scan_drupal_directories_collects_declaration_files_outside_tests() {
     let dir = tempfile::tempdir().unwrap();
     let web_root = dir.path();
     for (path, content) in [
@@ -735,6 +735,7 @@ fn scan_drupal_directories_collects_services_files_outside_tests() {
         files,
         vec![
             web_root.join("core/core.services.yml"),
+            web_root.join("modules/contrib/token/token.info.yml"),
             web_root.join("modules/contrib/token/token.services.yml"),
             web_root.join("sites/default/services.yml"),
         ]

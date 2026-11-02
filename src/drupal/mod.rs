@@ -15,6 +15,7 @@ use std::sync::atomic::Ordering;
 
 use parking_lot::RwLock;
 
+pub(crate) mod hooks;
 pub(crate) mod links;
 pub(crate) mod routing;
 pub(crate) mod types;
@@ -35,6 +36,11 @@ pub(crate) struct DrupalState {
     declaration_files: RwLock<Vec<PathBuf>>,
     /// The project's routes by the methods they dispatch to, once read.
     route_index: RwLock<Option<std::sync::Arc<upcasting::RouteIndex>>>,
+    /// The PHP files of core and contributed extensions that document or
+    /// implement hooks, which the workspace walk never reaches either.
+    hook_php_files: RwLock<Vec<PathBuf>>,
+    /// The modules, install profiles, and themes of every web root.
+    extensions: RwLock<Vec<hooks::Extension>>,
 }
 
 /// A kind of file Drupal reads declarations from.
@@ -202,11 +208,12 @@ pub(crate) fn matches_route_pattern(pattern: &str, name: &str) -> bool {
     rest.len() >= last.len() && rest.ends_with(last)
 }
 
-/// Whether `path` is a file Drupal reads declarations from.
+/// Whether `path` is a file Drupal reads declarations from: a services,
+/// routing, or links file, or an extension's `*.info.yml`.
 pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| declaration_file_kind(name).is_some())
+        .is_some_and(|name| declaration_file_kind(name).is_some() || hooks::is_info_file_name(name))
         && !is_test_fixture(path, web_root)
         && !is_unloaded(path, web_root)
 }
@@ -220,6 +227,28 @@ pub(crate) fn is_views_route_name(name: &str) -> bool {
             (parts.next(), parts.next(), parts.next()),
             (Some(view), Some(display), None) if !view.is_empty() && !display.is_empty()
         )
+}
+
+/// Whether `path` is a PHP file that can document or implement hooks: an
+/// `*.api.php`, an extension's procedural file, or a class under an
+/// extension's `src/Hook`.
+pub(crate) fn is_hook_php_file(path: &Path, web_root: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let by_name = [
+        ".api.php", ".module", ".install", ".inc", ".profile", ".theme",
+    ]
+    .iter()
+    .any(|suffix| name.ends_with(suffix))
+        || name == "theme-settings.php";
+    let in_hook_dir = name.ends_with(".php")
+        && path
+            .components()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|pair| pair[0].as_os_str() == "src" && pair[1].as_os_str() == "Hook");
+    (by_name || in_hook_dir) && !is_test_fixture(path, web_root) && !is_unloaded(path, web_root)
 }
 
 /// Whether `path` lies under a `tests` folder of the web root: it belongs to
@@ -251,11 +280,48 @@ impl Backend {
     pub(crate) fn clear_drupal_web_roots(&self) {
         self.drupal.web_roots.write().clear();
         self.drupal.declaration_files.write().clear();
+        self.drupal.hook_php_files.write().clear();
+        self.drupal.extensions.write().clear();
     }
 
-    /// Remember the declaration files the Drupal walk found.
+    /// Remember the declaration files the Drupal walk found: the YAML for
+    /// the workspace index, the extensions their `*.info.yml` declare, and
+    /// the PHP files that document or implement hooks.
     pub(crate) fn note_drupal_declaration_files(&self, files: Vec<PathBuf>) {
-        self.drupal.declaration_files.write().extend(files);
+        let mut yaml = Vec::new();
+        let mut php = Vec::new();
+        let mut extensions = Vec::new();
+        for file in files {
+            let name = file
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+            if hooks::is_info_file_name(name) {
+                extensions.extend(hooks::read_extension(&file));
+            } else if name.ends_with(".yml") {
+                yaml.push(file);
+            } else {
+                php.push(file);
+            }
+        }
+        self.drupal.declaration_files.write().extend(yaml);
+        self.drupal.hook_php_files.write().extend(php);
+        self.note_drupal_extensions(extensions);
+    }
+
+    /// The PHP files of core and contributed extensions that document or
+    /// implement hooks, for the workspace index to parse.
+    pub(crate) fn drupal_hook_php_files(&self) -> Vec<PathBuf> {
+        self.drupal.hook_php_files.read().clone()
+    }
+
+    /// Whether `path` lies under a `tests` folder of one of the web roots.
+    pub(crate) fn is_drupal_test_path(&self, path: &Path) -> bool {
+        self.drupal
+            .web_roots
+            .read()
+            .iter()
+            .any(|root| path.starts_with(root) && is_test_fixture(path, root))
     }
 
     /// The declaration files the Drupal walk found, for the workspace index
@@ -386,12 +452,7 @@ impl Backend {
         path.file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.ends_with(".api.php"))
-            || self
-                .drupal
-                .web_roots
-                .read()
-                .iter()
-                .any(|root| path.starts_with(root) && is_test_fixture(&path, root))
+            || self.is_drupal_test_path(&path)
     }
 
     /// Whether `uri` belongs to a test module of a Drupal project and is not

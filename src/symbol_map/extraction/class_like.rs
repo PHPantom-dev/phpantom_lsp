@@ -25,6 +25,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_yii_route_argument_spans(class, ctx);
     emit_drupal_entity_type_spans(class, ctx);
     emit_drupal_route_attribute_spans(class, ctx);
+    emit_drupal_hook_attribute_spans(class, ctx);
     emit_drupal_route_builder_spans(&class.members, class.name.span.start.offset, ctx);
 
     if let Some(ref extends) = class.extends {
@@ -922,6 +923,7 @@ pub(super) fn extract_from_function<'a>(func: &'a Function<'a>, ctx: &mut Extrac
             is_docblock_reference: false,
         },
     });
+    emit_drupal_hook_doc_span(func, ctx);
 
     // Docblock.  We extract type spans and template params now, but
     // defer `@param $var` variable spans until after we know

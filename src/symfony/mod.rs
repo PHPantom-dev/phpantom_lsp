@@ -125,9 +125,9 @@ pub(crate) struct SymfonyState {
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
 /// translation key, a template, a Twig filter or function, a configuration
-/// key, an event listener, a Messenger bus, a Drupal entity type, or a
-/// Drupal route, outright or through a configurator call still to be
-/// confirmed, or registers a Messenger handler, or imports routes, or
+/// key, an event listener, a Messenger bus, a Drupal entity type, a Drupal
+/// route, or a Drupal hook, outright or through a configurator call still
+/// to be confirmed, or registers a Messenger handler, or imports routes, or
 /// declares a Twig loader.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that

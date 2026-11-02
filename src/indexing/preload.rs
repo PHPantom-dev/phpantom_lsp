@@ -312,6 +312,15 @@ impl Backend {
             }
             // Drupal's own walk found the declaration files the gitignore-aware
             // walk skips; the custom ones both walks reach are listed once.
+            let drupal_php = self.drupal_hook_php_files();
+            if !drupal_php.is_empty() {
+                let mut seen: HashSet<PathBuf> = php_files.iter().cloned().collect();
+                php_files.extend(
+                    drupal_php
+                        .into_iter()
+                        .filter(|path| seen.insert(path.clone())),
+                );
+            }
             let drupal_files = self.drupal_declaration_files();
             if !drupal_files.is_empty() {
                 let mut seen: HashSet<PathBuf> = resource_files.iter().cloned().collect();

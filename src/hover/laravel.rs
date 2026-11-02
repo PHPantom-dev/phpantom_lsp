@@ -292,10 +292,12 @@ impl Backend {
             | StringKeyKind::SymfonyTranslation
             | StringKeyKind::TranslationDomain
             | StringKeyKind::DrupalEntityType
-            | StringKeyKind::DrupalRoute => {
+            | StringKeyKind::DrupalRoute
+            | StringKeyKind::DrupalHook => {
                 let label = match kind {
                     StringKeyKind::ServiceId => "Service",
                     StringKeyKind::DrupalEntityType => "Entity type",
+                    StringKeyKind::DrupalHook => "Hook",
                     StringKeyKind::ContainerParameter => "Parameter",
                     StringKeyKind::SymfonyRoute | StringKeyKind::DrupalRoute => "Route",
                     StringKeyKind::SymfonyTranslation => "Translation",

@@ -172,6 +172,11 @@ pub(crate) enum StringKeyKind {
     /// the route's path, and read by the keys of the parameters a route
     /// call or a links file's `route_parameters:` passes.
     DrupalRouteParameter,
+    /// A Drupal hook name: declared by the `hook_<name>()` function that
+    /// documents it in an `*.api.php` file and by the module handler's and
+    /// theme manager's calls that invoke it, and read by the implementations
+    /// a `#[Hook]` attribute or a procedural function's name make.
+    DrupalHook,
 }
 
 impl StringKeyKind {
@@ -218,9 +223,10 @@ impl StringKeyKind {
             | Self::TwigVariable => KeyFramework::Twig,
             Self::YiiView | Self::YiiRoute | Self::YiiRouteArgument => KeyFramework::Yii,
             Self::WordPressHook => KeyFramework::WordPress,
-            Self::DrupalEntityType | Self::DrupalRoute | Self::DrupalRouteParameter => {
-                KeyFramework::Drupal
-            }
+            Self::DrupalEntityType
+            | Self::DrupalRoute
+            | Self::DrupalRouteParameter
+            | Self::DrupalHook => KeyFramework::Drupal,
         }
     }
 

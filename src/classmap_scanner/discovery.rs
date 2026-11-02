@@ -687,6 +687,9 @@ pub fn scan_drupal_directories(
             }
             if is_drupal_php_file(path) || filters.is_php_file(path) {
                 php_files.push((path.to_path_buf(), crate::ClassCompletionOrigin::Project));
+                if crate::drupal::is_hook_php_file(path, web_root) {
+                    declaration_files.push(path.to_path_buf());
+                }
             } else if crate::drupal::is_declaration_file(path, web_root) {
                 declaration_files.push(path.to_path_buf());
             }

@@ -108,6 +108,8 @@ struct ExtractionCtx<'a> {
     drupal_route_aliases: Vec<String>,
     /// The Drupal routes the file's `#[Route]` attributes declare.
     drupal_routes: Vec<crate::symbol_map::DrupalRouteSite>,
+    /// What the file holds of Drupal hooks, which its path says.
+    drupal_file: crate::drupal::hooks::DrupalFile,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -403,7 +405,14 @@ impl Frameworks {
 /// every navigable symbol occurrence.
 #[cfg(test)]
 pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> SymbolMap {
-    extract_symbol_map_inner(program, content, None, Frameworks::ALL, None)
+    extract_symbol_map_inner(
+        program,
+        content,
+        None,
+        Frameworks::ALL,
+        None,
+        crate::drupal::hooks::DrupalFile::Other,
+    )
 }
 
 /// Build a [`SymbolMap`] using the semantic names produced by `mago-names`.
@@ -419,6 +428,7 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
         Some(resolved_names),
         Frameworks::ALL,
         None,
+        crate::drupal::hooks::DrupalFile::Other,
     );
     map.refresh_conditional_string_key_spans(None, |_| false);
     map
@@ -429,6 +439,7 @@ pub(crate) fn extract_symbol_map_with_resolved_names(
 ///
 /// `frameworks` says which frameworks' names to record, and `yii_dir` is the
 /// file's directory when the project is a Yii application.
+#[cfg(test)]
 pub(crate) fn extract_symbol_map_for_index(
     program: &Program<'_>,
     content: &str,
@@ -436,7 +447,34 @@ pub(crate) fn extract_symbol_map_for_index(
     frameworks: Frameworks,
     yii_dir: Option<&std::path::Path>,
 ) -> SymbolMap {
-    extract_symbol_map_inner(program, content, Some(resolved_names), frameworks, yii_dir)
+    extract_symbol_map_inner(
+        program,
+        content,
+        Some(resolved_names),
+        frameworks,
+        yii_dir,
+        crate::drupal::hooks::DrupalFile::Other,
+    )
+}
+
+/// [`extract_symbol_map_for_index`] for a file whose path says what it
+/// holds of Drupal hooks.
+pub(crate) fn extract_symbol_map_for_file(
+    program: &Program<'_>,
+    content: &str,
+    resolved_names: &OwnedResolvedNames,
+    frameworks: Frameworks,
+    yii_dir: Option<&std::path::Path>,
+    drupal_file: crate::drupal::hooks::DrupalFile,
+) -> SymbolMap {
+    extract_symbol_map_inner(
+        program,
+        content,
+        Some(resolved_names),
+        frameworks,
+        yii_dir,
+        drupal_file,
+    )
 }
 
 fn extract_symbol_map_inner(
@@ -445,6 +483,7 @@ fn extract_symbol_map_inner(
     resolved_names: Option<&OwnedResolvedNames>,
     frameworks: Frameworks,
     yii_dir: Option<&std::path::Path>,
+    drupal_file: crate::drupal::hooks::DrupalFile,
 ) -> SymbolMap {
     let Frameworks {
         symfony,
@@ -484,6 +523,7 @@ fn extract_symbol_map_inner(
         drupal_route_patterns: Vec::new(),
         drupal_route_aliases: Vec::new(),
         drupal_routes: Vec::new(),
+        drupal_file,
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,

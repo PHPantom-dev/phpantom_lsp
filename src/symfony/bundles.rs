@@ -180,7 +180,7 @@ fn read_php_file(uri: &str, content: &str) -> SymbolMap {
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let resolver = mago_names::resolver::NameResolver::new(&arena);
     let names = crate::names::OwnedResolvedNames::from_resolved(&resolver.resolve(program));
-    let map = crate::symbol_map::extract_symbol_map_for_index(
+    let map = crate::symbol_map::extraction::extract_symbol_map_for_file(
         program,
         content,
         &names,
@@ -191,6 +191,7 @@ fn read_php_file(uri: &str, content: &str) -> SymbolMap {
             twig: false,
         },
         None,
+        crate::drupal::hooks::DrupalFile::Other,
     );
     let mut configurators = HashMap::new();
     for statement in program.statements.iter() {
