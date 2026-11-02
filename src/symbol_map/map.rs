@@ -307,6 +307,11 @@ pub(crate) struct SymbolMap {
     /// The entity types the file's entity classes declare, sorted by
     /// `start`.  Empty for every file that declares none.
     pub entity_types: Vec<EntityTypeSite>,
+    /// The shapes of the Drupal route names the file's route builders give
+    /// routes they build from parts, `*` for each part that is not
+    /// written out (`search.view_*`).  Empty for every file that builds
+    /// none.
+    pub drupal_route_patterns: Vec<String>,
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,

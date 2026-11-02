@@ -373,3 +373,47 @@ async fn route_attributes_declare_and_templates_read() {
     routes.sort();
     assert_eq!(routes, ["acme.about", "acme.notes.list"]);
 }
+
+const BUILDER: &str = r#"<?php
+namespace Drupal\acme\Routing;
+
+use Symfony\Component\Routing\Route;
+
+final class Routes {
+    public function routes(): array {
+        $routes = [];
+        $routes['acme.built'] = new Route('/acme/built');
+        return $routes;
+    }
+}
+"#;
+
+const BUILDER_PATH: &str = "web/modules/custom/acme/src/Routing/Routes.php";
+
+/// A route a PHP route builder adds under a name written out is declared
+/// there.
+#[tokio::test]
+async fn a_route_builder_declares_the_routes_it_names() {
+    let consumer = CONSUMER.replace(
+        "Url::fromRoute('acme.greeting')",
+        "Url::fromRoute('acme.built')",
+    );
+    let (backend, dir) = workspace(&files(&[
+        ("web/core/lib/Symfony/Routing/RouteClass.php", "<?php\nnamespace Symfony\\Component\\Routing;\nclass Route {\n    public function __construct(string $path) {}\n}\n"),
+        (ROUTING_PATH, ROUTING),
+        (BUILDER_PATH, BUILDER),
+        (CONSUMER_PATH, consumer.as_str()),
+    ]))
+    .await;
+    let found = definitions_at(
+        &backend,
+        &uri_for(&dir, CONSUMER_PATH),
+        position_in(&consumer, "fromRoute('acme.built')", 12),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        (&found[0].uri, found[0].range.start.line),
+        (&uri_for(&dir, BUILDER_PATH), 8)
+    );
+}

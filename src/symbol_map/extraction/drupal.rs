@@ -171,6 +171,177 @@ fn is_controller_class(fqn: &str) -> bool {
         && segments.next().is_some()
 }
 
+/// What a route builder names the route it adds: a name written out, or
+/// the shape of one built from parts.
+enum BuiltName {
+    Literal(String, u32, u32),
+    Pattern(String),
+}
+
+/// Record the routes a route builder adds: a class whose file uses
+/// Symfony's `Route` or `RouteCollection`, as the classes a routing file's
+/// `route_callbacks` name, route subscribers, and entity route providers
+/// do.  `$collection->add(NAME, $route)` and `$routes[NAME] = new Route(…)`
+/// add the route `NAME`: written out, it is declared; built from parts, its
+/// shape is kept as a pattern, and a name with no part written out stands
+/// for any route under the extension's own prefix.
+pub(in crate::symbol_map::extraction) fn emit_drupal_route_builder_spans(
+    class: &Class<'_>,
+    ctx: &mut ExtractionCtx<'_>,
+) {
+    if !ctx.drupal || !ctx.content.contains("Symfony\\Component\\Routing\\Route") {
+        return;
+    }
+    let mut found = BuilderSites::default();
+    for member in class.members.iter() {
+        if let ClassLikeMember::Method(method) = member {
+            mago_syntax::walker::Walker::walk_method(&BuilderWalker, method, &mut found);
+        }
+    }
+    let mut names: Vec<&Expression<'_>> = found.added;
+    for (name, class_expr) in found.assigned {
+        let Expression::Identifier(identifier) = class_expr else {
+            continue;
+        };
+        let resolved = ctx
+            .resolved_name_at(identifier.span().start.offset)
+            .unwrap_or_else(|| bytes_to_str(identifier.value()));
+        if resolved
+            .trim_start_matches('\\')
+            .eq_ignore_ascii_case("Symfony\\Component\\Routing\\Route")
+        {
+            names.push(name);
+        }
+    }
+    for name in names {
+        match built_name(name, ctx.content) {
+            BuiltName::Literal(key, start, end) => ctx.spans.push(SymbolSpan {
+                start,
+                end,
+                kind: SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalRoute,
+                    key,
+                    is_write: true,
+                    is_optional: false,
+                },
+            }),
+            BuiltName::Pattern(pattern) => {
+                let pattern = if pattern.bytes().all(|byte| byte == b'*') {
+                    let Some(prefix) = ctx
+                        .resolved_name_at(class.name.span.start.offset)
+                        .and_then(extension_of)
+                    else {
+                        continue;
+                    };
+                    format!("{prefix}.*")
+                } else {
+                    pattern
+                };
+                if !ctx.drupal_route_patterns.contains(&pattern) {
+                    ctx.drupal_route_patterns.push(pattern);
+                }
+            }
+        }
+    }
+}
+
+/// The calls and assignments of a route builder's methods that may add a
+/// route.
+#[derive(Default)]
+struct BuilderSites<'ast, 'arena> {
+    /// The first argument of each `->add()` with two or more arguments.
+    added: Vec<&'ast Expression<'arena>>,
+    /// The index of each `$routes[NAME] = new Class(…)`, with the class.
+    assigned: Vec<(&'ast Expression<'arena>, &'ast Expression<'arena>)>,
+}
+
+struct BuilderWalker;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BuilderSites<'ast, 'arena>>
+    for BuilderWalker
+{
+    fn walk_in_method_call(
+        &self,
+        call: &'ast MethodCall<'arena>,
+        found: &mut BuilderSites<'ast, 'arena>,
+    ) {
+        let ClassLikeMemberSelector::Identifier(name) = &call.method else {
+            return;
+        };
+        let arguments = &call.argument_list.arguments;
+        if name.value.eq_ignore_ascii_case(b"add")
+            && arguments.len() >= 2
+            && let Some(Argument::Positional(first)) = arguments.first()
+        {
+            found.added.push(first.value);
+        }
+    }
+
+    fn walk_in_assignment(
+        &self,
+        assignment: &'ast Assignment<'arena>,
+        found: &mut BuilderSites<'ast, 'arena>,
+    ) {
+        if let Expression::ArrayAccess(access) = assignment.lhs
+            && let Expression::Instantiation(instantiation) = assignment.rhs
+        {
+            found.assigned.push((access.index, instantiation.class));
+        }
+    }
+}
+
+/// The name a route builder gives a route: written out, or the shape of
+/// the parts it is built from.
+fn built_name(expression: &Expression<'_>, content: &str) -> BuiltName {
+    if let Some((key, start, end)) = resolved_string_literal(expression, content) {
+        return BuiltName::Literal(key.to_string(), start as u32, end as u32);
+    }
+    let mut pattern = String::new();
+    push_name_parts(expression, &mut pattern);
+    BuiltName::Pattern(pattern)
+}
+
+/// Append the shape of `expression` to `pattern`: its text where it is a
+/// string, `*` where it is anything else.
+fn push_name_parts(expression: &Expression<'_>, pattern: &mut String) {
+    let unknown = |pattern: &mut String| {
+        if !pattern.ends_with('*') {
+            pattern.push('*');
+        }
+    };
+    match expression {
+        Expression::Literal(Literal::String(string)) => match string.value {
+            Some(value) => pattern.push_str(&String::from_utf8_lossy(value)),
+            None => unknown(pattern),
+        },
+        Expression::CompositeString(CompositeString::Interpolated(string)) => {
+            for part in string.parts.iter() {
+                match part {
+                    StringPart::Literal(literal) => match literal.value {
+                        Some(value) => pattern.push_str(&String::from_utf8_lossy(value)),
+                        None => pattern.push_str(&String::from_utf8_lossy(literal.raw)),
+                    },
+                    _ => unknown(pattern),
+                }
+            }
+        }
+        Expression::Binary(binary) if binary.operator.is_concatenation() => {
+            push_name_parts(binary.lhs, pattern);
+            push_name_parts(binary.rhs, pattern);
+        }
+        Expression::Parenthesized(inner) => push_name_parts(inner.expression, pattern),
+        _ => unknown(pattern),
+    }
+}
+
+/// The extension a class of `Drupal\<extension>\…` belongs to, other than
+/// core's own `Drupal\Core` and `Drupal\Component`.
+fn extension_of(fqn: &str) -> Option<&str> {
+    let mut segments = fqn.trim_start_matches('\\').split('\\');
+    let extension = (segments.next() == Some("Drupal")).then(|| segments.next())??;
+    (!matches!(extension, "Core" | "Component") && segments.next().is_some()).then_some(extension)
+}
+
 /// Record the route name `new Url('…')` reads.
 pub(in crate::symbol_map::extraction) fn emit_drupal_url_spans(
     class: &Expression<'_>,
@@ -417,6 +588,78 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    /// The route names `php`'s route builders declare, and the patterns
+    /// they keep.
+    fn built(php: &str) -> (Vec<String>, Vec<String>) {
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(
+            program,
+            php,
+            &names,
+            crate::symbol_map::extraction::Frameworks {
+                symfony: false,
+                service_container: true,
+                drupal: true,
+                twig: false,
+            },
+            None,
+        );
+        let declared = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::StringKey {
+                    kind: StringKeyKind::DrupalRoute,
+                    key,
+                    is_write: true,
+                    ..
+                } => Some(key.clone()),
+                _ => None,
+            })
+            .collect();
+        (declared, map.drupal_route_patterns.clone())
+    }
+
+    #[test]
+    fn route_builders_declare_names_and_keep_patterns() {
+        let php = r#"<?php
+namespace Drupal\search\Routing;
+use Symfony\Component\Routing\Route;
+use Symfony\Component\Routing\RouteCollection;
+class SearchPageRoutes {
+    public function routes(RouteCollection $collection, string $id, string $name): array {
+        $routes['search.view'] = new Route('/search');
+        $routes["search.view_$id"] = new Route('/search/' . $id);
+        $routes['search.help_' . $id] = new Route('/help');
+        $collection->add('search.literal', new Route('/x'));
+        $collection->add("{$name}.bc", new Route('/y'));
+        $collection->add($name, new Route('/z'));
+        $routes['not_a_route'] = new \ArrayObject();
+        $form->add('not_a_route_either');
+        return $routes;
+    }
+}
+"#;
+        let (mut declared, mut patterns) = built(php);
+        declared.sort();
+        patterns.sort();
+        assert_eq!(declared, ["search.literal", "search.view"]);
+        assert_eq!(
+            patterns,
+            ["*.bc", "search.*", "search.help_*", "search.view_*"]
+        );
+    }
+
+    #[test]
+    fn a_file_without_symfony_routes_builds_none() {
+        let php = "<?php\nnamespace Drupal\\acme;\nclass Cart {\n    public function run($items) { $items->add('acme.thing', 1); }\n}\n";
+        assert_eq!(built(php), (Vec::new(), Vec::new()));
     }
 
     #[test]

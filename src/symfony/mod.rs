@@ -148,6 +148,7 @@ fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> boo
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
         || (map.declares_twig_loader && enabled(StringKeyKind::TwigTemplate))
+        || (!map.drupal_route_patterns.is_empty() && enabled(StringKeyKind::DrupalRoute))
         || map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
