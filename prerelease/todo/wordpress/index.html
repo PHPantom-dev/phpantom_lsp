@@ -1312,17 +1312,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#wp13-return-types-no-conditional-return-can-express" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        WP13. Return types no conditional <code>@return</code> can express
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#wp8-sage-view-composers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1366,6 +1355,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#wp14-wp_parse_args-of-an-object" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        WP14. <code>wp_parse_args()</code> of an object
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1395,11 +1395,16 @@
 <p>Known gaps and missing features in PHPantom's WordPress support. Today
 WordPress gets the generic engine, plus the output constants (<code>OBJECT</code>,
 <code>ARRAY_A</code>, …) its stubs leave out and the return types an argument
-decides that they declare too wide (<code>src/wordpress/</code>). Core's functions
+decides that they declare too wide (<code>src/wordpress/</code>), or that no PHPDoc
+type can spell (<code>src/type_engine/type_ops/call_site_returns/wordpress.rs</code>).
+Core's functions
 and classes resolve only when the project indexes WordPress itself or a
 stub package for it. The stubs' own type tests run in
 <code>tests/wordpress_stubs/</code>, and what the engine reads wrongly in them is
-filed under "Conditional return types" in <a href="../bugs/">bugs.md</a>.</p>
+filed under "Conditional return types" in <a href="../bugs/">bugs.md</a>. The
+return types <code>src/wordpress/overrides.php</code> gives the stubs that hold for
+every WordPress version the stubs cover are worth offering to
+<code>php-stubs/wordpress-stubs</code> as well.</p>
 <p>Most WordPress typing lives in <code>php-stubs/wordpress-stubs</code>, so the
 external stubs are the foundation for everything here. Installed with
 Composer, the package is a stub source with no configuration, as is
@@ -1569,37 +1574,6 @@ problem as Blade and Twig template variables.</p>
 <p><strong>Where to look:</strong> Laravel's view names (<code>src/virtual_members/laravel/view_names.rs</code>)
 and the Twig template-name support.</p>
 <hr />
-<h2 id="wp13-return-types-no-conditional-return-can-express">WP13. Return types no conditional <code>@return</code> can express<a class="headerlink" href="#wp13-return-types-no-conditional-return-can-express" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$args = wp_parse_args($args, ['before' =&gt; '', 'echo' =&gt; true]);</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">$args['echo'];   // mixed, want bool</span>
-</code></pre></div>
-<p><code>src/wordpress/overrides.php</code> gives the WordPress stubs the conditional
-return types an argument decides. What is left of PHPStan's WordPress
-extension needs the engine, since no PHPDoc type can say it. Its
-fixtures are ported in <code>tests/wordpress_stubs/data/phpstan-wordpress/</code>,
-each gap marked <code>// SKIP</code>:</p>
-<ul>
-<li><strong>Merged shapes.</strong> <code>wp_parse_args($args, $defaults)</code> of an array is
-  <code>array_merge($defaults, $args)</code>, which the array function rules
-  (<code>src/type_engine/variable/array_func_rules.rs</code>) already type.
-  <code>shortcode_atts($pairs, $atts)</code> keeps the keys of <code>$pairs</code>, each value
-  its default's type or <code>string</code>. 23 assertions.</li>
-<li><strong><code>esc_sql()</code> keeps the shape</strong> of the array it escapes, each scalar
-  value a <code>string</code> and anything else <code>''</code>. 11 assertions.</li>
-<li><strong><code>wp_slash()</code> keeps the shape</strong> of the array it slashes, each string
-  value slashed. The stubs' conditional gives <code>array&lt;key-of&lt;T&gt;, …&gt;</code>, which
-  loses the keys each value belongs to. 6 assertions.</li>
-<li><strong>Calls on literal arguments.</strong> <code>wp_slash('foo')</code>,
-  <code>trailingslashit('foo')</code>, <code>normalize_whitespace(' 0 ')</code>,
-  <code>stripslashes_from_strings_only('foo')</code> and
-  <code>wp_parse_url('http://example.com', PHP_URL_HOST)</code> give the literal
-  WordPress would return, the way <code>scalar_fold.rs</code> folds PHP's own string
-  functions. 33 assertions.</li>
-</ul>
-<p>The overrides that hold for every WordPress version the stubs cover are
-worth offering to <code>php-stubs/wordpress-stubs</code> as well.</p>
-<hr />
 <h2 id="wp8-sage-view-composers">WP8. Sage view composers<a class="headerlink" href="#wp8-sage-view-composers" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Roots' Sage theme, through its Acorn framework, hands data to Blade views
@@ -1622,12 +1596,12 @@ for exactly which members count.</p>
 <hr />
 <h2 id="wp10-hook-docblocks-that-do-not-match-the-call">WP10. Hook docblocks that do not match the call<a class="headerlink" href="#wp10-hook-docblocks-that-do-not-match-the-call" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong> (depends on WP5)</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/**</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x"> * Filters the order total.</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x"> *</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x"> * @param float $total The total.</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x"> */</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">$total = apply_filters('acme_order_total', $total, $order);   // 2 arguments, 1 @param</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/**</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x"> * Filters the order total.</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x"> *</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x"> * @param float $total The total.</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x"> */</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">$total = apply_filters('acme_order_total', $total, $order);   // 2 arguments, 1 @param</span>
 </code></pre></div>
 <p>WP5 reads the docblock above <code>do_action()</code> and <code>apply_filters()</code> as the
 hook's signature, so a docblock that disagrees with the call types every
@@ -1641,9 +1615,9 @@ cases.</p>
 <hr />
 <h2 id="wp11-assertwperror-and-assertnotwperror-narrow">WP11. <code>assertWPError()</code> and <code>assertNotWPError()</code> narrow<a class="headerlink" href="#wp11-assertwperror-and-assertnotwperror-narrow" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$result = wp_insert_post($data, true);   // int|WP_Error</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$this-&gt;assertNotWPError($result);</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">$result + 1;                             // still int|WP_Error</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$result = wp_insert_post($data, true);   // int|WP_Error</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$this-&gt;assertNotWPError($result);</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$result + 1;                             // still int|WP_Error</span>
 </code></pre></div>
 <p>WordPress's PHPUnit base class (<code>WP_UnitTestCase_Base</code>) asserts a value
 is or is not a <code>WP_Error</code>, and the test stubs do not say so. PHPStan's
@@ -1657,11 +1631,11 @@ Rust.</p>
 <hr />
 <h2 id="wp12-constants-wp-configphp-defines-keep-the-value-of-one-install">WP12. Constants <code>wp-config.php</code> defines keep the value of one install<a class="headerlink" href="#wp12-constants-wp-configphp-defines-keep-the-value-of-one-install" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">// wp-config.php</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">define('WP_CONTENT_DIR', '/var/www/wp-content');</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">// a plugin</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">if (WP_CONTENT_DIR === '/srv/site/wp-content') { … }   // read as `false`</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// wp-config.php</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">define('WP_CONTENT_DIR', '/var/www/wp-content');</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">// a plugin</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">if (WP_CONTENT_DIR === '/srv/site/wp-content') { … }   // read as `false`</span>
 </code></pre></div>
 <p>A constant from a <code>define()</code> in <code>wp-config.php</code> is typed as the literal
 it holds on this machine, so a comparison against another install's value
@@ -1673,6 +1647,21 @@ value differs between installs, so its type is the general one (<code>string</co
 other <code>bool</code> constants already widen to <code>bool</code>; the string and integer
 ones do not. Widen every constant <code>wp-config.php</code> (or
 <code>wp-config-sample.php</code>) defines, rather than keeping a list of names.</p>
+<hr />
+<h2 id="wp14-wp_parse_args-of-an-object">WP14. <code>wp_parse_args()</code> of an object<a class="headerlink" href="#wp14-wp_parse_args-of-an-object" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$args = wp_parse_args($post, ['extra' =&gt; 1]);   // array, want an array with an `extra` key</span>
+</code></pre></div>
+<p><code>wp_parse_args()</code> reads an object through <code>get_object_vars()</code>, called
+from inside WordPress, so the result holds the object's public
+properties merged under the defaults. PHPStan's WordPress extension
+types it <code>non-empty-array&lt;mixed&gt;&amp;hasOffset('extra')</code> outside a class,
+and keeps the declared <code>array</code> inside one, where the caller sees more
+properties than WordPress does. PHPantom keeps the declared <code>array</code>
+everywhere: it has no <code>hasOffset()</code> type, and does not type
+<code>get_object_vars()</code> by the scope it is called from. The fixture is
+ported in <code>tests/wordpress_stubs/data/phpstan-wordpress/</code>, marked
+<code>// SKIP</code>.</p>
 
 
 
