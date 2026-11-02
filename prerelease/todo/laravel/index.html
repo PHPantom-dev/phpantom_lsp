@@ -1448,17 +1448,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l65-unknown-blade-and-livewire-components" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L65. Unknown Blade and Livewire components
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l66-related-file-navigation-for-models-events-and-listeners" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2225,17 +2214,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L64. Routes on controller methods
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l65-unknown-blade-and-livewire-components" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L65. Unknown Blade and Livewire components
       </span>
     </span>
   </a>
@@ -3070,22 +3048,6 @@ established.</p>
 <p><strong>Where to look:</strong> <code>code_lens.rs</code>;
 <code>virtual_members/laravel/route_names/</code> for the discovered routes and
 their actions.</p>
-<h4 id="l65-unknown-blade-and-livewire-components">L65. Unknown Blade and Livewire components<a class="headerlink" href="#l65-unknown-blade-and-livewire-components" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
-<p><code>&lt;x-buttons.bakc /&gt;</code> and <code>&lt;livewire:orders.overveiw /&gt;</code> name nothing, and
-nothing says so: component tags complete and navigate, but a tag that
-resolves to no class and no view is not reported (the tag diagnostics in
-<code>diagnostics/blade_component_tags.rs</code> only check that tags balance).
-Laravel Idea reports both, though on a project that keeps its Blade views
-outside <code>resources/views</code> it also flags components that exist. Report a
-tag that <code>blade/discovery.rs</code> cannot resolve, keeping the world open for
-component namespaces and paths the project registers in a way we cannot
-read.</p>
-<p>Pair it with a "Create component" quick fix, as an unknown view already
-offers "Create view" (<code>create_missing_view.rs</code>). Offer to create the anonymous component's Blade file at the path the tag
-resolves to (<code>resources/views/components/alert.blade.php</code>, honouring
-anonymous component namespaces and nested names), and as a second option
-the class-backed pair (<code>app/View/Components/Alert.php</code> plus its view).</p>
 <h4 id="l66-related-file-navigation-for-models-events-and-listeners">L66. Related-file navigation for models, events, and listeners<a class="headerlink" href="#l66-related-file-navigation-for-models-events-and-listeners" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Laravel Idea links an Eloquent model to its factory, policy, observer,
