@@ -1404,9 +1404,10 @@ filed under "Conditional return types" in <a href="../bugs/">bugs.md</a>.</p>
 external stubs are the foundation for everything here. Installed with
 Composer, the package is a stub source with no configuration, as is
 <code>php-stubs/woocommerce-stubs</code>; a project without Composer can list
-either under <code>[stubs] paths</code>. <code>global $wpdb;</code> being untyped is
-a gap in the generic engine, tracked as
-<a href="../type-inference/#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it">T57</a>.
+either under <code>[stubs] paths</code>. <code>global $wpdb;</code> takes its type from a
+<code>@global</code> tag on the function; without one it is untyped, a gap in the
+generic engine tracked as
+<a href="../type-inference/#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file">T61</a>.
 PHPStan's WordPress extension
 (<code>szepeviktor/phpstan-wordpress</code>) is the checklist of what a WordPress
 developer expects from types; PhpStorm's built-in WordPress support and

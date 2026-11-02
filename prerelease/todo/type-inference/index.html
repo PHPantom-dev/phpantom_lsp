@@ -1337,17 +1337,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T57. A <code>global</code> variable is untyped unless a <code>@var</code> sits above it
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t58-newt-is-not-supported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1374,6 +1363,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T60. A float literal is typed <code>float</code>, not its value
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T61. A <code>global</code> variable is untyped without a type in the same file
       </span>
     </span>
   </a>
@@ -1653,17 +1653,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        T57. A <code>global</code> variable is untyped unless a <code>@var</code> sits above it
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#t58-newt-is-not-supported" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1690,6 +1679,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T60. A float literal is typed <code>float</code>, not its value
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T61. A <code>global</code> variable is untyped without a type in the same file
       </span>
     </span>
   </a>
@@ -2248,50 +2248,16 @@ project's <code>doctrine.yaml</code>.</p>
 (<code>Type/Doctrine/DBAL/*RowCountReturnTypeExtension</code>,
 <code>Doctrine/Driver/DriverDetector</code>).</p>
 <hr />
-<h2 id="t57-a-global-variable-is-untyped-unless-a-var-sits-above-it">T57. A <code>global</code> variable is untyped unless a <code>@var</code> sits above it<a class="headerlink" href="#t57-a-global-variable-is-untyped-unless-a-var-sits-above-it" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/**</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x"> * @global wpdb $wpdb WordPress database abstraction object.</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x"> */</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">function acme_count_orders(): int {</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">    global $wpdb;</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">    return (int) $wpdb-&gt;get_var("SELECT COUNT(*) FROM {$wpdb-&gt;prefix}acme_orders");</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>PhpStorm types <code>$wpdb</code> as <code>wpdb</code> in a theme once it is pointed at a
-WordPress install, and reports an unknown method on it; we leave it
-untyped. <code>$wpdb</code> is how WordPress code reaches the database, so it is
-one of the most used variables in any plugin or theme.</p>
-<p><code>global $x</code> takes its type from the same file's top-level scope, or from
-a <code>@var</code> docblock directly above the statement. Two more sources are
-ignored:</p>
-<ul>
-<li><strong><code>@global Type $name</code></strong> on the enclosing function's docblock, the
-  phpDocumentor tag WordPress core and most plugins use for exactly
-  this. Reading it is the cheap half.</li>
-<li><strong>An assignment in another file</strong>, such as the ones WordPress core
-  makes to <code>$wp_query</code> and <code>$wpdb</code> (directly or through <code>$GLOBALS</code>)
-  during bootstrap, or a globals stub file that declares them with <code>@var</code>. PhpStorm types
-  globals this way. It needs an index of global variable assignments,
-  which must stay cheap: decide which files may feed it (stubs, and
-  files the project includes at top level) before building it.</li>
-</ul>
-<p>WordPress is the biggest user (<code>$wpdb</code>, <code>$post</code>, <code>$wp_query</code>), but the
-gap is in the generic engine.</p>
-<p><strong>Where to look:</strong> <code>src/type_engine/variable/forward_walk/statements.rs</code>
-(<code>Statement::Global</code>), <code>apply_global_var_docblocks</code> in
-<code>src/type_engine/variable/forward_walk/var_docblocks.rs</code>.</p>
-<hr />
 <h2 id="t58-newt-is-not-supported">T58. <code>new&lt;T&gt;</code> is not supported<a class="headerlink" href="#t58-newt-is-not-supported" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">/**</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x"> * @template T of string</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x"> * @param T $class_name</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x"> * @return ($class_name is 'WP_Posts_List_Table'|'WP_Users_List_Table'|… ? new&lt;T&gt; : false)</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x"> */</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">function _get_list_table($class_name, $args = []) { … }</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">_get_list_table('WP_Posts_List_Table');   // want WP_Posts_List_Table, get new&lt;&lt;T&gt;&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/**</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x"> * @template T of string</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x"> * @param T $class_name</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x"> * @return ($class_name is 'WP_Posts_List_Table'|'WP_Users_List_Table'|… ? new&lt;T&gt; : false)</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x"> */</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">function _get_list_table($class_name, $args = []) { … }</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="x">_get_list_table('WP_Posts_List_Table');   // want WP_Posts_List_Table, get new&lt;&lt;T&gt;&gt;</span>
 </code></pre></div>
 <p><code>new&lt;T&gt;</code> is PHPStan's type for an instance of the class a string names,
 used where a function instantiates the class it is given by name. We
@@ -2303,22 +2269,22 @@ are marked with this.</p>
 <hr />
 <h2 id="t59-tk-on-a-class-template-is-not-resolved">T59. <code>T[K]</code> on a class template is not resolved<a class="headerlink" href="#t59-tk-on-a-class-template-is-not-resolved" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/**</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x"> * @template T of array = array&lt;string, mixed&gt;</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x"> * @implements ArrayAccess&lt;key-of&lt;T&gt;, value-of&lt;T&gt;&gt;</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x"> */</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">class WP_REST_Request implements ArrayAccess {</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">    /**</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">     * @template TOffset of key-of&lt;T&gt;</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">     * @param TOffset $key</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x">     * @return T[TOffset]|null</span>
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="x">     */</span>
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="x">    public function get_param($key) { … }</span>
-<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="x">}</span>
-<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>
-<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="x">/** @var WP_REST_Request&lt;array{id: int, name: string}&gt; $request */</span>
-<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="x">$request-&gt;get_param('id');   // want int|null, get array{id: int, name: string}['id']|null</span>
-<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="x">$request['id'];              // want int|null, get array{id: int, name: string}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">/**</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x"> * @template T of array = array&lt;string, mixed&gt;</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x"> * @implements ArrayAccess&lt;key-of&lt;T&gt;, value-of&lt;T&gt;&gt;</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x"> */</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">class WP_REST_Request implements ArrayAccess {</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">    /**</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">     * @template TOffset of key-of&lt;T&gt;</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">     * @param TOffset $key</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="x">     * @return T[TOffset]|null</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="x">     */</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="x">    public function get_param($key) { … }</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="x">}</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="x">/** @var WP_REST_Request&lt;array{id: int, name: string}&gt; $request */</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="x">$request-&gt;get_param('id');   // want int|null, get array{id: int, name: string}['id']|null</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="x">$request['id'];              // want int|null, get array{id: int, name: string}</span>
 </code></pre></div>
 <p>An offset access type over a class template stays as written once the
 template is bound, and array access on the object (through
@@ -2330,18 +2296,47 @@ API endpoint that types its request this way gets every parameter wrong.
 <hr />
 <h2 id="t60-a-float-literal-is-typed-float-not-its-value">T60. A float literal is typed <code>float</code>, not its value<a class="headerlink" href="#t60-a-float-literal-is-typed-float-not-its-value" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/**</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x"> * @template T</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x"> * @param T $data</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x"> * @return (T is array|object|string ? string : T)</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x"> */</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">function maybe_serialize($data) { … }</span>
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">maybe_serialize(0.0);   // want 0.0, get float</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/**</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x"> * @template T</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x"> * @param T $data</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x"> * @return (T is array|object|string ? string : T)</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x"> */</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">function maybe_serialize($data) { … }</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">maybe_serialize(0.0);   // want 0.0, get float</span>
 </code></pre></div>
 <p>Integer, string and boolean literals keep their value as their type;
 float literals become <code>float</code>. A template bound to one, or a condition
 over one, loses the value. 2 assertions of the WordPress stubs fixtures.</p>
+<hr />
+<h2 id="t61-a-global-variable-is-untyped-without-a-type-in-the-same-file">T61. A <code>global</code> variable is untyped without a type in the same file<a class="headerlink" href="#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">function acme_count_orders(): int {</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">    global $wpdb;</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">    return (int) $wpdb-&gt;get_var("SELECT COUNT(*) FROM {$wpdb-&gt;prefix}acme_orders");</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>global $x</code> takes its type from a <code>@global Type $x</code> tag on the enclosing
+function, a <code>@var</code> docblock directly above the statement, or the same
+file's top-level scope. Plugin and theme code often writes <code>global $wpdb;</code>
+with none of those, and then <code>$wpdb</code> is untyped. PhpStorm types it once it
+is pointed at a WordPress install, from the assignments core makes in
+other files.</p>
+<p>WordPress core assigns its globals during bootstrap, at the top level of
+<code>wp-settings.php</code> through <code>$GLOBALS['wp_query'] = new WP_Query();</code> (each
+with a <code>@global</code> docblock above it), and inside functions such as
+<code>require_wp_db()</code> through <code>global $wpdb; $wpdb = new wpdb(...);</code>.
+<code>php-stubs/wordpress-stubs</code> declares no globals at all, so a project that
+has only the stubs needs either core indexed (WP3) or a globals stub file
+that declares them with <code>@var</code>.</p>
+<p>This needs an index of global variable assignments, which must stay
+cheap: decide which files may feed it (stubs, and files the project
+includes at top level) before building it, and whether a <code>@global</code> tag on
+one function may type the same global in another.</p>
+<p><strong>Where to look:</strong> <code>src/type_engine/variable/forward_walk/statements.rs</code>
+(<code>Statement::Global</code>), <code>declared_global_types</code> and
+<code>apply_global_var_docblocks</code> in
+<code>src/type_engine/variable/forward_walk/var_docblocks.rs</code>.</p>
 
 
 

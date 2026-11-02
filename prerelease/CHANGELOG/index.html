@@ -5130,6 +5130,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h2 id="unreleased"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.1...HEAD">Unreleased</a><a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>@global</code> tags type the globals a function imports.</strong> A <code>@global wpdb $wpdb</code> tag on a function or method docblock types <code>$wpdb</code> after <code>global $wpdb;</code>, so WordPress code gets completion and diagnostics on <code>$wpdb</code>, <code>$wp_query</code> and the rest.</li>
 <li><strong>Filter <code>analyze</code> by diagnostic code.</strong> <code>--code unused_import</code> reports only that code and <code>--exclude-code unused_import</code> leaves it out. Both are repeatable and work with <code>--severity</code> and every output format. Contributed by @stubbedev.</li>
 <li><strong>Go to declaration.</strong> On a method call or a method's own declaration, go-to-declaration jumps to the interface or abstract method it implements. Where there is none, it lands where go-to-definition does.</li>
 <li><strong>Morph aliases and config keys complete as array keys.</strong> Registered aliases are suggested for the keys of <code>Relation::morphMap([...])</code>, and config keys for the keys of <code>Config::set([...])</code> and <code>config([...])</code>. Contributed by @shuvroroy.</li>
