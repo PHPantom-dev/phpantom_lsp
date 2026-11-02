@@ -935,29 +935,6 @@ them.
 
 ---
 
-## F50. Twig filters and functions
-
-**Impact: Medium · Complexity: Medium**
-
-Blocks full Twig support: the README keeps Twig marked as partial until this lands.
-
-A project's Twig extensions declare filters and functions with `new
-TwigFilter('price', …)` and `new TwigFunction('icon', …)` in
-`getFilters()` and `getFunctions()`, or with `#[AsTwigFilter]` and
-`#[AsTwigFunction]` on a method. A template's `{{ amount|price }}` and
-`{{ icon('x') }}` neither complete, navigate to the PHP method behind
-them, nor show its signature on hover, and an unknown one is not
-reported. Twig's own filters and functions come from its core extension,
-which is read the same way.
-
-This applies to Twig outside Symfony too.
-
-**Where to look:** `src/twig/templates.rs` (the Twig scan), and
-`references/symfony-language-tools` (`docs/features/twig-callables.rst`)
-and `references/twigstan`.
-
----
-
 ## F51. Class names in Twig's `constant()` and `enum()`
 
 **Impact: Low · Complexity: Low-Medium**

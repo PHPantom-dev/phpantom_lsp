@@ -129,7 +129,7 @@ pub(in crate::symbol_map::extraction) fn record_yii_view_sites(
         }
         YiiViewScope::Class(base) => {
             let class_fqn = ctx
-                .yii_class_name_offset
+                .class_name_offset
                 .and_then(|offset| ctx.resolved_name_at(offset));
             match chain_view_base(object, dir, class_fqn) {
                 Some(base) => view_key(name, base.as_deref(), None),

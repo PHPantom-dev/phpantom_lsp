@@ -40,6 +40,8 @@ enum CheckedStringKind {
     SymfonyRoute,
     SymfonyTranslation,
     TwigTemplate,
+    TwigFilter,
+    TwigFunction,
     MessengerBus,
     YiiView,
     YiiRoute,
@@ -66,6 +68,8 @@ impl CheckedStringKind {
             StringKeyKind::SymfonyRoute => Self::SymfonyRoute,
             StringKeyKind::SymfonyTranslation => Self::SymfonyTranslation,
             StringKeyKind::TwigTemplate => Self::TwigTemplate,
+            StringKeyKind::TwigFilter => Self::TwigFilter,
+            StringKeyKind::TwigFunction => Self::TwigFunction,
             StringKeyKind::MessengerBus => Self::MessengerBus,
             StringKeyKind::YiiView => Self::YiiView,
             StringKeyKind::YiiRoute => Self::YiiRoute,
@@ -146,6 +150,8 @@ struct DeclaredKeys<'a> {
     judged_translation_domains: Arc<[String]>,
     /// The Twig templates the project holds, sorted.
     twig_templates: Vec<String>,
+    /// The Twig filters and functions the project and its packages declare.
+    twig_callables: Option<Arc<crate::twig::callables::TwigCallables>>,
     /// The Messenger buses the project's configuration declares, sorted.
     messenger_buses: Vec<String>,
     /// The Yii route names the project declares, sorted.
@@ -175,6 +181,12 @@ impl<'a> DeclaredKeys<'a> {
         let has_symfony_route = names(|kind| kind == CheckedStringKind::SymfonyRoute);
         let has_symfony_translation = names(|kind| kind == CheckedStringKind::SymfonyTranslation);
         let has_twig_template = names(|kind| kind == CheckedStringKind::TwigTemplate);
+        let has_twig_callable = names(|kind| {
+            matches!(
+                kind,
+                CheckedStringKind::TwigFilter | CheckedStringKind::TwigFunction
+            )
+        });
         let has_messenger_bus = names(|kind| kind == CheckedStringKind::MessengerBus);
         let has_yii_route = names(|kind| kind == CheckedStringKind::YiiRoute);
 
@@ -312,6 +324,7 @@ impl<'a> DeclaredKeys<'a> {
         } else {
             Vec::new()
         };
+        let twig_callables = has_twig_callable.then(|| backend.twig_callables());
 
         let messenger_buses = if has_messenger_bus {
             backend.symfony_declared_names(crate::symbol_map::StringKeyKind::MessengerBus)
@@ -344,6 +357,7 @@ impl<'a> DeclaredKeys<'a> {
             symfony_translations,
             judged_translation_domains,
             twig_templates,
+            twig_callables,
             messenger_buses,
             yii_routes,
         }
@@ -402,6 +416,16 @@ impl<'a> DeclaredKeys<'a> {
             CheckedStringKind::SymfonyRoute => self.judge_symfony_route(key),
             CheckedStringKind::SymfonyTranslation => self.judge_symfony_translation(key),
             CheckedStringKind::TwigTemplate => self.judge_twig_template(key),
+            CheckedStringKind::TwigFilter => self
+                .twig_callables
+                .as_ref()?
+                .declares(crate::symbol_map::StringKeyKind::TwigFilter, key)
+                .map(|valid| (valid, "Twig filter", "invalid_twig_filter")),
+            CheckedStringKind::TwigFunction => self
+                .twig_callables
+                .as_ref()?
+                .declares(crate::symbol_map::StringKeyKind::TwigFunction, key)
+                .map(|valid| (valid, "Twig function", "invalid_twig_function")),
             CheckedStringKind::MessengerBus => self.judge_messenger_bus(key),
             // A view whose alias the project does not declare cannot be
             // told missing.

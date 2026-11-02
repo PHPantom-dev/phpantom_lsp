@@ -45,6 +45,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook => CompletionItemKind::Event,
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
         StringKeyKind::YiiRouteArgument => CompletionItemKind::Field,
+        StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => CompletionItemKind::Function,
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::YiiRoute
@@ -178,6 +179,9 @@ impl Backend {
             | StringKeyKind::SymfonyEvent
             | StringKeyKind::MessengerBus
             | StringKeyKind::YiiRoute => self.symfony_declared_names(*kind).into(),
+            StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
+                self.twig_callable_names(*kind).into()
+            }
             // A translation key is completed in the domain it is looked up
             // in, a configuration key under the key it is nested in, which
             // only the Symfony completion knows, and a route argument from

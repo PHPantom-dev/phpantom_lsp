@@ -26,4 +26,11 @@
      config/routes/framework.yaml. #}
   <a href="{{ path('admin_dashboard') }}">Admin</a>
   <a href="{{ path('_preview_error', {'code': 404}) }}">Error page</a>
+  {# Try: go-to-definition on initials, which leads to the method behind it
+     in src/Twig/AppExtension.php, on badge, declared by an #[AsTwigFunction]
+     in src/Twig/Badges.php, or on upper, one of Twig's own filters. Hover
+     one to see its signature, and complete a filter after a new | or a
+     function where an expression starts. A filter or function no extension
+     declares is reported. #}
+  <p>{{ sender|initials }} {{ badge('demo') }} {{ sender|upper }}</p>
 {% endblock %}

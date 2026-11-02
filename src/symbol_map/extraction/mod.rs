@@ -95,6 +95,8 @@ struct ExtractionCtx<'a> {
     /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
     /// register.
     messenger_handlers: Vec<crate::symbol_map::MessengerHandlerSite>,
+    /// The Twig filters and functions the file declares.
+    twig_callables: Vec<crate::symbol_map::TwigCallableSite>,
     /// What the file's PHP configurator calls declare a service or a
     /// parameter as.
     container_values: Vec<crate::symbol_map::ContainerValueSite>,
@@ -144,8 +146,9 @@ struct ExtractionCtx<'a> {
     /// What a view name in the code being extracted is relative to.
     yii_view_scope: YiiViewScope,
     /// Where the name of the class being extracted is written, for the
-    /// controller a renderer's `withController($this)` names.
-    yii_class_name_offset: Option<u32>,
+    /// controller a renderer's `withController($this)` names and the class a
+    /// Twig extension's `[$this, 'method']` callable calls.
+    class_name_offset: Option<u32>,
     /// Whether the file names anything from Symfony's container
     /// configurator namespace, checked once lazily.
     uses_symfony_configurators: Option<bool>,
@@ -284,6 +287,7 @@ mod phpunit;
 mod statements;
 mod subject_text;
 mod symfony;
+mod twig;
 mod wordpress;
 mod yii;
 mod yii_routes;
@@ -296,6 +300,7 @@ use phpunit::*;
 use statements::*;
 use subject_text::*;
 use symfony::*;
+use twig::*;
 use wordpress::*;
 use yii::*;
 use yii_routes::*;
@@ -405,6 +410,7 @@ fn extract_symbol_map_inner(
         morph_column_sites: Vec::new(),
         gate_subjects: Vec::new(),
         messenger_handlers: Vec::new(),
+        twig_callables: Vec::new(),
         container_values: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
@@ -424,7 +430,7 @@ fn extract_symbol_map_inner(
         route_imports: Vec::new(),
         yii_dir,
         yii_view_scope: YiiViewScope::Template,
-        yii_class_name_offset: None,
+        class_name_offset: None,
         yii: yii_dir.is_some(),
         names_yii_router: None,
         yii_read_chains: Vec::new(),
@@ -582,6 +588,7 @@ fn extract_symbol_map_inner(
         morph_column_sites: ctx.morph_column_sites,
         gate_subjects: ctx.gate_subjects,
         messenger_handlers: ctx.messenger_handlers,
+        twig_callables: ctx.twig_callables,
         container_values: ctx.container_values,
         routes: ctx.routes,
         route_imports: ctx

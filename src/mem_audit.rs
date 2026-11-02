@@ -1387,6 +1387,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
                     * size_of::<crate::symbol_map::MessengerHandlerSite>(),
             );
             sym.add(
+                sm.twig_callables.capacity() * size_of::<crate::symbol_map::TwigCallableSite>(),
+            );
+            sym.add(
                 sm.container_values.capacity() * size_of::<crate::symbol_map::ContainerValueSite>(),
             );
             sym.add(sm.routes.capacity() * size_of::<crate::symbol_map::RouteSite>());

@@ -11,6 +11,7 @@
 
 pub(crate) mod block_navigation;
 pub(crate) mod blocks;
+pub(crate) mod callables;
 pub(crate) mod roots;
 pub(crate) mod templates;
 
@@ -32,6 +33,8 @@ pub(crate) struct TwigState {
     /// [`roots::is_candidate_path`]), with the plain names it references.
     files: RwLock<HashMap<PathBuf, Vec<String>>>,
     roots: RwLock<Arc<TwigRoots>>,
+    /// The filters and functions installed packages declare, once read.
+    vendor_callables: RwLock<Option<Arc<callables::VendorCallables>>>,
 }
 
 impl Backend {

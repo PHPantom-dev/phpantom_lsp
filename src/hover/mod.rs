@@ -24,6 +24,7 @@ mod laravel_trans;
 mod member;
 mod see_refs;
 mod templates;
+mod twig;
 mod variable;
 
 use tower_lsp_server::gen_lsp_types::*;

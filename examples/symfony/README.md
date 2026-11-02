@@ -48,6 +48,12 @@ catalogues together, the way a real Symfony project does.
   `templates/demo/index.html.twig`, go to the definition of `title` or of
   `parent()` to reach `base.html.twig`'s block, and in `base.html.twig` go to
   the definition of `body` to reach the template that overrides it.
+- Twig filters and functions lead to the PHP behind them. In
+  `templates/demo/index.html.twig`, go to the definition of `initials` to
+  reach `src/Twig/AppExtension.php`, of `badge` to reach the
+  `#[AsTwigFunction]` in `src/Twig/Badges.php`, or of `upper` to reach
+  Twig's own extension. Hover one for its signature, complete a filter after
+  `|`, and misspell one to see it reported.
 - Form fields and validation mappings name the properties of the class they
   map. In `src/Form/RegistrationType.php` or `config/validator/User.yaml`, go
   to the definition of `email`, find the references of `$displayName` in

@@ -1332,7 +1332,7 @@ pub(in crate::symbol_map::extraction) fn emit_symfony_config_tree_spans(
 }
 
 /// The attributes among `attribute_lists` that resolve to `class_name`.
-fn attributes_named<'e, 'a>(
+pub(in crate::symbol_map::extraction) fn attributes_named<'e, 'a>(
     attribute_lists: &'e Sequence<'a, AttributeList<'a>>,
     class_name: &'e str,
     ctx: &'e ExtractionCtx<'_>,
@@ -1352,7 +1352,7 @@ fn attributes_named<'e, 'a>(
 /// The arguments of `attribute`, each with the constructor parameter it is
 /// passed to: a named one by its name, a positional one by its place in
 /// `parameters`.
-fn attribute_arguments<'e, 'a>(
+pub(in crate::symbol_map::extraction) fn attribute_arguments<'e, 'a>(
     attribute: &'e Attribute<'a>,
     parameters: &[&'static str],
 ) -> Vec<(&'e str, &'e Expression<'a>)> {

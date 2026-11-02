@@ -19,6 +19,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     emit_symfony_config_tree_spans(class, ctx);
     emit_symfony_listener_spans(class, ctx);
     emit_messenger_handler_sites(class, ctx);
+    emit_twig_callable_attributes(class, ctx);
     emit_yii_route_argument_spans(class, ctx);
 
     if let Some(ref extends) = class.extends {
@@ -74,15 +75,13 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     ctx.covers_default_class = covers_default_class;
     let yii_view_scope = yii_class_scope(class, ctx);
     let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, yii_view_scope);
-    let prev_yii_class_name_offset = ctx
-        .yii_class_name_offset
-        .replace(class.name.span.start.offset);
+    let prev_class_name_offset = ctx.class_name_offset.replace(class.name.span.start.offset);
 
     for member in class.members.iter() {
         extract_from_class_member(member, ctx);
     }
 
-    ctx.yii_class_name_offset = prev_yii_class_name_offset;
+    ctx.class_name_offset = prev_class_name_offset;
     ctx.yii_view_scope = prev_yii_view_scope;
     ctx.covers_default_class = prev_covers_default_class;
     ctx.in_mailable = prev_in_mailable;

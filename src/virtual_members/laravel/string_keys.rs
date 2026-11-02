@@ -79,6 +79,9 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::YiiRoute => backend.symfony_declaration_locations(*kind, key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
         StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
+        StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
+            backend.twig_callable_definitions(*kind, key)
+        }
         StringKeyKind::YiiRouteArgument => backend.yii_route_argument_locations(key),
         StringKeyKind::WordPressHook => backend.wordpress_hook_definitions(key),
     }
@@ -269,6 +272,8 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::ContainerParameter
         | StringKeyKind::SymfonyTranslation
         | StringKeyKind::TwigTemplate
+        | StringKeyKind::TwigFilter
+        | StringKeyKind::TwigFunction
         | StringKeyKind::SymfonyConfigKey
         | StringKeyKind::SymfonyEvent
         | StringKeyKind::MessengerBus

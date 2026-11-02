@@ -25,6 +25,8 @@ use App\MessageHandler\CountWelcomeEmailsHandler;
 use App\MessageHandler\SendWelcomeEmailHandler;
 use App\Query\QueryBus;
 use App\Service\WelcomeMailer;
+use App\Twig\AppExtension;
+use App\Twig\Badges;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Symfony\Bridge\Twig\Extension\RoutingExtension;
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
@@ -53,6 +55,7 @@ use Symfony\Component\Translation\Translator;
 use Symfony\Component\Validator\Validation;
 use Symfony\Component\Yaml\Yaml;
 use Twig\Environment;
+use Twig\Extension\AttributeExtension;
 use Twig\Loader\FilesystemLoader;
 
 $passed = 0;
@@ -202,6 +205,8 @@ check('symfony/validator ships a catalogue of the validators domain', is_file(__
 $twig = new Environment(new FilesystemLoader(__DIR__ . '/templates'), ['strict_variables' => true]);
 $twig->addExtension(new TranslationExtension($translator));
 $twig->addExtension(new RoutingExtension($urls));
+$twig->addExtension(new AppExtension());
+$twig->addExtension(new AttributeExtension(Badges::class));
 $html = $twig->render('demo/index.html.twig', ['sender' => 'PHPantom', 'support' => '', 'title' => '']);
 
 check('demo/index.html.twig extends base.html.twig', str_contains($html, '<!doctype html>'));
@@ -212,6 +217,7 @@ check("The template's path('app_demo', ...) resolves", str_contains($html, 'href
 check("The template's path('app_demo_legacy') resolves", str_contains($html, 'href="/legacy"'));
 check("The template's path('admin_dashboard') resolves", str_contains($html, 'href="/admin"'));
 check("The template's path('_preview_error', ...) resolves", str_contains($html, 'href="/_error/404"'));
+check("The template's |initials filter is AppExtension::initials()", str_contains($html, '<p>P <span class="badge">demo</span> PHPANTOM</p>'));
 
 // ─── Forms ──────────────────────────────────────────────────────────────────
 

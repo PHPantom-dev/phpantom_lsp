@@ -294,6 +294,7 @@ mod symfony_routes;
 mod symfony_templates;
 mod symfony_translations;
 mod twig_blocks;
+mod twig_callables;
 mod twig_templates;
 mod type_definition;
 mod type_hierarchy;

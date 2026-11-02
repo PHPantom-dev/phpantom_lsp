@@ -94,6 +94,15 @@ pub(crate) enum StringKeyKind {
     /// rendered by `block()`.  A name only means something among the
     /// templates that extend each other (see `twig::block_navigation`).
     TwigBlock,
+    /// A Twig filter name: declared by a `new TwigFilter('price', …)` or an
+    /// `#[AsTwigFilter]` method in an extension, the project's or an
+    /// installed package's (see `twig::callables`), and applied by a
+    /// template's `|price`.
+    TwigFilter,
+    /// A Twig function name: declared like [`Self::TwigFilter`], with
+    /// `TwigFunction` and `#[AsTwigFunction]`, and called by a template's
+    /// `icon(…)`.
+    TwigFunction,
     /// A bundle configuration key, as its dotted path from the bundle's
     /// root (`acme_demo.mailer.dsn`): declared by a `TreeBuilder` schema in
     /// a `getConfigTreeBuilder()` (see `symfony::config_tree`), and read by
@@ -164,7 +173,10 @@ impl StringKeyKind {
 
     /// Whether this key belongs to Twig, whatever the framework around it.
     pub(crate) const fn is_twig(self) -> bool {
-        matches!(self, Self::TwigTemplate | Self::TwigBlock)
+        matches!(
+            self,
+            Self::TwigTemplate | Self::TwigBlock | Self::TwigFilter | Self::TwigFunction
+        )
     }
 
     /// Whether this key belongs to Yii.
@@ -371,6 +383,35 @@ pub(crate) struct MessengerHandlerSite {
     pub method: Atom,
     /// The message class, fully qualified.
     pub message: Atom,
+}
+
+/// A Twig filter or function an extension declares, and the PHP callable
+/// behind it.
+///
+/// Kept beside the declaring [`SymbolKind::StringKey`] span, which only
+/// holds the name: what a template's `|price` runs is a fact about the
+/// declaration, read by the definition and hover of the name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TwigCallableSite {
+    /// [`StringKeyKind::TwigFilter`] or [`StringKeyKind::TwigFunction`].
+    pub kind: StringKeyKind,
+    pub name: Atom,
+    /// The byte range of the name, inside its quotes.
+    pub start: u32,
+    pub end: u32,
+    pub target: TwigCallableTarget,
+}
+
+/// The PHP callable a Twig filter or function runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TwigCallableTarget {
+    /// A method, of the class fully qualified.
+    Method { class: Atom, method: Atom },
+    /// A function, fully qualified.
+    Function(Atom),
+    /// A closure, or a callable that names nothing (a filter Twig compiles
+    /// itself, such as `raw`).
+    Inline,
 }
 
 // ─── Container declarations ─────────────────────────────────────────────────

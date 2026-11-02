@@ -62,6 +62,8 @@ impl Backend {
                 "Block",
                 self.twig_block_detail(uri, Some(offset as usize), key),
             ),
+            StringKeyKind::TwigFilter => ("Twig filter", self.twig_callable_detail(*kind, key)),
+            StringKeyKind::TwigFunction => ("Twig function", self.twig_callable_detail(*kind, key)),
             StringKeyKind::Route => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,

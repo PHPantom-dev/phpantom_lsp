@@ -294,6 +294,9 @@ pub(crate) struct SymbolMap {
     /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
     /// register.  Empty for every file that declares none.
     pub messenger_handlers: Vec<MessengerHandlerSite>,
+    /// The Twig filters and functions the file declares, in source order.
+    /// Empty for every file that declares none.
+    pub twig_callables: Vec<TwigCallableSite>,
     /// The classes, aliases, and values the file's service and container
     /// parameter declarations give, sorted by `start`.  Empty for every file
     /// that declares none.

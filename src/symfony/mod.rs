@@ -104,7 +104,8 @@ pub(crate) fn slot_spans(content: &str, slots: Vec<NameSlot>) -> Vec<SymbolSpan>
 }
 
 /// The files whose symbol maps declare a Symfony service ID, container
-/// parameter, route, translation key, Twig template, configuration key,
+/// parameter, route, translation key, Twig template, Twig filter or
+/// function, configuration key,
 /// event listener, or Messenger bus, or register a Messenger handler, or
 /// define a Yii route.
 #[derive(Default)]
@@ -117,16 +118,19 @@ pub(crate) struct SymfonyState {
 }
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
-/// translation key, a template, a configuration key, an event listener, or
-/// a Messenger bus, outright or through a configurator call still to be
+/// translation key, a template, a Twig filter or function, a configuration
+/// key, an event listener, or a Messenger bus, outright or through a configurator call still to be
 /// confirmed, or registers a Messenger handler, or imports routes.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that
-/// uses Twig declares its templates and nothing else.  A Yii route is
+/// uses Twig declares its templates, filters, and functions and nothing
+/// else.  A Yii route is
 /// counted whether it has a name or not, for the arguments its handler
 /// reads from its path.
 fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> bool) -> bool {
-    let counts = |kind: StringKeyKind| (kind.is_symfony() || kind.is_yii()) && enabled(kind);
+    let counts = |kind: StringKeyKind| {
+        (kind.is_symfony() || kind.is_yii() || kind.is_twig()) && enabled(kind)
+    };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
         || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))

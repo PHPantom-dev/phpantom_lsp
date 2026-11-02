@@ -337,8 +337,8 @@ impl Backend {
 
 impl Backend {
     /// The spans of a Twig template: the names it is loaded by, the
-    /// templates and blocks it names, and in a Symfony project the route names and
-    /// translation keys it reads.
+    /// templates, blocks, filters, and functions it names, and in a Symfony
+    /// project the route names and translation keys it reads.
     fn twig_template_spans(&self, uri: &str, content: &str, is_symfony: bool) -> Vec<SymbolSpan> {
         let roots = self.twig_roots();
         let names = crate::util::uri_to_path(uri)
@@ -356,6 +356,17 @@ impl Backend {
             |name| roots.is_template_name(name),
         ));
         spans.extend(crate::twig::blocks::twig_block_spans(content));
+        // The `parent` of a `parent()` is the block it renders, rather than
+        // the function Twig declares it as.
+        let callables: Vec<SymbolSpan> = crate::twig::callables::twig_callable_spans(content)
+            .into_iter()
+            .filter(|callable| {
+                !spans
+                    .iter()
+                    .any(|span| span.start < callable.end && callable.start < span.end)
+            })
+            .collect();
+        spans.extend(callables);
         spans.sort_by_key(|span| span.start);
         spans
     }

@@ -320,7 +320,7 @@ impl Backend {
 
     /// Complete a service reference or parameter placeholder in a YAML or
     /// XML configuration file, or a route name, translation key, template
-    /// name, or block name in a Twig template.
+    /// name, block name, filter, or function in a Twig template.
     pub(crate) fn try_symfony_resource_completion(
         &self,
         uri: &str,
@@ -362,11 +362,15 @@ impl Backend {
             }
             if let Some(start) = crate::twig::templates::twig_template_name_start(content, cursor) {
                 (StringKeyKind::TwigTemplate, start)
-            } else if is_symfony {
-                let start = crate::symfony::routes::twig_route_name_start(content, cursor)?;
+            } else if let Some(start) = is_symfony
+                .then(|| crate::symfony::routes::twig_route_name_start(content, cursor))
+                .flatten()
+            {
                 (StringKeyKind::SymfonyRoute, start)
             } else {
-                return None;
+                let (start, kind) = crate::twig::callables::callable_name_start(content, cursor)?;
+                let names = self.twig_callable_names(kind);
+                return self.symfony_names_response(kind, names, content, start, cursor, position);
             }
         } else if !is_symfony {
             return None;
