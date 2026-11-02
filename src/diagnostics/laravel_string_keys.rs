@@ -860,7 +860,7 @@ impl Backend {
         let symbol_map = &ctx.symbol_map;
         let extra = self.typed_receiver_spans_for(uri, symbol_map);
         let morph_columns = self.morph_column_spans_for(uri, symbol_map);
-        let is_drupal_test_code = self.is_drupal_test_code(uri);
+        let is_drupal_test_code = self.is_drupal_example_or_test_code(uri);
         let key_spans: Vec<CheckedKeySpan> = symbol_map
             .spans
             .iter()
@@ -894,7 +894,8 @@ impl Backend {
                 {
                     return None;
                 }
-                // Test code passes invented route names to mocks.
+                // Test code passes invented route names to mocks, and an
+                // `*.api.php` file's examples name invented routes too.
                 if *kind == crate::symbol_map::StringKeyKind::DrupalRoute && is_drupal_test_code {
                     return None;
                 }

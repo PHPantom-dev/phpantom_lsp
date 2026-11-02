@@ -311,20 +311,26 @@ impl Backend {
         aliases
     }
 
-    /// Whether `uri` is test code of a Drupal project: a file under a
-    /// `tests` folder of one of its web roots.
-    pub(crate) fn is_drupal_test_code(&self, uri: &str) -> bool {
+    /// Whether `uri` is code a Drupal site never runs against its own
+    /// declarations: a file under a `tests` folder of one of its web roots,
+    /// whose route names are a test module's or invented for a mock, or an
+    /// extension's `*.api.php`, which documents hooks with example code.
+    pub(crate) fn is_drupal_example_or_test_code(&self, uri: &str) -> bool {
         if !self.is_drupal_project() {
             return false;
         }
         let Some(path) = crate::util::uri_to_path(uri) else {
             return false;
         };
-        self.drupal
-            .web_roots
-            .read()
-            .iter()
-            .any(|root| path.starts_with(root) && is_test_fixture(&path, root))
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".api.php"))
+            || self
+                .drupal
+                .web_roots
+                .read()
+                .iter()
+                .any(|root| path.starts_with(root) && is_test_fixture(&path, root))
     }
 
     /// Whether `uri` belongs to a test module of a Drupal project and is not

@@ -675,8 +675,9 @@ async fn entity_and_views_routes_are_judged_by_their_shape() {
     );
 }
 
-/// Test code passes invented route names to mocks, and a project whose
-/// routing files were not read has nothing to judge against.
+/// Test code passes invented route names to mocks, `*.api.php` examples
+/// name invented routes, and a project whose routing files were not read
+/// has nothing to judge against.
 #[tokio::test]
 async fn test_code_and_unread_projects_are_not_judged() {
     let test_path = "web/modules/custom/acme/tests/src/Unit/CheckedTest.php";
@@ -687,4 +688,10 @@ async fn test_code_and_unread_projects_are_not_judged() {
     );
     let path = "web/modules/custom/acme/src/Checked.php";
     assert!(unknown_routes(&[(path, CHECKED)], path).await.is_empty());
+    let api_path = "web/modules/custom/acme/acme.api.php";
+    assert!(
+        unknown_routes(&[(ROUTING_PATH, ROUTING), (api_path, CHECKED)], api_path)
+            .await
+            .is_empty()
+    );
 }
