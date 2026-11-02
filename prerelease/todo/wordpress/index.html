@@ -1246,10 +1246,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#wp1-wordpress-demo-project-and-a-real-world-baseline" class="md-nav__link">
+  <a href="#wp9-the-argument-types-the-wordpress-stubs-declare" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        WP1. WordPress demo project and a real-world baseline
+        WP9. The argument types the WordPress stubs declare
       </span>
     </span>
   </a>
@@ -1257,10 +1257,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#wp9-the-argument-types-the-wordpress-stubs-declare" class="md-nav__link">
+  <a href="#wp15-analyze-leaves-out-a-plugins-files-outside-its-psr-4-roots" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        WP9. The argument types the WordPress stubs declare
+        WP15. <code>analyze</code> leaves out a plugin's files outside its PSR-4 roots
       </span>
     </span>
   </a>
@@ -1417,6 +1417,16 @@ PHPStan's WordPress extension
 (<code>szepeviktor/phpstan-wordpress</code>) is the checklist of what a WordPress
 developer expects from types; PhpStorm's built-in WordPress support and
 PHP Tools' hook navigation are what they expect from an editor.</p>
+<p><code>examples/wordpress/</code> is the demo project: a plugin and a theme with core
+from the stubs, and an <code>assertions.php</code> that checks their claims against
+WordPress installed on SQLite. The real-world baseline is Contact Form 7
+(a plugin) and GeneratePress (a classic theme), analysed with the stubs
+installed. Of their 104 and 232 diagnostics (2026-11-02), most are what
+the stubs or the projects' own docblocks declare, and PHPStan reports
+them too. What they show PHPantom getting wrong is filed below under
+WP3, WP9 and WP15. Hooks and template parts produce no diagnostics
+today, so the baseline cannot rank WP4 to WP6; they rank by what an
+editor user compares first.</p>
 <p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
@@ -1438,28 +1448,6 @@ within the same impact tier.</p>
 </tbody>
 </table>
 <hr />
-<h2 id="wp1-wordpress-demo-project-and-a-real-world-baseline">WP1. WordPress demo project and a real-world baseline<a class="headerlink" href="#wp1-wordpress-demo-project-and-a-real-world-baseline" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Complexity: Low-Medium</strong></p>
-<p>Every other WordPress item is measured against this one. Without a demo
-project and a baseline from real code, WordPress support would be built
-untested and could regress silently.</p>
-<ul>
-<li><strong><code>examples/wordpress/</code></strong>: a small plugin and a theme, in the same
-  shape as <code>examples/laravel/</code> and <code>examples/symfony/</code>, with "Try:"
-  comments at each site and a README listing what to try. It installs
-  <code>php-stubs/wordpress-stubs</code> through Composer, which is how most typed
-  WordPress projects get core's declarations.</li>
-<li><strong>Runtime assertions</strong>: an <code>assertions.php</code> that checks the demo's
-  claims against real WordPress, as <code>examples/laravel/assertions.php</code>
-  does for Eloquent. Decide whether that boots WordPress (core from
-  Composer plus the SQLite database drop-in, so no server is needed) or
-  only checks what can be read without booting.</li>
-<li><strong>A real-world baseline</strong>: run <code>analyze</code> on an actively maintained
-  open-source plugin and theme, bucket the diagnostics by cause, and
-  file what WordPress-specific gaps they show. That ranks the rest of
-  this document by what actually breaks.</li>
-</ul>
-<hr />
 <h2 id="wp9-the-argument-types-the-wordpress-stubs-declare">WP9. The argument types the WordPress stubs declare<a class="headerlink" href="#wp9-the-argument-types-the-wordpress-stubs-declare" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">add_menu_page('Acme', 'Acme', 'manage_options', 'acme', 'notACallable');</span>
@@ -1475,6 +1463,32 @@ beside them as diagnostics fixtures (as <code>tests/fixtures/phpstan_symfony/</c
 does for the Symfony extension's rule tests), extending the slice of the
 stubs <code>scripts/extract-wordpress-stubs.php</code> copies, and file every call
 the argument-type check judges differently.</p>
+<p>The baseline also found parameters the stubs declare narrower than core
+accepts. <code>wp_hash()</code> takes <code>'auth'|'logged_in'|'nonce'|'secure_auth'</code> as
+its scheme, but <code>wp_salt()</code> makes a salt for any scheme, and Contact
+Form 7 hashes with its own. <code>the_title_attribute()</code> and its siblings take
+only an array shape, though core runs <code>wp_parse_args()</code> on a query string
+like <code>'echo=0'</code> too. <code>WP_Customize_Manager::add_control()</code> and
+<code>add_section()</code> close their <code>$args</code> shapes, but the control or section
+class reads keys of its own (GeneratePress passes <code>pro_text</code> and
+<code>pro_url</code>), and <code>settings</code> is a setting ID as often as an array. Correct
+these in <code>src/wordpress/overrides.php</code>, which replaces only return types
+today, and offer them to the stubs.</p>
+<hr />
+<h2 id="wp15-analyze-leaves-out-a-plugins-files-outside-its-psr-4-roots">WP15. <code>analyze</code> leaves out a plugin's files outside its PSR-4 roots<a class="headerlink" href="#wp15-analyze-leaves-out-a-plugins-files-outside-its-psr-4-roots" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"autoload"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"psr-4"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"Acme\\Shop\\"</span><span class="p">:</span><span class="w"> </span><span class="s2">"src/"</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>A plugin that autoloads its classes with Composer keeps the rest of its
+code outside the PSR-4 root: the main file with the <code>Plugin Name:</code>
+header, <code>uninstall.php</code>, <code>templates/</code>, <code>views/</code>. <code>analyze</code> walks only
+the PSR-4 roots when a <code>composer.json</code> declares any, so none of those
+files are checked, and a theme next to the plugin is skipped as a whole.
+The editor still reports them when they are open. Analyse a plugin's or
+theme's whole directory (one holding a file with a <code>Plugin Name:</code> or
+<code>Theme Name:</code> header, minus <code>vendor/</code> and <code>node_modules/</code>), the way
+Blade view directories are added today.</p>
+<p><strong>Where to look:</strong> <code>discover_user_files</code> in <code>src/analyse/run.rs</code>.</p>
 <hr />
 <h2 id="wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own">WP3. WordPress core for a plugin or theme opened on its own<a class="headerlink" href="#wp3-wordpress-core-for-a-plugin-or-theme-opened-on-its-own" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
@@ -1492,15 +1506,20 @@ tree or only what the workspace references.</p>
 <p>This follows the rule in <code>external-stubs.md</code>: Drupal's web root and
 sibling editor folders are detected, never typed by the user, and every
 new source of PHP maps onto an existing role.</p>
+<p>Contact Form 7 shows what a sibling plugin that is not installed costs
+today. It calls Akismet behind <code>is_callable(['Akismet', 'get_api_key'])</code>,
+which still reports <code>Akismet</code> as an unknown class, and Really Simple
+CAPTCHA behind <code>class_exists('ReallySimpleCaptcha')</code>, which is accepted
+but leaves 18 members "could not be resolved" on the object it builds.</p>
 <p><strong>Where to look:</strong> <code>src/classmap_scanner/discovery.rs</code>
 (<code>scan_drupal_directories</code> is the closest precedent),
 <code>src/config/indexing.rs</code>.</p>
 <hr />
 <h2 id="wp4-hook-names">WP4. Hook names<a class="headerlink" href="#wp4-hook-names" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: High · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">add_action('acme_order_placed', [$this, 'sendReceipt']);</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">do_action('acme_order_placed', $order);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">add_action('acme_order_placed', [$this, 'sendReceipt']);</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">do_action('acme_order_placed', $order);</span>
 </code></pre></div>
 <p>The hook name is the string that ties a listener to the place that fires
 it, and nothing navigates between the two today. Treat it as a string
@@ -1535,16 +1554,16 @@ use (<code>src/virtual_members/laravel/string_keys.rs</code>,
 <hr />
 <h2 id="wp5-hook-callback-parameter-and-return-types">WP5. Hook callback parameter and return types<a class="headerlink" href="#wp5-hook-callback-parameter-and-return-types" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Complexity: Medium-High</strong> (depends on WP4)</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/**</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x"> * Filters the post content.</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x"> *</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x"> * @param string $content Content of the current post.</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x"> */</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">$content = apply_filters('the_content', $content);</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">add_filter('the_content', function ($content) {</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    return $content . '…';   // $content is untyped today</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">});</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/**</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x"> * Filters the post content.</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x"> *</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x"> * @param string $content Content of the current post.</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x"> */</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">$content = apply_filters('the_content', $content);</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">add_filter('the_content', function ($content) {</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    return $content . '…';   // $content is untyped today</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">});</span>
 </code></pre></div>
 <p>Core documents every hook with a docblock above the call that fires it.
 Its <code>@param</code> tags type the callback's parameters, and a filter's first
@@ -1562,8 +1581,8 @@ WordPress extension (<code>HookCallbackRule</code>, <code>ApplyFiltersDynamicFun
 <hr />
 <h2 id="wp6-template-parts">WP6. Template parts<a class="headerlink" href="#wp6-template-parts" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">get_template_part('template-parts/content', get_post_type());</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">locate_template(['parts/hero.php']);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">get_template_part('template-parts/content', get_post_type());</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">locate_template(['parts/hero.php']);</span>
 </code></pre></div>
 <p>Theme code names template files by a path without the extension, looked
 up in the child theme and then the parent theme. Navigate from the
@@ -1596,12 +1615,12 @@ for exactly which members count.</p>
 <hr />
 <h2 id="wp10-hook-docblocks-that-do-not-match-the-call">WP10. Hook docblocks that do not match the call<a class="headerlink" href="#wp10-hook-docblocks-that-do-not-match-the-call" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong> (depends on WP5)</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/**</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x"> * Filters the order total.</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x"> *</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x"> * @param float $total The total.</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x"> */</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">$total = apply_filters('acme_order_total', $total, $order);   // 2 arguments, 1 @param</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/**</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x"> * Filters the order total.</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x"> *</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x"> * @param float $total The total.</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x"> */</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">$total = apply_filters('acme_order_total', $total, $order);   // 2 arguments, 1 @param</span>
 </code></pre></div>
 <p>WP5 reads the docblock above <code>do_action()</code> and <code>apply_filters()</code> as the
 hook's signature, so a docblock that disagrees with the call types every
@@ -1615,9 +1634,9 @@ cases.</p>
 <hr />
 <h2 id="wp11-assertwperror-and-assertnotwperror-narrow">WP11. <code>assertWPError()</code> and <code>assertNotWPError()</code> narrow<a class="headerlink" href="#wp11-assertwperror-and-assertnotwperror-narrow" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$result = wp_insert_post($data, true);   // int|WP_Error</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$this-&gt;assertNotWPError($result);</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$result + 1;                             // still int|WP_Error</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$result = wp_insert_post($data, true);   // int|WP_Error</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$this-&gt;assertNotWPError($result);</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">$result + 1;                             // still int|WP_Error</span>
 </code></pre></div>
 <p>WordPress's PHPUnit base class (<code>WP_UnitTestCase_Base</code>) asserts a value
 is or is not a <code>WP_Error</code>, and the test stubs do not say so. PHPStan's
@@ -1631,11 +1650,11 @@ Rust.</p>
 <hr />
 <h2 id="wp12-constants-wp-configphp-defines-keep-the-value-of-one-install">WP12. Constants <code>wp-config.php</code> defines keep the value of one install<a class="headerlink" href="#wp12-constants-wp-configphp-defines-keep-the-value-of-one-install" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// wp-config.php</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">define('WP_CONTENT_DIR', '/var/www/wp-content');</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">// a plugin</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">if (WP_CONTENT_DIR === '/srv/site/wp-content') { … }   // read as `false`</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">// wp-config.php</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">define('WP_CONTENT_DIR', '/var/www/wp-content');</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">// a plugin</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">if (WP_CONTENT_DIR === '/srv/site/wp-content') { … }   // read as `false`</span>
 </code></pre></div>
 <p>A constant from a <code>define()</code> in <code>wp-config.php</code> is typed as the literal
 it holds on this machine, so a comparison against another install's value
@@ -1650,7 +1669,7 @@ ones do not. Widen every constant <code>wp-config.php</code> (or
 <hr />
 <h2 id="wp14-wp_parse_args-of-an-object">WP14. <code>wp_parse_args()</code> of an object<a class="headerlink" href="#wp14-wp_parse_args-of-an-object" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$args = wp_parse_args($post, ['extra' =&gt; 1]);   // array, want an array with an `extra` key</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$args = wp_parse_args($post, ['extra' =&gt; 1]);   // array, want an array with an `extra` key</span>
 </code></pre></div>
 <p><code>wp_parse_args()</code> reads an object through <code>get_object_vars()</code>, called
 from inside WordPress, so the result holds the object's public

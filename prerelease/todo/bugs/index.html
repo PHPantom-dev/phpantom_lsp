@@ -1006,6 +1006,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b722-array_udiff-and-its-siblings-reject-their-callback-as-the-third-argument" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B722. <code>array_udiff()</code> and its siblings reject their callback as the third argument
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1652,6 +1669,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b722-array_udiff-and-its-siblings-reject-their-callback-as-the-third-argument" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B722. <code>array_udiff()</code> and its siblings reject their callback as the third argument
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1759,7 +1793,25 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b722-array_udiff-and-its-siblings-reject-their-callback-as-the-third-argument">B722. <code>array_udiff()</code> and its siblings reject their callback as the third argument<a class="headerlink" href="#b722-array_udiff-and-its-siblings-reject-their-callback-as-the-third-argument" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">array_udiff($a, $b, fn($x, $y) =&gt; $x &lt;=&gt; $y);</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">// Argument 3 ($array2) expects array, got Closure(mixed, mixed): int</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">array_udiff($a, $b, $c, fn($x, $y) =&gt; $x &lt;=&gt; $y);   // not reported</span>
+</code></pre></div>
+<p>Since PHP 8.0 phpstorm-stubs declare these as <code>array $array, ...$rest</code>,
+keeping the PHP 7 <code>array $array2, callable $data_compare_func</code> behind
+<code>#[PhpStormStubsElementAvailable(to: '7.4')]</code>. With exactly three
+arguments, the third is checked against <code>array</code> under the name
+<code>$array2</code>, a parameter PHP 8 does not have, so the callback is reported.
+With four arguments nothing is reported, and the second argument is
+never checked. <code>array_diff_ukey()</code>, <code>array_diff_uassoc()</code>,
+<code>array_intersect_ukey()</code>, <code>array_udiff_assoc()</code>, <code>array_uintersect()</code> and
+the rest of the family behave the same, with or without a PHP version in
+<code>composer.json</code>. Widening <code>$rest</code> in <code>src/stub_patches/functions.rs</code>
+does not change it, so the parameter comes from somewhere other than the
+version-filtered list.</p>
+<p>Found in Contact Form 7's HTML formatter (<code>array_diff_ukey()</code>).</p>
 
 
 
