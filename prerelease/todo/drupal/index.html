@@ -1518,8 +1518,16 @@ aliases and parameter placeholders. Start by checking what it picks up from a
 Drupal module unchanged, then teach it where Drupal keeps the files
 (every enabled module's and core's <code>*.services.yml</code>) instead of
 <code>config/services.yaml</code>.</p>
+<p>Most of Drupal's navigation depends on this. On Drupal core, Find
+References on <code>EntityStorageInterface::load()</code> misses about 240 calls
+of the shape
+<code>$this-&gt;container-&gt;get('entity_type.manager')-&gt;getStorage('node')-&gt;load(1)</code>.
+They are the bulk of what a tool that types service lookups finds and
+we don't.</p>
 <p><strong>Where to look:</strong> <code>src/symfony/container.rs</code>, <code>src/symfony/resources.rs</code>,
-and PHPStan's Drupal extension (its service map).</p>
+PHPStan's Drupal extension (its service map), and PHPlumb
+(<code>crates/phplumb-index/src/frameworks/drupal/services.rs</code>, MIT), which
+reads the same files.</p>
 <hr />
 <h2 id="dr3-entity-storage-and-entity-type-ids">DR3. Entity storage and entity type IDs<a class="headerlink" href="#dr3-entity-storage-and-entity-type-ids" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: High · Complexity: Medium-High</strong></p>

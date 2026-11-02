@@ -1205,6 +1205,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T61. A regression that changes where a call resolves goes unnoticed
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1510,6 +1521,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T61. A regression that changes where a call resolves goes unnoticed
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1790,6 +1812,26 @@ argument list: resolve the class the way <code>new</code> resolves it, read the
 callable parameter of <code>__construct</code> at the argument's position the way
 <code>infer_callable_params_from_static_receiver_fw</code> does for a static call,
 and use it from both walks so diagnostics and completion agree.</p>
+<hr />
+<h2 id="t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed">T61. A regression that changes where a call resolves goes unnoticed<a class="headerlink" href="#t61-a-regression-that-changes-where-a-call-resolves-goes-unnoticed" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>The only real-project check for type-engine changes is
+<code>phpantom_lsp analyze</code>, which counts diagnostics. A change that sends
+<code>$x-&gt;save()</code> to a different class, or drops the target of a call that
+never produced a diagnostic, leaves the count unchanged: go-to-definition,
+hover and references regress silently. A change that resolves more calls
+shows up only as fewer <code>unknown_member</code> reports, never as an increase in
+coverage.</p>
+<p><strong>Plan.</strong> Add a mode to <code>analyze</code> that writes, for every member access,
+function call, and class reference in the project, its position and the
+FQN of each declaration it resolves to (or nothing), one line per access
+in a stable order. The <code>semantic_export</code> occurrence records already
+contain this data. Here they would be fed by the analyze
+workspace pipeline instead of caller-supplied documents. A small script
+diffs two dumps (the branch and <code>main</code>) and reports targets lost,
+changed, and gained, plus the share of member accesses resolved. Run it
+on a few real projects before merging type-engine changes, and record
+coverage alongside the diagnostic counts.</p>
 <hr />
 <h2 id="t34-staticconst-over-narrows-to-the-declaring-classs-value">T34. <code>static::CONST</code> over-narrows to the declaring class's value<a class="headerlink" href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
