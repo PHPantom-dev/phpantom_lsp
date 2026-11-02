@@ -1355,17 +1355,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#wp16-benchmark-for-wordpress-hook-names-and-stubs" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        WP16. Benchmark for WordPress hook names and stubs
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1429,6 +1418,11 @@ them too. What they show PHPantom getting wrong is filed below under
 WP3, WP9 and WP15. Hooks and template parts produce no diagnostics
 today, so the baseline cannot rank WP5 and WP6; they rank by what an
 editor user compares first.</p>
+<p><strong>Benchmarks.</strong> <code>benches/wordpress_completion.rs</code> measures hook name
+completion, going from a listener to the places that fire its hook, and
+member completion on values the stubs type, over a generated plugin and
+the plugins Composer installs beside it. Every item that adds a hook or
+template feature adds its case to it.</p>
 <p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
 within the same impact tier.</p>
 <table>
@@ -1654,18 +1648,6 @@ everywhere: it has no <code>hasOffset()</code> type, and does not type
 <code>get_object_vars()</code> by the scope it is called from. The fixture is
 ported in <code>tests/wordpress_stubs/data/phpstan-wordpress/</code>, marked
 <code>// SKIP</code>.</p>
-<hr />
-<h2 id="wp16-benchmark-for-wordpress-hook-names-and-stubs">WP16. Benchmark for WordPress hook names and stubs<a class="headerlink" href="#wp16-benchmark-for-wordpress-hook-names-and-stubs" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p>Laravel, Symfony, and Yii have Criterion benchmarks in <code>benches/</code>;
-WordPress has none, though its hook names are read from every installed
-plugin's files and its stubs are one 6 MB file. Add
-<code>benches/wordpress_completion.rs</code>: generate a plugin that fires and
-listens to a few hundred hooks across many files, and time hook name
-completion inside <code>add_action('…')</code> and <code>apply_filters('…')</code>,
-go-to-definition from a listener to the firing, and member completion
-on a value whose type comes from the stubs (<code>get_post()</code>, <code>$wpdb</code>).
-Register it in <code>Cargo.toml</code> so <code>benches/ci_benchmarks.py</code> picks it up.</p>
 
 
 
