@@ -1045,23 +1045,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b705-find-references-skips-drupals-module-and-install-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B705. Find References skips Drupal's <code>.module</code> and <code>.install</code> files
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1747,23 +1730,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b705-find-references-skips-drupals-module-and-install-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B705. Find References skips Drupal's <code>.module</code> and <code>.install</code> files
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1902,25 +1868,7 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b705-find-references-skips-drupals-module-and-install-files">B705. Find References skips Drupal's <code>.module</code> and <code>.install</code> files<a class="headerlink" href="#b705-find-references-skips-drupals-module-and-install-files" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// web/core/modules/navigation/navigation.install</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">$file = \Drupal::entityTypeManager()-&gt;getStorage('file')-&gt;load($logo_fid);</span>
-</code></pre></div>
-<p>Find References on <code>EntityStorageInterface::load()</code> in a Drupal site
-returns no result from a <code>.module</code>, <code>.install</code>, <code>.theme</code>, <code>.profile</code>,
-<code>.inc</code> or <code>.engine</code> file, though their classes and functions are
-indexed. On Drupal core the call above and one in <code>search.install</code> are
-missing. Setting <code>[indexing] extensions</code> to those six extensions brings
-them back.</p>
-<p>When the web root is detected, <code>scan_drupal_directories</code> reads those
-files with its own <code>is_drupal_php_file</code>, but <code>IndexFilters::is_php_file</code>,
-which decides which files the workspace walk turns into symbol maps,
-knows only <code>.php</code> and the configured extensions. Add the Drupal
-extensions to the filter's extension list when a Drupal web root is
-detected, so every workspace walk sees the same files the class scan
-does. Check which other workspace-wide features (rename, workspace
-symbols, <code>analyze</code>) read the same filter.</p>
+<p>No outstanding items.</p>
 
 
 

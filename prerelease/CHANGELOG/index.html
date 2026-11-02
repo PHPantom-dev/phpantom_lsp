@@ -5222,6 +5222,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Find References in Drupal hook files.</strong> Calls in a Drupal site's <code>.module</code>, <code>.install</code>, <code>.theme</code>, <code>.profile</code>, <code>.inc</code> and <code>.engine</code> files are now found by Find References and rename, and <code>analyze</code> checks those files, without listing the extensions under <code>[indexing] extensions</code>.</li>
 <li><strong>Component tags spelled differently from their class.</strong> <code>&lt;livewire:last-24-hours-orders&gt;</code> and <code>&lt;x-forms.datePicker&gt;</code> now navigate and complete and type their attributes like the spelling derived from the class name, since Laravel and Livewire reach the same class from either.</li>
 <li><strong>Members read through a dynamic property name.</strong> A call like <code>$model-&gt;{$column}-&gt;equals($other)</code> is no longer checked against the object the property is read from, which reported a method that the property's own value has.</li>
 <li><strong>Arguments to a variadic parameter are type-checked.</strong> Each argument collected by a <code>...$rest</code> parameter is now checked against the type the parameter declares, the same as any other argument. Mockery's <code>Mockery::mock(Foo::class, [...])</code> and <code>spy()</code> accept the mocked class's constructor arguments.</li>
