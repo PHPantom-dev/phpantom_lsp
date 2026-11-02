@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793637860340,
+  "lastUpdate": 1793639156806,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -8821,6 +8821,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 102.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "jakubmisek@users.noreply.github.com",
+            "name": "Jakub Míšek",
+            "username": "jakubmisek"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "69fa8c26a4ae1d87d0a6c62ad7900fa394aa0c5b",
+          "message": "Update README / PHP Tools -> Rename\n\nThanks for including us. Rename has been in the free tier since v1.73, so the lock isn't accurate anymore.\r\n\r\nSorry for the confusion, and thank you again for mentioning us!",
+          "timestamp": "2026-11-02T17:49:05+01:00",
+          "tree_id": "b2eb9f116d31c7a732b762c980611a3f2799e910",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/69fa8c26a4ae1d87d0a6c62ad7900fa394aa0c5b"
+        },
+        "date": 1793639145961,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 80,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 78.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 100.9,
             "unit": "MiB"
           }
         ]
