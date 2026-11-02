@@ -1370,10 +1370,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file" class="md-nav__link">
+  <a href="#t62-global-tags-in-library-code-do-not-type-a-global" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        T61. A <code>global</code> variable is untyped without a type in the same file
+        T62. <code>@global</code> tags in library code do not type a global
       </span>
     </span>
   </a>
@@ -1686,10 +1686,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file" class="md-nav__link">
+  <a href="#t62-global-tags-in-library-code-do-not-type-a-global" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        T61. A <code>global</code> variable is untyped without a type in the same file
+        T62. <code>@global</code> tags in library code do not type a global
       </span>
     </span>
   </a>
@@ -2309,34 +2309,32 @@ API endpoint that types its request this way gets every parameter wrong.
 float literals become <code>float</code>. A template bound to one, or a condition
 over one, loses the value. 2 assertions of the WordPress stubs fixtures.</p>
 <hr />
-<h2 id="t61-a-global-variable-is-untyped-without-a-type-in-the-same-file">T61. A <code>global</code> variable is untyped without a type in the same file<a class="headerlink" href="#t61-a-global-variable-is-untyped-without-a-type-in-the-same-file" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
+<h2 id="t62-global-tags-in-library-code-do-not-type-a-global">T62. <code>@global</code> tags in library code do not type a global<a class="headerlink" href="#t62-global-tags-in-library-code-do-not-type-a-global" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">function acme_count_orders(): int {</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">    global $wpdb;</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">    global $wpdb; // untyped when core is indexed instead of the stubs</span>
 <a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">    return (int) $wpdb-&gt;get_var("SELECT COUNT(*) FROM {$wpdb-&gt;prefix}acme_orders");</span>
 <a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">}</span>
 </code></pre></div>
-<p><code>global $x</code> takes its type from a <code>@global Type $x</code> tag on the enclosing
-function, a <code>@var</code> docblock directly above the statement, or the same
-file's top-level scope. Plugin and theme code often writes <code>global $wpdb;</code>
-with none of those, and then <code>$wpdb</code> is untyped. PhpStorm types it once it
-is pointed at a WordPress install, from the assignments core makes in
-other files.</p>
-<p>WordPress core assigns its globals during bootstrap, at the top level of
-<code>wp-settings.php</code> through <code>$GLOBALS['wp_query'] = new WP_Query();</code> (each
-with a <code>@global</code> docblock above it), and inside functions such as
-<code>require_wp_db()</code> through <code>global $wpdb; $wpdb = new wpdb(...);</code>.
-<code>php-stubs/wordpress-stubs</code> declares no globals at all, so a project that
-has only the stubs needs either core indexed (WP3) or a globals stub file
-that declares them with <code>@var</code>.</p>
-<p>This needs an index of global variable assignments, which must stay
-cheap: decide which files may feed it (stubs, and files the project
-includes at top level) before building it, and whether a <code>@global</code> tag on
-one function may type the same global in another.</p>
-<p><strong>Where to look:</strong> <code>src/type_engine/variable/forward_walk/statements.rs</code>
-(<code>Statement::Global</code>), <code>declared_global_types</code> and
-<code>apply_global_var_docblocks</code> in
-<code>src/type_engine/variable/forward_walk/var_docblocks.rs</code>.</p>
+<p>A <code>global $x;</code> with no type of its own takes the type the <code>@global</code> tags of
+the stub files give <code>$x</code> (<code>ExternalStubIndex::globals</code>). Tags anywhere else
+are not read: WordPress core indexed as library code (WP3, or a whole
+install opened as the workspace) writes the same tags on its functions, and
+on the top-level <code>$GLOBALS['wp_query'] = new WP_Query();</code> assignments of
+<code>wp-settings.php</code>, but a project that has core without the stubs leaves
+<code>$wpdb</code> untyped. A plugin's own global documented on one function and
+imported untagged in another is untyped the same way.</p>
+<p>The stub index is rebuilt whole, so its tags are read once per rebuild.
+Library and project files are discovered by several scans and merged
+incrementally (<code>SymbolIndex::merge_scan</code>, <code>replace_tree</code>, the watcher's
+<code>reindex</code>), so feeding them in means carrying a name-to-files map through
+each of those, and deciding which files may count: a project file a
+Composer project autoloads by class is only parsed on demand, and reading
+its tags only once it happens to be parsed would make a type depend on
+what was opened first.</p>
+<p><strong>Where to look:</strong> <code>load_external_stub_global</code> in
+<code>src/resolution/external_stubs.rs</code>, <code>scan_global_tags</code> in
+<code>src/classmap_scanner/discovery.rs</code>.</p>
 
 
 
