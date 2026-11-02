@@ -2124,24 +2124,6 @@ feeding to the framework index the YAML occurrences are kept in. Sidux's</p>
 <code>collect_framework_name_edits</code>), <code>src/symbol_map/extraction/symfony.rs</code>,
 <code>src/blade/typed_receiver.rs</code>.</p>
 <hr />
-<h2 id="f26-symfony-service-ids-a-bundle-or-a-definition-api-declares">F26. Symfony service IDs a bundle or a definition API declares<a class="headerlink" href="#f26-symfony-service-ids-a-bundle-or-a-definition-api-declares" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>Service IDs and container parameters are read from the application's YAML,
-XML, and PHP configurators. A bundle's own declarations, and the ones a
-kernel or an extension makes through the <code>ContainerBuilder</code> API
-(<code>register('app.mailer', …)</code>, <code>setAlias()</code>, <code>setParameter()</code> on a builder,
-<code>setDefinition()</code>), are not, so those names neither complete nor navigate,
-and only names under the application's own <code>app.</code> prefix can be reported
-as undeclared. Two reading shapes are missing too: a configurator's
-<code>-&gt;parent('app.base')</code>, and the <code>%name%</code> placeholders in a string a
-configurator passes as an argument (<code>-&gt;args(['%app.sender%'])</code>).</p>
-<p>Reading the installed bundles' <code>Resources/config/</code> would also let the
-unknown-ID check judge names outside <code>app.</code>; it has to stay cheap enough
-for a project with dozens of bundles.</p>
-<p><strong>Where to look:</strong> <code>src/symbol_map/extraction/symfony.rs</code>
-(<code>symfony_receiver_method</code>), <code>src/symbol_map/string_keys.rs</code>
-(<code>ReceiverClass</code>), <code>src/symfony/</code>.</p>
-<hr />
 <h2 id="f27-symfony-route-parameters">F27. Symfony route parameters<a class="headerlink" href="#f27-symfony-route-parameters" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.</p>
