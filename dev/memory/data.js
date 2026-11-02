@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793652109917,
+  "lastUpdate": 1793655979648,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9085,6 +9085,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 98.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3633be06f3313a2c401129e3e4ec8b57d8490397",
+          "message": "feat(laravel): add validation rule string intelligence",
+          "timestamp": "2026-11-02T21:56:11+01:00",
+          "tree_id": "67eaf06556d7113a4154aa66350e406fa96228c0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3633be06f3313a2c401129e3e4ec8b57d8490397"
+        },
+        "date": 1793655968477,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 76.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 105.1,
             "unit": "MiB"
           }
         ]
