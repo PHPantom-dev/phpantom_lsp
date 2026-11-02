@@ -971,17 +971,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b712-a-router-resource-set-in-php-configuration-still-lets-route-names-be-judged" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B712. A router resource set in PHP configuration still lets route names be judged
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b713-a-localized-route-annotation-declares-no-per-locale-names" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1656,17 +1645,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b712-a-router-resource-set-in-php-configuration-still-lets-route-names-be-judged" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B712. A router resource set in PHP configuration still lets route names be judged
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b713-a-localized-route-annotation-declares-no-per-locale-names" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1812,30 +1790,14 @@ seconds a rate-limit message names.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="framework-names-in-strings">Framework names in strings<a class="headerlink" href="#framework-names-in-strings" title="Permanent link">&para;</a></h2>
-<h3 id="b712-a-router-resource-set-in-php-configuration-still-lets-route-names-be-judged">B712. A router resource set in PHP configuration still lets route names be judged<a class="headerlink" href="#b712-a-router-resource-set-in-php-configuration-still-lets-route-names-be-judged" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// config/packages/routing.php</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">return static function (FrameworkConfig $framework): void {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    $framework-&gt;router()-&gt;resource('app.route_loader');</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">};</span>
-</code></pre></div>
-<p>A <code>framework.router.resource</code> that points anywhere but
-<code>kernel::loadRoutes</code> means the routing files are not what Symfony
-loads, so no route name can be told missing. That is noticed in
-<code>config/packages/</code> YAML and XML (<code>config_tree::configures_foreign_router_resource</code>),
-but PHP package configuration is not read at all, whether written with
-the fluent <code>FrameworkConfig</code> builders, <code>$container-&gt;extension('framework', [...])</code>,
-or the array shape <code>App::config()</code> takes. Every route name the custom
-loader defines is still reported unknown. Read the router's resource from
-PHP configuration too.</p>
 <h3 id="b713-a-localized-route-annotation-declares-no-per-locale-names">B713. A localized <code>@Route</code> annotation declares no per-locale names<a class="headerlink" href="#b713-a-localized-route-annotation-declares-no-per-locale-names" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/**</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x"> * @Route({"en": "/contact", "nl": "/contact-nl"}, name="contact")</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x"> */</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">public function contact(): Response { … }</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">$this-&gt;generateUrl('contact.en');   // reported unknown</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @Route({"en": "/contact", "nl": "/contact-nl"}, name="contact")</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> */</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">public function contact(): Response { … }</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">$this-&gt;generateUrl('contact.en');   // reported unknown</span>
 </code></pre></div>
 <p>A localized <code>#[Route]</code> attribute declares <code>contact.en</code> and <code>contact.nl</code>
 beside <code>contact</code>, but the <code>@Route</code> annotation reader
@@ -1845,13 +1807,13 @@ locale keys of an annotation's path the way the attribute's are read.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first">B704. A function declared in two files resolves to whichever is found first<a class="headerlink" href="#b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function __() {}</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function __() {}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
 </code></pre></div>
 <p>WordPress core declares nineteen of its functions a second time as
 no-ops for its script loader. Calls across the project resolve to the
