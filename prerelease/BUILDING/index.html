@@ -1687,14 +1687,16 @@ first. Each
 <code>assertions.php</code> checks its playground's demo against the real framework.</p>
 <p>All seventeen must pass with zero warnings and zero failures, and the
 Symfony and Yii <code>analyze</code> runs must report <code>[OK] No errors</code>. The Laravel
-<code>analyze</code> run is the exception: <code>app/Demo.php</code> carries three
+<code>analyze</code> run is the exception: <code>app/Demo.php</code> carries four
 deliberate mistakes, each demonstrating a diagnostic.
 <code>Artisan::call('does:not-exist')</code>
-demonstrates <code>invalid_laravel_command</code>, and one <code>view('welcome', …)</code>
+demonstrates <code>invalid_laravel_command</code>,
+<code>-&gt;withoutMiddleware('bakery.closed')</code> demonstrates
+<code>invalid_laravel_middleware</code>, and one <code>view('welcome', …)</code>
 call both leaves out a variable the template declares and passes a
 misspelled key, demonstrating <code>missing_view_variable</code> and
 <code>unused_view_variable</code>. So it must report exactly
-<code>[ERROR] Found 3 errors</code>, on those two lines. Any other count, or an
+<code>[ERROR] Found 4 errors</code>, on those three lines. Any other count, or an
 error on a different line, is a regression.</p>
 <h3 id="manual-lsp-testing">Manual LSP Testing<a class="headerlink" href="#manual-lsp-testing" title="Permanent link">&para;</a></h3>
 <p>The included <code>test_lsp.sh</code> script sends JSON-RPC messages to the server over stdin/stdout, exercising the full LSP protocol flow (initialize, open file, hover, completion, shutdown):</p>

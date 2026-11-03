@@ -1172,17 +1172,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l71-model-level-attributes-as-column-sources" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L71. Model-level attributes as column sources
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1923,17 +1912,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l71-model-level-attributes-as-column-sources" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L71. Model-level attributes as column sources
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2649,21 +2627,6 @@ want accessors that have a mutator.</p>
 <code>virtual_members/laravel/where_property.rs</code> and its callers in
 <code>completion/eloquent_string.rs</code>; <code>extract_column_names</code> in
 <code>virtual_members/laravel/model_extraction/</code> for <code>$appends</code>.</p>
-<h4 id="l71-model-level-attributes-as-column-sources">L71. Model-level attributes as column sources<a class="headerlink" href="#l71-model-level-attributes-as-column-sources" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<p>Laravel models can declare their column lists with class attributes
-instead of properties: <code>#[Fillable(['name'])]</code>, <code>#[Guarded([...])]</code>,
-<code>#[Hidden([...])]</code>, <code>#[Visible([...])]</code> and <code>#[Appends([...])]</code> from
-<code>Illuminate\Database\Eloquent\Attributes</code>, which the framework merges
-into the matching property when the model boots. PHPantom reads only the
-properties. A model that uses the attributes gets no column completion
-from them, no fillable-first ordering in <code>create([...])</code>, and none of
-the column names they list. Read their <code>columns</code> argument alongside the
-property it stands in for, so the two forms behave the same. L49 needs
-the same read for <code>#[Fillable]</code>, <code>#[Guarded]</code> and <code>#[Unguarded]</code>.</p>
-<p><strong>Where to look:</strong> <code>extract_column_names</code> and the <code>$fillable</code>/<code>$guarded</code>
-reads in <code>virtual_members/laravel/model_extraction/</code>, which already
-reads the <code>#[Table]</code> attribute.</p>
 <h4 id="l8-withsum-withavg-withmin-withmax-aggregate-properties">L8. <code>withSum()</code> / <code>withAvg()</code> / <code>withMin()</code> / <code>withMax()</code> aggregate properties<a class="headerlink" href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: High</strong></p>
 <p>Less common than <code>withCount</code>; only affects codebases using aggregate
