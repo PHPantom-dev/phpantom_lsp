@@ -432,13 +432,14 @@ pub struct BackendState {
     /// handler also verifies that the captured text is still current before
     /// updating shared maps.
     pub(crate) did_change_parse_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
-    /// The last open file `update_ast` parsed, kept for the diagnostic
-    /// pass its edit schedules, keyed by URI.
+    /// The last open file `update_ast` parsed, keyed by URI, kept for the
+    /// diagnostic pass its edit schedules and the requests against the same
+    /// text until the next edit.
     ///
-    /// One slot rather than one per file: only the file being typed in is
-    /// diagnosed right after its parse, and the parse of a large file
-    /// holds tens of megabytes.
-    pub(crate) parsed_for_diagnostics: Mutex<Option<(String, crate::parser::ParsedFile)>>,
+    /// One slot rather than one per file: the file being typed in is the
+    /// one diagnosed and queried right after its parse, and the parse of a
+    /// large file holds tens of megabytes.
+    pub(crate) kept_parse: Mutex<Option<(String, Arc<crate::parser::ParsedFile>)>>,
     /// Coalescing state for expensive whole-file requests. See
     /// [`WholeFileCoalesce`] for why this exists.
     pub(crate) whole_file_coalesce: Arc<WholeFileCoalesce>,

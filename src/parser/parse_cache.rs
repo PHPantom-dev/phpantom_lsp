@@ -43,59 +43,30 @@ const MAX_CACHED_OTHER_FILES: usize = 4;
 
 /// A parse that owns everything its `Program` borrows: the text and the
 /// arena the nodes live in.
-struct ParsedTree {
+///
+/// Shared between passes and threads: `didChange` parses the buffer to
+/// rebuild the index on one thread, and the diagnostic pass and every
+/// request against that text read the same parse on others, until the next
+/// edit replaces it.  A file whose last statement is still unfinished is
+/// parsed more than once (see
+/// [`parse_program`](super::recovery::parse_program)), so a parse of it is
+/// worth keeping.
+pub(crate) struct ParsedFile {
+    content: Arc<String>,
     /// Owns the nodes `program` points at; never read directly.
     _arena: mago_allocator::LocalArena,
-    /// The `Program` allocated in `_arena`, borrowing it and the text the
-    /// owner of this tree keeps beside it.
+    /// The `Program` allocated in `_arena`, borrowing it and `content`.
     program: *const (),
 }
 
-impl ParsedTree {
-    fn new(
-        content: &str,
-        parse: impl for<'a> FnOnce(&'a mago_allocator::LocalArena, &'a str) -> &'a Program<'a>,
-    ) -> Self {
-        let arena = mago_allocator::LocalArena::new();
-        let program: *const () = (parse(&arena, content) as *const Program<'_>).cast();
-        // The arena's chunks are heap-allocated and do not move when the
-        // arena itself does, so the pointer outlives this move.
-        Self {
-            _arena: arena,
-            program,
-        }
-    }
-
-    /// The program.
-    ///
-    /// # Safety
-    ///
-    /// The text the tree was parsed from must outlive the returned
-    /// reference.
-    unsafe fn program(&self) -> &Program<'_> {
-        // SAFETY: the pointer came from a `&Program` that borrows only the
-        // arena, owned by `self`, and the text, which the caller vouches
-        // for.
-        unsafe { &*self.program.cast::<Program<'_>>() }
-    }
-}
-
-/// A file parsed outside any pass, handed to the pass that diagnoses it so
-/// that pass does not parse the same text again.
-///
-/// `didChange` parses the buffer to rebuild the index on one thread, and
-/// the diagnostic pass for that buffer runs later on another, so this
-/// keeps the text and the arena together and is `Send`.
-pub(crate) struct ParsedFile {
-    content: Arc<String>,
-    tree: ParsedTree,
-}
-
-// SAFETY: the raw pointer is the only thing keeping the auto trait from
-// applying.  It points into `tree.arena`, which is `Send` and moves with
-// it, and the `Program` it names is `Send` and borrows only that arena and
-// `content`, which moves along too.
+// SAFETY: the raw pointer is the only thing keeping the auto traits from
+// applying.  It points into `_arena`, which is `Send` and moves with it,
+// and the `Program` it names is `Send` and `Sync` and borrows only that
+// arena and `content`, which moves along too.  A shared `ParsedFile` only
+// reads the program; the arena is reached through nothing but its drop,
+// which takes the file by value.
 unsafe impl Send for ParsedFile {}
+unsafe impl Sync for ParsedFile {}
 
 impl ParsedFile {
     /// Parse `content` with `parse`, which receives a fresh arena and the
@@ -104,8 +75,16 @@ impl ParsedFile {
         content: Arc<String>,
         parse: impl for<'a> FnOnce(&'a mago_allocator::LocalArena, &'a str) -> &'a Program<'a>,
     ) -> Self {
-        let tree = ParsedTree::new(&content, parse);
-        Self { content, tree }
+        let arena = mago_allocator::LocalArena::new();
+        let program: *const () = (parse(&arena, &content) as *const Program<'_>).cast();
+        // The arena's chunks and the `String`'s buffer are heap-allocated
+        // and do not move when the arena and the `Arc` do, so the pointer
+        // outlives these moves.
+        Self {
+            content,
+            _arena: arena,
+            program,
+        }
     }
 
     pub(crate) fn content(&self) -> &Arc<String> {
@@ -113,9 +92,9 @@ impl ParsedFile {
     }
 
     pub(crate) fn program(&self) -> &Program<'_> {
-        // SAFETY: `self.content` is the text the tree was parsed from and
-        // lives as long as `self`.
-        unsafe { self.tree.program() }
+        // SAFETY: the pointer came from a `&Program` that borrows only the
+        // arena and the text, both owned by `self`.
+        unsafe { &*self.program.cast::<Program<'_>>() }
     }
 }
 
@@ -123,7 +102,7 @@ impl ParsedFile {
 struct CachedFile {
     content: Arc<String>,
     /// The parse of `content`.  Unset until the first parse of this file.
-    parsed: std::cell::OnceCell<ParsedTree>,
+    parsed: std::cell::OnceCell<Arc<ParsedFile>>,
     /// The file's `namespace` declarations, scanned on first use.
     namespaces: std::cell::OnceCell<crate::text_scan::NamespaceDecls>,
     /// The file's first-class callable assignments, collected on first use.
@@ -168,12 +147,14 @@ impl CachedFile {
     }
 
     fn program(&self) -> &Program<'_> {
-        let tree = self
-            .parsed
-            .get_or_init(|| ParsedTree::new(&self.content, super::recovery::parse_program));
-        // SAFETY: the tree was parsed from `self.content`, which lives as
-        // long as `self`.
-        unsafe { tree.program() }
+        self.parsed
+            .get_or_init(|| {
+                Arc::new(ParsedFile::new(
+                    Arc::clone(&self.content),
+                    super::recovery::parse_program,
+                ))
+            })
+            .program()
     }
 }
 
@@ -240,6 +221,9 @@ pub(crate) struct ParseCacheGuard<'a> {
     /// The file and the address of the borrowed text this guard added to
     /// its [`CachedFile::aliases`], withdrawn on drop.
     alias: Option<(std::rc::Weak<CachedFile>, (usize, usize))>,
+    /// The text `alias` names, when the guard has to keep it alive itself.
+    /// Dropped after the alias is withdrawn.
+    _aliased_text: Option<Arc<String>>,
     _content: std::marker::PhantomData<&'a str>,
 }
 
@@ -297,20 +281,32 @@ pub(crate) fn with_parse_cache_arc(content: Arc<String>) -> ParseCacheGuard<'sta
     install_parse_cache(&text, move || content).0
 }
 
-/// [`with_parse_cache_arc`] for a file already parsed, which the pass then
-/// reads instead of parsing it again.
+/// [`with_parse_cache_arc`] for `text` already parsed as `parsed`, which
+/// the pass then reads instead of parsing it again.
 ///
-/// The parse is dropped when the pass ends.  A pass already active that
-/// holds the same text keeps its own copy and parse of it.
-pub(crate) fn with_parsed_file_cache(parsed: ParsedFile) -> ParseCacheGuard<'static> {
-    let ParsedFile { content, tree } = parsed;
-    let text = Arc::clone(&content);
-    let (guard, file) = install_parse_cache(&text, move || content);
-    // The tree borrows `text`, so it can only live beside that very
-    // allocation, not beside an equal copy the pass registered earlier.
-    if Arc::ptr_eq(&file.content, &text) {
+/// `text` is the caller's copy of the text `parsed` read, which the pass
+/// looks it up by.  A pass already active that holds the same text keeps
+/// its own copy and parse of it.
+pub(crate) fn with_parsed_file_cache(
+    parsed: Arc<ParsedFile>,
+    text: Arc<String>,
+) -> ParseCacheGuard<'static> {
+    let content = Arc::clone(parsed.content());
+    let (mut guard, file) = install_parse_cache(&content, || Arc::clone(&content));
+    // The parse borrows its own copy of the text, so it can only live
+    // beside that very allocation, not beside an equal copy the pass
+    // registered earlier.
+    if Arc::ptr_eq(&file.content, &content) {
         // An `Err` means the file was parsed already; this copy goes.
-        let _ = file.parsed.set(tree);
+        let _ = file.parsed.set(parsed);
+    }
+    // Lookups by the caller's copy then compare addresses rather than the
+    // whole text.
+    if !Arc::ptr_eq(&file.content, &text) {
+        let address = text_address(&text);
+        file.aliases.borrow_mut().push(address);
+        guard.alias = Some((Rc::downgrade(&file), address));
+        guard._aliased_text = Some(text);
     }
     guard
 }
@@ -340,6 +336,7 @@ fn install_parse_cache<'a>(
         let guard = ParseCacheGuard {
             owns_cache,
             alias: None,
+            _aliased_text: None,
             _content: std::marker::PhantomData,
         };
         (guard, file)
@@ -667,12 +664,28 @@ mod with_parsed_program_tests {
     #[test]
     fn a_handed_over_parse_is_read_instead_of_parsing_again() {
         let content = std::sync::Arc::new("<?php class Foo {}".to_string());
-        let parsed = super::ParsedFile::new(std::sync::Arc::clone(&content), |arena, text| {
-            crate::parser::recovery::parse_program(arena, text)
-        });
+        let parsed = std::sync::Arc::new(super::ParsedFile::new(
+            std::sync::Arc::clone(&content),
+            crate::parser::recovery::parse_program,
+        ));
         let handed_over = std::ptr::from_ref(parsed.program()) as usize;
-        let _guard = super::with_parsed_file_cache(parsed);
+        let _guard = super::with_parsed_file_cache(parsed, std::sync::Arc::clone(&content));
         assert_eq!(program_address(&content), handed_over);
+    }
+
+    /// A parse kept from an earlier pass read its own copy of the text.  A
+    /// pass looking it up by another copy reads it too.
+    #[test]
+    fn a_handed_over_parse_is_read_through_another_copy_of_its_text() {
+        let text = "<?php class Foo {}";
+        let parsed = std::sync::Arc::new(super::ParsedFile::new(
+            std::sync::Arc::new(text.to_string()),
+            crate::parser::recovery::parse_program,
+        ));
+        let handed_over = std::ptr::from_ref(parsed.program()) as usize;
+        let copy = std::sync::Arc::new(text.to_string());
+        let _guard = super::with_parsed_file_cache(parsed, std::sync::Arc::clone(&copy));
+        assert_eq!(program_address(&copy), handed_over);
     }
 
     /// A pass that already holds the text keeps its own parse: the handed
@@ -682,10 +695,12 @@ mod with_parsed_program_tests {
         let own = "<?php class Foo {}";
         let _guard = with_parse_cache(own);
         let own_program = program_address(own);
-        let parsed = super::ParsedFile::new(std::sync::Arc::new(own.to_string()), |arena, text| {
-            crate::parser::recovery::parse_program(arena, text)
-        });
-        let _nested = super::with_parsed_file_cache(parsed);
+        let copy = std::sync::Arc::new(own.to_string());
+        let parsed = std::sync::Arc::new(super::ParsedFile::new(
+            std::sync::Arc::clone(&copy),
+            crate::parser::recovery::parse_program,
+        ));
+        let _nested = super::with_parsed_file_cache(parsed, copy);
         assert_eq!(program_address(own), own_program);
     }
 

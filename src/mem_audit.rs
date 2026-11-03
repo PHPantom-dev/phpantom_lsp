@@ -1873,9 +1873,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     probe("did_change_parse_locks", &mut || {
         *backend.did_change_parse_locks.lock() = Default::default()
     });
-    probe("parsed_for_diagnostics", &mut || {
-        *backend.parsed_for_diagnostics.lock() = None
-    });
+    probe("kept_parse", &mut || *backend.kept_parse.lock() = None);
     probe("workspace psr4 + vendor paths", &mut || {
         *backend.workspace.psr4_mappings.write() = Default::default();
         *backend.workspace.vendor_uri_prefixes.lock() = Default::default();

@@ -189,7 +189,8 @@ impl Backend {
     /// and publishes the resulting single-file update.
     ///
     /// An open file's parse is kept for the diagnostic pass this edit
-    /// schedules (see [`Backend::take_parsed_for_diagnostics`]).
+    /// schedules and the requests that follow it (see
+    /// [`Backend::kept_parse`]).
     fn update_ast_inner(
         &self,
         uri: &str,
@@ -219,7 +220,7 @@ impl Backend {
         update.blade = blade;
         let changed = self.apply_ast_index_updates_batch(vec![update]);
         if let Some(parsed) = parsed {
-            self.keep_parsed_for_diagnostics(uri, parsed);
+            self.keep_parse(uri, parsed);
         }
         changed
     }

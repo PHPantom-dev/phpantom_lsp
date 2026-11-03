@@ -88,7 +88,7 @@ impl BackendState {
             symbols: SymbolIndex::new(),
             workspace,
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
-            parsed_for_diagnostics: Mutex::new(None),
+            kept_parse: Mutex::new(None),
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
             client: None,
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
