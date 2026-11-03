@@ -37,7 +37,42 @@ No outstanding items.
 
 ## Reachability
 
-No outstanding items.
+#### B10. A `finally` block does not see the paths an uncaught exception takes into it
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+$tool = null;
+try {
+    $tool = new Tool();
+    $this->mayThrow();
+    $tool = null;
+} finally {
+    if (null !== $tool) {
+        $tool->editable();
+        // Cannot access method 'editable' on type 'never'
+    }
+}
+```
+
+A `finally` block also runs when the `try` body throws something no
+`catch` takes, or when a `catch` throws partway through its body. The
+diagnostic walk enters the block with the paths that finish the `try` or a
+`catch`, plus those that `return` or rethrow at the end of a `catch`, but
+not with the state before each statement that can throw. Hover and
+completion inside the block already merge that state in, so the two
+disagree.
+
+**Where to change:** `process_try` in
+`src/type_engine/variable/forward_walk/control_flow.rs`. The
+cursor-in-`finally` branch merges `catch_entry` when
+`!catches_everything(try_stmt)`; the branch for code after the statement
+should hand the same state to `walk_finally_block` as one more exit. Note
+that `walk_try_body` returns the pre-`try` state when nothing in the body
+can throw, which is right for a `catch` (it cannot run then) but would
+wrongly widen the `finally` entry, so it needs to say whether anything can
+throw at all. The cursor-in-`finally` branch has the same imprecision
+today.
 
 ## Narrowing
 

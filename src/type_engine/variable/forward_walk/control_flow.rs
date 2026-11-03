@@ -132,9 +132,11 @@ pub(crate) fn process_try<'b>(
             // Every path through the statement runs the finally block: the
             // try body finishing, each catch finishing (even one that
             // returns or rethrows, since the block runs before it leaves),
-            // and an exception no catch takes, which arrives with whatever
-            // the try body had done when it threw.
+            // an exception no catch takes, which arrives with whatever the
+            // try body had done when it threw, and a `return` out of the
+            // try body.
             let mut throws = ThrowPoints::default();
+            let return_frame = push_return_frame(ctx.flow);
             let catch_entry = walk_try_body(try_stmt, scope, ctx, Some(&mut throws));
             let mut merged = scope.clone();
             for catch in try_stmt.catch_clauses.iter() {
@@ -149,6 +151,10 @@ pub(crate) fn process_try<'b>(
             if !catches_everything(try_stmt) {
                 merged.merge_branch(&catch_entry);
             }
+            if let Some(returned) = return_frame.finish() {
+                merged.merge_branch(&returned);
+                record_return_edge(ctx.flow, &returned);
+            }
             *scope = merged;
             walk_body_forward(finally.block.statements.iter(), scope, ctx);
             return;
@@ -159,10 +165,19 @@ pub(crate) fn process_try<'b>(
     // merge all catch scopes.
     let mut throws = ThrowPoints::default();
     let collect = (!try_stmt.catch_clauses.is_empty()).then_some(&mut throws);
+    // A `finally` block also runs on the way out of a `return` in the try
+    // body or a catch, so what each one carries out is collected for it.
+    let return_frame = try_stmt
+        .finally_clause
+        .is_some()
+        .then(|| push_return_frame(ctx.flow));
     let catch_entry = walk_try_body(try_stmt, scope, ctx, collect);
     let try_scope = scope.clone();
 
     let mut all_scopes = vec![try_scope];
+    // The catches that return or rethrow, which leave through the
+    // `finally` block without reaching the statement after the `try`.
+    let mut exited: Option<ScopeState> = None;
     for catch in try_stmt.catch_clauses.iter() {
         if !throws.reach(catch, ctx) {
             continue;
@@ -175,10 +190,17 @@ pub(crate) fn process_try<'b>(
         // that is what puts the pre-try type of a variable the try body
         // assigned back into the join.
         if branch_exits_stmts(catch.block.statements.iter(), &catch_scope, ctx) {
+            if return_frame.is_some() {
+                match exited.as_mut() {
+                    Some(exited) => exited.merge_branch(&catch_scope),
+                    None => exited = Some(catch_scope),
+                }
+            }
             continue;
         }
         all_scopes.push(catch_scope);
     }
+    let returned = return_frame.and_then(ReturnFrameGuard::finish);
 
     // Merge all scopes.
     let mut merged = all_scopes[0].clone();
@@ -187,10 +209,58 @@ pub(crate) fn process_try<'b>(
     }
     *scope = merged;
 
-    // Walk the finally block if present.
     if let Some(ref finally) = try_stmt.finally_clause {
-        walk_body_forward(finally.block.statements.iter(), scope, ctx);
+        walk_finally_block(finally, scope, [exited.as_ref(), returned.as_ref()], ctx);
     }
+    // The `return`s collected above still leave the enclosing body.
+    if let Some(returned) = &returned {
+        record_return_edge(ctx.flow, returned);
+    }
+}
+
+/// Walk a `finally` block for the code after its `try` statement.
+///
+/// `scope` holds the paths that carry on past the statement, and `exits`
+/// the ones that leave it by a `return` or a rethrowing `catch`, which run
+/// the block on their way out too.  The code after the statement must only
+/// see the first, while the block's own statements are read with both.  So when
+/// the walk records the scopes statements are read with, the block is
+/// walked twice: once for `scope`, recording nothing, and once more from
+/// the join with `exits`, for the record.  A walk that records nothing
+/// has no use for the second one.
+///
+/// Only the recording walk ever takes the second path, and a `try` nested
+/// in the block is walked by the quiet one as a single walk again, so a
+/// block nested `n` deep is walked `n + 1` times rather than `2^n`.
+fn walk_finally_block<'b>(
+    finally: &'b TryFinallyClause<'b>,
+    scope: &mut ScopeState,
+    exits: [Option<&ScopeState>; 2],
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let statements = &finally.block.statements;
+    let recording = is_diagnostic_scope_active() && !snapshot_recording_suspended();
+    let entry = (recording && exits.iter().any(Option::is_some))
+        .then(|| {
+            let mut entry = scope.clone();
+            for exit in exits.into_iter().flatten() {
+                entry.merge_branch(exit);
+            }
+            entry
+        })
+        .filter(|entry| !entry.walks_the_same_as(scope));
+    let Some(mut entry) = entry else {
+        walk_body_forward(statements.iter(), scope, ctx);
+        return;
+    };
+    {
+        let _quiet = suspend_snapshot_recording();
+        walk_body_forward(statements.iter(), scope, ctx);
+    }
+    // This walk is only there for the record, so it must leave nothing else
+    // behind: the returns the block makes were recorded by the one above.
+    let _barrier = suspend_return_edges(ctx.flow);
+    walk_body_forward(statements.iter(), &mut entry, ctx);
 }
 
 /// Process a `switch` statement.
