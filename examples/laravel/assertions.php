@@ -59,6 +59,77 @@ check(
     ($danish->getCasts()['is_vegan'] ?? null) === 'boolean'
 );
 
+// ─── Eloquent attribute arrays and column arguments ─────────────────────────
+
+$capsule->schema()->create('customers', function (\Illuminate\Database\Schema\Blueprint $table) {
+    $table->id();
+    $table->string('name');
+    $table->string('email');
+    $table->timestamps();
+});
+$customerDraft = \App\Models\Customer::make(['name' => 'Ada', 'email' => 'ada@example.test']);
+check(
+    'The Hidden model attribute accepts column names',
+    $customerDraft->getHidden() === ['email']
+        && ! array_key_exists('email', $customerDraft->toArray())
+        && $customerDraft->toArray()['name'] === 'Ada'
+);
+check(
+    'Model::make fills an unsaved model from attribute-array keys',
+    $customerDraft instanceof \App\Models\Customer
+        && ! $customerDraft->exists
+        && $customerDraft->name === 'Ada'
+        && $customerDraft->email === 'ada@example.test'
+);
+check(
+    'Model::fill returns the model and applies its fillable attributes',
+    $customerDraft->fill(['name' => 'Ada Lovelace']) === $customerDraft
+        && $customerDraft->name === 'Ada Lovelace'
+);
+$customerRecord = \App\Models\Customer::create(['name' => 'Ada', 'email' => 'ada@example.test']);
+check(
+    'Model::create persists the attribute array',
+    $customerRecord->exists && \App\Models\Customer::firstWhere('email', 'ada@example.test')->is($customerRecord)
+);
+check(
+    'Model::update saves its attribute array',
+    $customerRecord->update(['name' => 'Ada Lovelace'])
+        && $customerRecord->fresh()->name === 'Ada Lovelace'
+);
+$updatedCustomer = \App\Models\Customer::updateOrCreate(['email' => 'ada@example.test'], ['name' => 'Ada']);
+check(
+    'updateOrCreate matches its first array and saves its second array',
+    $updatedCustomer->is($customerRecord)
+        && $updatedCustomer->name === 'Ada'
+        && \App\Models\Customer::count() === 1
+);
+check(
+    'whereColumn treats both arguments as column names',
+    \App\Models\Customer::whereColumn('name', 'email')->count() === 0
+        && \App\Models\Customer::whereColumn('name', '!=', 'email')->count() === 1
+);
+$fillableBakery = \App\Models\Bakery::make(['flour' => 'whole wheat']);
+check(
+    'Bakery exposes flour as fillable and kitchen_id as guarded',
+    $fillableBakery->isFillable('flour')
+        && ! $fillableBakery->isFillable('kitchen_id')
+        && $fillableBakery->flour === 'whole wheat'
+);
+$capsule->schema()->create('bakeries', function (\Illuminate\Database\Schema\Blueprint $table) {
+    $table->id();
+    $table->integer('egg_count');
+});
+\App\Models\Bakery::query()->insert([['egg_count' => 2], ['egg_count' => 4]]);
+check(
+    'Eloquent aggregates accept a column name',
+    \App\Models\Bakery::min('egg_count') === 2
+        && \App\Models\Bakery::max('egg_count') === 4
+        && \App\Models\Bakery::sum('egg_count') === 6
+        && (float) \App\Models\Bakery::avg('egg_count') === 3.0
+);
+$capsule->schema()->drop('customers');
+$capsule->schema()->drop('bakeries');
+
 // ─── Scope vs Model method shadowing ────────────────────────────────────────
 
 // Model::fresh() is public — a subclass CANNOT define a #[Scope] named "fresh"
@@ -955,6 +1026,123 @@ check(
     (string) (new ReflectionEnum(\App\Models\JamFlavor::class))->getBackingType() === 'string'
         && (string) (new ReflectionEnum(\App\Models\BatchSize::class))->getBackingType() === 'int'
 );
+
+// ─── Validation string references and custom rules ──────────────────────────
+
+$validationRequest = new \App\Http\Requests\ValidationDemoRequest();
+$validationRules = $validationRequest->rules();
+$validationFactory = new \Illuminate\Validation\Factory($translator);
+$validationFactory->setPresenceVerifier(
+    new \Illuminate\Validation\DatabasePresenceVerifier($capsule->getDatabaseManager())
+);
+
+// Run the provider's actual registration against a standalone validator.
+$previousValidator = \Illuminate\Support\Facades\Validator::getFacadeRoot();
+\Illuminate\Support\Facades\Validator::swap($validationFactory);
+$validationProvider = new \App\Providers\DemoServiceProvider(new \Illuminate\Container\Container());
+$validationProvider->registerValidationRules();
+
+$schema = $capsule->getConnection()->getSchemaBuilder();
+$schema->create('customers', static function (\Illuminate\Database\Schema\Blueprint $table): void {
+    $table->string('email');
+});
+$schema->create('bakeries', static function (\Illuminate\Database\Schema\Blueprint $table): void {
+    $table->string('jam_flavor');
+});
+$capsule->getConnection()->table('customers')->insert(['email' => 'existing@bakery.test']);
+foreach (\App\Models\JamFlavor::cases() as $flavor) {
+    $capsule->getConnection()->table('bakeries')->insert(['jam_flavor' => $flavor->value]);
+}
+
+$validationData = [
+    'email' => 'new@bakery.test',
+    'password' => 'Sourdough!',
+    'password_confirmation' => 'Sourdough!',
+    'jam_flavor' => 'blueberry',
+    'featured_flavor' => 'strawberry',
+    'code' => 'BREAD',
+    'booking_code' => 'BAK-2026',
+];
+$validateDemo = static function (array $data) use ($validationFactory, $validationRequest, $validationRules) {
+    return $validationFactory->make(
+        $data,
+        $validationRules,
+        $validationRequest->messages(),
+        $validationRequest->attributes()
+    );
+};
+check('ValidationDemoRequest accepts its demonstrated values', $validateDemo($validationData)->passes());
+check(
+    'exists and unique name the model tables and declared columns',
+    (new \App\Models\Customer())->getTable() === 'customers'
+        && in_array('email', (new \App\Models\Customer())->getFillable(), true)
+        && (new \App\Models\Bakery())->getTable() === 'bakeries'
+        && ((new \App\Models\Bakery())->getCasts()['jam_flavor'] ?? null) === \App\Models\JamFlavor::class
+);
+check(
+    'in values are the backing values of the column enum',
+    explode(',', substr(explode('|', $validationRules['jam_flavor'])[2], 3))
+        === array_map(static fn (\App\Models\JamFlavor $flavor): string => $flavor->value, \App\Models\JamFlavor::cases())
+);
+check(
+    'Rule::in accepts the same enum-backed column values',
+    $validateDemo(array_replace($validationData, ['featured_flavor' => 'raspberry']))->passes()
+        && $validateDemo(array_replace($validationData, ['featured_flavor' => 'blueberry']))->errors()->has('featured_flavor')
+);
+check(
+    'same refers to the sibling password field',
+    $validateDemo(array_replace($validationData, ['password_confirmation' => 'Different!']))->errors()->has('password_confirmation')
+);
+check(
+    'exists rejects a value absent from the named column',
+    $validateDemo(array_replace($validationData, ['jam_flavor' => 'apricot']))->errors()->has('jam_flavor')
+);
+check(
+    'messages() selects the named field and rule',
+    $validateDemo(array_replace($validationData, ['email' => 'existing@bakery.test']))->errors()->first('email')
+        === 'That email address is already registered.'
+        && $validateDemo(array_replace($validationData, ['email' => '']))->errors()->first('email')
+        === 'Please provide your email address.'
+);
+$translator->addLines(['validation.same' => 'The :attribute must match :other.'], 'en');
+check(
+    'attributes() labels a field declared in rules()',
+    $validateDemo(array_replace($validationData, ['password_confirmation' => 'Different!']))->errors()->first('password_confirmation')
+        === 'The repeated password must match password.'
+);
+check(
+    'the custom ValidationRule object rejects lowercase input',
+    $validationRules['code'][1] instanceof \Illuminate\Contracts\Validation\ValidationRule
+        && $validateDemo(array_replace($validationData, ['code' => 'bread']))->errors()->first('code')
+        === 'The code must be uppercase.'
+);
+check(
+    'the provider registers bakery_code as a usable string rule',
+    $validateDemo(array_replace($validationData, ['booking_code' => 'OTHER-2026']))->errors()->has('booking_code')
+);
+$conditionalValidator = $validationFactory->make(['email' => 'baker@bakery.test'], ['email' => ['required', 'email']]);
+$conditionalValidator->sometimes('email', 'max:255', static fn (): bool => true);
+check(
+    'sometimes() adds its rule to the named field',
+    in_array('max:255', $conditionalValidator->getRules()['email'], true)
+        && $conditionalValidator->passes()
+);
+$requiredRule = new ReflectionMethod(\Illuminate\Validation\Validator::class, 'validateRequired');
+$maximumRule = new ReflectionMethod(\Illuminate\Validation\Validator::class, 'validateMax');
+check(
+    'installed validator methods expose rule parameter requirements',
+    array_map(static fn (ReflectionParameter $parameter): string => $parameter->getName(), $requiredRule->getParameters())
+        === ['attribute', 'value']
+        && array_map(static fn (ReflectionParameter $parameter): string => $parameter->getName(), $maximumRule->getParameters())
+        === ['attribute', 'value', 'parameters']
+);
+$schema->drop('customers');
+$schema->drop('bakeries');
+if ($previousValidator !== null) {
+    \Illuminate\Support\Facades\Validator::swap($previousValidator);
+} else {
+    \Illuminate\Support\Facades\Validator::clearResolvedInstance('validator');
+}
 
 // ─── Composed rules and excluded fields ─────────────────────────────────────
 
@@ -2066,6 +2254,104 @@ check(
     \App\Models\Review::where('reviewable_type', 'blog_post')->getBindings() === ['blog_post']
 );
 \Illuminate\Database\Eloquent\Relations\Relation::morphMap($previousMorphMap, false);
+
+// ─── Eloquent rejects names its builder does not answer ─────────────────────
+// Demo::eloquentQuery() claims a typo in a model or builder call throws, and
+// that any where...() call is a column filter instead.
+
+$throwsBadMethodCall = function (callable $call): bool {
+    try {
+        $call();
+    } catch (BadMethodCallException) {
+        return true;
+    }
+    return false;
+};
+check(
+    'An unknown method on a model throws',
+    $throwsBadMethodCall(fn () => (new \App\Models\Bakery())->freshlyBakd())
+);
+check(
+    'An unknown method on a model builder throws',
+    $throwsBadMethodCall(fn () => \App\Models\Bakery::query()->freshlyBakd())
+);
+check(
+    'A where...() call on a model builder is a column filter',
+    !$throwsBadMethodCall(fn () => \App\Models\Bakery::query()->whereFreshlyBakd(true))
+);
+
+// ─── Middleware names ───────────────────────────────────────────────────────
+// `Demo::middlewareNames()` relies on the aliases and groups bootstrap/app.php
+// registers sitting next to the framework's defaults, and on a group being
+// able to list an alias.
+
+$middlewareApp = require __DIR__ . '/bootstrap/app.php';
+$middlewareKernel = $middlewareApp->make(\Illuminate\Contracts\Http\Kernel::class);
+$middlewareAliases = $middlewareKernel->getMiddlewareAliases();
+$middlewareGroups = $middlewareKernel->getMiddlewareGroups();
+check(
+    'bootstrap/app.php registers the bakery.open alias',
+    ($middlewareAliases['bakery.open'] ?? null) === \App\Http\Middleware\EnsureBakeryIsOpen::class
+);
+check(
+    'The framework\'s auth alias stays registered next to the application\'s',
+    ($middlewareAliases['auth'] ?? null) === \Illuminate\Auth\Middleware\Authenticate::class
+);
+check(
+    'bootstrap/app.php registers the storefront group, which lists an alias',
+    ($middlewareGroups['storefront'] ?? null) === ['web', 'bakery.open']
+);
+check(
+    'The framework\'s web group stays registered',
+    isset($middlewareGroups['web'])
+);
+check(
+    'bakery.closed is not a registered alias or group',
+    !isset($middlewareAliases['bakery.closed']) && !isset($middlewareGroups['bakery.closed'])
+);
+check(
+    'EnsureBakeryIsOpen::handle() takes a day after the request and the next closure',
+    (new ReflectionMethod(\App\Http\Middleware\EnsureBakeryIsOpen::class, 'handle'))->getParameters()[2]->getName() === 'day'
+);
+
+// ─── Routes on controller methods ───────────────────────────────────────────
+
+// BakeryController's "Try:" comment counts the routes routes/web.php points
+// at each of its actions.  Load the real route file onto a fresh router and
+// count them the way the code lens does: one per registered route.
+$actionApp = new \Illuminate\Foundation\Application(__DIR__);
+$actionApp->instance('router', new \Illuminate\Routing\Router(new \Illuminate\Events\Dispatcher(), $actionApp));
+$previousFacadeApp = \Illuminate\Support\Facades\Facade::getFacadeApplication();
+\Illuminate\Support\Facades\Facade::setFacadeApplication($actionApp);
+\Illuminate\Support\Facades\Facade::clearResolvedInstances();
+\Illuminate\Support\Facades\Route::macro('bakeryAuth', function (): void {});
+(static function (): void {
+    require __DIR__ . '/routes/web.php';
+})();
+$bakeryActionRoutes = [];
+foreach ($actionApp['router']->getRoutes() as $route) {
+    $action = $route->getActionName();
+    if (str_starts_with($action, \App\Http\Controllers\BakeryController::class . '@')) {
+        $method = substr($action, strlen(\App\Http\Controllers\BakeryController::class) + 1);
+        $bakeryActionRoutes[$method][] = $route->getName();
+    }
+}
+\Illuminate\Support\Facades\Facade::setFacadeApplication($previousFacadeApp);
+\Illuminate\Support\Facades\Facade::clearResolvedInstances();
+check(
+    'show() is reached by its own route and by the nested resource',
+    ($bakeryActionRoutes['show'] ?? []) === ['bakeries.show', 'bakeries.ovens.show']
+);
+check(
+    'index() is reached by its own route, the nested resource, and the campaign loop',
+    in_array('bakeries.index', $bakeryActionRoutes['index'] ?? [], true)
+        && in_array('bakeries.ovens.index', $bakeryActionRoutes['index'] ?? [], true)
+        && in_array('campaigns.valentines.gifts', $bakeryActionRoutes['index'] ?? [], true)
+);
+check(
+    'cancel() is reached by one route',
+    ($bakeryActionRoutes['cancel'] ?? []) === ['bakeries.cancel']
+);
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

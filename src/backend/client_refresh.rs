@@ -30,6 +30,21 @@ impl Backend {
         }
     }
 
+    /// [`request_inlay_hint_refresh`](Self::request_inlay_hint_refresh)
+    /// from synchronous code, such as a config reload: the request goes
+    /// out on a spawned task rather than being awaited.
+    pub(crate) fn request_inlay_hint_refresh_detached(&self) {
+        if self.caps().inlay_hint_refresh
+            && let Some(client) = &self.client
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let client = client.clone();
+            runtime.spawn(async move {
+                let _ = client.inlay_hint_refresh().await;
+            });
+        }
+    }
+
     /// Ask the editor to re-pull every file's semantic tokens, if it said
     /// it can.
     pub(crate) async fn request_semantic_tokens_refresh(&self) {

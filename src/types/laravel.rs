@@ -222,6 +222,11 @@ pub struct LaravelMetadata {
     /// from the effective method name, including trait aliases. Kept on the
     /// declaring class or trait so lookup respects method overrides.
     pub morph_type_columns: Vec<(Atom, Option<Atom>)>,
+    /// Relation method names whose related model is a `config()` value
+    /// (`$this->morphToMany(config('permission.models.role'), …)`), each
+    /// with its config key. Kept on the declaring class or trait; the
+    /// class loader fills the related model in from the config.
+    pub config_related_models: Vec<(Atom, String)>,
     /// What this class's `getFacadeAccessor()` returns, when it declares
     /// one.
     ///

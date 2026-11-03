@@ -71,6 +71,14 @@ impl Backend {
             self.set_client_stub_options(options);
         }
 
+        if let Some(options) = params
+            .initialization_options
+            .as_ref()
+            .and_then(crate::config::ClientInlayHintOptions::from_client_settings)
+        {
+            self.set_client_inlay_hint_options(options);
+        }
+
         let caps = ClientCaps::from_capabilities(&params.capabilities);
         // A client that can register type hierarchy dynamically gets it
         // from `initialized` instead, so it is never registered twice.

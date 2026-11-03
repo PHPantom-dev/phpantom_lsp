@@ -29,99 +29,7 @@ No outstanding items.
 
 ## Conditional return types
 
-PHPStan-style conditional return types (`@phpstan-return ($x is T ? A :
-B)`) are how library stubs say what a call returns for the arguments it
-gets. The WordPress stubs use them on some 150 functions, and their own
-type tests are ported in `tests/wordpress_stubs/`: each entry below names how many of
-those assertions it accounts for.
-
-### B707. A conditional type inside a union, an intersection or a generic argument is not evaluated
-
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-/** @phpstan-return ($display is true ? void : string)|null */
-function edit_term_link($link = '', $before = '', $after = '', $term = null, $display = true) { … }
-
-/** @phpstan-return ($prefix is '' ? numeric-string : string)&non-falsy-string */
-function wp_unique_id($prefix = '') { … }
-```
-
-A conditional is evaluated only when it is the whole return type. Inside
-a union (`false|(…)`, `(…)|\WP_Error`), an intersection, or a generic
-argument (`array<key-of<T>, (value-of<T> is string ? string : …)>`), it
-stays in the type unevaluated, and hover shows its source text. This is
-`get_term_by()`, `get_bookmark()`, `get_category()`, `get_tags()`,
-`get_terms()`, `wp_get_post_terms()` and every other function that adds
-`|\WP_Error` or `|false` to an argument-dependent result. 144
-assertions.
-
-### B708. A condition over a refined type is misjudged
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @phpstan-return ($value is int<min, 0> ? false : WP_User|false) */
-function get_user($value) { … }
-get_user(0);           // want false, get WP_User|false
-
-/** @phpstan-return ($path is non-falsy-string ? bool : false) */
-function path_is_absolute($path) { … }
-path_is_absolute('foo');   // want bool, get false
-
-/** @phpstan-return ($data is array<int, mixed> ? true : false) */
-function wp_is_numeric_array($data) { … }
-wp_is_numeric_array(['key' => 'value']);   // want false, get true
-```
-
-The check that decides a condition handles plain types and literals, and
-gets these wrong:
-
-- integer ranges (`int<min, 0>`, `int<min, -1>`) against an integer
-  literal or another range;
-- refined strings (`non-empty-string`, `non-falsy-string`,
-  `lowercase-string`, `numeric-string`, `literal-string`) against a
-  literal or a refined string that is one (a `lowercase-string`
-  parameter against `is lowercase-string`), which is judged not to be,
-  also under `is not`;
-- an array against a refined string, which is left undecided rather
-  than ruled out;
-- `scalar`, which a literal `'a'`, `1` or `true` is judged not to be;
-- `numeric` and `empty`, which match nothing;
-- `resource` and `object`, which are not ruled out of `string`;
-- the key type of `array<K, V>`, which is ignored.
-
-94 assertions, from `absint()`, `has_shortcode()`, `size_format()`,
-`validate_file()`, `WP_Dependencies::query()`, `paginate_links()`,
-`trailingslashit()` and others.
-
-### B710. A conditional over a method template ignores its bound and does not narrow it
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/**
- * @template T of int<0, max>
- * @param T|int<min, -1>|scalar|null $maybeint
- * @return ($maybeint is T ? T : …)
- */
-function absint($maybeint) { … }
-absint(5);   // want 5, get int<0, max>
-
-/**
- * @template T of string
- * @return (T is non-falsy-string ? T|false : false)
- */
-function sanitize_sql_orderby($orderby) { … }
-sanitize_sql_orderby($string);   // want non-falsy-string|false, get string|false
-```
-
-Three gaps in how a template meets a condition: `$x is T` is never true,
-even for an argument that is what `T` was bound to; a template bound to
-an argument wider than its `of` bound (`mixed` passed for `T of
-bool|string|int`) is not clamped to the bound; and the branch a condition
-picks does not narrow the template it tested (`T` is
-`non-falsy-string` inside the true branch above). 23 assertions.
+No outstanding items.
 
 ## Standard-library return types
 
@@ -132,29 +40,6 @@ No outstanding items.
 No outstanding items.
 
 ## Narrowing
-
-### B700. `!empty($x->prop)` does not narrow the way `isset($x->prop)` does
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @return object|array|WP_Error */
-function plugins_api() { … }
-
-$result = plugins_api();
-if (isset($result->slug)) {
-    echo $result->slug;   // fine
-}
-if (! empty($result->name)) {
-    echo $result->name;   // Property 'name' not found on class 'WP_Error'
-}
-```
-
-`!empty($x->prop)` implies `isset($x->prop)`, so it must remove the same
-union members: here `WP_Error`, which declares no `name` and has no
-`__get`/`__isset`, and the `array`. The `isset` form already does this;
-the `empty` form leaves the union whole. Found in WordPress core's plugin
-installer screen.
 
 ### B692. `(int)` of a `ctype_digit()`-checked string is not non-negative
 
@@ -180,121 +65,23 @@ matches PHP 8 throwing a `ValueError` on a negative.
 Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.
 
-### B713. `@phpstan-assert` narrowing intersects refined string types wrongly
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/**
- * @template TUuid of string
- * @param TUuid $uuid
- * @phpstan-assert-if-true =TUuid&lowercase-string&non-falsy-string $uuid
- */
-function wp_is_uuid($uuid, $version = null) { … }
-
-$uuid = 'foo';
-if (wp_is_uuid($uuid)) {
-    $uuid;   // want 'foo', get never
-}
-```
-
-Narrowing a `lowercase-string` by `=non-falsy-string`, or the literal
-`'foo'` by `lowercase-string&non-falsy-string`, gives `never`, though
-`'foo'` is both; and a template in the asserted type (`TUuid` above) is
-left in the narrowed type instead of being replaced by what it was bound
-to. 6 assertions.
-
-### B714. An `@phpstan-impure` call is narrowed by an earlier check of the same call
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-/**
- * @return string|WP_Error
- * @phpstan-impure
- */
-function get_password_reset_key($user) { … }
-
-if (is_wp_error(get_password_reset_key($user))) {
-    get_password_reset_key($user);   // want string|WP_Error, get WP_Error
-}
-```
-
-A call to a function marked `@phpstan-impure` returns something new each
-time, so a check on one call says nothing about the next. We narrow the
-second call as if it were the first. 4 assertions.
-
 ## Array types
 
 No outstanding items.
 
 ## Laravel
 
-### B695. A primitive cast on a nullable column drops the `null`
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-// schema: `is_franchise` tinyint(1) DEFAULT NULL
-class AdminUser extends Model
-{
-    protected $casts = ['is_franchise' => 'boolean'];
-}
-
-$user->is_franchise;   // want bool|null, get bool
-```
-
-`Model::castAttribute()` returns a `null` value untouched for every
-primitive cast type (`bool`, `int`, `float`, `string`, `array`, dates, …),
-so a nullable column keeps its `null` through the cast. We take the cast's
-type and drop the column's nullability, so a null check on the property
-reads as redundant and the `null` case is never offered. Laravel Idea gets
-this right from the same schema.
-
-Found on a Laravel project's admin user model, whose schema dump marks
-the column nullable.
-
-### B696. A relation whose related class comes from `config()` is typed `Model`
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-// spatie/laravel-permission's HasRoles
-public function roles(): BelongsToMany
-{
-    return $this->morphToMany(config('permission.models.role'), 'model', …);
-}
-
-$user->roles;   // want Collection<int, Role>, get Collection<int, Model>
-```
-
-The related class is a `config()` value, and `config/permission.php` holds
-a literal `Role::class` under that key. We already type config values, but
-relationship body inference does not take a class from one, so every
-relation declared this way (spatie/laravel-permission's `roles` and
-`permissions` are the common case) falls back to the base `Model`. Laravel
-Idea resolves both to the configured classes.
-
-### B697. `analyze` and the editor disagree on a nullable `updated_at`
-
-**Impact: Medium · Complexity: Medium**
-
-On a model whose schema dump declares `updated_at timestamp NULL`, the
-same binary reports `$model->updated_at` as `Illuminate\Support\Carbon`
-from `analyze` and as `null|Illuminate\Support\Carbon` in the editor
-(the schema is right, so the editor is). `created_at` (`NOT NULL`) is
-`Carbon` in both. Some part of the model's column sources is loaded
-differently, or in a different order, between the CLI and the language
-server. Find which, and make both read the schema the same way.
-
-Found on a Laravel project's admin user model by probing the same file
-both ways.
+No outstanding items.
 
 ## Blade
 
 No outstanding items.
 
 ## Templates
+
+No outstanding items.
+
+## Framework names in strings
 
 No outstanding items.
 
@@ -334,20 +121,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B717. Variables a `require`d file defines have no type
-
-**Impact: Low · Complexity: Medium**
-
-```php
-function core_upgrade(): string {
-    require ABSPATH . WPINC . '/version.php';   // assigns $wp_version = '6.7'
-    return $wp_version;                          // hover: nothing, want string
-}
-```
-
-When an include's path resolves, the variables the included file's top
-level assigns are no longer reported as undefined, but hover,
-completion, and the type checks know nothing about them. Walk the
-included file's top level and carry the types it leaves its variables
-into the including scope at the point the include ends.
-
+No outstanding items.

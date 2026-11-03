@@ -15,6 +15,7 @@ const COMPOSER: &str = r#"{
     "autoload": { "psr-4": {
         "App\\": "src/",
         "Symfony\\Bundle\\FrameworkBundle\\": "stubs/framework-bundle/",
+        "Symfony\\Bundle\\WebProfilerBundle\\": "vendor/symfony/web-profiler-bundle/",
         "Symfony\\Component\\Routing\\": "stubs/routing/"
     } }
 }"#;
@@ -35,8 +36,49 @@ const STUBS: &[(&str, &str)] = &[
         "<?php\nnamespace Symfony\\Component\\Routing\\Generator;\ninterface UrlGeneratorInterface {\n    public function generate(string $name, array $parameters = []): string;\n}\n",
     ),
     (
+        "stubs/routing/Generator/UrlGenerator.php",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Generator;\nclass UrlGenerator implements UrlGeneratorInterface {\n    public function __construct(\\Symfony\\Component\\Routing\\RouteCollection $routes) {}\n    public function generate(string $name, array $parameters = []): string {}\n}\n",
+    ),
+    (
+        "stubs/routing/RouteCollection.php",
+        "<?php\nnamespace Symfony\\Component\\Routing;\nclass RouteCollection {\n    public function add(string $name, object $route): void {}\n}\n",
+    ),
+    (
+        "stubs/routing/Exception/RouteNotFoundException.php",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Exception;\nclass RouteNotFoundException extends \\InvalidArgumentException {}\n",
+    ),
+    (
         "stubs/routing/Loader/Configurator/RoutingConfigurator.php",
-        "<?php\nnamespace Symfony\\Component\\Routing\\Loader\\Configurator;\nclass RoutingConfigurator {\n    public function add(string $name, string|array $path): object {}\n}\n",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Loader\\Configurator;\nclass RoutingConfigurator {\n    public function add(string $name, string|array $path): RouteConfigurator {}\n    public function alias(string $name, string $alias): object {}\n    public function collection(string $name = ''): CollectionConfigurator {}\n    public function import(string|array $resource, ?string $type = null): ImportConfigurator {}\n}\n",
+    ),
+    (
+        "stubs/routing/Loader/Configurator/CollectionConfigurator.php",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Loader\\Configurator;\nclass CollectionConfigurator {\n    public function add(string $name, string|array $path): RouteConfigurator {}\n    public function alias(string $name, string $alias): object {}\n    public function collection(string $name = ''): self {}\n}\n",
+    ),
+    (
+        "stubs/routing/Loader/Configurator/RouteConfigurator.php",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Loader\\Configurator;\nclass RouteConfigurator {\n    public function add(string $name, string|array $path): RouteConfigurator {}\n    public function controller(string $controller): static {}\n}\n",
+    ),
+    (
+        "stubs/routing/Loader/Configurator/ImportConfigurator.php",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Loader\\Configurator;\nclass ImportConfigurator {\n    public function namePrefix(string $namePrefix): static {}\n    public function prefix(string|array $prefix): static {}\n}\n",
+    ),
+    (
+        "stubs/routing/Annotation/Route.php",
+        "<?php\nnamespace Symfony\\Component\\Routing\\Annotation;\nclass Route {}\n",
+    ),
+    // A bundle that is never opened: its routing files are read from disk.
+    (
+        "vendor/symfony/web-profiler-bundle/WebProfilerBundle.php",
+        "<?php\nnamespace Symfony\\Bundle\\WebProfilerBundle;\nclass WebProfilerBundle {}\n",
+    ),
+    (
+        "vendor/symfony/web-profiler-bundle/Resources/config/routing/wdt.xml",
+        "<?xml version=\"1.0\"?>\n<routes>\n    <import resource=\"wdt.php\" type=\"php\"/>\n</routes>\n",
+    ),
+    (
+        "vendor/symfony/web-profiler-bundle/Resources/config/routing/wdt.php",
+        "<?php\nuse Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator;\n\nreturn static function (RoutingConfigurator $routes): void {\n    $routes->add('_wdt', '/{token}');\n};\n",
     ),
 ];
 
@@ -345,8 +387,25 @@ function link(UrlGeneratorInterface $urls, \ArrayObject $other): void {
     );
 }
 
+/// The `invalid_symfony_route` messages a slow-diagnostics pass reports
+/// for `content`, in order.
+fn route_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<String> {
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
+    diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(Code::String(code)) if code == "invalid_symfony_route"
+            )
+        })
+        .map(|diagnostic| message_text(&diagnostic.message).to_string())
+        .collect()
+}
+
 #[tokio::test]
-async fn only_undeclared_application_routes_are_reported() {
+async fn undeclared_routes_are_reported() {
     let consumer = r#"<?php
 namespace App\Controller;
 
@@ -374,9 +433,347 @@ final class CheckController extends AbstractController
     .await;
     let consumer_uri = uri_for(&dir, "src/Controller/CheckController.php");
 
+    // `app_check_check` is the name Symfony gives the unnamed route above,
+    // and no bundle this application imports routes from declares
+    // `_profiler`.
+    assert_eq!(
+        route_problems(&backend, &consumer_uri, consumer),
+        vec![
+            "Unknown route: 'app_missing'".to_string(),
+            "Unknown route: '_profiler'".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn names_symfony_derives_from_a_route_are_declared() {
+    let contact = r#"<?php
+namespace App\Controller;
+
+use Symfony\Component\Routing\Attribute\Route;
+
+final class ContactController
+{
+    #[Route(path: ['en' => '/contact', 'nl' => '/contact-nl'], name: 'contact')]
+    public function contact(): void {}
+
+    #[Route('/team', name: 'team')]
+    public function team(): void {}
+}
+"#;
+    let consumer = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class LinkController extends AbstractController
+{
+    public function links(): void
+    {
+        $this->generateUrl('App\Controller\AboutController');
+        $this->generateUrl('App\Controller\AboutController::__invoke');
+        $this->generateUrl('App\Controller\ContactController::team');
+        $this->generateUrl('App\Controller\ContactController::contact');
+        $this->generateUrl('contact.en');
+        $this->generateUrl('contact');
+        $this->generateUrl('contact.de');
+    }
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", ROUTES_YAML),
+        ("src/Controller/AboutController.php", INVOKABLE_PHP),
+        ("src/Controller/ContactController.php", contact),
+        ("src/Controller/LinkController.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+
+    // A localized action has a route per locale, so no single one is named
+    // after it.
+    assert_eq!(
+        route_problems(&backend, &consumer_uri, consumer),
+        vec![
+            "Unknown route: 'App\\Controller\\ContactController::contact'".to_string(),
+            "Unknown route: 'contact.de'".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn routes_a_router_resource_loads_are_not_judged() {
+    let consumer = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class LinkController extends AbstractController
+{
+    public function links(): void
+    {
+        $this->generateUrl('from_the_custom_loader');
+    }
+}
+"#;
+    let routing = "when@prod:\n    framework:\n        router:\n            resource: 'app.route_loader'\n            type: service\n";
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", ROUTES_YAML),
+        ("config/packages/routing.yaml", routing),
+        ("src/Controller/LinkController.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+    assert!(route_problems(&backend, &consumer_uri, consumer).is_empty());
+
+    // A kernel that loads its routes itself is no different.
+    let kernel = r#"<?php
+namespace App;
+
+use Symfony\Component\HttpKernel\Kernel as BaseKernel;
+
+class Kernel extends BaseKernel
+{
+    public function loadRoutes(object $loader): object
+    {
+        return $loader->load('app.route_loader', 'service');
+    }
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", ROUTES_YAML),
+        ("src/Kernel.php", kernel),
+        ("src/Controller/LinkController.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+    assert!(route_problems(&backend, &consumer_uri, consumer).is_empty());
+}
+
+#[tokio::test]
+async fn routes_a_router_resource_set_in_php_configuration_loads_are_not_judged() {
+    let consumer = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class LinkController extends AbstractController
+{
+    public function links(): void
+    {
+        $this->generateUrl('from_the_custom_loader');
+    }
+}
+"#;
+    let fluent = r#"<?php
+use Symfony\Config\FrameworkConfig;
+
+return static function (FrameworkConfig $framework): void {
+    $framework->router()->resource('app.route_loader')->type('service');
+};
+"#;
+    let fluent_array = r#"<?php
+use Symfony\Config\FrameworkConfig;
+
+return static function (FrameworkConfig $framework): void {
+    $framework->router(['resource' => 'app.route_loader', 'type' => 'service']);
+};
+"#;
+    let extension = r#"<?php
+use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
+
+return static function (ContainerConfigurator $container): void {
+    $container->extension('framework', [
+        'router' => ['resource' => 'app.route_loader', 'type' => 'service'],
+    ]);
+};
+"#;
+    let app_config = r#"<?php
+use Symfony\Component\DependencyInjection\Loader\Configurator\App;
+
+return App::config([
+    'when@prod' => [
+        'framework' => [
+            'router' => ['resource' => 'app.route_loader', 'type' => 'service'],
+        ],
+    ],
+]);
+"#;
+    for routing in [fluent, fluent_array, extension, app_config] {
+        let (backend, dir) = workspace(&[
+            ("config/routes.yaml", ROUTES_YAML),
+            ("config/packages/routing.php", routing),
+            ("src/Controller/LinkController.php", consumer),
+        ])
+        .await;
+        let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+        assert!(
+            route_problems(&backend, &consumer_uri, consumer).is_empty(),
+            "{routing}"
+        );
+    }
+
+    // The kernel's own route loading, or a router configured without a
+    // resource, loads the routing files.
+    let kernel_resource = r#"<?php
+use Symfony\Config\FrameworkConfig;
+
+return static function (FrameworkConfig $framework): void {
+    $framework->router()->resource('kernel::loadRoutes')->utf8(true);
+    $framework->router()->strictRequirements(null);
+};
+"#;
+    let other_key = r#"<?php
+return [
+    'framework' => ['router' => ['utf8' => true], 'assets' => ['resource' => 'x']],
+];
+"#;
+    for routing in [kernel_resource, other_key] {
+        let (backend, dir) = workspace(&[
+            ("config/routes.yaml", ROUTES_YAML),
+            ("config/packages/routing.php", routing),
+            ("src/Controller/LinkController.php", consumer),
+        ])
+        .await;
+        let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+        assert_eq!(
+            route_problems(&backend, &consumer_uri, consumer),
+            vec!["Unknown route: 'from_the_custom_loader'".to_string()],
+            "{routing}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_route_looked_up_where_it_may_be_missing_is_not_judged() {
+    let consumer = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\Routing\Exception\RouteNotFoundException;
+
+final class LinkController extends AbstractController
+{
+    public function links(): string
+    {
+        try {
+            $url = $this->generateUrl('legacy_dashboard');
+        } catch (RouteNotFoundException) {
+            $url = '/';
+        }
+        try {
+            $this->generateUrl('caught_elsewhere');
+        } catch (\RuntimeException) {
+        }
+        return $url;
+    }
+}
+"#;
+    let test = r#"<?php
+namespace App\Tests;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\Routing\Generator\UrlGenerator;
+use Symfony\Component\Routing\RouteCollection;
+
+final class GeneratorTest extends AbstractController
+{
+    public function testGenerate(): void
+    {
+        $routes = new RouteCollection();
+        $generator = new UrlGenerator($routes);
+        $generator->generate('local_only');
+        $this->generateUrl('app_missing');
+    }
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", ROUTES_YAML),
+        ("src/Controller/LinkController.php", consumer),
+        ("src/Tests/GeneratorTest.php", test),
+    ])
+    .await;
+
+    // A `\RuntimeException` is not what a missing route throws.
+    let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+    assert_eq!(
+        route_problems(&backend, &consumer_uri, consumer),
+        vec!["Unknown route: 'caught_elsewhere'".to_string()]
+    );
+    // A router the file builds has its own routes; the application's are
+    // still the application's.
+    let test_uri = uri_for(&dir, "src/Tests/GeneratorTest.php");
+    assert_eq!(
+        route_problems(&backend, &test_uri, test),
+        vec!["Unknown route: 'app_missing'".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn a_routing_configurator_alias_declares_a_route() {
+    let routes_php = r#"<?php
+use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
+
+return static function (RoutingConfigurator $routes, \ArrayObject $other): void {
+    $routes->add('app_legacy', '/legacy');
+    $routes->alias('home', 'app_legacy');
+    $routes->collection('blog_')->alias('start', 'app_legacy');
+    $other->offsetSet('not_a_route', '/x');
+};
+"#;
+    let consumer = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class LinkController extends AbstractController
+{
+    public function links(): void
+    {
+        $this->generateUrl('home');
+        $this->generateUrl('blog_start');
+        $this->generateUrl('start');
+    }
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/routes.php", routes_php),
+        ("src/Controller/LinkController.php", consumer),
+    ])
+    .await;
+    let consumer_uri = uri_for(&dir, "src/Controller/LinkController.php");
+    let routes_uri = uri_for(&dir, "config/routes.php");
+
+    // The alias declared on a collection takes its name prefix.
+    assert_eq!(
+        route_problems(&backend, &consumer_uri, consumer),
+        vec!["Unknown route: 'start'".to_string()]
+    );
+    let found = definitions(&backend, &consumer_uri, position_in(consumer, "'home'", 2)).await;
+    assert_eq!(found, vec![(routes_uri.clone(), 5)]);
+    // The route the alias reads is a reference to it.
+    let found = references(
+        &backend,
+        &routes_uri,
+        position_in(routes_php, "'app_legacy'", 2),
+    )
+    .await;
+    assert!(found.contains(&(routes_uri.clone(), 5)), "{found:?}");
+}
+
+#[tokio::test]
+async fn undeclared_routes_a_template_names_are_reported() {
+    let twig = "{# path('commented_out') #}\n<a href=\"{{ path('app_home') }}\">Home</a>\n<a href=\"{{ path('app_hme') }}\">Typo</a>\n";
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", ROUTES_YAML),
+        ("src/Controller/PostController.php", CONTROLLER_PHP),
+        ("templates/home.html.twig", twig),
+    ])
+    .await;
+    let uri = uri_for(&dir, "templates/home.html.twig");
+
     let mut diagnostics = Vec::new();
-    backend.collect_slow_diagnostics(consumer_uri.as_str(), consumer, &mut diagnostics);
-    let reported: Vec<String> = diagnostics
+    backend.collect_template_diagnostics(uri.as_str(), twig, &mut diagnostics);
+    let reported: Vec<(String, u32)> = diagnostics
         .iter()
         .filter(|diagnostic| {
             matches!(
@@ -384,8 +781,250 @@ final class CheckController extends AbstractController
                 Some(Code::String(code)) if code == "invalid_symfony_route"
             )
         })
-        .map(|diagnostic| message_text(&diagnostic.message).to_string())
+        .map(|diagnostic| {
+            (
+                message_text(&diagnostic.message).to_string(),
+                diagnostic.range.start.line,
+            )
+        })
         .collect();
-    // `app_check_check` is the name Symfony gives the unnamed route above.
-    assert_eq!(reported, vec!["Unknown route: 'app_missing'".to_string()]);
+    assert_eq!(reported, vec![("Unknown route: 'app_hme'".to_string(), 2)]);
+}
+
+/// An application whose routes are put together by the imports that load
+/// them: a name prefix on an attribute import, on an XML file it imports,
+/// and on a configurator's `import()`, configurator collections, `@Route`
+/// annotations, a bundle's routing files, and loaders whose routes cannot be
+/// read.
+const COMPOSED_ROUTES_YAML: &str = "controllers:
+    resource:
+        path: ../src/Controller/
+        namespace: App\\Controller
+    type: attribute
+
+admin:
+    resource: ../src/Admin/
+    type: attribute
+    name_prefix: admin_
+
+shop: { resource: shop.xml, name_prefix: 'shop_' }
+
+when@dev:
+    web_profiler_wdt:
+        resource: '@WebProfilerBundle/Resources/config/routing/wdt.xml'
+        prefix: /_wdt
+
+_security_logout:
+    resource: security.route_loader.logout
+    type: service
+
+api:
+    resource: .
+    type: api_platform
+    name_prefix: api_
+";
+
+const SHOP_XML: &str = r#"<?xml version="1.0"?>
+<routes>
+    <route id="cart" path="/cart"/>
+    <import resource="../src/Shop/" type="attribute" name-prefix="catalog_"/>
+</routes>
+"#;
+
+const COMPOSED_ROUTES_PHP: &str = r#"<?php
+use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
+
+return static function (RoutingConfigurator $routes): void {
+    $routes->collection('blog_')
+        ->add('index', '/blog')
+        ->add('show', '/blog/{slug}');
+    $archive = $routes->collection('archive_');
+    $archive->add('list', '/archive');
+    $routes->import('../src/Legacy/', 'annotation')->namePrefix('old_');
+};
+"#;
+
+const ADMIN_PHP: &str = r#"<?php
+namespace App\Admin;
+
+use Symfony\Component\Routing\Attribute\Route;
+
+final class PostController
+{
+    #[Route('/admin/post', name: 'post_edit')]
+    public function edit(): void {}
+}
+"#;
+
+const SHOP_PHP: &str = r#"<?php
+namespace App\Shop;
+
+use Symfony\Component\Routing\Attribute\Route;
+
+final class ProductController
+{
+    #[Route('/product', name: 'product')]
+    public function show(): void {}
+}
+"#;
+
+const LEGACY_PHP: &str = r#"<?php
+namespace App\Legacy;
+
+use Symfony\Component\Routing\Annotation\Route;
+
+/**
+ * @Route("/legacy", name="legacy_")
+ */
+final class LegacyController
+{
+    /**
+     * @Route("/page", name="page", methods={"GET"})
+     */
+    public function page(): void {}
+}
+"#;
+
+const COMPOSED_CONSUMER: &str = r#"<?php
+namespace App\Controller;
+
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+
+final class LinkController extends AbstractController
+{
+    public function links(): void
+    {
+        $this->generateUrl('admin_post_edit');
+        $this->generateUrl('post_edit');
+        $this->generateUrl('shop_cart');
+        $this->generateUrl('cart');
+        $this->generateUrl('shop_catalog_product');
+        $this->generateUrl('blog_index');
+        $this->generateUrl('blog_show');
+        $this->generateUrl('archive_list');
+        $this->generateUrl('old_legacy_page');
+        $this->generateUrl('_wdt');
+        $this->generateUrl('_logout_main');
+        $this->generateUrl('api_anything');
+        $this->generateUrl('app_missing');
+    }
+}
+"#;
+
+async fn composed_workspace() -> (Backend, tempfile::TempDir) {
+    workspace(&[
+        ("config/routes.yaml", COMPOSED_ROUTES_YAML),
+        ("config/routes.php", COMPOSED_ROUTES_PHP),
+        ("config/shop.xml", SHOP_XML),
+        ("src/Admin/PostController.php", ADMIN_PHP),
+        ("src/Shop/ProductController.php", SHOP_PHP),
+        ("src/Legacy/LegacyController.php", LEGACY_PHP),
+        ("src/Controller/LinkController.php", COMPOSED_CONSUMER),
+    ])
+    .await
+}
+
+#[tokio::test]
+async fn names_the_imports_compose_are_declared() {
+    let (backend, dir) = composed_workspace().await;
+    let consumer = uri_for(&dir, "src/Controller/LinkController.php");
+
+    // Only the names the imports do not give are reported; the security
+    // bundle's logout routes and the custom loader's are not read.
+    assert_eq!(
+        route_problems(&backend, &consumer, COMPOSED_CONSUMER),
+        vec![
+            "Unknown route: 'post_edit'".to_string(),
+            "Unknown route: 'cart'".to_string(),
+            "Unknown route: 'app_missing'".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_composed_name_goes_to_its_declaration() {
+    let (backend, dir) = composed_workspace().await;
+    let consumer = uri_for(&dir, "src/Controller/LinkController.php");
+
+    for (needle, file, line) in [
+        ("'admin_post_edit'", "src/Admin/PostController.php", 7),
+        ("'shop_cart'", "config/shop.xml", 2),
+        (
+            "'shop_catalog_product'",
+            "src/Shop/ProductController.php",
+            7,
+        ),
+        ("'blog_show'", "config/routes.php", 6),
+        ("'archive_list'", "config/routes.php", 8),
+        ("'old_legacy_page'", "src/Legacy/LegacyController.php", 11),
+        (
+            "'_wdt'",
+            "vendor/symfony/web-profiler-bundle/Resources/config/routing/wdt.php",
+            4,
+        ),
+    ] {
+        let found = definitions(
+            &backend,
+            &consumer,
+            position_in(COMPOSED_CONSUMER, needle, 2),
+        )
+        .await;
+        assert_eq!(found, vec![(uri_for(&dir, file), line)], "for {needle}");
+    }
+
+    // References include the declaration the name is composed from.
+    let found = references(
+        &backend,
+        &consumer,
+        position_in(COMPOSED_CONSUMER, "'admin_post_edit'", 2),
+    )
+    .await;
+    assert_eq!(
+        found,
+        sorted(vec![
+            (uri_for(&dir, "src/Admin/PostController.php"), 7),
+            (consumer.clone(), 9),
+        ])
+    );
+}
+
+#[tokio::test]
+async fn composed_names_complete() {
+    let consumer = r#"<?php
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+
+function link(UrlGeneratorInterface $urls): void {
+    $urls->generate('');
+}
+"#;
+    let (backend, dir) = workspace(&[
+        ("config/routes.yaml", COMPOSED_ROUTES_YAML),
+        ("config/routes.php", COMPOSED_ROUTES_PHP),
+        ("config/shop.xml", SHOP_XML),
+        ("src/Admin/PostController.php", ADMIN_PHP),
+        ("src/Shop/ProductController.php", SHOP_PHP),
+        ("src/Legacy/LegacyController.php", LEGACY_PHP),
+        ("src/consumer.php", consumer),
+    ])
+    .await;
+    let labels = completion_labels(
+        &backend,
+        &uri_for(&dir, "src/consumer.php"),
+        position_in(consumer, "generate('')", 10),
+    )
+    .await;
+    assert_eq!(
+        labels,
+        [
+            "_wdt",
+            "admin_post_edit",
+            "archive_list",
+            "blog_index",
+            "blog_show",
+            "old_legacy_page",
+            "shop_cart",
+            "shop_catalog_product",
+        ]
+        .map(String::from)
+    );
 }

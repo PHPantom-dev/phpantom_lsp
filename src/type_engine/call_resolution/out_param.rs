@@ -254,6 +254,7 @@ pub(crate) fn resolve_out_type_for_call(
         bindings: &[],
         arg_type_resolver: Some(&arg_type_resolver),
         this_type: None,
+        subs: None,
     };
     let declaring_fqn = callee.declaring_fqn();
     resolve_conditional_with_text_args_and_defaults(

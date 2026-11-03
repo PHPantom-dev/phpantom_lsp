@@ -213,22 +213,40 @@ fn gate_model_subject(
     }
 }
 
-/// Emit navigable parameters embedded in Laravel middleware strings.
-///
-/// Handles `can:ability,Model` and, when `include_auth_guards` is true,
-/// `auth:guard[,guard]`, each accepted as one string or as an array value.
-pub(in crate::symbol_map::extraction) fn try_emit_can_middleware_spans(
+/// Which parts of a middleware string a call site makes navigable.
+#[derive(Clone, Copy)]
+pub(in crate::symbol_map::extraction) struct MiddlewareSpans {
+    /// The alias or group name before any `:`.
+    pub(in crate::symbol_map::extraction) alias: bool,
+    /// The guards of an `auth:guard[,guard]` string.
+    pub(in crate::symbol_map::extraction) auth_guards: bool,
+}
+
+/// Emit the navigable parts of the Laravel middleware strings a call's
+/// `middleware` argument names.
+pub(in crate::symbol_map::extraction) fn try_emit_middleware_spans(
     argument_list: &ArgumentList<'_>,
-    include_auth_guards: bool,
+    parts: MiddlewareSpans,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Some(middleware) = argument_expr_for_parameter(argument_list, "middleware") else {
-        return;
-    };
+    if let Some(middleware) = argument_expr_for_parameter(argument_list, "middleware") {
+        emit_middleware_value_spans(middleware, parts, content, spans);
+    }
+}
+
+/// Emit the navigable parts of a middleware string, or of each string in
+/// an array of them: the alias or group name, the ability of
+/// `can:ability,Model`, and the guards of `auth:guard[,guard]`.
+pub(in crate::symbol_map::extraction) fn emit_middleware_value_spans(
+    middleware: &Expression<'_>,
+    parts: MiddlewareSpans,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
     // Laravel reads a middleware array's values whatever their keys.
     let Some(elements) = crate::parser::array_literal_elements(middleware) else {
-        push_middleware_parameter_spans(middleware, include_auth_guards, content, spans);
+        push_middleware_parameter_spans(middleware, parts, content, spans);
         return;
     };
     for element in elements.iter() {
@@ -237,19 +255,30 @@ pub(in crate::symbol_map::extraction) fn try_emit_can_middleware_spans(
             ArrayElement::Value(element) => element.value,
             ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
         };
-        push_middleware_parameter_spans(value, include_auth_guards, content, spans);
+        push_middleware_parameter_spans(value, parts, content, spans);
     }
 }
 
 fn push_middleware_parameter_spans(
     expr: &Expression<'_>,
-    include_auth_guards: bool,
+    parts: MiddlewareSpans,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
     let Some((text, inner_start, _)) = string_literal_at_range(expr, content) else {
         return;
     };
+    let alias = text.split_once(':').map_or(text, |(alias, _)| alias);
+    // A name with a namespace separator is a middleware class, which the
+    // router instantiates without looking it up.
+    if parts.alias && !alias.contains('\\') {
+        push_embedded_string_span(
+            crate::symbol_map::StringKeyKind::Middleware,
+            alias,
+            inner_start,
+            spans,
+        );
+    }
     let Some((alias, parameters)) = text.split_once(':') else {
         return;
     };
@@ -262,7 +291,7 @@ fn push_middleware_parameter_spans(
             parameter_start,
             spans,
         );
-    } else if include_auth_guards
+    } else if parts.auth_guards
         && crate::symbol_map::laravel_resources::middleware_resource(&text[..alias.len() + 1])
             == Some(crate::symbol_map::LaravelConfigResource::AuthGuard)
     {

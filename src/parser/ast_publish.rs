@@ -486,6 +486,11 @@ impl Backend {
         self.repopulate_resolved_classes(&evicted_fqns);
 
         let structural_changed = any_signature_changed || any_function_changed;
+        if any_signature_changed {
+            // A class can become a model or validation rule through an
+            // ancestor, even if it was not part of the previous catalog.
+            self.laravel.string_key_cache.write().validation_rules = None;
+        }
         if structural_changed {
             self.invalidate_signature_dependents(&changed_names);
         } else {
@@ -531,6 +536,7 @@ impl Backend {
                 None => files.get(&update.uri).and_then(|old| old.blade.clone()),
             };
             self.note_symfony_declarations(&update.uri, &update.symbol_map);
+            self.note_wordpress_hooks(&update.uri, &update.symbol_map);
             let state = crate::file_state::FileState {
                 symbol_map: Some(Arc::clone(&update.symbol_map)),
                 parse_errors: std::mem::take(&mut update.parse_errors),
@@ -554,6 +560,7 @@ impl Backend {
         let mut files = self.files.write();
         for (uri, map) in maps {
             self.note_symfony_declarations(&uri, &map);
+            self.note_wordpress_hooks(&uri, &map);
             let state = match files.get(&uri) {
                 Some(state) => state.with_symbol_map(map),
                 None => crate::file_state::FileState {

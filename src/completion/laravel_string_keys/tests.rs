@@ -621,10 +621,21 @@ fn auth_middleware_completion_replaces_only_the_current_guard() {
         " admin"
     );
 
-    for literal in ["signed:admin", "AUTH:admin", "auth"] {
+    for literal in ["signed:admin", "AUTH:admin"] {
         let content = format!("<?php\nRoute::middleware('{literal}');\n");
         assert!(detect_at_end(&content, literal).is_none(), "`{literal}`");
     }
+}
+
+#[test]
+fn middleware_completion_types_the_alias_before_any_colon() {
+    let content = "<?php\nRoute::middleware(['web', 'au']);\n";
+    let ctx = detect_at_end(content, "'au").expect("middleware alias context");
+    assert_eq!(ctx.kind, StringKeyKind::Middleware);
+    assert_eq!(ctx.prefix, "au");
+
+    let content = "<?php\nRoute::middleware('App\\Http\\Middleware\\Ensure');\n";
+    assert!(detect_at_end(content, "Ensure").is_none());
 }
 
 #[test]

@@ -1712,3 +1712,330 @@ function column(callable $content): string { return ''; }
         "both closures read a property User does not declare, got: {messages:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// By-reference captures of a local closure invoked right there
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn argument_type_errors(php: &str) -> Vec<String> {
+    crate::common::slow_diagnostic_messages(
+        &create_test_backend_with_full_stubs(),
+        "file:///ByRefInvoked.php",
+        php,
+        "type_mismatch_argument",
+    )
+}
+
+/// Calling the closure a local holds runs its body there and then, so a
+/// capture it always writes holds what was written once the call returns.
+#[test]
+fn by_ref_capture_written_by_an_invoked_local_closure_is_definite() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    public function direct(): int
+    {
+        $out = null;
+        $write = static function () use (&$out): void {
+            $out = 'written';
+        };
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert!(errors.is_empty(), "got: {errors:?}");
+}
+
+#[test]
+fn by_ref_capture_written_by_an_immediately_invoked_closure_is_definite() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    public function immediate(): int
+    {
+        $out = null;
+        (static function () use (&$out): void {
+            $out = 'written';
+        })();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert!(errors.is_empty(), "got: {errors:?}");
+}
+
+/// A write the body only makes on one path leaves the capture holding
+/// either value after the call.
+#[test]
+fn by_ref_capture_written_conditionally_by_an_invoked_closure_stays_a_union() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    public function conditional(bool $flag): int
+    {
+        $out = null;
+        $write = static function () use (&$out, $flag): void {
+            if ($flag) {
+                $out = 'written';
+            }
+        };
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+}
+
+/// Handing the closure to another function says nothing about whether it
+/// ever runs.
+#[test]
+fn by_ref_capture_of_a_closure_passed_on_stays_a_union() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+function defer(callable $cb): void {}
+final class ByRefClosure
+{
+    public function passed(): int
+    {
+        $out = null;
+        $write = static function () use (&$out): void {
+            $out = 'written';
+        };
+        defer($write);
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+}
+
+/// A call on one branch only runs the closure on that branch.
+#[test]
+fn by_ref_capture_of_a_closure_invoked_conditionally_stays_a_union() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    public function guarded(bool $flag): int
+    {
+        $out = null;
+        $write = static function () use (&$out): void {
+            $out = 'written';
+        };
+        if ($flag) {
+            $write();
+        }
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+}
+
+/// Once the variable holds something else, calling it no longer runs the
+/// closure that captured the variable.
+#[test]
+fn by_ref_capture_of_a_reassigned_closure_variable_stays_a_union() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    public function reassigned(): int
+    {
+        $out = null;
+        $write = static function () use (&$out): void {
+            $out = 'written';
+        };
+        $write = static function (): void {};
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+}
+
+/// Past a join, the variable may hold either closure.
+#[test]
+fn by_ref_capture_of_a_closure_variable_reassigned_on_one_branch_stays_a_union() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    public function maybeReassigned(bool $flag): int
+    {
+        $out = null;
+        $write = static function () use (&$out): void {
+            $out = 'written';
+        };
+        if ($flag) {
+            $write = static function (): void {};
+        }
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+}
+
+/// A `foreach` binding is a write to the variable as much as `=` is.
+#[test]
+fn by_ref_capture_of_a_closure_variable_rebound_by_foreach_stays_a_union() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    /** @param list<\Closure(): void> $others */
+    public function rebound(array $others): int
+    {
+        $out = null;
+        $write = static function () use (&$out): void {
+            $out = 'written';
+        };
+        foreach ($others as $write) {
+        }
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+}
+
+/// A by-value capture holds what the variable held where the closure was
+/// written, not what it holds where the closure is called.
+#[test]
+fn by_value_capture_of_an_invoked_closure_keeps_its_definition_value() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    public function byValue(): int
+    {
+        $source = 'written';
+        $out = null;
+        $write = static function () use ($source, &$out): void {
+            $out = $source;
+        };
+        $source = 42;
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert!(errors.is_empty(), "got: {errors:?}");
+}
+
+/// A callee that takes the closure variable by reference may put another
+/// closure in it, so a later call no longer runs the one assigned.
+#[test]
+fn by_ref_capture_of_a_closure_passed_by_reference_stays_a_union() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+function swap(&$cb): void { $cb = static function (): void {}; }
+final class ByRefClosure
+{
+    public function swapped(): int
+    {
+        $out = null;
+        $write = static function () use (&$out): void {
+            $out = 'written';
+        };
+        swap($write);
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+}
+
+/// A closure that calls itself through a by-reference capture of its own
+/// variable must not be walked forever.
+#[test]
+fn by_ref_capture_of_a_self_calling_closure_terminates() {
+    argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    public function recursive(int $n): int
+    {
+        $out = null;
+        $write = static function () use (&$out, &$write, &$n): void {
+            $out = 'written';
+            if ($n-- > 0) {
+                $write();
+            }
+        };
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+}
+
+/// A loop may run its body no times, so a call inside it only maybe ran.
+#[test]
+fn by_ref_capture_of_a_closure_invoked_in_a_loop_stays_a_union() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    /** @param list<int> $items */
+    public function looped(array $items): int
+    {
+        $out = null;
+        $write = static function () use (&$out): void {
+            $out = 'written';
+        };
+        foreach ($items as $item) {
+            $write();
+        }
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+}

@@ -19,7 +19,7 @@ use crate::virtual_members::laravel::helpers::{
 };
 use crate::virtual_members::laravel::route_groups::{
     chain_dynamic_name_prefix, chain_uri_prefix, dynamic_as_prefix_from_args,
-    extract_uri_prefix_from_args, join_uri_segments,
+    extract_uri_prefix_from_args, group_option_expression, join_uri_segments,
 };
 
 /// Resolve `route('name')` to the `->name('name')` declarations that register
@@ -169,6 +169,9 @@ pub(crate) struct RouteDiscovery {
     /// Every file the scan read, canonically and sorted: an edit to any of
     /// them can change the routes.
     pub sources: Vec<PathBuf>,
+    /// Every route, named or not, whose action is a controller method,
+    /// sorted by controller and then method, case-insensitively.
+    pub actions: Vec<RouteAction>,
 }
 
 impl RouteDiscovery {
@@ -224,6 +227,17 @@ impl RouteDiscovery {
             .collect()
     }
 
+    /// The routes that dispatch to a method of `controller`, given by its FQN.
+    pub(crate) fn controller_actions(&self, controller: &str) -> &[RouteAction] {
+        let start = self.actions.partition_point(|action| {
+            cmp_ignore_ascii_case(&action.controller, controller).is_lt()
+        });
+        let len = self.actions[start..].partition_point(|action| {
+            cmp_ignore_ascii_case(&action.controller, controller).is_eq()
+        });
+        &self.actions[start..start + len]
+    }
+
     /// Whether the scan read the file `uri`, so that an edit to it can change
     /// the routes.
     pub(crate) fn reads(&self, uri: &str) -> bool {
@@ -268,6 +282,9 @@ struct GroupPrefix<'a> {
     router_var: Option<&'a str>,
     /// Whether `$this` is the router, as it is inside a router macro body.
     this_is_router: bool,
+    /// The controller a `->controller(X::class)` group gives the bare method
+    /// names its routes use as actions.
+    controller: Option<&'a str>,
 }
 
 impl GroupPrefix<'_> {
@@ -279,6 +296,7 @@ impl GroupPrefix<'_> {
             unknowable: false,
             router_var: Some("router"),
             this_is_router: false,
+            controller: None,
         }
     }
 
@@ -317,6 +335,8 @@ pub(super) struct RouteCollector {
     pub(super) open_suffixes: Vec<String>,
     /// The files the walk read, canonically.
     sources: Vec<PathBuf>,
+    /// The routes whose action is a controller method.
+    pub(super) actions: Vec<RouteAction>,
 }
 
 impl RouteCollector {
@@ -327,6 +347,7 @@ impl RouteCollector {
             mut open_prefixes,
             mut open_suffixes,
             mut sources,
+            mut actions,
         } = self;
         // Sorting the project's own registrations ahead of a package's, and
         // known URIs ahead of unknown ones, then deduping to one entry per
@@ -357,6 +378,15 @@ impl RouteCollector {
         open_suffixes.dedup();
         sources.sort();
         sources.dedup();
+        // A file reached twice (a diamond include) registers its routes twice.
+        actions.sort_by(|a, b| {
+            cmp_ignore_ascii_case(&a.controller, &b.controller)
+                .then_with(|| cmp_ignore_ascii_case(&a.method, &b.method))
+                .then_with(|| a.uri.cmp(&b.uri))
+                .then_with(|| a.verbs.cmp(&b.verbs))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        actions.dedup();
         // `routes` is sorted by name and deduplicated, so the names come out
         // sorted too.
         let names: std::sync::Arc<[String]> =
@@ -367,6 +397,7 @@ impl RouteCollector {
             open_prefixes,
             open_suffixes,
             sources,
+            actions,
         }
     }
 }
@@ -442,6 +473,8 @@ struct LeafRoute<'e, 'arena> {
     /// The part of the chain ahead of the registration, or the whole receiver
     /// when no registration was found.
     rest: Option<&'e Expression<'arena>>,
+    /// The registration call itself, when the chain has one.
+    registration: Option<&'e Expression<'arena>>,
 }
 
 /// Read the full name of the route a `->name()` link belongs to.
@@ -494,7 +527,11 @@ fn leaf_route_name<'e, 'arena>(
                     name.push_str(segment.as_deref()?);
                     Some(name)
                 });
-            return LeafRoute { name, rest };
+            return LeafRoute {
+                name,
+                rest,
+                registration: Some(cur),
+            };
         }
         let Some(link) = object else {
             break;
@@ -513,6 +550,7 @@ fn leaf_route_name<'e, 'arena>(
     LeafRoute {
         name: own,
         rest: Some(mc.object),
+        registration: None,
     }
 }
 
@@ -723,16 +761,17 @@ pub(super) fn walk_route_file(
     }
     let uri = Arc::new(uri.clone());
     let lines = LineIndex::new(content);
-    in_parsed_route_file(content, b"input.php", |program| {
-        let paths = ScanPaths::new(
-            file_path.and_then(Path::parent),
-            workspace_root,
-            &open,
+    in_parsed_route_file(content, b"input.php", |program, names| {
+        let paths = ScanPaths {
+            dir: file_path.and_then(Path::parent),
+            root: workspace_root,
+            open: &open,
             macros,
             program,
-            &uri,
-            &lines,
-        );
+            names,
+            uri: &uri,
+            lines: &lines,
+        };
 
         let mut scope = Scope::default();
         for stmt in program.statements.iter() {
@@ -795,11 +834,14 @@ fn walk_expr(
     if let Some(registration) = resource_registration(expr, content)
         && group.chain_reaches_router(expr, content)
     {
-        let mut push_name = |name_expr| {
+        let mut push_name = |name_expr, controller: Option<&Expression<'_>>| {
             if let Some((name, offset, _)) = resource_string_literal(name_expr, content) {
+                let controller = controller
+                    .and_then(|controller| class_name(controller, content, scope, paths.names));
                 push_resource_routes(
                     &registration,
                     name,
+                    controller,
                     group,
                     paths.declaration(offset, None),
                     sink,
@@ -809,11 +851,11 @@ fn walk_expr(
         if registration.multiple {
             for element in resource_array_elements(registration.names) {
                 if let ArrayElement::KeyValue(pair) = element {
-                    push_name(pair.key);
+                    push_name(pair.key, Some(pair.value));
                 }
             }
         } else {
-            push_name(registration.names);
+            push_name(registration.names, registration.controller);
         }
         // A `->group()` sharing the chain registers routes of its own, which
         // the resource shortcut must not swallow.
@@ -846,10 +888,12 @@ fn walk_expr(
                     format!("{}{}", group.name, chain_name_prefix(mc.object, content));
                 let uri_prefix =
                     join_uri_segments(group.uri, &chain_uri_prefix(mc.object, content));
+                let controller = chain_controller(mc.object, content, scope, paths.names);
                 let inner = GroupPrefix {
                     name: &name_prefix,
                     uri: &uri_prefix,
                     unknowable: group.unknowable || dynamic_head.is_some(),
+                    controller: controller.as_deref().or(group.controller),
                     ..group
                 };
                 for arg in mc.argument_list.arguments.iter() {
@@ -892,31 +936,41 @@ fn walk_expr(
                         });
                     }
                 }
+                if let Some(registration) = leaf.registration
+                    && group.chain_reaches_router(mc.object, content)
+                {
+                    let name = leaf
+                        .name
+                        .map(|name| format!("{}{name}", group.name))
+                        .filter(|full| !full.is_empty() && !full.ends_with('.'));
+                    record_action(registration, name, content, group, paths, scope, sink);
+                }
                 if let Some(rest) = leaf.rest {
                     walk_expr(rest, content, group, paths, scope, sink);
                 }
             } else if is_registration_verb(ident.value) {
                 // `Route::name('users.index')->get(…)`: the registrar's name
                 // becomes the route's even with no `->name()` after the verb.
-                let registrar = chain_name_prefix(mc.object, content);
-                let full = format!("{}{registrar}", group.name);
-                if !registrar.is_empty()
-                    && !full.ends_with('.')
-                    && group.chain_reaches_router(mc.object, content)
-                {
-                    if group.unknowable {
-                        sink.open_suffixes.push(full.clone());
+                if group.chain_reaches_router(mc.object, content) {
+                    let registrar = chain_name_prefix(mc.object, content);
+                    let full = format!("{}{registrar}", group.name);
+                    let name = (!registrar.is_empty() && !full.ends_with('.')).then_some(full);
+                    if let Some(full) = &name {
+                        if group.unknowable {
+                            sink.open_suffixes.push(full.clone());
+                        }
+                        let uri_prefix =
+                            join_uri_segments(group.uri, &chain_uri_prefix(mc.object, content));
+                        sink.routes.push(RouteEntry {
+                            name: full.clone(),
+                            uri: route_uri(&uri_prefix, chain_uri(expr, content, scope).as_deref()),
+                            from_vendor: false,
+                            declarations: vec![
+                                paths.declaration(expr.span().start.offset as usize, None),
+                            ],
+                        });
                     }
-                    let uri_prefix =
-                        join_uri_segments(group.uri, &chain_uri_prefix(mc.object, content));
-                    sink.routes.push(RouteEntry {
-                        name: full,
-                        uri: route_uri(&uri_prefix, chain_uri(expr, content, scope).as_deref()),
-                        from_vendor: false,
-                        declarations: vec![
-                            paths.declaration(expr.span().start.offset as usize, None),
-                        ],
-                    });
+                    record_action(expr, name, content, group, paths, scope, sink);
                 }
                 walk_expr(mc.object, content, group, paths, scope, sink);
             } else if !walk_macro(ident.value, Some(mc.object), content, group, paths, sink) {
@@ -945,15 +999,21 @@ fn walk_expr(
                 );
                 let uri_prefix =
                     join_uri_segments(group.uri, &extract_uri_prefix_from_args(args(), content));
+                let controller = group_option_expression(args(), content, "controller")
+                    .and_then(|controller| class_name(controller, content, scope, paths.names));
                 let inner = GroupPrefix {
                     name: &name_prefix,
                     uri: &uri_prefix,
                     unknowable: group.unknowable || dynamic_head.is_some(),
+                    controller: controller.as_deref().or(group.controller),
                     ..group
                 };
                 for arg in sc.argument_list.arguments.iter() {
                     walk_group_body(arg.value(), content, inner, paths, scope, sink);
                 }
+            } else if is_registration_verb(ident.value) && group.chain_reaches_router(expr, content)
+            {
+                record_action(expr, None, content, group, paths, scope, sink);
             } else {
                 // `Auth::routes()` registers nothing itself: the facade
                 // forwards to the router's `auth` macro, which `laravel/ui`
@@ -982,6 +1042,69 @@ fn walk_expr(
         }
         _ => {}
     }
+}
+
+/// Record the controller method the registration call `registration`
+/// dispatches to, if its action names one.
+///
+/// `name` is the route's full name, when it has one.
+fn record_action(
+    registration: &Expression<'_>,
+    name: Option<String>,
+    content: &str,
+    group: GroupPrefix<'_>,
+    paths: ScanPaths<'_>,
+    scope: &Scope,
+    sink: &mut RouteCollector,
+) {
+    let (ident, args, object) = match registration {
+        Expression::Call(Call::Method(mc)) => (&mc.method, &mc.argument_list, Some(mc.object)),
+        Expression::Call(Call::StaticMethod(sc)) => (&sc.method, &sc.argument_list, None),
+        _ => return,
+    };
+    let ClassLikeMemberSelector::Identifier(ident) = ident else {
+        return;
+    };
+    let method = ident.value.to_ascii_lowercase();
+    let action_index = match method.as_slice() {
+        b"match" => 2,
+        b"fallback" => 0,
+        // These answer with a view or a redirect, not a controller.
+        b"view" | b"redirect" | b"permanentredirect" => return,
+        _ => 1,
+    };
+    let Some(action) = args.arguments.iter().nth(action_index) else {
+        return;
+    };
+    let chain_controller =
+        object.and_then(|object| chain_controller(object, content, scope, paths.names));
+    let Some((controller, target)) = action_target(
+        action.value(),
+        chain_controller.as_deref().or(group.controller),
+        content,
+        scope,
+        paths.names,
+    ) else {
+        return;
+    };
+    let uri_prefix = match object {
+        Some(object) => join_uri_segments(group.uri, &chain_uri_prefix(object, content)),
+        None => group.uri.to_string(),
+    };
+    let own_uri = if method == b"fallback" {
+        Some("{fallbackPlaceholder}".to_string())
+    } else {
+        chain_uri(registration, content, scope)
+    };
+    sink.actions.push(RouteAction {
+        controller,
+        method: target,
+        verbs: registration_verbs(&method, args, content, scope),
+        uri: route_uri(&uri_prefix, own_uri.as_deref()),
+        // A group whose own name is unknown leaves part of the name unknown.
+        name: name.filter(|_| !group.unknowable),
+        declaration: paths.declaration(registration.span().start.offset as usize, None),
+    });
 }
 
 /// Record the prefix a group whose own name is not statically known leaves
@@ -1050,6 +1173,7 @@ fn walk_macro(
         // caller's variables.
         router_var: None,
         this_is_router: true,
+        controller: group.controller,
     };
     sink.sources.push(
         open.path
@@ -1057,10 +1181,11 @@ fn walk_macro(
             .unwrap_or_else(|_| open.path.clone()),
     );
     let lines = LineIndex::new(&open.content);
-    in_parsed_route_file(&open.content, b"macro.php", |program| {
+    in_parsed_route_file(&open.content, b"macro.php", |program, names| {
         let sub_paths = ScanPaths {
             dir: open.path.parent(),
             program,
+            names,
             uri: &open.uri,
             lines: &lines,
             ..paths
@@ -1098,6 +1223,7 @@ fn walk_macro(
 fn push_resource_routes(
     registration: &ResourceRegistration<'_>,
     name: &str,
+    controller: Option<String>,
     group: GroupPrefix<'_>,
     declaration: RouteDeclaration,
     sink: &mut RouteCollector,
@@ -1155,6 +1281,16 @@ fn push_resource_routes(
         // that group contributes ahead of it.
         if group.unknowable {
             sink.open_suffixes.push(name.clone());
+        }
+        if let Some(controller) = &controller {
+            sink.actions.push(RouteAction {
+                controller: controller.clone(),
+                method: suffix.to_string(),
+                verbs: resource_verbs(suffix).to_string(),
+                uri: uri.clone(),
+                name: (!group.unknowable).then(|| name.clone()),
+                declaration: declaration.clone(),
+            });
         }
         sink.routes.push(RouteEntry {
             name,
@@ -1255,10 +1391,11 @@ fn walk_included_file(
     sink.sources.push(included.path.clone());
 
     let lines = LineIndex::new(&included.content);
-    in_parsed_route_file(&included.content, b"included.php", |program| {
+    in_parsed_route_file(&included.content, b"included.php", |program, names| {
         let sub_paths = ScanPaths {
             dir: included.path.parent(),
             program,
+            names,
             uri: &sub_uri,
             lines: &lines,
             ..paths

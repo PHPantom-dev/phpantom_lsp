@@ -16530,3 +16530,83 @@ async fn test_dynamic_callback_calls_preserve_explicit_parameter_types() {
         }
     }
 }
+
+/// A relation whose related class is a `config()` value (the way
+/// spatie/laravel-permission's `HasRoles` declares `roles()`) loads the class
+/// the config key holds, not the base `Model`.
+#[tokio::test]
+async fn relation_related_class_from_config_value() {
+    let has_roles_php = "\
+<?php
+namespace App\\Concerns;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+trait HasRoles {
+    public function roles(): BelongsToMany
+    {
+        $relation = $this->morphToMany(config('permission.models.role'), 'model');
+        return $relation;
+    }
+    public function teams(): BelongsToMany
+    {
+        return $this->belongsToMany(config('permission.models.team'));
+    }
+}
+";
+    let user_php = "\
+<?php
+namespace App\\Models;
+use App\\Concerns\\HasRoles;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    use HasRoles;
+    public function test() {
+        $this->roles;
+        $this->teams;
+    }
+}
+";
+    let config_php = "\
+<?php
+return [
+    'models' => [
+        'role' => App\\Models\\Role::class,
+        'team' => env('TEAM_MODEL', App\\Models\\Role::class),
+    ],
+];
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Concerns/HasRoles.php", has_roles_php),
+        ("src/Models/Role.php", ROLE_PHP),
+        ("src/Models/User.php", user_php),
+        ("config/permission.php", config_php),
+    ]);
+    let uri = Uri::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
+    open_php(&backend, &uri, user_php).await;
+
+    let hover_at = |line: u32| {
+        let backend = &backend;
+        let uri = &uri;
+        async move {
+            match hover_response(backend, uri, line, 17)
+                .await
+                .map(|h| h.contents)
+            {
+                Some(Contents::MarkupContent(m)) => m.value,
+                other => panic!("expected markup hover, got: {other:?}"),
+            }
+        }
+    };
+
+    let roles = hover_at(7).await;
+    assert!(
+        roles.contains("Collection<App\\Models\\Role>") || roles.contains("Collection<Role>"),
+        "roles should load the configured Role model, got: {roles}"
+    );
+    // An `env()` override could name any class at runtime, so the relation
+    // keeps the base model.
+    let teams = hover_at(8).await;
+    assert!(
+        !teams.contains("Role"),
+        "teams should not pin the env-overridable model, got: {teams}"
+    );
+}

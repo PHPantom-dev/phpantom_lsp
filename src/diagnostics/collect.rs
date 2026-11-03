@@ -147,6 +147,14 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         Backend::collect_override_attribute_diagnostics_with_context,
     ),
     always(
+        "invalid_data_provider",
+        Backend::collect_data_provider_diagnostics_with_context,
+    ),
+    always(
+        "missing_parent_call",
+        Backend::collect_parent_call_diagnostics_with_context,
+    ),
+    always(
         "invalid_member_name",
         Backend::collect_dynamic_member_name_diagnostics_with_context,
     ),
@@ -156,6 +164,10 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
         runs_in: Framework::StringKeys,
         reads_every_body: false,
     },
+    laravel(
+        "invalid_validation_rule",
+        Backend::collect_validation_string_diagnostics,
+    ),
     laravel(
         "invalid_command_parameter",
         Backend::collect_invalid_command_param_diagnostics,
@@ -173,6 +185,9 @@ static SLOW_COLLECTORS: &[SlowCollector] = &[
     laravel("blade_component_tag_balance", |backend, _, uri, _, out| {
         backend.collect_blade_component_tag_diagnostics(uri, out)
     }),
+    laravel("blade_unknown_component", |backend, _, uri, _, out| {
+        backend.collect_blade_unknown_component_diagnostics(uri, out)
+    }),
     laravel("blade_section", |backend, _, uri, _, out| {
         backend.collect_blade_section_diagnostics(uri, out)
     }),
@@ -187,8 +202,10 @@ pub(crate) type SlowDiagnosticObserver<'a> =
 
 impl Backend {
     /// Returns `true` if the URI should be skipped for diagnostics: stub
-    /// files (embedded or under a stub path), and resource documents (Twig
-    /// templates, YAML and XML files), which are not PHP.  Vendor files are
+    /// files (embedded or under a stub path), and resource documents (YAML,
+    /// XML, and XLIFF files), which are not PHP.  A Twig template is a
+    /// resource document too, but the names it holds are judged (see
+    /// [`Self::collect_template_diagnostics`]).  Vendor files are
     /// not skipped here: users
     /// working in monorepos or with `--prefer-source` packages
     /// legitimately edit vendor files, so the live per-file pass
@@ -198,7 +215,28 @@ impl Backend {
     pub(super) fn should_skip_diagnostics(&self, uri_str: &str) -> bool {
         crate::stubs::is_stub_uri(uri_str)
             || self.is_external_stub_uri(uri_str)
-            || self.is_resource_uri(uri_str)
+            || (self.is_resource_uri(uri_str) && !self.is_twig_template_uri(uri_str))
+    }
+
+    /// Collect the diagnostics of a Twig template: the template, route,
+    /// and translation names it holds that nothing declares.  A template
+    /// is not PHP, so this is all that is judged there.
+    pub fn collect_template_diagnostics(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        if !self.is_twig_project() {
+            return;
+        }
+        let ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
+        // The spans index the text the map was scanned from, which an edit
+        // whose scan has not landed yet has moved on from.
+        if !ctx.symbol_map.matches_source(content) {
+            return;
+        }
+        self.collect_invalid_laravel_string_key_diagnostics(&ctx, uri_str, content, out);
     }
 
     /// Collect Phase 1 (fast) diagnostics: syntax errors, unused
@@ -413,6 +451,7 @@ impl Backend {
                 &source_class_loaders.as_dyn(),
                 &ctx.file.block_imports(),
                 Some(self),
+                Some(uri_str),
                 owned_loaders.loaders(),
                 Some(&self.resolved_class_cache),
             ),
@@ -424,6 +463,7 @@ impl Backend {
                     &source_class_loaders.as_dyn(),
                     &ctx.file.block_imports(),
                     Some(self),
+                    Some(uri_str),
                     owned_loaders.loaders(),
                     Some(&self.resolved_class_cache),
                     targets,

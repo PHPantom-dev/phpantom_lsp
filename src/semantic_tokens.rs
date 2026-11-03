@@ -325,6 +325,12 @@ impl Backend {
                     is_array_callable: _,
                     is_nullsafe: _,
                 } => {
+                    // Telling a mock's `allows('update')` from any other
+                    // object's takes the type engine, which tokens do not
+                    // run for a variable, so the string keeps its colour.
+                    if *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod {
+                        continue;
+                    }
                     let static_property_syntax = *is_static
                         && content
                             .get(span.start as usize..span.end as usize)

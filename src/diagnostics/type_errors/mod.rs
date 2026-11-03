@@ -46,6 +46,34 @@ pub(super) fn has_strict_types(program: &Program<'_>) -> bool {
     false
 }
 
+/// Whether a `value` that does not fit `declared` only fails on being `null`
+/// or `false`: every other member fits, and there is at least one.
+///
+/// The code is not wrong, only wrong if the value turns out empty, so these
+/// mismatches are only reported when `possibly-empty-mismatches` asks for them.
+pub(super) fn fails_only_on_empty(
+    value: &crate::php_type::PhpType,
+    declared: &crate::php_type::PhpType,
+    class_loader: &ResolvedClassLoader<'_>,
+    strict_types: bool,
+) -> bool {
+    use crate::php_type::TypeKind;
+    let fits = |ty: &crate::php_type::PhpType| {
+        is_type_compatible(ty, declared, class_loader, strict_types)
+    };
+    match value.kind() {
+        TypeKind::Nullable(inner) => fits(inner),
+        TypeKind::Union(members) => {
+            let mut others = members
+                .iter()
+                .filter(|member| !member.is_null() && !member.is_false())
+                .peekable();
+            others.peek().is_some() && others.all(fits)
+        }
+        _ => false,
+    }
+}
+
 /// Whether `arg_type` can be passed where `param_type` is declared, with
 /// the Laravel model-type operators (`builder-of<Model>`, …) on either side
 /// expanded to the classes they name first.

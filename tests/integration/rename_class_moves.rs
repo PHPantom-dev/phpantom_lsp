@@ -329,6 +329,7 @@ async fn psr4_move_workspace(files: &[(&str, &str)]) -> (Backend, tempfile::Temp
     *backend.psr4_mappings().write() = vec![phpantom_lsp::composer::Psr4Mapping {
         prefix: "App\\".to_string(),
         base_path: "src".to_string(),
+        is_dev: false,
     }];
 
     for (rel, content) in files {
@@ -676,6 +677,7 @@ async fn blade_move_workspace(files: &[(&str, &str)]) -> (Backend, tempfile::Tem
     *backend.psr4_mappings().write() = vec![phpantom_lsp::composer::Psr4Mapping {
         prefix: "App\\".to_string(),
         base_path: "src".to_string(),
+        is_dev: false,
     }];
 
     for (rel, content) in files {

@@ -75,6 +75,15 @@ fn collect_intersection_members(hint: &Hint, members: &mut Vec<PhpType>) {
     }
 }
 
+/// Whether `parameter_list` declares a parameter named `name` (with its
+/// `$`), whatever PHP versions it is available for.
+pub(crate) fn declares_parameter(parameter_list: &FunctionLikeParameterList, name: &str) -> bool {
+    parameter_list
+        .parameters
+        .iter()
+        .any(|param| param.variable.name == name.as_bytes())
+}
+
 /// Extract parameter information from a method's parameter list.
 ///
 /// When `content` is provided, default value expressions are extracted

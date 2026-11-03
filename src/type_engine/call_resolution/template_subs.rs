@@ -286,11 +286,19 @@ fn exclusively_bound_templates(
         .filter(|(_, param_name)| was_passed(param_name))
         .collect();
 
-    filled
-        .iter()
-        .filter(|(tpl_name, _)| filled.iter().filter(|(t, _)| t == tpl_name).count() == 1)
-        .map(|binding| **binding)
-        .collect()
+    // A hint naming the template more than once (`T|array<T>`) records
+    // one binding per mention, all for the same parameter.
+    let mut exclusive: Vec<(Atom, Atom)> = Vec::new();
+    for &&(tpl_name, param_name) in &filled {
+        if filled
+            .iter()
+            .all(|(t, p)| *t != tpl_name || *p == param_name)
+            && !exclusive.contains(&(tpl_name, param_name))
+        {
+            exclusive.push((tpl_name, param_name));
+        }
+    }
+    exclusive
 }
 
 /// Recover a template parameter no argument names directly, from the

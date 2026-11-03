@@ -93,6 +93,16 @@ pub struct ResolvedCacheInner {
     /// computation instead of racing it. See
     /// [`claim_pending`](Self::claim_pending).
     pending: HashMap<ResolvedClassCacheKey, std::thread::ThreadId>,
+    /// The claim each blocked thread is waiting on.  Together with
+    /// [`pending`](Self::pending) this forms the wait-for graph that
+    /// [`claim_pending`](Self::claim_pending) keeps acyclic: a thread
+    /// resolving one class routinely needs another mid-resolution, so
+    /// two threads can each hold the claim the other needs.
+    ///
+    /// Only a running thread can take a claim or start a wait, so a
+    /// claim never adds an edge out of a blocked thread, and a wait is
+    /// only recorded after checking that it closes no cycle.
+    pending_waits: HashMap<std::thread::ThreadId, ResolvedClassCacheKey>,
     /// Interned transformed methods, keyed by the identity of the
     /// original `Arc<MethodInfo>` plus a fingerprint of the transform
     /// (template substitution map, bare-`self` replacement target,
@@ -173,9 +183,16 @@ pub(crate) enum PendingClaim {
     /// re-entrant call). Proceed as if uncontended; do not release
     /// this claim independently of the outer call that took it.
     AlreadyOwnedByThisThread,
-    /// A different thread holds the claim. The caller should wait for
-    /// it to finish and read the cache instead of resolving again.
+    /// A different thread holds the claim and the caller is now recorded
+    /// as waiting on it. The caller should wait for it to finish and
+    /// read the cache instead of resolving again, then end the wait via
+    /// [`ResolvedCacheInner::end_pending_wait`].
     OwnedByOtherThread,
+    /// A different thread holds the claim, but it is blocked, directly or
+    /// through other threads, on a claim the caller holds. Waiting could
+    /// only end at the timeout, so the caller must resolve independently.
+    /// No wait is recorded.
+    OwnedByThreadWaitingOnCaller,
 }
 
 /// Interned transformed copies of one kind of member, keyed by the
@@ -340,20 +357,53 @@ impl ResolvedCacheInner {
     /// Attempt to become the sole resolver of `key`'s first, not-yet-cached
     /// resolution. See [`pending`](Self::pending) for why this exists
     /// alongside `in_flight`.
-    pub(crate) fn claim_pending(&mut self, key: &ResolvedClassCacheKey) -> PendingClaim {
-        let current = std::thread::current().id();
+    pub(crate) fn claim_pending(
+        &mut self,
+        thread: std::thread::ThreadId,
+        key: &ResolvedClassCacheKey,
+    ) -> PendingClaim {
         match self.pending.get(key) {
-            Some(&owner) if owner == current => PendingClaim::AlreadyOwnedByThisThread,
-            Some(_) => PendingClaim::OwnedByOtherThread,
+            Some(&owner) if owner == thread => PendingClaim::AlreadyOwnedByThisThread,
+            Some(&owner) if self.is_blocked_on(owner, thread) => {
+                PendingClaim::OwnedByThreadWaitingOnCaller
+            }
+            Some(_) => {
+                self.pending_waits.insert(thread, key.clone());
+                PendingClaim::OwnedByOtherThread
+            }
             None => {
-                self.pending.insert(key.clone(), current);
+                self.pending.insert(key.clone(), thread);
                 PendingClaim::Fresh
             }
         }
     }
 
+    /// Whether `waiter` is blocked on `holder`, directly or through a
+    /// chain of other waiting threads.  The walk ends because
+    /// [`pending_waits`](Self::pending_waits) is kept acyclic.
+    fn is_blocked_on(&self, waiter: std::thread::ThreadId, holder: std::thread::ThreadId) -> bool {
+        let mut current = waiter;
+        while let Some(owner) = self
+            .pending_waits
+            .get(&current)
+            .and_then(|key| self.pending.get(key))
+        {
+            if *owner == holder {
+                return true;
+            }
+            current = *owner;
+        }
+        false
+    }
+
+    /// End the wait [`PendingClaim::OwnedByOtherThread`] recorded for
+    /// `thread`.
+    pub(crate) fn end_pending_wait(&mut self, thread: std::thread::ThreadId) {
+        self.pending_waits.remove(&thread);
+    }
+
     /// Release a [`PendingClaim::Fresh`] claim on `key`, letting any
-    /// thread waiting in `claim_pending` proceed.
+    /// thread waiting on it proceed.
     pub(crate) fn release_pending(&mut self, key: &ResolvedClassCacheKey) {
         self.pending.remove(key);
     }
@@ -399,8 +449,8 @@ impl ResolvedCacheInner {
 
     /// Remove all entries and indices.
     ///
-    /// `in_flight` and `pending` are left untouched: their entries
-    /// belong to resolution call trees currently running on other
+    /// `in_flight`, `pending` and `pending_waits` are left untouched:
+    /// their entries belong to resolution call trees currently running on other
     /// threads, not to the cached contents being invalidated.
     pub fn clear(&mut self) {
         self.map.clear();
@@ -880,6 +930,118 @@ fn dependency_keys(key: &ResolvedClassCacheKey, cls: &ClassInfo) -> Vec<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn distinct_thread_id() -> std::thread::ThreadId {
+        std::thread::spawn(|| std::thread::current().id())
+            .join()
+            .unwrap()
+    }
+
+    fn pending_key(name: &str) -> ResolvedClassCacheKey {
+        (crate::atom::atom(name), Vec::new())
+    }
+
+    #[test]
+    fn a_thread_holding_a_claim_may_wait_when_no_cycle_results() {
+        let mut cache = ResolvedCacheInner::default();
+        let (first, second) = (distinct_thread_id(), distinct_thread_id());
+        let (a, b) = (pending_key("A"), pending_key("B"));
+
+        assert!(matches!(
+            cache.claim_pending(first, &a),
+            PendingClaim::Fresh
+        ));
+        assert!(matches!(
+            cache.claim_pending(second, &b),
+            PendingClaim::Fresh
+        ));
+        assert!(matches!(
+            cache.claim_pending(first, &b),
+            PendingClaim::OwnedByOtherThread
+        ));
+    }
+
+    #[test]
+    fn a_wait_that_would_close_a_cycle_is_refused() {
+        let mut cache = ResolvedCacheInner::default();
+        let (first, second) = (distinct_thread_id(), distinct_thread_id());
+        let (a, b) = (pending_key("A"), pending_key("B"));
+
+        cache.claim_pending(first, &a);
+        cache.claim_pending(second, &b);
+        cache.claim_pending(first, &b);
+
+        assert!(matches!(
+            cache.claim_pending(second, &a),
+            PendingClaim::OwnedByThreadWaitingOnCaller
+        ));
+    }
+
+    #[test]
+    fn a_cycle_through_an_intermediate_thread_is_refused() {
+        let mut cache = ResolvedCacheInner::default();
+        let (first, second, third) = (
+            distinct_thread_id(),
+            distinct_thread_id(),
+            distinct_thread_id(),
+        );
+        let (a, b, c) = (pending_key("A"), pending_key("B"), pending_key("C"));
+
+        cache.claim_pending(first, &a);
+        cache.claim_pending(second, &b);
+        cache.claim_pending(third, &c);
+        cache.claim_pending(first, &b);
+        cache.claim_pending(second, &c);
+
+        assert!(matches!(
+            cache.claim_pending(third, &a),
+            PendingClaim::OwnedByThreadWaitingOnCaller
+        ));
+    }
+
+    #[test]
+    fn a_finished_wait_no_longer_blocks_the_other_thread() {
+        let mut cache = ResolvedCacheInner::default();
+        let (first, second) = (distinct_thread_id(), distinct_thread_id());
+        let (a, b) = (pending_key("A"), pending_key("B"));
+
+        cache.claim_pending(first, &a);
+        cache.claim_pending(second, &b);
+        cache.claim_pending(first, &b);
+        cache.end_pending_wait(first);
+
+        assert!(matches!(
+            cache.claim_pending(second, &a),
+            PendingClaim::OwnedByOtherThread
+        ));
+    }
+
+    #[test]
+    fn a_waiter_follows_a_claim_that_changed_hands() {
+        let mut cache = ResolvedCacheInner::default();
+        let (first, second, third) = (
+            distinct_thread_id(),
+            distinct_thread_id(),
+            distinct_thread_id(),
+        );
+        let (a, b) = (pending_key("A"), pending_key("B"));
+
+        cache.claim_pending(first, &a);
+        cache.claim_pending(second, &b);
+        cache.claim_pending(first, &b);
+        cache.release_pending(&b);
+        cache.claim_pending(third, &b);
+
+        assert!(matches!(
+            cache.claim_pending(second, &a),
+            PendingClaim::OwnedByOtherThread
+        ));
+        cache.end_pending_wait(second);
+        assert!(matches!(
+            cache.claim_pending(third, &a),
+            PendingClaim::OwnedByThreadWaitingOnCaller
+        ));
+    }
 
     #[test]
     fn sweep_drops_dead_origins_once_the_map_doubles() {

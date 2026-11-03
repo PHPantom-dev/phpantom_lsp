@@ -7,6 +7,6 @@ namespace PhpStubs\WordPress\Core\Tests;
 use function validate_plugin;
 use function PHPStan\Testing\assertType;
 
-assertType('WP_Error', validate_plugin('')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('WP_Error', validate_plugin(''));
 assertType('0|WP_Error', validate_plugin('pluginPath'));
 assertType('0|WP_Error', validate_plugin(Faker::string()));

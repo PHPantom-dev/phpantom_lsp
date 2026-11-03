@@ -482,28 +482,59 @@ impl Backend {
         if let Some(fl) = ctx.function_loader
             && let Some(func_info) = fl(func_name, 0)
         {
-            if func_info.conditional_return.is_some()
-                || crate::type_engine::type_ops::call_site_returns::has_call_site_return(func_name)
-            {
+            let call_site_name =
+                crate::type_engine::type_ops::call_site_returns::call_site_name(&func_info);
+            if func_info.conditional_return.is_some() || call_site_name.is_some() {
                 let var_resolver = build_var_resolver(ctx);
                 // `is <Type>` conditions on an argument that isn't a
                 // literal (`preg_replace($p, $r, $subject)`) are
                 // decided by the argument's resolved type, so the
                 // branch a call takes matches what it was handed.
                 let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, ctx);
-                let resolved_type = func_info
+                // A function whose arguments decide its result
+                // (`json_encode(…, JSON_THROW_ON_ERROR)` never returning
+                // `false`, `filter_var()` returning what its filter
+                // produces, `wp_parse_args()` merging two shapes) is
+                // decided at the call site, more closely than its
+                // conditional can say.
+                let call_site = call_site_name.and_then(|name| {
+                    crate::type_engine::type_ops::call_site_returns::call_site_return_type(
+                        name,
+                        &func_info.parameters,
+                        text_args,
+                        func_info.return_type.as_ref(),
+                        Some(&arg_ty_resolver),
+                    )
+                });
+                let resolved_type = call_site.or_else(|| func_info
                     .conditional_return
                     .as_ref()
                     .and_then(|cond| {
                         if text_args.is_empty() {
                             return resolve_conditional_without_args(cond, &func_info.parameters);
                         }
+                        // A condition over a template is judged by what the
+                        // arguments bound it to.
+                        let subs = (!func_info.template_bindings.is_empty()).then(|| {
+                            let arg_texts: Vec<String> = split_top_level_commas(text_args)
+                                .into_iter()
+                                .map(str::to_string)
+                                .collect();
+                            crate::type_engine::conditional_resolution::template_subs_within_bounds(
+                                crate::type_engine::variable::rhs_resolution::build_function_template_subs(
+                                    &func_info, &arg_texts, None, ctx,
+                                ),
+                                &func_info.template_param_bounds,
+                                ctx.file.class_loader,
+                            )
+                        });
                         let tpl = TemplateContext {
                             defaults: None,
                             params: &func_info.template_params,
                             bindings: &func_info.template_bindings,
                             arg_type_resolver: Some(&arg_ty_resolver),
                             this_type: None,
+                            subs: subs.as_ref(),
                         };
                         resolve_conditional_with_text_args_and_defaults(
                             cond,
@@ -518,21 +549,7 @@ impl Backend {
                             ctx.file.class_loader,
                             &tpl,
                         )
-                    })
-                    // A builtin whose arguments decide its result
-                    // (`json_encode(…, JSON_THROW_ON_ERROR)` never
-                    // returning `false`, `filter_var()` returning what
-                    // its filter produces) is decided the same way: at
-                    // the call site.
-                    .or_else(|| {
-                        crate::type_engine::type_ops::call_site_returns::call_site_return_type(
-                            func_name,
-                            &func_info.parameters,
-                            text_args,
-                            func_info.return_type.as_ref()?,
-                            Some(&arg_ty_resolver),
-                        )
-                    });
+                    }));
                 if let Some(parsed_ty) = resolved_type {
                     // The winning branch can name a function-level
                     // `@template` (`tap()` returns `TValue`), which
@@ -1041,6 +1058,7 @@ fn method_call_return_hint(
         bindings: m.template_bindings(),
         arg_type_resolver: Some(&arg_ty_resolver),
         this_type: None,
+        subs: None,
     };
     Some(
         crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(

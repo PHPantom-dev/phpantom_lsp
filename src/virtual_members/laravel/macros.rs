@@ -205,6 +205,83 @@ fn collect_mixin_calls(
     node.visit_children(|child| collect_mixin_calls(child, resolved, out));
 }
 
+/// A name a class answers through `__call` because of a registration the
+/// macro scan saw but could not turn into a typed method.
+///
+/// A `macro('name', $callable)` whose callable is not a closure and a
+/// `Model::resolveRelationUsing('name', ...)` dynamic relation are both
+/// callable by `name` without being declared anywhere.  When the name is not
+/// a literal either (`macro($name, ...)`, `mixin($helper)`), the target
+/// accepts names nothing can list, which `name: None` records.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct OpenCallName {
+    /// FQN of the class written before `::`, resolved via the file's `use`
+    /// statements.
+    pub target: String,
+    /// The registered name, or `None` when the registration's name or set of
+    /// names cannot be read.
+    pub name: Option<String>,
+}
+
+/// Extract the [`OpenCallName`]s a file registers through static
+/// `Target::macro()`, `Target::mixin()` and `Target::resolveRelationUsing()`
+/// calls.
+///
+/// A literal `macro('name', closure)` and a `mixin(new X)` / `mixin(X::class)`
+/// are left out: [`extract_macro_registrations`] and the mixin expansion type
+/// those.  Calls on `self`/`static`/`parent` or on a variable carry no target
+/// the scan can name and are skipped.
+pub(crate) fn extract_open_call_names(content: &str) -> Vec<OpenCallName> {
+    let bytes = content.as_bytes();
+    if memchr::memmem::find(bytes, b"macro(").is_none()
+        && memchr::memmem::find(bytes, b"mixin(").is_none()
+        && memchr::memmem::find(bytes, b"resolveRelationUsing(").is_none()
+    {
+        return Vec::new();
+    }
+
+    let arena = LocalArena::new();
+    let file_id = FileId::new(b"input.php");
+    let program = parse_file_content(&arena, file_id, bytes);
+    let resolved = NameResolver::new(&arena).resolve(program);
+    let owned = OwnedResolvedNames::from_resolved(&resolved);
+
+    fn collect(node: Node<'_, '_>, resolved: &OwnedResolvedNames, out: &mut Vec<OpenCallName>) {
+        if let Node::StaticMethodCall(smc) = node
+            && let ClassLikeMemberSelector::Identifier(ident) = &smc.method
+            && let Some(target) = resolve_target_fqn(smc.class, resolved)
+        {
+            let method = bytes_to_str(ident.value);
+            let mut args = smc.argument_list.arguments.iter().map(|a| a.value());
+            let first = args.next();
+            let name = || first.and_then(macro_name);
+            let fact = if method.eq_ignore_ascii_case("macro") {
+                match name() {
+                    Some(_) if args.next().is_some_and(|c| closure_signature(c).is_some()) => None,
+                    name => Some(name),
+                }
+            } else if method.eq_ignore_ascii_case("mixin") {
+                first
+                    .and_then(|arg| resolve_mixin_argument_fqn(arg, resolved))
+                    .is_none()
+                    .then_some(None)
+            } else if method.eq_ignore_ascii_case("resolveRelationUsing") {
+                Some(name())
+            } else {
+                None
+            };
+            if let Some(name) = fact {
+                out.push(OpenCallName { target, name });
+            }
+        }
+        node.visit_children(|child| collect(child, resolved, out));
+    }
+
+    let mut out = Vec::new();
+    collect(Node::Program(program), &owned, &mut out);
+    out
+}
+
 /// Resolve the mixin-class FQN from a `mixin()` argument, accepting only the
 /// two literal shapes `new X` / `new X(...)` and `X::class`.
 fn resolve_mixin_argument_fqn(
@@ -441,6 +518,52 @@ fn returned_closure<'ast, 'arena>(body: &'ast Block<'arena>) -> Option<&'ast Exp
     None
 }
 
+/// Whether a file turns on Eloquent's missing-attribute exception, through
+/// `Model::preventAccessingMissingAttributes()` or `Model::shouldBeStrict()`.
+///
+/// `None` when the file makes neither call.  Only a literal `false` argument
+/// turns it off: the usual `Model::shouldBeStrict(! app()->isProduction())`
+/// is on wherever the code is being written, so that is the setting the
+/// editor reports for.  When a file makes several calls the last one wins,
+/// as it does at runtime.
+pub(crate) fn extract_strict_attributes(content: &str) -> Option<bool> {
+    let bytes = content.as_bytes();
+    if memchr::memmem::find(bytes, b"preventAccessingMissingAttributes(").is_none()
+        && memchr::memmem::find(bytes, b"shouldBeStrict(").is_none()
+    {
+        return None;
+    }
+
+    let arena = LocalArena::new();
+    let file_id = FileId::new(b"input.php");
+    let program = parse_file_content(&arena, file_id, bytes);
+    let resolved = NameResolver::new(&arena).resolve(program);
+    let owned = OwnedResolvedNames::from_resolved(&resolved);
+
+    fn collect(node: Node<'_, '_>, resolved: &OwnedResolvedNames, strict: &mut Option<bool>) {
+        if let Node::StaticMethodCall(call) = node
+            && let ClassLikeMemberSelector::Identifier(method) = &call.method
+            && matches!(
+                bytes_to_str(method.value).to_ascii_lowercase().as_str(),
+                "preventaccessingmissingattributes" | "shouldbestrict"
+            )
+            && resolve_target_fqn(call.class, resolved)
+                .is_some_and(|target| target == super::ELOQUENT_MODEL_FQN)
+        {
+            let off =
+                call.argument_list.arguments.first().is_some_and(|arg| {
+                    matches!(arg.value(), Expression::Literal(Literal::False(_)))
+                });
+            *strict = Some(!off);
+        }
+        node.visit_children(|child| collect(child, resolved, strict));
+    }
+
+    let mut strict = None;
+    collect(Node::Program(program), &owned, &mut strict);
+    strict
+}
+
 /// Extract the concrete date class selected by `Date::use()` or
 /// `Date::useClass()`, through either the facade or date factory.
 pub(crate) fn extract_date_factory_class(content: &str) -> Option<String> {
@@ -493,6 +616,10 @@ pub(crate) fn extract_date_factory_class(content: &str) -> Option<String> {
 #[derive(Default)]
 pub(crate) struct LaravelMacroIndex {
     pub(crate) files: FileContributions<Vec<MacroRegistration>>,
+    /// The [`OpenCallName`]s each contributing file registers.
+    pub(crate) open_call_files: FileContributions<Vec<OpenCallName>>,
+    /// `open_call_files` merged by target FQN.
+    open_calls: HashMap<String, OpenCallNames>,
     merged: HashMap<String, Vec<Arc<MethodInfo>>>,
     /// Source location of each macro's `::macro('name', ...)` registration,
     /// keyed by `(target FQN, macro name)`.  Powers go-to-definition, which
@@ -504,10 +631,41 @@ pub(crate) struct LaravelMacroIndex {
     reverse_locations: HashMap<(String, u32), Vec<(String, String)>>,
 }
 
+/// The names one class answers through registrations the scan could not
+/// type.  See [`OpenCallName`].
+#[derive(Default)]
+struct OpenCallNames {
+    /// A registration whose name the scan could not read.
+    any: bool,
+    names: HashSet<String>,
+}
+
 impl LaravelMacroIndex {
     /// Rebuild the merged lookup map from the per-file registrations.
     pub(crate) fn rebuild(&mut self) {
         self.rebuild_merged();
+        let mut open_calls: HashMap<String, OpenCallNames> = HashMap::new();
+        for fact in self.open_call_files.values().flatten() {
+            let entry = open_calls.entry(fact.target.clone()).or_default();
+            match &fact.name {
+                Some(name) => {
+                    entry.names.insert(name.clone());
+                }
+                None => entry.any = true,
+            }
+        }
+        self.open_calls = open_calls;
+    }
+
+    /// Whether a registration on `target` that the scan could not type
+    /// makes `name` callable on it, or may.
+    ///
+    /// Macro and relation-resolver names are array keys at runtime, so the
+    /// match is case-sensitive.
+    pub(crate) fn may_answer_call(&self, target: &str, name: &str) -> bool {
+        self.open_calls
+            .get(target)
+            .is_some_and(|open| open.any || open.names.contains(name))
     }
 
     /// Whether the merged map has no macros at all.

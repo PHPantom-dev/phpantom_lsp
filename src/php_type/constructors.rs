@@ -363,7 +363,8 @@ impl PhpType {
         TypeKind::Callable(Box::new(callable)).into()
     }
 
-    /// Conditional type (`$x is T ? U : V`).
+    /// Conditional type (`$x is T ? U : V`) that answers an undecided
+    /// condition with both branches, as a docblock conditional does.
     pub fn conditional(
         param: impl AsRef<str>,
         negated: bool,
@@ -371,26 +372,28 @@ impl PhpType {
         then_type: PhpType,
         else_type: PhpType,
     ) -> PhpType {
-        PhpType::conditional_type(ConditionalType {
-            param: atom(param.as_ref()),
+        PhpType::conditional_answering_undecided(
+            param,
             negated,
             condition,
             then_type,
             else_type,
-            else_when_undecided: false,
-        })
+            UndecidedReading::BothBranches,
+        )
     }
 
-    /// Conditional type whose `then` branch needs proof.
+    /// Conditional type that answers an undecided condition with
+    /// `undecided`.
     ///
-    /// See [`ConditionalType::else_when_undecided`] for when to reach
-    /// for this instead of [`PhpType::conditional`].
-    pub fn conditional_defaulting_to_else(
+    /// See [`UndecidedReading`] for when to reach for a reading other than
+    /// the one [`PhpType::conditional`] picks.
+    pub fn conditional_answering_undecided(
         param: impl AsRef<str>,
         negated: bool,
         condition: PhpType,
         then_type: PhpType,
         else_type: PhpType,
+        undecided: UndecidedReading,
     ) -> PhpType {
         PhpType::conditional_type(ConditionalType {
             param: atom(param.as_ref()),
@@ -398,7 +401,7 @@ impl PhpType {
             condition,
             then_type,
             else_type,
-            else_when_undecided: true,
+            undecided,
         })
     }
 

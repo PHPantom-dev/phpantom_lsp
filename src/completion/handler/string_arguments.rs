@@ -1,9 +1,10 @@
 //! Completion inside a string argument: array shape keys, the Laravel
 //! string keys (routes, config, views, translations, morph aliases, paths,
 //! route and command parameters, request input), Symfony service IDs and
-//! container parameters, Yii views, Eloquent relation and
+//! container parameters, Yii views, WordPress hook names, Eloquent relation and
 //! column names, the strings a parameter's declared type asks for, and
-//! method names in route-controller groups and array callables.
+//! method names in mock expectations, route-controller groups and array
+//! callables.
 
 use tower_lsp_server::gen_lsp_types::CompletionResponse;
 
@@ -62,6 +63,14 @@ impl Backend {
         // `ensure_workspace_indexed` → `update_ast` → write lock.
         let is_laravel = self.resolved_class_cache.read().laravel().is_enabled();
         if is_laravel
+            && matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_validation_string_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
+        if is_laravel
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_translation_argument_completion(content, position, code, ctx)
@@ -96,6 +105,16 @@ impl Backend {
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_symfony_string_key_completion(uri, content, position, code, ctx)
+        {
+            return Some(response);
+        }
+
+        // ── WordPress hook names ─────────────────────────────────
+        // `add_action('|')`, `do_action('|')`, and the rest of the hook
+        // functions.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) = self.try_wordpress_hook_completion(uri, content, position, code)
         {
             return Some(response);
         }
@@ -171,8 +190,11 @@ impl Backend {
             string_ctx,
             StringContext::InStringLiteral | StringContext::NotInString
         ) && let Some(code) = code_ctx.as_ref()
-            && let Some(response) =
-                self.try_eloquent_string_completion(content, position, ctx, code)
+            && let Some(response) = self
+                .try_eloquent_string_completion(content, position, ctx, code)
+                .or_else(|| {
+                    self.try_eloquent_model_attribute_completion(content, position, ctx, code)
+                })
         {
             return Some(response);
         }
@@ -217,6 +239,18 @@ impl Backend {
             && let Some(code) = code_ctx.as_ref()
             && let Some(response) =
                 self.try_request_input_key_completion(uri, content, position, ctx, code)
+        {
+            return Some(response);
+        }
+
+        // ── Mock expectation method names ────────────────────────
+        // `$mock->method('|')`, `$mock->shouldReceive('|')`,
+        // `Facade::shouldReceive('|')` and the rest name a method of the
+        // mocked class.
+        if matches!(string_ctx, StringContext::InStringLiteral)
+            && let Some(code) = code_ctx.as_ref()
+            && let Some(response) =
+                self.try_mock_method_completion(uri, content, position, ctx, code)
         {
             return Some(response);
         }

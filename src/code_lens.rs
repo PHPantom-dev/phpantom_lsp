@@ -2,8 +2,9 @@
 //!
 //! Shows reference and implementation counts, override/implement
 //! annotations, the links between a Doctrine entity and its repository,
-//! the links between a Messenger message and its handlers, and the renders
-//! of a Yii template.
+//! the links between a Messenger message and its handlers, the links
+//! between a class and its tests, the routes that dispatch to a Laravel
+//! controller method, and the renders of a Yii template.
 
 use std::sync::Arc;
 
@@ -21,6 +22,14 @@ use crate::references::MemberRefKind;
 use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::text_position::{LineIndex, offset_to_position};
 use crate::types::{ClassInfo, ClassLikeKind, Visibility};
+
+/// A location at the top of the file at `uri`.
+fn file_top_location(uri: &str) -> Option<Location> {
+    Some(Location {
+        uri: uri.parse().ok()?,
+        range: Range::default(),
+    })
+}
 
 /// Shown while a declaration's references are being counted, so the lens
 /// keeps its line instead of vanishing and shifting the file, and reads as
@@ -55,6 +64,32 @@ fn line_indent(index: &LineIndex, line: usize) -> u32 {
         .count() as u32
 }
 
+/// The title of the lens for a route that dispatches to a controller
+/// method: its verbs, its URI and its name, as far as they are known
+/// (`GET /orders/{order} · orders.show`).
+fn route_lens_title(action: &crate::virtual_members::laravel::RouteAction) -> String {
+    let mut title = action.verbs.clone();
+    if !action.uri.is_empty() {
+        if !title.is_empty() {
+            title.push(' ');
+        }
+        if !action.uri.starts_with('/') {
+            title.push('/');
+        }
+        title.push_str(&action.uri);
+    }
+    if let Some(name) = &action.name {
+        if !title.is_empty() {
+            title.push_str(" · ");
+        }
+        title.push_str(name);
+    }
+    if title.is_empty() {
+        title.push_str("Route");
+    }
+    title
+}
+
 /// Information about a prototype (ancestor) method that a local method
 /// overrides or implements.
 struct Prototype {
@@ -74,8 +109,10 @@ impl Backend {
     /// lenses for interfaces and abstract classes and their methods,
     /// navigation lenses for methods that override or implement an
     /// ancestor declaration, in a Doctrine project the lenses that link an
-    /// entity and its repository, and in a Symfony project the ones that
-    /// link a Messenger message and its handlers.
+    /// entity and its repository, in a Symfony project the ones that
+    /// link a Messenger message and its handlers, the ones that link a
+    /// class and its tests, and in a Laravel project the routes that
+    /// dispatch to each controller method.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
             let map = self.symbols.uri_classes_index.read();
@@ -92,6 +129,16 @@ impl Backend {
         let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let is_doctrine = self.is_doctrine_project();
         let is_symfony = self.is_symfony_project();
+        // Discovering the routes reads every user file's symbol map, which
+        // waits for the workspace index, so like the implementation lenses
+        // they appear once indexing is done and the client re-pulls.
+        let routes = (!classes.is_empty()
+            && self.resolved_class_cache.read().laravel().is_enabled()
+            && self
+                .workspace_index
+                .indexed
+                .load(std::sync::atomic::Ordering::Acquire))
+        .then(|| self.cached_routes());
 
         for class in &classes {
             let class_fqn = class.fqn();
@@ -131,6 +178,10 @@ impl Backend {
                 self.push_messenger_lenses(uri, class, &index, &mut lenses);
             }
 
+            let route_actions = routes
+                .as_deref()
+                .map_or(&[][..], |routes| routes.controller_actions(&class_fqn));
+
             for method in &class.methods {
                 if method.name_offset == 0
                     || method.is_virtual
@@ -149,6 +200,21 @@ impl Backend {
                     start: position,
                     end: position,
                 };
+
+                for action in route_actions
+                    .iter()
+                    .filter(|action| action.method.eq_ignore_ascii_case(&method.name))
+                {
+                    lenses.push(CodeLens {
+                        range,
+                        command: Some(self.build_code_lens_command(
+                            route_lens_title(action),
+                            (*action.declaration.file).clone(),
+                            action.declaration.position,
+                        )),
+                        data: None,
+                    });
+                }
 
                 let proto = self.find_prototype(class, &method.name, uri, content);
                 if !method.name.starts_with("__")
@@ -268,6 +334,10 @@ impl Backend {
                     lenses.push(lens);
                 }
             }
+        }
+
+        if let Some(lens) = self.build_test_subject_lens(uri, &classes, &index) {
+            lenses.push(lens);
         }
 
         // A template declares no class, so only such a file is looked up
@@ -792,13 +862,13 @@ impl Backend {
     }
 
     /// Build the "which tests cover this class" lens for a class
-    /// declaration, from the test classes whose PHPUnit coverage metadata
-    /// (`@covers` / `@uses` / `#[CoversClass]` and friends) names it.
+    /// declaration: the test classes whose PHPUnit coverage metadata
+    /// (`@covers` / `@uses` / `#[CoversClass]` and friends) names it, and
+    /// the tests its name and path pair it with by convention.
     ///
     /// `None` when the class has no keyword position (synthetic/anonymous
-    /// classes), no test declares coverage for it, or none of the test
-    /// classes that do can be located on disk any more.  Also `None` while
-    /// the workspace is still indexing, since
+    /// classes) or no test can be located.  The coverage half stays empty
+    /// while the workspace is still indexing, since
     /// [`Backend::find_covering_test_classes`] cannot answer until then.
     fn build_covers_lens(
         &self,
@@ -810,16 +880,18 @@ impl Backend {
             return None;
         }
 
-        let locations: Vec<(Atom, Location)> = self
+        let mut targets: Vec<(String, Location)> = self
             .find_covering_test_classes(&class.fqn())
             .into_iter()
             .filter_map(|(test_fqn, test_uri)| {
                 let location = self.covers_lens_target(test_fqn.as_str(), &test_uri, uri, index)?;
-                Some((test_fqn, location))
+                Some((crate::util::short_name(&test_fqn).to_string(), location))
             })
             .collect();
-        if locations.is_empty() {
-            return None;
+        for (label, location) in self.conventional_test_locations(class, uri) {
+            if !targets.iter().any(|(_, known)| known.uri == location.uri) {
+                targets.push((label, location));
+            }
         }
 
         let line = index.line_of(class.keyword_offset as usize);
@@ -827,34 +899,149 @@ impl Backend {
             line: line as u32,
             character: line_indent(index, line),
         };
-        let range = Range {
-            start: position,
-            end: position,
+        let title = match targets.as_slice() {
+            [(label, _)] => format!("Tests: {label}"),
+            _ => format!("Tests: {} tests", targets.len()),
+        };
+        self.targets_lens(uri, position, title, targets)
+    }
+
+    /// The tests the naming convention pairs with `class`, declared in
+    /// `uri`, each labelled with its file's name.  A PHPUnit test is
+    /// located at its class declaration, a Pest file at its top.
+    fn conventional_test_locations(&self, class: &ClassInfo, uri: &str) -> Vec<(String, Location)> {
+        // Expected class names are worked out under the mappings' lock, but
+        // looked up only once it is released: loading a class reads the
+        // mappings again.
+        let files: Vec<(std::path::PathBuf, Option<String>)> = {
+            let mappings = self.psr4_mappings().read();
+            if !mappings.iter().any(|mapping| mapping.is_dev) {
+                return Vec::new();
+            }
+            let Some(root) = self.workspace_root().read().clone() else {
+                return Vec::new();
+            };
+            let Some(path) = crate::util::uri_to_path(uri) else {
+                return Vec::new();
+            };
+            crate::composer::conventional_test_files(&mappings, &root, &class.fqn(), &path)
+                .into_iter()
+                .map(|test_path| {
+                    let fqn =
+                        crate::composer::resolve_namespace_from_path(&mappings, &root, &test_path)
+                            .map(|(namespace, name)| match namespace {
+                                Some(namespace) => format!("{namespace}\\{name}"),
+                                None => name,
+                            });
+                    (test_path, fqn)
+                })
+                .collect()
         };
 
-        let command = if let [(test_fqn, location)] = locations.as_slice() {
-            let title = format!("Tests: {}", crate::util::short_name(test_fqn));
-            self.build_code_lens_command(title, location.uri.clone(), location.range.start)
+        files
+            .into_iter()
+            .filter_map(|(path, fqn)| {
+                let label = path.file_stem()?.to_str()?.to_string();
+                let test_uri = crate::util::path_to_uri(&path);
+                let location = fqn
+                    .and_then(|fqn| self.class_declaration_location(&fqn))
+                    .filter(|location| location.uri.as_str() == test_uri)
+                    .or_else(|| file_top_location(&test_uri))?;
+                Some((label, location))
+            })
+            .collect()
+    }
+
+    /// The lens on a test linking it to the classes the naming convention
+    /// pairs it with: on the test class named after the file, or at the top
+    /// of a Pest file, which declares no class.
+    ///
+    /// Coverage metadata needs no lens on this side: go-to-definition on the
+    /// metadata reaches the class it names.
+    fn build_test_subject_lens(
+        &self,
+        uri: &str,
+        classes: &[Arc<ClassInfo>],
+        index: &LineIndex,
+    ) -> Option<CodeLens> {
+        let path = crate::util::uri_to_path(uri)?;
+        let subjects = {
+            let mappings = self.psr4_mappings().read();
+            if !mappings.iter().any(|mapping| mapping.is_dev) {
+                return None;
+            }
+            let root = self.workspace_root().read().clone()?;
+            crate::composer::conventional_test_subjects(&mappings, &root, &path)
+        };
+        if subjects.is_empty() {
+            return None;
+        }
+
+        let position = if classes.is_empty() {
+            Position::new(0, 0)
         } else {
-            let title = format!("Tests: {} tests", locations.len());
-            let current_uri: Uri = match uri.parse() {
-                Ok(u) => u,
-                Err(_) => return None,
-            };
-            Command {
-                title,
-                command: "editor.action.showReferences".to_string(),
-                arguments: Some(vec![
-                    serde_json::json!(current_uri),
-                    serde_json::json!(range.start),
-                    serde_json::json!(locations.iter().map(|(_, l)| l.clone()).collect::<Vec<_>>()),
-                ]),
-                tooltip: None,
+            let stem = path.file_stem()?.to_str()?;
+            let test_class = classes
+                .iter()
+                .find(|class| class.keyword_offset != 0 && class.name.eq_ignore_ascii_case(stem))?;
+            let line = index.line_of(test_class.keyword_offset as usize);
+            Position {
+                line: line as u32,
+                character: line_indent(index, line),
             }
         };
 
+        let targets: Vec<(String, Location)> = subjects
+            .into_iter()
+            .filter_map(|(fqn, subject_path)| {
+                let location = self
+                    .class_declaration_location(&fqn)
+                    .or_else(|| file_top_location(&crate::util::path_to_uri(&subject_path)))?;
+                Some((crate::util::short_name(&fqn).to_string(), location))
+            })
+            .collect();
+        let title = match targets.as_slice() {
+            [(label, _)] => format!("Test subject: {label}"),
+            _ => format!("Test subjects: {} classes", targets.len()),
+        };
+        self.targets_lens(uri, position, title, targets)
+    }
+
+    /// A lens at `position` that goes straight to its one target, or lists
+    /// several.  `None` when there is no target.
+    fn targets_lens(
+        &self,
+        uri: &str,
+        position: Position,
+        title: String,
+        targets: Vec<(String, Location)>,
+    ) -> Option<CodeLens> {
+        let command = match targets.as_slice() {
+            [] => return None,
+            [(_, location)] => {
+                self.build_code_lens_command(title, location.uri.clone(), location.range.start)
+            }
+            _ => {
+                let current_uri: Uri = uri.parse().ok()?;
+                let locations: Vec<Location> =
+                    targets.into_iter().map(|(_, location)| location).collect();
+                Command {
+                    title,
+                    command: "editor.action.showReferences".to_string(),
+                    arguments: Some(vec![
+                        serde_json::json!(current_uri),
+                        serde_json::json!(position),
+                        serde_json::json!(locations),
+                    ]),
+                    tooltip: None,
+                }
+            }
+        };
         Some(CodeLens {
-            range,
+            range: Range {
+                start: position,
+                end: position,
+            },
             command: Some(command),
             data: None,
         })

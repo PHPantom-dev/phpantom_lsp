@@ -313,9 +313,15 @@ impl LanguageServer for Backend {
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         // Clients re-push settings for reasons of their own, so a
-        // notification that carries no file filters or stub directory is
-        // not a request to drop the ones already in force, and one that
-        // repeats the current settings is not a change.
+        // notification that carries no inlay hint toggles, file filters or
+        // stub directory is not a request to drop the ones already in
+        // force, and one that repeats the current settings is not a change.
+        if crate::config::ClientInlayHintOptions::from_client_settings(&params.settings)
+            .is_some_and(|options| self.set_client_inlay_hint_options(options))
+        {
+            self.request_inlay_hint_refresh().await;
+        }
+
         let indexing = crate::config::ClientIndexingOptions::from_client_settings(&params.settings);
         let stubs = crate::config::ClientStubOptions::from_client_settings(&params.settings);
         if indexing.is_none() && stubs.is_none() {

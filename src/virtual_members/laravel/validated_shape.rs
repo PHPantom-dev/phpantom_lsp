@@ -40,8 +40,8 @@ use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::{AccessKind, BackedEnumType, ClassInfo, ClassLikeKind};
 
 use super::validation_rules::{
-    RulesArray, ValidationRule, is_request_like, is_validated_input, resolve_enum_class_names,
-    rules_from_array_text, rules_in_scope,
+    RulesArray, ValidationRule, is_request_like, is_validated_input,
+    rules_from_array_text_in_context, rules_in_scope,
 };
 
 /// Resolves a class name to its `ClassInfo`, the loader every shape lookup
@@ -215,10 +215,7 @@ pub(crate) fn resolve_shape_at_call(
         // describes, so the rules come from the call site rather than scope —
         // which is why this arm needs no server state.
         ShapeCall::Validate if is_request_like(receiver, class_loader) => {
-            let mut rules = rules_from_array_text(args.first()?)?;
-            // The rules array is written at the call site, so an enum rule in
-            // it names its class in this file's terms.
-            resolve_enum_class_names(&mut rules, content);
+            let rules = rules_from_array_text_in_context(args.first()?, content, offset)?;
             rules_to_shape(&rules, class_loader)
         }
         ShapeCall::Validated

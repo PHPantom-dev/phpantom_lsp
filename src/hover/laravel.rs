@@ -1,6 +1,6 @@
 //! Hover for Laravel, Blade, and Symfony: the string keys a call names (routes,
 //! config, views, translations, Artisan commands, gate abilities, container
-//! bindings, morph aliases, `.env` names), Blade sections and stacks, an
+//! bindings, morph aliases, middleware, `.env` names), Blade sections and stacks, an
 //! Artisan command's own arguments and options, and the column a
 //! `model-property<Model>` string names.
 
@@ -39,6 +39,62 @@ impl Backend {
         Some((location.uri, short_path))
     }
 
+    /// The label and detail of a middleware alias or group: the class an
+    /// alias runs, with the parameters its `handle()` takes after the
+    /// request and the next closure, or the members a group runs.
+    fn middleware_hover(&self, name: &str) -> (&'static str, String) {
+        enum Shown {
+            Alias(Option<String>),
+            Group(Vec<String>),
+        }
+        let (shown, uri) = {
+            let index = self.laravel.middleware.read();
+            match index.get(name) {
+                Some(crate::virtual_members::laravel::MiddlewareTarget::Alias(alias)) => {
+                    (Shown::Alias(alias.class.clone()), alias.uri.clone())
+                }
+                Some(crate::virtual_members::laravel::MiddlewareTarget::Group(group)) => {
+                    (Shown::Group(group.members.clone()), group.uri.clone())
+                }
+                None => return ("Middleware", "Not a registered alias or group".to_string()),
+            }
+        };
+
+        let mut parts = Vec::new();
+        let label = match shown {
+            Shown::Alias(class) => {
+                if let Some(class) = class {
+                    parts.push(format!("Runs `{class}`"));
+                    if let Some(info) = self.find_or_load_class(&class)
+                        && let Some(handle) = info.get_method("handle")
+                        && handle.parameters.len() > 2
+                    {
+                        parts.push(format!(
+                            "Parameters: `{}`",
+                            super::formatting::format_native_params(&handle.parameters[2..])
+                        ));
+                    }
+                }
+                "Middleware"
+            }
+            Shown::Group(members) => {
+                if !members.is_empty() {
+                    let list: Vec<String> = members
+                        .iter()
+                        .map(|member| format!("- `{member}`"))
+                        .collect();
+                    parts.push(list.join("\n"));
+                }
+                "Middleware group"
+            }
+        };
+        let registered = self
+            .workspace_relative_path(&uri)
+            .unwrap_or_else(|| uri.rsplit('/').next().unwrap_or(&uri).to_string());
+        parts.push(format!("Registered in `{registered}`"));
+        (label, parts.join("\n\n"))
+    }
+
     /// Build hover content for a Laravel string key (route name, config
     /// key, view name, or translation key).
     pub(super) fn hover_laravel_string_key(
@@ -46,6 +102,7 @@ impl Backend {
         kind: &crate::symbol_map::StringKeyKind,
         key: &str,
         uri: &str,
+        offset: u32,
     ) -> Option<Hover> {
         use crate::symbol_map::StringKeyKind;
 
@@ -57,6 +114,16 @@ impl Backend {
         let (label, detail) = match kind {
             StringKeyKind::Section => ("Section", self.blade_block_detail(uri, kind, key)),
             StringKeyKind::Stack => ("Stack", self.blade_block_detail(uri, kind, key)),
+            StringKeyKind::TwigBlock => (
+                "Block",
+                self.twig_block_detail(uri, Some(offset as usize), key),
+            ),
+            StringKeyKind::TwigFilter => ("Twig filter", self.twig_callable_detail(*kind, key)),
+            StringKeyKind::TwigFunction => ("Twig function", self.twig_callable_detail(*kind, key)),
+            StringKeyKind::TwigVariable => (
+                "Twig variable",
+                self.twig_variable_detail(uri, Some(offset as usize), key),
+            ),
             StringKeyKind::Route => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,
@@ -182,6 +249,7 @@ impl Backend {
                 ("Morph type", detail)
             }
             StringKeyKind::GateAbility => ("Ability", self.gate_ability_detail(key)),
+            StringKeyKind::Middleware => self.middleware_hover(key),
             StringKeyKind::ContainerBinding => {
                 let detail = match self.container_binding_target(key) {
                     Some(target) => {
@@ -328,6 +396,7 @@ impl Backend {
                     );
                 ("View", detail)
             }
+            StringKeyKind::WordPressHook => ("Hook", self.wordpress_hook_detail(key)),
         };
 
         Some(make_hover(format!(

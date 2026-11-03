@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::php_type::ShapeEntry;
+use crate::type_engine::type_ops::conditional::refinements::is_value_refinement;
 
 /// Extract the `(array, key, negated)` expressions of an
 /// `array_key_exists($k, $arr)` check, unwrapping parentheses and a
@@ -394,8 +395,10 @@ pub(super) fn apply_assertion_to_key(
         if should_exclude {
             return;
         }
-        if condition_facts::scalar_assert_guard_kind(asserted_type).is_some() {
+        if condition_facts::scalar_inclusion_guard_kind(asserted_type).is_some() {
             results.push(ResolvedType::from_type_string(asserted_type.clone()));
+        } else if condition_facts::asserted_alternatives(asserted_type).len() > 1 {
+            results = ctx.resolved_types_for(asserted_type.clone());
         } else {
             let var_ctx = build_var_ctx(target, ctx, scope_resolver);
             condition_facts::include_instance_of(asserted_type, false, &var_ctx, &mut results);
@@ -404,26 +407,105 @@ pub(super) fn apply_assertion_to_key(
         return;
     }
 
+    let exhaustible = narrow_to_assertion(
+        target,
+        &mut results,
+        asserted_type,
+        should_exclude,
+        ctx,
+        scope_resolver,
+    );
+    if !results.is_empty() {
+        scope.set(target, results);
+    } else if exhaustible {
+        mark_exhausted(target, scope);
+    }
+}
+
+/// Narrow `results`, the types of the subject at `target`, to what an
+/// assertion of `asserted_type` (ruled out when `should_exclude`) leaves.
+///
+/// Returns whether an empty outcome is a proof that nothing survived,
+/// rather than a check the machinery could not apply.
+///
+/// A positive assertion of a union (`?Dog`, `Dog|int`) holds when the value
+/// is any one of its alternatives, so each alternative narrows a copy of
+/// the subject on its own and the outcomes join: `Dog|Cat|null` asserted
+/// `?Dog` keeps the `Dog` and the `null`. An alternative the subject could
+/// never hold contributes nothing, since narrowing to it alone would
+/// replace the subject with it: a `Dog` asserted `string|null` (PHPUnit's
+/// `assertSame($row['k'] ?? null, $dog)`) must not become `null`. A union
+/// of string and int refinements is the exception, refined member-wise
+/// below.
+pub(crate) fn narrow_to_assertion(
+    target: &str,
+    results: &mut Vec<ResolvedType>,
+    asserted_type: &PhpType,
+    should_exclude: bool,
+    ctx: &ForwardWalkCtx<'_>,
+    scope_resolver: &dyn Fn(&str) -> Vec<ResolvedType>,
+) -> bool {
+    if !should_exclude && !is_scalar_refinement(asserted_type) {
+        let alternatives = condition_facts::asserted_alternatives(asserted_type);
+        if alternatives.len() > 1 {
+            // Any value at all satisfies a union that admits `mixed`.
+            if alternatives.iter().any(PhpType::is_mixed) {
+                return false;
+            }
+            let held: Vec<&PhpType> = alternatives
+                .iter()
+                .filter(|alternative| {
+                    let alternative = [ResolvedType::from_type_string((*alternative).clone())];
+                    !types_are_disjoint(results, &alternative)
+                })
+                .collect();
+            // An assertion the subject contradicts outright describes a path
+            // that never runs, and says nothing worth keeping about it.
+            if held.is_empty() {
+                return false;
+            }
+            let mut kept: Vec<ResolvedType> = Vec::new();
+            let mut exhaustible = true;
+            for alternative in held {
+                let mut narrowed = results.clone();
+                exhaustible &= narrow_to_assertion(
+                    target,
+                    &mut narrowed,
+                    alternative,
+                    false,
+                    ctx,
+                    scope_resolver,
+                );
+                for rt in narrowed {
+                    ResolvedType::push_unique(&mut kept, rt);
+                }
+            }
+            *results = kept;
+            return exhaustible;
+        }
+    }
+
     // Only a check that names no class proves nothing survived it.  A
     // class exclusion ignores type arguments, so ruling out
     // `ReflectionClass<Picture>` empties a `ReflectionClass<object>` the
     // check never contradicted, and a class inclusion comes back empty
     // when the loader cannot find the class.
     let mut exhaustible = false;
-    if let Some(kind) = condition_facts::scalar_assert_guard_kind(asserted_type) {
+    // A literal or `class-string` that refines a string or int is left to
+    // the member-wise refinement below, which keeps `class-string` itself
+    // rather than widening it to `string`.
+    let guard_kind = if should_exclude || is_scalar_refinement(asserted_type) {
+        condition_facts::scalar_assert_guard_kind(asserted_type)
+    } else {
+        condition_facts::scalar_inclusion_guard_kind(asserted_type)
+    };
+    if let Some(kind) = guard_kind {
         exhaustible = true;
         if should_exclude {
-            condition_facts::apply_type_guard_exclusion(
-                kind,
-                &mut results,
-                Some(ctx.file.class_loader),
-            );
+            condition_facts::apply_type_guard_exclusion(kind, results, Some(ctx.file.class_loader));
         } else {
-            condition_facts::apply_type_guard_inclusion(
-                kind,
-                &mut results,
-                Some(ctx.file.class_loader),
-            );
+            condition_facts::apply_type_guard_inclusion(kind, results, Some(ctx.file.class_loader));
+            condition_facts::narrow_to_asserted_value(asserted_type, results);
         }
     } else if should_exclude && matches!(asserted_type.kind(), TypeKind::Union(_)) {
         // Ruling out a union rules out every member, so each one narrows on
@@ -439,11 +521,11 @@ pub(super) fn apply_assertion_to_key(
             if let Some(kind) = condition_facts::scalar_assert_guard_kind(member) {
                 condition_facts::apply_type_guard_exclusion(
                     kind,
-                    &mut results,
+                    results,
                     Some(ctx.file.class_loader),
                 );
             } else {
-                ResolvedType::apply_narrowing(&mut results, |classes| {
+                ResolvedType::apply_narrowing(results, |classes| {
                     condition_facts::apply_instanceof_exclusion(member, &var_ctx, classes)
                 });
             }
@@ -462,6 +544,17 @@ pub(super) fn apply_assertion_to_key(
                         Some(member.clone())
                     } else if member.is_mixed() || asserted_type.is_subtype_of(member) {
                         Some(asserted_type.clone())
+                    } else if is_value_refinement(member) && is_value_refinement(asserted_type) {
+                        // Neither refinement implies the other, but they
+                        // overlap: a `lowercase-string` asserted
+                        // `non-falsy-string` is both.
+                        let parts = member
+                            .intersection_members()
+                            .into_iter()
+                            .chain(asserted_type.intersection_members())
+                            .cloned()
+                            .collect();
+                        Some(PhpType::intersection(parts).simplified())
                     } else {
                         None
                     }
@@ -482,22 +575,17 @@ pub(super) fn apply_assertion_to_key(
     } else {
         let var_ctx = build_var_ctx(target, ctx, scope_resolver);
         if should_exclude {
-            ResolvedType::apply_narrowing(&mut results, |classes| {
+            ResolvedType::apply_narrowing(results, |classes| {
                 condition_facts::apply_instanceof_exclusion(asserted_type, &var_ctx, classes)
             });
         } else {
-            ResolvedType::apply_narrowing(&mut results, |classes| {
+            ResolvedType::apply_narrowing(results, |classes| {
                 condition_facts::apply_instanceof_inclusion(asserted_type, false, &var_ctx, classes)
             });
-            narrow_type_arguments(asserted_type, &mut results, ctx);
+            narrow_type_arguments(asserted_type, results, ctx);
         }
     }
-
-    if !results.is_empty() {
-        scope.set(target, results);
-    } else if exhaustible {
-        mark_exhausted(target, scope);
-    }
+    exhaustible
 }
 
 /// Whether `ty` is a narrower form of `string` or `int` (`class-string`,

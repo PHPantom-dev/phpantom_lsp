@@ -10,7 +10,7 @@ use function PHPStan\Testing\assertType;
 $data = Faker::array();
 
 if (wp_is_numeric_array($data) === false) {
-    assertType('false', wp_is_numeric_array($data)); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+    assertType('false', wp_is_numeric_array($data));
 }
 
 if (wp_is_numeric_array($data) === true) {

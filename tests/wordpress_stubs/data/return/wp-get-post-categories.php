@@ -10,32 +10,32 @@ use function PHPStan\Testing\assertType;
 $postID = 123;
 
 // Default argument values (fields => ids)
-assertType('list<int>|WP_Error', wp_get_post_categories($postID)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('list<int>|WP_Error', wp_get_post_categories($postID, [])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('list<int>|WP_Error', wp_get_post_categories($postID));
+assertType('list<int>|WP_Error', wp_get_post_categories($postID, []));
 
 // Empty $post_id
 assertType('array{}', wp_get_post_categories(0));
 
 // Requesting names or slugs
-assertType('list<string>|WP_Error', wp_get_post_categories($postID, ['fields' => 'names'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('list<string>|WP_Error', wp_get_post_categories($postID, ['fields' => 'slugs'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('array<int, string>|WP_Error', wp_get_post_categories($postID, ['fields' => 'id=>name'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('array<int, string>|WP_Error', wp_get_post_categories($postID, ['fields' => 'id=>slug'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('list<string>|WP_Error', wp_get_post_categories($postID, ['fields' => 'names']));
+assertType('list<string>|WP_Error', wp_get_post_categories($postID, ['fields' => 'slugs']));
+assertType('array<int, string>|WP_Error', wp_get_post_categories($postID, ['fields' => 'id=>name']));
+assertType('array<int, string>|WP_Error', wp_get_post_categories($postID, ['fields' => 'id=>slug']));
 
 // Requesting IDs
-assertType('list<int>|WP_Error', wp_get_post_categories($postID, ['fields' => 'ids'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('list<int>|WP_Error', wp_get_post_categories($postID, ['fields' => 'tt_ids'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('list<int>|WP_Error', wp_get_post_categories($postID, ['fields' => 'ids']));
+assertType('list<int>|WP_Error', wp_get_post_categories($postID, ['fields' => 'tt_ids']));
 
 // Requesting parent IDs
-assertType('array<int, int>|WP_Error', wp_get_post_categories($postID, ['fields' => 'id=>parent'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('array<int, int>|WP_Error', wp_get_post_categories($postID, ['fields' => 'id=>parent']));
 
 // Requesting objects
-assertType('array<int, WP_Term>|WP_Error', wp_get_post_categories($postID, ['fields' => 'all'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('array<int, WP_Term>|WP_Error', wp_get_post_categories($postID, ['fields' => 'all_with_object_id'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('list<int>|WP_Error', wp_get_post_categories($postID, ['fields' => 'foo'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('array<int, WP_Term>|WP_Error', wp_get_post_categories($postID, ['fields' => 'all']));
+assertType('array<int, WP_Term>|WP_Error', wp_get_post_categories($postID, ['fields' => 'all_with_object_id']));
+assertType('list<int>|WP_Error', wp_get_post_categories($postID, ['fields' => 'foo']));
 
 // Requesting a count
-assertType('numeric-string|WP_Error', wp_get_post_categories($postID, ['fields' => 'count'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('numeric-string|WP_Error', wp_get_post_categories($postID, ['fields' => 'count']));
 
 // Unknown fields value
-assertType('array<int, int|string|WP_Term>|numeric-string|WP_Error', wp_get_post_categories($postID, ['fields' => Faker::string()])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('list<string>|array<int, string>|array<int, int>|array<int, WP_Term>|numeric-string|list<int>|WP_Error', wp_get_post_categories($postID, ['fields' => Faker::string()])); // PHPantom keeps the array types apart where PHPStan merges them

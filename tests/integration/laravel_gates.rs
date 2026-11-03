@@ -1112,6 +1112,7 @@ class Gate {
         workspace_root: dir.path().to_path_buf(),
         path_filters: vec![dir.path().join("src/Consumer.php")],
         severity_filter: phpantom_lsp::analyse::SeverityFilter::All,
+        code_filter: phpantom_lsp::analyse::CodeFilter::default(),
         use_colour: false,
         output_format: phpantom_lsp::analyse::OutputFormat::Json,
         // Suppresses the progress bar, which has no terminal to draw on here.

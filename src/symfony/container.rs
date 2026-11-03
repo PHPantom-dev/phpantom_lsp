@@ -211,8 +211,9 @@ impl Backend {
         values
     }
 
-    /// The classes the service `id` is built from, following aliases and
-    /// a class given as a parameter.  An ID spelled as a class is that class
+    /// The classes the service `id` is built from, following aliases, a
+    /// class given as a parameter, and the parent a child definition takes
+    /// its class from when it names none.  An ID spelled as a class is that class
     /// when no declaration says otherwise.  Empty when nothing the project
     /// declares says.
     pub(crate) fn symfony_service_classes(&self, id: &str) -> Vec<Atom> {
@@ -226,6 +227,7 @@ impl Backend {
             return;
         }
         let mut found = false;
+        let mut parents = Vec::new();
         for value in self.symfony_declared_values(StringKeyKind::ServiceId, id) {
             match value {
                 Some(ContainerValue::Class(class)) => match placeholder_name(&class) {
@@ -248,8 +250,16 @@ impl Backend {
                     found = true;
                     self.collect_service_classes(&target, seen, out);
                 }
+                Some(ContainerValue::Parent(parent)) => parents.push(parent),
                 Some(ContainerValue::Type(_)) | None => {}
             }
+        }
+        if !found {
+            let before = out.len();
+            for parent in parents {
+                self.collect_service_classes(&parent, seen, out);
+            }
+            found = out.len() > before;
         }
         if !found && id.contains('\\') {
             let class = id.strip_prefix('\\').unwrap_or(id);
@@ -293,7 +303,9 @@ impl Backend {
         for value in values {
             types.push(match value? {
                 ContainerValue::Type(ty) => ty,
-                ContainerValue::Class(_) | ContainerValue::Alias(_) => PhpType::string(),
+                ContainerValue::Class(_) | ContainerValue::Alias(_) | ContainerValue::Parent(_) => {
+                    PhpType::string()
+                }
             });
         }
         Some(PhpType::union(types))
@@ -315,6 +327,7 @@ mod tests {
             Some(ContainerValue::Type(ty)) => ty.to_string(),
             Some(ContainerValue::Class(class)) => format!("class {class}"),
             Some(ContainerValue::Alias(id)) => format!("alias {id}"),
+            Some(ContainerValue::Parent(id)) => format!("parent {id}"),
             None => "none".to_string(),
         }
     }

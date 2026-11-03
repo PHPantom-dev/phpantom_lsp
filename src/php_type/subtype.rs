@@ -883,9 +883,11 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
         // `non-falsy-string` and its Psalm synonym `truthy-string` exclude
         // both `""` and `"0"`, so they are strictly narrower than
         // `non-empty-string`, which excludes only `""`.
+        // A numeric string has at least one digit, so it is never `""`.
         "non-empty-string" => matches!(
             sub_n,
-            "non-empty-literal-string"
+            "numeric-string"
+                | "non-empty-literal-string"
                 | "non-empty-lowercase-string"
                 | "non-empty-uppercase-string"
                 | "callable-string"

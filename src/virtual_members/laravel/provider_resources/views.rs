@@ -35,6 +35,200 @@ pub(super) fn record_blade_facade_call(
     let method = method.value.to_ascii_lowercase();
     record_component_registration(file, &method, &call.argument_list, resources)
         || record_directive_registration(file, &method, &call.argument_list, resources)
+        || record_component_alias_registration(file, &method, &call.argument_list, resources)
+}
+
+/// `Livewire::component('counter', Counter::class)` registers a component
+/// under a name of its own.  Reports whether the call was one.
+pub(super) fn record_livewire_component(
+    file: &ProviderFile<'_, '_>,
+    expr: &Expression<'_>,
+    resources: &mut ProviderResources,
+) -> bool {
+    let Expression::Call(Call::StaticMethod(call)) = expr else {
+        return false;
+    };
+    let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+        return false;
+    };
+    if !method.value.eq_ignore_ascii_case(b"component") || !names_facade(call.class, b"Livewire") {
+        return false;
+    }
+    let mut args = call.argument_list.arguments.iter();
+    let name = args
+        .next()
+        .and_then(|arg| class_or_string(file, arg.value()));
+    match name {
+        // `Livewire::component(Counter::class)` names the component after
+        // its class, which for one under the component namespace is the
+        // name discovery already gives it.
+        Some(name) if name.contains('\\') => {
+            let dotted = name
+                .trim_matches('\\')
+                .split('\\')
+                .map(crate::blade::component_tags::kebab_case)
+                .collect::<Vec<_>>()
+                .join(".");
+            resources.livewire_aliases.push(dotted);
+        }
+        Some(name) => resources.livewire_aliases.push(name),
+        None => resources.open_livewire_aliases = true,
+    }
+    true
+}
+
+/// `$this->loadViewComponentsAs('pkg', [Calendar::class])` registers each
+/// class under an alias carrying the prefix.  Reports whether the call was
+/// one.
+pub(super) fn record_view_components_as(
+    file: &ProviderFile<'_, '_>,
+    method: &[u8],
+    call: &MethodCall<'_>,
+    resources: &mut ProviderResources,
+) -> bool {
+    if method != b"loadviewcomponentsas" {
+        return false;
+    }
+    let mut args = call.argument_list.arguments.iter();
+    let prefix = args
+        .next()
+        .and_then(|arg| const_string(arg.value(), file.content, file.scope));
+    record_component_alias_array(file, args.next().map(|arg| arg.value()), prefix, resources);
+    true
+}
+
+/// Record the aliases `Blade::component()` and `Blade::components()`
+/// register, and report whether the call was one of them.
+fn record_component_alias_registration(
+    file: &ProviderFile<'_, '_>,
+    method: &[u8],
+    argument_list: &ArgumentList<'_>,
+    resources: &mut ProviderResources,
+) -> bool {
+    let args: Vec<&Expression<'_>> = argument_list
+        .arguments
+        .iter()
+        .map(|arg| arg.value())
+        .collect();
+    let prefix = |index: usize| match args.get(index) {
+        None => Some(String::new()),
+        Some(expr) => const_string(expr, file.content, file.scope),
+    };
+    match method {
+        b"component" => {
+            record_component_alias(
+                file,
+                args.first().copied(),
+                args.get(1).copied(),
+                prefix(2),
+                resources,
+            );
+        }
+        b"components" => {
+            record_component_alias_array(file, args.first().copied(), prefix(1), resources);
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Each entry of a `components([...])` / `loadViewComponentsAs(…, [...])`
+/// array, registered the way `BladeCompiler::component()` registers it.
+/// A list this scan cannot read leaves every alias under `prefix` open.
+fn record_component_alias_array(
+    file: &ProviderFile<'_, '_>,
+    array: Option<&Expression<'_>>,
+    prefix: Option<String>,
+    resources: &mut ProviderResources,
+) {
+    let elements = match array {
+        Some(Expression::Array(array)) => &array.elements,
+        Some(Expression::LegacyArray(array)) => &array.elements,
+        _ => {
+            open_component_alias_prefix(prefix, resources);
+            return;
+        }
+    };
+    for element in elements.iter() {
+        match element {
+            ArrayElement::KeyValue(entry) => record_component_alias(
+                file,
+                Some(entry.key),
+                Some(entry.value),
+                prefix.clone(),
+                resources,
+            ),
+            ArrayElement::Value(entry) => {
+                record_component_alias(file, Some(entry.value), None, prefix.clone(), resources)
+            }
+            _ => open_component_alias_prefix(prefix.clone(), resources),
+        }
+    }
+}
+
+/// One `BladeCompiler::component($class, $alias, $prefix)` registration.
+///
+/// Either argument may hold the class, since Laravel swaps them when the
+/// alias is the one spelled with a namespace separator, and an alias left
+/// out is derived from the class name.  `prefix` is `None` when it could
+/// not be read, which leaves every un-namespaced alias open.
+pub(super) fn record_component_alias(
+    file: &ProviderFile<'_, '_>,
+    class: Option<&Expression<'_>>,
+    alias: Option<&Expression<'_>>,
+    prefix: Option<String>,
+    resources: &mut ProviderResources,
+) {
+    let alias = alias.filter(|expr| !matches!(expr, Expression::Literal(Literal::Null(_))));
+    let class = class.and_then(|expr| class_or_string(file, expr));
+    let alias = match alias {
+        Some(expr) => class_or_string(file, expr).and_then(|alias| {
+            if alias.contains('\\') {
+                class.clone()
+            } else {
+                Some(alias)
+            }
+        }),
+        None => class.as_deref().map(component_alias_for_class),
+    };
+    let (Some(alias), Some(prefix)) = (alias, prefix.as_ref()) else {
+        open_component_alias_prefix(prefix, resources);
+        return;
+    };
+    resources.component_aliases.push(if prefix.is_empty() {
+        alias
+    } else {
+        format!("{prefix}-{alias}")
+    });
+}
+
+/// The alias `BladeCompiler::component()` gives a class registered without
+/// one: the path below `View\Components\` joined with `:`, or else the
+/// class's short name, in kebab case.
+fn component_alias_for_class(class: &str) -> String {
+    let class = class.trim_matches('\\');
+    let tail = match class.find("\\View\\Components\\") {
+        Some(at) => &class[at + "\\View\\Components\\".len()..],
+        None => class.rsplit('\\').next().unwrap_or(class),
+    };
+    tail.split('\\')
+        .map(crate::blade::component_tags::kebab_case)
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+fn open_component_alias_prefix(prefix: Option<String>, resources: &mut ProviderResources) {
+    let prefix = prefix.unwrap_or_default();
+    if !resources.open_component_alias_prefixes.contains(&prefix) {
+        resources.open_component_alias_prefixes.push(prefix);
+    }
+}
+
+/// A string argument, or the class an `X::class` argument names.
+fn class_or_string(file: &ProviderFile<'_, '_>, expr: &Expression<'_>) -> Option<String> {
+    const_string(expr, file.content, file.scope)
+        .or_else(|| file.resolved.class_fetch_fqn(expr))
+        .map(|value| value.replace("\\\\", "\\"))
 }
 
 /// The same registrations written against the compiler instance a deferred
@@ -48,6 +242,13 @@ pub(super) fn record_blade_compiler_call(
     resources: &mut ProviderResources,
 ) -> bool {
     if record_component_registration(file, method, &call.argument_list, resources) {
+        return true;
+    }
+    // `component()` is a name plenty of fluent APIs carry, so like the
+    // directives below it counts only on Blade's own compiler.
+    if is_blade_compiler_expr(file, call.object)
+        && record_component_alias_registration(file, method, &call.argument_list, resources)
+    {
         return true;
     }
     // `$blade->directive(…)` / `$blade->if(…)`, written the same way.

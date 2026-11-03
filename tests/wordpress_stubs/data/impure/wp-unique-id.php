@@ -8,5 +8,5 @@ use function wp_unique_id;
 use function PHPStan\Testing\assertType;
 
 if (wp_unique_id() === '1') {
-    assertType('lowercase-string&non-falsy-string&numeric-string', wp_unique_id()); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+    assertType('lowercase-string&non-falsy-string&numeric-string', wp_unique_id());
 }

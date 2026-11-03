@@ -5,7 +5,7 @@
 //! `static` / `parent`.
 
 use crate::class_lookup::find_class_at_offset;
-use crate::symbol_map::{MappedSource, SymbolKind, SymbolSpan};
+use crate::symbol_map::{DocblockMemberRef, MappedSource, SymbolKind, SymbolSpan};
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 
 use super::super::existence_guards::ExistenceGuards;
@@ -31,6 +31,9 @@ pub(super) struct MemberAccessSite<'a> {
     pub(super) is_method_call: bool,
     pub(super) is_docblock_ref: bool,
     pub(super) is_nullsafe: bool,
+    /// Whether the member is the method a mock expectation names, which
+    /// is checked on the mocked class (see [`crate::mock_methods`]).
+    pub(super) mock_expectation: bool,
     /// The class the access is written in.
     pub(super) current_class: Option<&'a ClassInfo>,
 }
@@ -137,6 +140,7 @@ impl<'a> MemberAccessSite<'a> {
             is_method_call: *is_method_call,
             is_docblock_ref: docblock_ref.is_reference(),
             is_nullsafe: *is_nullsafe,
+            mock_expectation: *docblock_ref == DocblockMemberRef::MockedMethod,
             current_class,
         })
     }

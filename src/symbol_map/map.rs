@@ -294,6 +294,12 @@ pub(crate) struct SymbolMap {
     /// The Messenger handlers the file's `#[AsMessageHandler]` attributes
     /// register.  Empty for every file that declares none.
     pub messenger_handlers: Vec<MessengerHandlerSite>,
+    /// The Twig filters and functions the file declares, in source order.
+    /// Empty for every file that declares none.
+    pub twig_callables: Vec<TwigCallableSite>,
+    /// The variables the file's renders hand the Twig templates they
+    /// render, in source order.  Empty for every file that renders none.
+    pub twig_contexts: Vec<TwigContextSite>,
     /// The classes, aliases, and values the file's service and container
     /// parameter declarations give, sorted by `start`.  Empty for every file
     /// that declares none.
@@ -301,6 +307,15 @@ pub(crate) struct SymbolMap {
     /// The routes the file declares, in source order.  Empty for every file
     /// that declares none.
     pub routes: Vec<RouteSite>,
+    /// Whether the file declares a Twig loader of the project's own: a
+    /// class that is one, or a service tagged `twig.loader`.  Such a loader
+    /// can serve any template name, so no name can be told missing.
+    pub declares_twig_loader: bool,
+    /// The Symfony routes the file loads from elsewhere, and the ones it
+    /// declares in a way that cannot be read, including every route of a
+    /// kernel that loads them itself or a router configured to load them
+    /// from elsewhere.  Empty for every file that does neither.
+    pub route_imports: Vec<RouteImport>,
     /// Byte length of the source text this map was extracted from, or
     /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit
     /// in the `u32` fields above anyway).

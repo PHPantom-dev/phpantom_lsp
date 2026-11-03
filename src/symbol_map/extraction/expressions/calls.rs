@@ -24,7 +24,26 @@ pub(super) fn extract_instantiation_expr<'a>(
         {
             try_emit_mailable_content_view_spans(args, ctx.content, &mut ctx.spans);
         }
+        // A controller's static `middleware()` returns
+        // `new Middleware('auth', only: [...])`.
+        if let Expression::Identifier(ident) = inst.class
+            && is_laravel_controller_middleware_class(
+                ctx.resolved_name_at(ident.span().start.offset)
+                    .unwrap_or(&class_text),
+            )
+        {
+            try_emit_middleware_spans(
+                args,
+                MiddlewareSpans {
+                    alias: true,
+                    auth_guards: true,
+                },
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
         emit_symfony_instantiation_spans(inst.class, args, ctx);
+        emit_twig_callable_instantiation(inst.class, args, ctx);
         if !class_text.is_empty() {
             emit_call_site(
                 format!("new {}", class_text),
@@ -402,6 +421,7 @@ fn extract_function_call<'a>(
                 &func_call.argument_list,
                 ctx,
             );
+            emit_wordpress_hook_span(raw, &func_call.argument_list, ctx);
             if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
                 ctx.content,
                 name_clean,
@@ -468,6 +488,7 @@ fn extract_method_call<'a>(
         emit_laravel_method_call_spans(object, &member_name, argument_list, ctx);
         record_symfony_receiver_sites(object, &member_name, argument_list, ctx);
         record_yii_view_sites(object, &member_name, argument_list, ctx);
+        emit_mock_method_spans(object, &member_name, argument_list, ctx);
         // Recorded with `->` for both spellings so callable resolution
         // treats them alike.
         emit_call_site(
@@ -535,6 +556,12 @@ fn extract_static_method_call<'a>(
                 &mut ctx.spans,
             );
         }
+        emit_facade_mock_method_spans(
+            static_call.class,
+            &member_name,
+            &static_call.argument_list,
+            ctx,
+        );
         emit_call_site(
             format!("{}::{}", subject_text, member_name),
             &static_call.argument_list,

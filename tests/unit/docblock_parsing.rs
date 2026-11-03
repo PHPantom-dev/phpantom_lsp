@@ -1200,6 +1200,20 @@ fn conditional_no_return_tag() {
     assert_eq!(extract_conditional_return_type(doc), None);
 }
 
+#[test]
+fn conditional_inside_union_is_extracted_whole() {
+    let doc = "/** @phpstan-return false|($output is 'ARRAY_A' ? array : \\WP_Term) */";
+    let result = extract_conditional_return_type(doc).unwrap();
+    assert!(matches!(result.kind(), TypeKind::Union(_)));
+    assert!(result.contains_conditional());
+}
+
+#[test]
+fn parenthesized_group_without_conditional_is_not_one() {
+    let doc = "/** @return (A&B)|null */";
+    assert_eq!(extract_conditional_return_type(doc), None);
+}
+
 // ─── @mixin tag extraction ──────────────────────────────────────────────
 
 #[test]
@@ -1920,4 +1934,22 @@ fn method_tag_with_template_params() {
     assert_eq!(methods[0].template_bindings().len(), 1);
     assert_eq!(methods[0].template_bindings()[0].0.as_str(), "TVal");
     assert_eq!(methods[0].template_bindings()[0].1.as_str(), "$default");
+}
+
+#[test]
+fn docblocks_with_global_tags_finds_each_docblock_once() {
+    let content = "<?php\n/**\n * @global wpdb $wpdb\n * @global WP_Query $wp_query\n */\nfunction a() {}\n/** Not this one. */\n// @global Other $other\nfunction b() {}\n/** @global WP_Post $post */\nfunction c() {}\n";
+    let found = docblocks_with_global_tags(content);
+    let starts: Vec<usize> = found.iter().map(|&(start, _)| start).collect();
+    assert_eq!(
+        starts,
+        vec![6, content.find("/** @global WP_Post").unwrap()]
+    );
+    assert!(found[0].1.ends_with("*/"));
+    let names: Vec<String> = found
+        .iter()
+        .flat_map(|&(_, doc)| extract_global_tags(doc))
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(names, ["$wpdb", "$wp_query", "$post"]);
 }

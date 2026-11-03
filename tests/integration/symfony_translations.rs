@@ -2,8 +2,8 @@
 //! that declare them to the PHP and Twig that translate them.
 
 use crate::common::{
-    completion_response, create_psr4_workspace, hover_on, offset_position, open_document,
-    response_labels,
+    completion_response, create_psr4_workspace, hover_on, message_text, offset_position,
+    open_document, response_labels,
 };
 use phpantom_lsp::Backend;
 use tower_lsp_server::LanguageServer;
@@ -388,5 +388,146 @@ function label(TranslatorInterface $translator, \ArrayObject $other): void {
     assert_eq!(
         labels,
         vec!["demo.card".to_string(), "demo.title".to_string()]
+    );
+}
+
+/// An installed `symfony/validator`, which ships the `validators` domain.
+const VENDOR: &[(&str, &str)] = &[
+    (
+        "vendor/composer/installed.json",
+        r#"{"packages": [{"name": "symfony/validator", "install-path": "../symfony/validator"}]}"#,
+    ),
+    (
+        "vendor/symfony/validator/Resources/translations/validators.en.xlf",
+        VALIDATORS_XLF,
+    ),
+];
+
+/// The `invalid_symfony_translation` messages a slow-diagnostics pass
+/// reports for `content`, sorted.
+fn translation_problems(backend: &Backend, uri: &Uri, content: &str) -> Vec<String> {
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), content, &mut diagnostics);
+    let mut problems: Vec<String> = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(Code::String(code)) if code == "invalid_symfony_translation"
+            )
+        })
+        .map(|diagnostic| message_text(&diagnostic.message).to_string())
+        .collect();
+    problems.sort();
+    problems
+}
+
+const CHECKED_PHP: &str = r#"<?php
+namespace App\Controller;
+
+use Symfony\Component\Translation\TranslatableMessage;
+use Symfony\Contracts\Translation\TranslatorInterface;
+
+final class CheckController
+{
+    public function __construct(private TranslatorInterface $translator) {}
+
+    public function index(\ArrayObject $other, string $domain): void
+    {
+        $this->translator->trans('demo.title');
+        $this->translator->trans('demo.titel');
+        $this->translator->trans('demo.card', [], 'admin');
+        $this->translator->trans('Save');
+        $this->translator->trans('demo');
+        $this->translator->trans('user.missing', domain: 'validators');
+        $this->translator->trans('shop.cart', [], 'shop');
+        $this->translator->trans('demo.missing', [], $domain);
+        $other->offsetGet('demo.missing');
+        new TranslatableMessage('demo.cards');
+    }
+}
+"#;
+
+#[tokio::test]
+async fn keys_no_catalogue_declares_are_reported() {
+    let files: Vec<(&str, &str)> = VENDOR
+        .iter()
+        .copied()
+        .chain([("src/Controller/CheckController.php", CHECKED_PHP)])
+        .collect();
+    let (backend, dir) = workspace_with_catalogues(&files).await;
+    let uri = uri_for(&dir, "src/Controller/CheckController.php");
+
+    // `Save` and `demo` read as messages that are their own translation, an
+    // installed package ships `validators`, the project declares nothing in
+    // `shop`, and a domain that is not a literal is unknown.
+    assert_eq!(
+        translation_problems(&backend, &uri, CHECKED_PHP),
+        vec![
+            "Unknown translation key: 'demo.card' in domain 'admin'".to_string(),
+            "Unknown translation key: 'demo.cards' in domain 'messages'".to_string(),
+            "Unknown translation key: 'demo.titel' in domain 'messages'".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn keys_are_not_judged_without_installed_packages() {
+    let (backend, dir) =
+        workspace_with_catalogues(&[("src/Controller/CheckController.php", CHECKED_PHP)]).await;
+    let uri = uri_for(&dir, "src/Controller/CheckController.php");
+
+    assert!(translation_problems(&backend, &uri, CHECKED_PHP).is_empty());
+}
+
+#[tokio::test]
+async fn a_domain_with_a_catalogue_that_is_not_read_is_not_judged() {
+    let files: Vec<(&str, &str)> = VENDOR
+        .iter()
+        .copied()
+        .chain([
+            (
+                "translations/messages.de.php",
+                "<?php\nreturn ['demo.titel' => 'Demo'];\n",
+            ),
+            ("src/Controller/CheckController.php", CHECKED_PHP),
+        ])
+        .collect();
+    let (backend, dir) = workspace_with_catalogues(&files).await;
+    let uri = uri_for(&dir, "src/Controller/CheckController.php");
+
+    assert_eq!(
+        translation_problems(&backend, &uri, CHECKED_PHP),
+        vec!["Unknown translation key: 'demo.card' in domain 'admin'".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn only_the_directories_the_translator_loads_tell_which_domains_are_judged() {
+    let files: Vec<(&str, &str)> = VENDOR
+        .iter()
+        .copied()
+        .chain([
+            (
+                "config/packages/translation.yaml",
+                "framework:\n    translator:\n        default_path: '%kernel.project_dir%/assets/translations'\n",
+            ),
+            // A catalogue the translator does not load, which leaves
+            // `messages` to the PHP catalogue it does.
+            ("public/build/translations/messages.en.yaml", MESSAGES_YAML),
+            (
+                "assets/translations/messages+intl-icu.cs.php",
+                "<?php\nreturn ['demo' => ['titel' => 'Demo']];\n",
+            ),
+            ("assets/translations/admin.en.yaml", ADMIN_YAML),
+            ("src/Controller/CheckController.php", CHECKED_PHP),
+        ])
+        .collect();
+    let (backend, dir) = workspace(&files).await;
+    let uri = uri_for(&dir, "src/Controller/CheckController.php");
+
+    assert_eq!(
+        translation_problems(&backend, &uri, CHECKED_PHP),
+        vec!["Unknown translation key: 'demo.card' in domain 'admin'".to_string()]
     );
 }

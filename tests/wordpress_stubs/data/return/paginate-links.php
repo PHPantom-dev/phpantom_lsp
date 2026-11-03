@@ -8,9 +8,9 @@ use function paginate_links;
 use function PHPStan\Testing\assertType;
 
 // Returns null
-assertType('null', paginate_links(['total' => Faker::negativeInt(), 'key' => 'value'])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('null', paginate_links(['total' => 0, 'key' => 'value'])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('null', paginate_links(['total' => 1, 'key' => 'value'])); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('null', paginate_links(['total' => Faker::negativeInt(), 'key' => 'value']));
+assertType('null', paginate_links(['total' => 0, 'key' => 'value']));
+assertType('null', paginate_links(['total' => 1, 'key' => 'value']));
 
 // Returns list
 assertType('list<string>', paginate_links(['type' => 'array', 'key' => 'value']));

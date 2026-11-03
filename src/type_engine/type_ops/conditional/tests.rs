@@ -115,6 +115,7 @@ fn nested_condition_sees_argument_narrowed_by_outer_condition() {
             bindings: &[],
             arg_type_resolver: Some(&resolver),
             this_type: None,
+            subs: None,
         };
         resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -155,6 +156,7 @@ fn resolve_pathinfo(text_args: &str) -> Option<String> {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -221,6 +223,7 @@ fn omitted_default_self_const_resolves_against_declaring_class() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     // The call sits in an unrelated class; only the declaring class
     // resolves the default's `self` to the constant the resolver knows.
@@ -340,6 +343,7 @@ fn is_true_condition_needs_a_resolved_boolean_value() {
             bindings: &[],
             arg_type_resolver: Some(&resolver),
             this_type: None,
+            subs: None,
         };
         resolve_conditional_with_text_args_and_defaults(
             &PhpType::parse("($flag is true ? Then : Else)"),
@@ -506,6 +510,7 @@ fn is_string_condition_uses_resolved_arg_type() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolved = resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -539,6 +544,7 @@ fn scalar_conditions_classify_resolved_int_and_float_literals() {
             bindings: &[],
             arg_type_resolver: Some(&resolver),
             this_type: None,
+            subs: None,
         };
         let resolved = resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -573,6 +579,7 @@ fn undecidable_is_string_condition_unions_branches() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolved = resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -603,6 +610,7 @@ fn closure_arg_refutes_array_or_string_condition() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolved = resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -695,6 +703,7 @@ fn nested_template_default_conditional_collapses_fully() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let evaluated = evaluate_nested_conditionals_text(
         &ty,
@@ -747,6 +756,7 @@ fn resolve_find(arg_type: Option<PhpType>) -> Option<String> {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -799,6 +809,7 @@ fn resolve_is_null(text_args: &str, arg_type: Option<PhpType>) -> Option<String>
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     resolve_conditional_with_text_args_and_defaults(
         &cond,
@@ -867,6 +878,7 @@ fn value_condition_is_refuted_by_another_kind_of_argument() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolve = |text_args: &str| {
         resolve_conditional_with_text_args_and_defaults(
@@ -898,6 +910,7 @@ fn template_subject_is_decided_through_its_parameter_binding() {
         bindings: &bindings,
         arg_type_resolver: None,
         this_type: None,
+        subs: None,
     };
     let resolve = |text_args: &str| {
         resolve_conditional_with_text_args_and_defaults(
@@ -1004,6 +1017,7 @@ fn array_shape_condition_from_argument_text() {
             bindings: &[],
             arg_type_resolver: Some(&resolver),
             this_type: None,
+            subs: None,
         };
         resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -1047,6 +1061,7 @@ fn undecided_void_or_never_is_not_never() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolve = |text_args: &str| {
         resolve_conditional_with_text_args_and_defaults(
@@ -1078,6 +1093,7 @@ fn void_branch_is_kept() {
         bindings: &[],
         arg_type_resolver: Some(&resolver),
         this_type: None,
+        subs: None,
     };
     let resolve = |text_args: &str| {
         resolve_conditional_with_text_args_and_defaults(
@@ -1112,5 +1128,337 @@ fn union_argument_against_union_condition() {
     assert_eq!(
         shape_condition("array{id: ''|null}", "array{id: null|'', ...}"),
         Some(true)
+    );
+}
+
+/// Resolve a `get_term_by()`-style return type, whose conditional on
+/// `$output` sits inside a union, against `text_args`.
+fn resolve_term_by(return_type: &str, text_args: &str) -> Option<String> {
+    let ty = PhpType::parse(return_type);
+    let params = [param("$field"), param_with_default("$output", "'OBJECT'")];
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
+    let tpl = TemplateContext::with_params(&[]);
+    resolve_conditional_with_text_args_and_defaults(
+        &ty,
+        &params,
+        text_args,
+        None,
+        ConditionalClassContext::default(),
+        loader,
+        &tpl,
+    )
+    .map(|t| t.to_string())
+}
+
+/// A conditional that is one member of a union is decided like one that is
+/// the whole type, and its branch merges with the members around it.
+#[test]
+fn conditional_inside_union_is_decided() {
+    let ty = "false|($output is 'ARRAY_A' ? array<string, int> : ($output is 'ARRAY_N' ? list<int> : WP_Term))";
+    assert_eq!(
+        resolve_term_by(ty, "'id', 'ARRAY_A'").as_deref(),
+        Some("false|array<string, int>")
+    );
+    assert_eq!(
+        resolve_term_by(ty, "'id'").as_deref(),
+        Some("false|WP_Term")
+    );
+    assert_eq!(
+        resolve_conditional_without_args_and_defaults(
+            &PhpType::parse(ty),
+            &[param("$field"), param_with_default("$output", "'ARRAY_N'")],
+            None,
+            None,
+        )
+        .map(|t| t.to_string())
+        .as_deref(),
+        Some("false|list<int>")
+    );
+}
+
+/// The decided branch of a conditional inside an intersection or a generic
+/// argument takes its place there.
+#[test]
+fn conditional_inside_intersection_and_generic_is_decided() {
+    assert_eq!(
+        resolve_term_by(
+            "($output is 'OBJECT' ? numeric-string : string)&non-falsy-string",
+            "'id'"
+        )
+        .as_deref(),
+        Some("numeric-string&non-falsy-string")
+    );
+    assert_eq!(
+        resolve_term_by(
+            "array<int, ($output is 'OBJECT' ? WP_Term : string)>",
+            "'id', 'ARRAY_A'"
+        )
+        .as_deref(),
+        Some("array<int, string>")
+    );
+}
+
+/// An integer condition is decided by the ranges the argument and the
+/// condition cover.
+#[test]
+fn int_range_condition_compares_ranges() {
+    let cond = "int<min, 0>";
+    assert_eq!(shape_condition("0", cond), Some(true));
+    assert_eq!(shape_condition("-1", cond), Some(true));
+    assert_eq!(shape_condition("non-positive-int", cond), Some(true));
+    assert_eq!(shape_condition("int<-5, -1>", cond), Some(true));
+    assert_eq!(shape_condition("1", cond), Some(false));
+    assert_eq!(shape_condition("positive-int", cond), Some(false));
+    assert_eq!(shape_condition("int<0, max>", cond), None);
+    assert_eq!(shape_condition("int", cond), None);
+    // A value condition is refuted by a range that leaves the value out.
+    assert_eq!(shape_condition("int<1, max>", "0"), Some(false));
+    assert_eq!(shape_condition("int<0, max>", "0"), None);
+}
+
+/// A refined string condition is checked against a literal's value, and
+/// holds for a refined argument whose refinements imply it.
+#[test]
+fn refined_string_condition() {
+    assert_eq!(shape_condition("'foo'", "non-falsy-string"), Some(true));
+    assert_eq!(shape_condition("'0'", "non-falsy-string"), Some(false));
+    assert_eq!(shape_condition("''", "non-empty-string"), Some(false));
+    assert_eq!(shape_condition("'Foo'", "lowercase-string"), Some(false));
+    assert_eq!(shape_condition("''", "lowercase-string"), Some(true));
+    assert_eq!(shape_condition("'12'", "numeric-string"), Some(true));
+    assert_eq!(
+        shape_condition("lowercase-string", "lowercase-string"),
+        Some(true)
+    );
+    assert_eq!(
+        shape_condition("lowercase-string&non-falsy-string", "non-empty-string"),
+        Some(true)
+    );
+    assert_eq!(
+        shape_condition("numeric-string", "non-empty-string"),
+        Some(true)
+    );
+    assert_eq!(shape_condition("string", "non-falsy-string"), None);
+    assert_eq!(
+        shape_condition("non-empty-string", "non-falsy-string"),
+        None
+    );
+    // A string refinement that leaves a value out refutes it.
+    assert_eq!(shape_condition("non-empty-string", "''"), Some(false));
+    // Another category entirely is ruled out.
+    assert_eq!(shape_condition("array", "non-empty-string"), Some(false));
+    assert_eq!(shape_condition("resource", "string"), Some(false));
+    assert_eq!(shape_condition("object", "string"), Some(false));
+}
+
+/// `scalar`, `numeric` and `empty` take values from several categories.
+#[test]
+fn cross_category_keyword_conditions() {
+    assert_eq!(shape_condition("'a'", "scalar"), Some(true));
+    assert_eq!(shape_condition("1", "scalar"), Some(true));
+    assert_eq!(shape_condition("true", "scalar"), Some(true));
+    assert_eq!(shape_condition("array", "scalar"), Some(false));
+    assert_eq!(shape_condition("null", "scalar"), Some(false));
+
+    assert_eq!(shape_condition("int", "numeric"), Some(true));
+    assert_eq!(shape_condition("'1.5'", "numeric"), Some(true));
+    assert_eq!(shape_condition("numeric-string", "numeric"), Some(true));
+    assert_eq!(shape_condition("'abc'", "numeric"), Some(false));
+    assert_eq!(shape_condition("string", "numeric"), None);
+    assert_eq!(shape_condition("bool", "numeric"), Some(false));
+
+    assert_eq!(shape_condition("''", "empty"), Some(true));
+    assert_eq!(shape_condition("'0'", "empty"), Some(true));
+    assert_eq!(shape_condition("0", "empty"), Some(true));
+    assert_eq!(shape_condition("null", "empty"), Some(true));
+    assert_eq!(shape_condition("array{}", "empty"), Some(true));
+    assert_eq!(shape_condition("'a'", "empty"), Some(false));
+    assert_eq!(shape_condition("positive-int", "empty"), Some(false));
+    assert_eq!(shape_condition("non-falsy-string", "empty"), Some(false));
+    assert_eq!(
+        shape_condition("lowercase-string&non-falsy-string", "empty"),
+        Some(false)
+    );
+    assert_eq!(shape_condition("resource", "empty"), Some(false));
+    assert_eq!(shape_condition("string", "empty"), None);
+    assert_eq!(shape_condition("int<0, max>", "empty"), None);
+    assert_eq!(shape_condition("array", "empty"), None);
+}
+
+/// `array<K, V>` asks about the array's key and value types as well.
+#[test]
+fn array_condition_compares_keys_and_values() {
+    let cond = "array<int, mixed>";
+    assert_eq!(shape_condition("list<string>", cond), Some(true));
+    assert_eq!(shape_condition("array{'a', 'b'}", cond), Some(true));
+    assert_eq!(shape_condition("array{}", cond), Some(true));
+    assert_eq!(shape_condition("array<string, string>", cond), Some(false));
+    assert_eq!(shape_condition("array{key: 'value'}", cond), Some(false));
+    assert_eq!(shape_condition("array{0: 'a', key: 'b'}", cond), None);
+    assert_eq!(shape_condition("array", cond), None);
+    assert_eq!(
+        shape_condition("array<int, string>", "array<int, int>"),
+        Some(false)
+    );
+    assert_eq!(shape_condition("list<int>", "array<int>"), Some(true));
+}
+
+/// Resolve `return_type` against `text_args` with [`eloquent_loader`]
+/// answering for the classes it names.
+fn resolve_with_classes(return_type: &str, text_args: &str) -> Option<String> {
+    let ty = PhpType::parse(return_type);
+    let params = [param("$id"), param_with_default("$output", "'OBJECT'")];
+    let loader: &ResolvedClassLoader<'_> = &eloquent_loader;
+    let tpl = TemplateContext::with_params(&[]);
+    resolve_conditional_with_text_args_and_defaults(
+        &ty,
+        &params,
+        text_args,
+        None,
+        ConditionalClassContext::default(),
+        loader,
+        &tpl,
+    )
+    .map(|t| t.to_string())
+}
+
+/// Two decided conditionals intersected keep only the values both sides
+/// share: equal members meet in themselves, a narrower member in itself,
+/// and a pair no value satisfies drops out.
+#[test]
+fn intersection_of_decided_unions_is_met() {
+    let ty = "($id is int ? array<array-key, mixed>|Order : array<array-key, mixed>|Order|Model|null) \
+              & ($output is 'ARRAY_A' ? array<string, mixed>|Model|null : Order|Model|null)";
+    assert_eq!(resolve_with_classes(ty, "1").as_deref(), Some("Order"));
+    assert_eq!(
+        resolve_with_classes(ty, "1, 'ARRAY_A'").as_deref(),
+        Some("array<string, mixed>|Order")
+    );
+    assert_eq!(
+        resolve_with_classes(ty, "'x'").as_deref(),
+        Some("Order|Model|null")
+    );
+    // `Collection` and `Model` are unrelated classes, so no value is both.
+    assert_eq!(
+        resolve_with_classes(
+            "($output is 'OBJECT' ? Collection|string : int) & (Model|string)",
+            "1"
+        )
+        .as_deref(),
+        Some("string")
+    );
+    // A name no class answers to may be an unbound template, so it is not
+    // ruled out beside a scalar.
+    assert_eq!(
+        resolve_with_classes("($output is 'OBJECT' ? T|null : int) & (string|null)", "1")
+            .as_deref(),
+        Some("T&string|null")
+    );
+}
+
+/// Resolve `conditional` for a call binding the template `T` (from
+/// `$value`) to `bound_to`, held to `of` bound `bound` when given.
+fn resolve_over_template(conditional: &str, bound_to: &str, bound: Option<&str>) -> Option<String> {
+    let cond = PhpType::parse(conditional);
+    let params = [param("$value")];
+    let loader: &ResolvedClassLoader<'_> = &|_| None;
+    let template = [crate::atom::atom("T")];
+    let bindings = [(crate::atom::atom("T"), crate::atom::atom("$value"))];
+    let mut bounds = crate::atom::AtomMap::default();
+    if let Some(bound) = bound {
+        bounds.insert(crate::atom::atom("T"), PhpType::parse(bound));
+    }
+    let subs = template_subs_within_bounds(
+        HashMap::from([("T".to_string(), PhpType::parse(bound_to))]),
+        &bounds,
+        loader,
+    );
+    let resolver = |_: &str| Some(PhpType::parse(bound_to));
+    let tpl = TemplateContext {
+        defaults: None,
+        params: &template,
+        bindings: &bindings,
+        arg_type_resolver: Some(&resolver),
+        this_type: None,
+        subs: Some(&subs),
+    };
+    resolve_conditional_with_text_args_and_defaults(
+        &cond,
+        &params,
+        "$value",
+        None,
+        ConditionalClassContext::default(),
+        loader,
+        &tpl,
+    )
+    .map(|t| t.to_string())
+}
+
+/// The branch a condition on a template picks narrows the template: a
+/// `string` that is a `non-falsy-string` in the then branch is that there,
+/// and one that is not `''` in the else branch is a `non-empty-string`.
+#[test]
+fn condition_on_template_narrows_it_in_each_branch() {
+    assert_eq!(
+        resolve_over_template("(T is non-falsy-string ? T|false : false)", "string", None)
+            .as_deref(),
+        Some("non-falsy-string|false")
+    );
+    assert_eq!(
+        resolve_over_template("(T is numeric|'' ? false : T|false)", "string", None).as_deref(),
+        Some("false|non-empty-string")
+    );
+}
+
+/// A binding its bound does not admit leaves the template its bound, so a
+/// `mixed` argument for `T of bool|string|int` is judged as that union.
+#[test]
+fn template_bound_to_a_wider_argument_is_held_to_its_bound() {
+    assert_eq!(
+        resolve_over_template(
+            "(T is bool ? T : (T is ''|'0'|0 ? false : true))",
+            "mixed",
+            Some("bool|string|int"),
+        )
+        .as_deref(),
+        Some("bool")
+    );
+}
+
+/// `$value is T` holds for an argument that is what `T` was bound to.
+#[test]
+fn argument_tested_against_its_own_template_holds() {
+    assert_eq!(
+        resolve_over_template(
+            "($value is T ? T : int<0, max>)",
+            "int<1, max>",
+            Some("int<0, max>")
+        )
+        .as_deref(),
+        Some("int<1, max>")
+    );
+}
+
+/// A condition on `value-of<T>` or `key-of<T>` is judged against the values
+/// or keys of what `T` was bound to, and a value that is no array has none.
+#[test]
+fn condition_on_type_operator_looks_through_it() {
+    let values = "(value-of<T> is string ? 'strings' : 'other')";
+    assert_eq!(
+        resolve_over_template(values, "array{a: 'x'}", None).as_deref(),
+        Some("'strings'")
+    );
+    assert_eq!(
+        resolve_over_template(values, "'x'", None).as_deref(),
+        Some("'other'")
+    );
+    assert_eq!(
+        resolve_over_template(
+            "(key-of<T> is int ? 'ints' : 'other')",
+            "list<string>",
+            None
+        )
+        .as_deref(),
+        Some("'ints'")
     );
 }

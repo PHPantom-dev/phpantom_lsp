@@ -39,6 +39,7 @@ impl Backend {
             .laravel_mut()
             .set_schema_index(index.clone());
         *self.laravel.schema_index.write() = index;
+        self.laravel.string_key_cache.write().validation_rules = None;
         self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
     }
@@ -89,6 +90,7 @@ impl Backend {
                 .write()
                 .laravel_mut()
                 .set_schema_index(index);
+            self.laravel.string_key_cache.write().validation_rules = None;
             self.clear_resolved_class_cache();
             self.member_completion_cache.lock().clear();
         }

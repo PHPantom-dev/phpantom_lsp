@@ -24,12 +24,20 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         // For array access keys, narrow the shape on the base variable.
         strip_null_from_subject(&var_name, scope, ctx);
     }
+    // `($x ?? null) !== null` proves the same of `$x`.
+    if let Some(var_name) = extract_coalesced_non_null_check_var(condition) {
+        strip_null_from_subject(&var_name, scope, ctx);
+    }
     // Check for `$x !== false` or `false !== $x` — the truthy branch
     // rules out `false` alone, which is what the `T|false` handle idiom
     // (`fopen()`, `finfo_open()`, `strpos()`, …) is written to do.
     if let Some(var_name) = extract_non_false_check_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_false_from_scope(&var_name, scope);
+    }
+    // `($x ?? false) !== false` rules out an unset or `null` `$x` as well.
+    if let Some(var_name) = extract_coalesced_non_false_check_var(condition) {
+        strip_null_and_false_from_subject(&var_name, scope, ctx);
     }
     // `isset($x)` — truthy branch means $x is not null: strip null.
     // Handles multiple args: `isset($a, $b)` strips null from both.
@@ -156,6 +164,10 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
         // survives scope merges.
         strip_null_from_subject(&var_name, scope, ctx);
     }
+    // And failing `($x ?? null) === null` proves the same of `$x`.
+    if let Some(var_name) = extract_coalesced_null_equality_check_var(condition) {
+        strip_null_from_subject(&var_name, scope, ctx);
+    }
     // When the condition is `$x !== null`, the inverse (else/guard)
     // means $x IS null — narrow to null only.  Failing `$x != null`
     // leaves whatever compares equal to null.
@@ -183,6 +195,11 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     if let Some(var_name) = extract_false_equality_check_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_false_from_scope(&var_name, scope);
+    }
+    // And failing `($x ?? false) === false` rules out an unset or `null` `$x`
+    // as well.
+    if let Some(var_name) = extract_coalesced_false_equality_check_var(condition) {
+        strip_null_and_false_from_subject(&var_name, scope, ctx);
     }
     // When the condition is `$x !== false`, the inverse (else/guard)
     // means $x IS false — narrow to false only.
@@ -454,4 +471,16 @@ pub(crate) fn apply_guard_clause_null_narrowing<'b>(
     // The inverse pass already forgot an impure call's result; the
     // stripping above has just proved it again.
     super::super::receiver_mutation::forget_impure_call_results(if_stmt.condition, scope, ctx);
+}
+
+/// Strip both `null` and `false` from a subject a coalesce onto `false`
+/// proved set and non-false.
+fn strip_null_and_false_from_subject(
+    var_name: &str,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    strip_null_from_subject(var_name, scope, ctx);
+    seed_synthetic_key_if_needed(var_name, scope, ctx);
+    strip_false_from_scope(var_name, scope);
 }

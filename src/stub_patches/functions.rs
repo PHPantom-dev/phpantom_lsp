@@ -1,7 +1,7 @@
 //! Patches for the functions phpstorm-stubs declares incompletely.
 
 use crate::atom::atom;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{PhpType, TypeKind, UndecidedReading};
 use crate::types::{CallableInvocation, FunctionInfo};
 
 /// Apply all registered stub patches to a freshly-parsed function.
@@ -71,6 +71,16 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "bcadd" | "bcsub" | "bcmul" | "bcdiv" | "bcmod" | "bcpow" | "bcpowmod" | "bcsqrt"
         | "bcfloor" | "bcceil" | "bcround" => func.return_type = Some(PhpType::numeric_string()),
         "define" => widen_parameter_to_mixed(func, "$value"),
+        "array_udiff"
+        | "array_udiff_assoc"
+        | "array_udiff_uassoc"
+        | "array_diff_ukey"
+        | "array_diff_uassoc"
+        | "array_uintersect"
+        | "array_uintersect_assoc"
+        | "array_uintersect_uassoc"
+        | "array_intersect_ukey"
+        | "array_intersect_uassoc" => patch_callback_terminated_rest(func),
         name if name.starts_with("ctype_") => widen_parameter_to_mixed(func, "$text"),
         _ => {}
     }
@@ -90,6 +100,22 @@ fn mark_benevolent(return_type: &mut Option<PhpType>) {
     }
 }
 
+/// Correct a function parsed from the user's project or its vendor tree
+/// whose own docblock is wrong.
+///
+/// Separate from [`apply_function_stub_patches`], which is confined to the
+/// embedded stubs. Only Mockery's global `mock()` / `spy()` /
+/// `namedMock()` helpers are patched, recognised by their `$args`
+/// docblock as well as their name; see [`super::mockery`].
+pub fn apply_third_party_function_patches(func: &mut FunctionInfo) {
+    if func.namespace.is_none()
+        && super::mockery::is_mock_helper(&func.name)
+        && super::mockery::declares_mock_args(&func.parameters, &func.template_params)
+    {
+        super::mockery::widen_mock_args(func.parameters.make_mut(), &func.template_params);
+    }
+}
+
 /// Widen a parameter the stubs type more narrowly than php-src does.
 ///
 /// `ctype_digit()` and its siblings take `mixed $text` (passing an int is a
@@ -103,6 +129,20 @@ fn widen_parameter_to_mixed(func: &mut FunctionInfo, param_name: &str) {
         if param.name == param_name {
             param.type_hint = Some(PhpType::mixed());
             param.native_type_hint = Some(PhpType::mixed());
+        }
+    }
+}
+
+/// Patch a member of the `array_udiff()` family so its variadic takes the
+/// callbacks that end it.
+///
+/// Since PHP 8.0 these take `array $array, ...$rest`, where `$rest` is the
+/// other arrays followed by one or two comparison callbacks. The stubs tag
+/// `$rest` as `array`, which every call's trailing callback would contradict.
+fn patch_callback_terminated_rest(func: &mut FunctionInfo) {
+    for param in func.parameters.make_mut() {
+        if param.is_variadic {
+            param.type_hint = Some(PhpType::parse("array|callable"));
         }
     }
 }
@@ -523,18 +563,20 @@ fn patch_ini_get(func: &mut FunctionInfo) {
 fn patch_pow(func: &mut FunctionInfo) {
     let numeric = PhpType::union(vec![PhpType::int(), PhpType::float()]);
     let object = PhpType::named(atom("object"));
-    func.conditional_return = Some(PhpType::conditional_defaulting_to_else(
+    func.conditional_return = Some(PhpType::conditional_answering_undecided(
         "$num",
         false,
         object.clone(),
         object.clone(),
-        PhpType::conditional_defaulting_to_else(
+        PhpType::conditional_answering_undecided(
             "$exponent",
             false,
             object.clone(),
             object,
             numeric,
+            UndecidedReading::ElseBranch,
         ),
+        UndecidedReading::ElseBranch,
     ));
 }
 
@@ -852,8 +894,10 @@ fn patch_scanf_family(func: &mut FunctionInfo, assigned: &str, collected: &str) 
 /// the functions whose string branch keeps the `null` error result. An array
 /// subject is answered per element, so no error branch survives there.
 ///
-/// A subject whose type cannot be pinned down at the call site leaves the
-/// declared union, which is all the call can promise.
+/// A subject whose type cannot be pinned down at the call site leaves both
+/// shapes, marked benevolent: the call hands back whatever shape it was
+/// given, so the caller is no worse placed to know it than for the subject
+/// it passed in unchecked.
 fn patch_replace_family(func: &mut FunctionInfo, subject_param: &str, nullable_on_error: bool) {
     // Bail out if the stub does not have the parameter the conditional keys
     // on: without it the subject cannot be identified and the conditional
@@ -872,12 +916,13 @@ fn patch_replace_family(func: &mut FunctionInfo, subject_param: &str, nullable_o
         PhpType::string()
     };
 
-    func.conditional_return = Some(PhpType::conditional(
+    func.conditional_return = Some(PhpType::conditional_answering_undecided(
         subject_param,
         false,
         PhpType::array(),
         replaced_array,
         replaced_string,
+        UndecidedReading::BenevolentBothBranches,
     ));
 }
 

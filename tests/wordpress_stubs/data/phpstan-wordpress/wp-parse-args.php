@@ -23,7 +23,7 @@ function array_merge(): int
  */
 function wpParseArgsWithShape(array $args): void
 {
-    assertType( // SKIP: the shape `wp_parse_args()` or `shortcode_atts()` merges is not computed
+    assertType(
         'array{before: string, after: string, echo: bool}',
         wp_parse_args($args, ['before' => '', 'after' => '', 'echo' => true])
     );
@@ -34,7 +34,7 @@ function wpParseArgsWithShape(array $args): void
  */
 function wpParseArgsWithConstantArrays(): void
 {
-    assertType("array{a: 1, b: 'y'}", wp_parse_args(['a' => 1], ['a' => 'x', 'b' => 'y'])); // SKIP: the shape `wp_parse_args()` or `shortcode_atts()` merges is not computed
+    assertType("array{a: 1, b: 'y'}", wp_parse_args(['a' => 1], ['a' => 'x', 'b' => 'y']));
 }
 
 /**
@@ -44,8 +44,8 @@ function wpParseArgsWithConstantArrays(): void
  */
 function wpParseArgsWithoutDefaults(array $args): void
 {
-    assertType('array{page?: int}', wp_parse_args($args)); // SKIP: the shape `wp_parse_args()` or `shortcode_atts()` merges is not computed
-    assertType('array{page?: int}', wp_parse_args($args, [])); // SKIP: the shape `wp_parse_args()` or `shortcode_atts()` merges is not computed
+    assertType('array{page?: int}', wp_parse_args($args));
+    assertType('array{page?: int}', wp_parse_args($args, []));
 }
 
 /**
@@ -55,7 +55,7 @@ function wpParseArgsWithoutDefaults(array $args): void
  */
 function wpParseArgsWithNonArrayDefaults(array $args, string $defaults): void
 {
-    assertType('array{page?: int}', wp_parse_args($args, $defaults)); // SKIP: the shape `wp_parse_args()` or `shortcode_atts()` merges is not computed
+    assertType('array{page?: int}', wp_parse_args($args, $defaults));
 }
 
 /**

@@ -458,7 +458,7 @@ pub(super) fn each_variable_type(
 /// namespace: an injected `@var User $user` in a template's prologue means
 /// the global `\User`, and a template's contract is qualified the same way
 /// before a call site is judged against it.
-pub(super) fn qualify_class_names(ty: PhpType, class_loader: &ResolvedClassLoader<'_>) -> PhpType {
+pub(crate) fn qualify_class_names(ty: PhpType, class_loader: &ResolvedClassLoader<'_>) -> PhpType {
     ty.resolve_names(&|name: &str| match class_loader(Fqn::new(name)) {
         Some(cls) => format!("\\{}", cls.fqn()),
         None => name.to_string(),
@@ -480,7 +480,7 @@ const ARRAYABLE: &str = "Illuminate\\Contracts\\Support\\Arrayable";
 ///
 /// `None` when the type is not one shape, which leaves the call site
 /// incomplete and stands the missing and unknown checks down as before.
-pub(super) fn data_shape_entries(
+pub(crate) fn data_shape_entries(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<(String, PhpType)>> {

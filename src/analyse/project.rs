@@ -118,7 +118,8 @@ pub(crate) fn parse_user_files(
 /// providers.  Without it the `now()`/`today()` helpers and the Date
 /// facade resolve to nothing, `config()`/`view()`/`trans()`/`route()`
 /// string keys are all unknown, and morph aliases, gate abilities, Artisan
-/// command names, and vendor-registered macros read as invalid, and a
+/// command names, and vendor-registered macros read as invalid, model
+/// columns ignore the schema dumps and migrations, and a
 /// many-to-many target declared outside the analysed paths has no `$pivot`,
 /// so a run
 /// would report (or fix against) false positives.  A project that is not
@@ -132,10 +133,17 @@ pub(crate) fn discover_laravel_resources(backend: &Backend) {
     backend.build_provider_resources(&providers);
     backend.build_laravel_morph_map_index(&providers);
     backend.build_laravel_gate_index(&providers);
+    backend.build_laravel_middleware_index(&providers);
     // `update_ast` only refreshes these from the files it parses, which
     // here is the project's own source, so without a scan of the whole
     // FQN index the vendor entries are missing.
     backend.build_laravel_command_index();
     backend.build_laravel_macro_index(&providers);
+    // After the macro index: a migration's custom `Blueprint` column
+    // helpers come from it.
+    let root = backend.workspace_root().read().clone();
+    if let Some(root) = root {
+        backend.reload_laravel_schema_index(&root);
+    }
     backend.load_laravel_pivot_sources();
 }

@@ -56,6 +56,7 @@ async fn analyze(root: &Path) -> i32 {
         workspace_root: root.to_path_buf(),
         path_filters: Vec::new(),
         severity_filter: phpantom_lsp::analyse::SeverityFilter::All,
+        code_filter: phpantom_lsp::analyse::CodeFilter::default(),
         use_colour: false,
         output_format: phpantom_lsp::analyse::OutputFormat::Json,
         // Suppresses the progress bar, which has no terminal to draw on here.

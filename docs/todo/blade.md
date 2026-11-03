@@ -70,4 +70,19 @@ dependency.
 
 ---
 
-No outstanding items.
+## BL20. Port Bladestan's tests
+
+**Impact: Medium · Complexity: Medium**
+
+PHPantom reads the same template contract Bladestan does (the
+`@bladestan-signature` chain, `@props`/`@aware`, component scope,
+layouts), but checks it only against tests of its own. Bladestan's
+suite covers the variables a template sees, from its signature, its
+component, and its layouts, and the errors it reports for them. Port its fixtures into
+`tests/fixtures/bladestan/` as diagnostics and hover fixtures run by
+`tests/fixture_runner.rs`, with a project under `tests/bladestan/`
+holding the views and the slice of `laravel/framework` they need, and
+file every case PHPantom answers differently as a `// SKIP: reason`
+entry in `docs/todo/`. Tests of Bladestan's own compiler output (the
+PHP it generates for PHPStan) have no counterpart here; list them in
+the README as not ported.

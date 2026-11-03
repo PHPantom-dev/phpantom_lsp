@@ -491,6 +491,7 @@ async fn rename_namespace_psr4_directory_rename() {
     let psr4 = vec![phpantom_lsp::composer::Psr4Mapping {
         prefix: "App\\".to_string(),
         base_path: "src/App/".to_string(),
+        is_dev: false,
     }];
 
     let backend = Backend::new_test_with_workspace(workspace.clone(), psr4);

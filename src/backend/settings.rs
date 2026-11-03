@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use crate::{Backend, classmap_scanner, config, stubs, types};
 
@@ -20,6 +21,18 @@ impl Backend {
     /// Reads the one flag without cloning the whole config.
     pub(crate) fn diagnostics_enabled(&self) -> bool {
         self.workspace.config.lock().diagnostics.enabled()
+    }
+
+    /// Whether a type mismatch that only a `null` or `false` causes is
+    /// reported; see
+    /// [`DiagnosticsConfig::possibly_empty_mismatches_enabled`](config::DiagnosticsConfig::possibly_empty_mismatches_enabled).
+    /// Reads the one flag without cloning the whole config.
+    pub(crate) fn possibly_empty_mismatches_enabled(&self) -> bool {
+        self.workspace
+            .config
+            .lock()
+            .diagnostics
+            .possibly_empty_mismatches_enabled()
     }
 
     /// The directory symlinks the workspace walks have indexed through.
@@ -59,10 +72,11 @@ impl Backend {
         let root = self.workspace.workspace_root.read().clone();
         let indexing = self.config().indexing;
         let client = self.workspace.client_indexing.read();
+        let is_drupal = self.workspace.is_drupal.load(Ordering::Acquire);
 
         // The overwhelmingly common case is one layer or the other being
         // empty, so only pay for a merged allocation when both contribute.
-        let compiled = if client.is_empty() {
+        let compiled = if client.is_empty() && !is_drupal {
             classmap_scanner::IndexFilters::compile(
                 root.as_deref(),
                 indexing.exclude(),
@@ -73,7 +87,14 @@ impl Backend {
             // `.phpantom.toml` can still override an exclude the editor
             // forwarded: gitignore semantics give the last match priority.
             let exclude = [client.exclude.as_slice(), indexing.exclude()].concat();
-            let extensions = [client.extensions.as_slice(), indexing.extensions()].concat();
+            let mut extensions = [client.extensions.as_slice(), indexing.extensions()].concat();
+            if is_drupal {
+                extensions.extend(
+                    classmap_scanner::DRUPAL_PHP_EXTENSIONS
+                        .iter()
+                        .map(|ext| (*ext).to_string()),
+                );
+            }
             classmap_scanner::IndexFilters::compile(root.as_deref(), &exclude, &extensions)
         };
         drop(client);
@@ -85,6 +106,18 @@ impl Backend {
         let compiled = Arc::new(compiled);
         *self.workspace.index_filters.write() = Some(Arc::clone(&compiled));
         compiled
+    }
+
+    /// Record that a Composer project of the workspace is a Drupal site,
+    /// so every workspace walk reads Drupal's `.module`, `.install`, …
+    /// files as PHP the way the web-root class scan does.
+    ///
+    /// Only ever turned on: a workspace whose subprojects include one
+    /// Drupal site treats those extensions as PHP throughout.
+    pub(crate) fn mark_drupal_project(&self) {
+        if !self.workspace.is_drupal.swap(true, Ordering::AcqRel) {
+            *self.workspace.index_filters.write() = None;
+        }
     }
 
     /// Replace the client-supplied file filters.
@@ -103,6 +136,23 @@ impl Backend {
         drop(current);
         *self.workspace.index_filters.write() = None;
         true
+    }
+
+    /// The inlay hint kinds in force, from `[inlay_hints]` and the
+    /// editor's toggles together. Reads the one section without cloning
+    /// the whole config.
+    pub(crate) fn inlay_hint_kinds(&self) -> config::InlayHintKinds {
+        let client = *self.workspace.client_inlay_hints.read();
+        config::InlayHintKinds::resolve(&self.workspace.config.lock().inlay_hints, &client)
+    }
+
+    /// Replace the editor's inlay hint toggles. Returns whether the kinds
+    /// in force changed, so a settings push that leaves them as they were
+    /// does not make the editor re-pull every hint.
+    pub fn set_client_inlay_hint_options(&self, options: config::ClientInlayHintOptions) -> bool {
+        let before = self.inlay_hint_kinds();
+        *self.workspace.client_inlay_hints.write() = options;
+        self.inlay_hint_kinds() != before
     }
 
     /// Return the configured PHP version.

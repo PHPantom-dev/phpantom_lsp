@@ -521,6 +521,39 @@ fn canonicalize_literal_quotes(ty: &str) -> String {
     result
 }
 
+/// `ty` with each `\\` and `\'` inside a single-quoted literal replaced by
+/// a control character, so a scan that ends the literal at the next `'`
+/// finds its real end. Both sides of a comparison go through this, so the
+/// placeholders never need to be put back.
+fn hide_single_quoted_escapes(ty: &str) -> String {
+    let mut out = String::with_capacity(ty.len());
+    let mut quote: Option<char> = None;
+    let mut chars = ty.chars();
+    while let Some(ch) = chars.next() {
+        match quote {
+            Some('\'') if ch == '\\' => match chars.next() {
+                Some('\\') => out.push('\u{2}'),
+                Some('\'') => out.push('\u{1}'),
+                Some(other) => {
+                    out.push(ch);
+                    out.push(other);
+                }
+                None => out.push(ch),
+            },
+            Some(q) if ch == q => {
+                quote = None;
+                out.push(ch);
+            }
+            None if ch == '\'' || ch == '"' => {
+                quote = Some(ch);
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Normalize a type string for comparison.
 ///
 /// PHPStan and PHPantom may format the same type differently. This
@@ -529,6 +562,10 @@ fn canonicalize_literal_quotes(ty: &str) -> String {
 /// literal quote style) don't cause spurious failures.
 fn normalize_type(ty: &str) -> String {
     let mut s = canonicalize_literal_quotes(ty.trim());
+
+    // Hide the escapes inside single-quoted literals (`'foo\'s bar'`) from
+    // the scanners below, which end a literal at the next quote character.
+    s = hide_single_quoted_escapes(&s);
 
     // Strip leading backslash from FQN types.
     if s.starts_with('\\') {
@@ -710,8 +747,10 @@ fn expand_array_key(ty: &str) -> String {
 
 /// Drop the parentheses PHPStan puts around a union nested inside another
 /// type (a shape value, a generic argument), `array{a:(float|int)}`, which
-/// PHPantom prints bare. Only a `(` in a type position is a grouping one;
-/// the one opening a callable's parameter list follows its name.
+/// PHPantom prints bare, and the ones around an intersection in a union,
+/// `(A&B)|false`, which `&` binding tighter makes redundant. Only a `(` in a
+/// type position is a grouping one; the one opening a callable's parameter
+/// list follows its name.
 fn strip_nested_grouping_parens(ty: &str) -> String {
     let mut out = String::with_capacity(ty.len());
     let mut grouping: Vec<bool> = Vec::new();
@@ -734,7 +773,7 @@ fn strip_nested_grouping_parens(ty: &str) -> String {
                     .trim_end()
                     .chars()
                     .last()
-                    .is_some_and(|prev| matches!(prev, ':' | '<' | ',' | '{' | '|' | '&'));
+                    .is_none_or(|prev| matches!(prev, ':' | '<' | ',' | '{' | '|' | '&'));
                 grouping.push(is_grouping);
                 if !is_grouping {
                     out.push(ch);

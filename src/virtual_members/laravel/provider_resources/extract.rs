@@ -16,7 +16,7 @@ use super::bindings::{record_container_call, scan_property_bindings};
 use super::package_tools::record_package_call;
 use super::views::{
     push_view_dir_registration, record_blade_compiler_call, record_blade_facade_call,
-    record_view_data, record_view_namespace,
+    record_livewire_component, record_view_components_as, record_view_data, record_view_namespace,
 };
 use super::{PathContext, ProviderIdentity, ProviderResource, ProviderResources, resolve_path_arg};
 use crate::names::OwnedResolvedNames;
@@ -105,6 +105,7 @@ pub(crate) fn extract_provider_resources(
         // view factory, which reaches them as method calls, so they are
         // tried ahead of the method-call registrations below.
         if record_blade_facade_call(&file, expr, &mut resources)
+            || record_livewire_component(&file, expr, &mut resources)
             || record_view_namespace(&file, expr, &mut resources)
             || record_view_data(&file, expr, &mut resources)
         {
@@ -137,6 +138,11 @@ pub(crate) fn extract_provider_resources(
         if record_container_call(&file, &method, call, &mut resources)
             || record_blade_compiler_call(&file, &method, call, &mut resources)
             || record_package_call(&file, &method, call, &mut resources)
+        {
+            return ControlFlow::Continue(());
+        }
+        if is_this_expr(call.object)
+            && record_view_components_as(&file, &method, call, &mut resources)
         {
             return ControlFlow::Continue(());
         }

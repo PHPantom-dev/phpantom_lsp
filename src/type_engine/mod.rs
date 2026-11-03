@@ -101,16 +101,18 @@ pub(crate) enum BoundedInference {
     /// Reading a callee body for what it leaves in a by-reference
     /// parameter.
     OutParam = 1,
+    /// Reading an included file's top level for the variables it leaves.
+    Include = 2,
 }
 
 /// How deep each [`BoundedInference`] kind is nested on this thread,
 /// indexed by kind.
-type InferenceDepths = [u8; 2];
+type InferenceDepths = [u8; 3];
 
 thread_local! {
     /// The nesting depth of every [`BoundedInference`] kind on this thread.
     static INFERENCE_DEPTHS: std::cell::Cell<InferenceDepths> =
-        const { std::cell::Cell::new([0; 2]) };
+        const { std::cell::Cell::new([0; 3]) };
 
     /// Bumped whenever an inference is cut short (by a depth cap or the
     /// cycle guard) or is answered from a memo entry that was. A frame

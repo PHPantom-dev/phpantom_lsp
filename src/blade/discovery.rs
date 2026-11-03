@@ -23,7 +23,7 @@ use crate::composer::psr4_directories_for_namespace;
 
 /// The namespace tail Laravel looks for class-based components under when no
 /// provider registers a namespace of its own.
-const DEFAULT_COMPONENT_NAMESPACE_TAIL: &str = "View\\Components";
+pub(crate) const DEFAULT_COMPONENT_NAMESPACE_TAIL: &str = "View\\Components";
 
 /// Which framework's naming rules a class is indexed under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +46,69 @@ pub(crate) struct BladeDiscovery {
     pub(crate) components: HashMap<String, String>,
     /// Livewire component name (`counter`, `admin.users`) → class FQN.
     pub(crate) livewire: HashMap<String, String>,
+    /// [`Self::components`] again, keyed by [`class_key`] of the class
+    /// path, for the names that reach a class without being the exact
+    /// name it is indexed under.
+    blade_by_class: HashMap<String, String>,
+    /// [`Self::livewire`] keyed the same way as [`Self::blade_by_class`].
+    livewire_by_class: HashMap<String, String>,
+}
+
+impl BladeDiscovery {
+    /// The class an `<x-…>` tag name names.
+    ///
+    /// Laravel goes from the tag to the class rather than the other way
+    /// round (`ComponentTagCompiler::guessClassName()` studly-cases each
+    /// segment), so a name spelled differently from the one the class is
+    /// indexed under can still reach it: `<x-last-24-hours>` and
+    /// `<x-last24-hours>` both name `Last24Hours`.
+    pub(crate) fn blade_component(&self, name: &str) -> Option<&String> {
+        self.components.get(name).or_else(|| {
+            let (prefix, path) = match name.split_once("::") {
+                Some((prefix, path)) => (Some(prefix), path),
+                None => (None, name),
+            };
+            let key = class_key(prefix, &studly_path(path));
+            self.blade_by_class.get(&key).or_else(|| {
+                // `<x-card>` falls through to `Card\Card`.
+                let last = path.rsplit('.').next().unwrap_or(path);
+                let index = format!("{key}\\{}", class_key(None, &studly_path(last)));
+                self.blade_by_class.get(&index)
+            })
+        })
+    }
+
+    /// The class a `<livewire:…>` component name names, reached the way
+    /// Livewire's `ComponentRegistry` reaches it: each segment studly-cased,
+    /// then the same with `Index` appended.
+    pub(crate) fn livewire_component(&self, name: &str) -> Option<&String> {
+        self.livewire.get(name).or_else(|| {
+            let key = class_key(None, &studly_path(name));
+            self.livewire_by_class
+                .get(&key)
+                .or_else(|| self.livewire_by_class.get(&format!("{key}\\index")))
+        })
+    }
+}
+
+/// A class path as both directions of the tag-to-class mapping agree on
+/// it: case-insensitive like PHP's class lookup, under the tag prefix
+/// when there is one.
+fn class_key(prefix: Option<&str>, path: &str) -> String {
+    match prefix {
+        Some(prefix) => format!("{prefix}::{path}").to_lowercase(),
+        None => path.to_lowercase(),
+    }
+}
+
+/// `Str::studly()` applied to each dot-separated segment of a tag name,
+/// joined as a namespace path: `forms.date-picker` → `forms\datepicker`.
+/// Case is left alone, since [`class_key`] folds it anyway.
+fn studly_path(name: &str) -> String {
+    name.split('.')
+        .map(|segment| segment.replace(['-', '_'], ""))
+        .collect::<Vec<_>>()
+        .join("\\")
 }
 
 impl Backend {
@@ -80,13 +143,18 @@ impl Backend {
             } else {
                 ComponentKind::Blade
             };
-            let target = match kind {
-                ComponentKind::Livewire => &mut discovery.livewire,
-                ComponentKind::Blade => &mut discovery.components,
-            };
             let Some(tail) = strip_namespace(&fqn, &namespace) else {
                 continue;
             };
+            let (target, by_class) = match kind {
+                ComponentKind::Livewire => {
+                    (&mut discovery.livewire, &mut discovery.livewire_by_class)
+                }
+                ComponentKind::Blade => (&mut discovery.components, &mut discovery.blade_by_class),
+            };
+            by_class
+                .entry(class_key(prefix.as_deref(), tail))
+                .or_insert_with(|| fqn.clone());
             for name in component_names_for_tail(tail, kind) {
                 let key = match &prefix {
                     Some(prefix) => format!("{prefix}::{name}"),
@@ -167,13 +235,13 @@ impl Backend {
 
     /// The class an `<x-…>` tag name names, if the project ships one.
     pub(crate) fn blade_component_fqn(&self, tag: &str) -> Option<String> {
-        self.blade_discovery().components.get(tag).cloned()
+        self.blade_discovery().blade_component(tag).cloned()
     }
 
     /// The class a `<livewire:…>` component name names, if the project
     /// ships one.
     pub(crate) fn livewire_component_fqn(&self, name: &str) -> Option<String> {
-        self.blade_discovery().livewire.get(name).cloned()
+        self.blade_discovery().livewire_component(name).cloned()
     }
 
     /// The discovery index, but only when one is already built.
@@ -220,7 +288,7 @@ impl Backend {
         discovery: &BladeDiscovery,
     ) -> Option<ComponentTarget> {
         if let Some(name) = tag.strip_prefix("livewire:") {
-            let fqn = discovery.livewire.get(name)?.clone();
+            let fqn = discovery.livewire_component(name)?.clone();
             // Livewire builds the component through the container and
             // hands the tag's attributes to `mount()`.
             let binding = self
@@ -229,7 +297,7 @@ impl Backend {
             return Some(ComponentTarget { fqn, binding });
         }
         let name = tag.strip_prefix("x-")?;
-        if let Some(fqn) = discovery.components.get(name) {
+        if let Some(fqn) = discovery.blade_component(name) {
             let binding = self
                 .component_signature(fqn, "__construct")
                 .map_or(ComponentBinding::Declare, ComponentBinding::Construct);

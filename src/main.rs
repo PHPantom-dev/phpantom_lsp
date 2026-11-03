@@ -68,6 +68,14 @@ enum Command {
         #[arg(long, default_value = "all")]
         severity: SeverityArg,
 
+        /// Only report diagnostics with this code (e.g. "unused_import"). Repeatable.
+        #[arg(long = "code", value_name = "CODE")]
+        codes: Vec<String>,
+
+        /// Leave out diagnostics with this code. Repeatable. Wins over --code.
+        #[arg(long = "exclude-code", value_name = "CODE")]
+        exclude_codes: Vec<String>,
+
         #[command(flatten)]
         project: ProjectArgs,
 
@@ -405,6 +413,8 @@ async fn async_main() {
         Some(Command::Analyze {
             paths,
             severity,
+            codes,
+            exclude_codes,
             project,
             debug,
             verbose,
@@ -422,6 +432,7 @@ async fn async_main() {
                     .map(|p| resolve_path_filter(p, 2))
                     .collect(),
                 severity_filter: severity.into(),
+                code_filter: phpantom_lsp::analyse::CodeFilter::new(codes, exclude_codes),
                 use_colour,
                 output_format,
                 debug: debug || verbose >= 2,

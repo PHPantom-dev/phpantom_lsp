@@ -1,0 +1,35 @@
+// test: a string assertion intersects with the refinements the subject already carries
+// feature: hover
+// expect_hover: $both => lowercase-string&non-falsy-string
+// expect_hover: $literal => 'foo'
+// expect: $templated = lowercase-string&non-falsy-string
+---
+<?php
+
+/** @phpstan-assert-if-true =non-falsy-string $s */
+function is_filled($s): bool { return $s !== ''; }
+
+/** @phpstan-assert-if-true lowercase-string&non-falsy-string $s */
+function is_slug($s): bool { return true; }
+
+/**
+ * @template TUuid of string
+ * @param TUuid $uuid
+ * @phpstan-assert-if-true =TUuid&lowercase-string&non-falsy-string $uuid
+ */
+function is_uuid($uuid): bool { return true; }
+
+/** @param lowercase-string $lower */
+function test(string $lower, string $s): void {
+    if (is_filled($lower)) {
+        $both = $lower;
+    }
+    $foo = 'foo';
+    if (is_slug($foo)) {
+        $literal = $foo;
+    }
+    if (is_uuid($s)) {
+        $templated = $s;
+        $<>templated;
+    }
+}

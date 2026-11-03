@@ -9,7 +9,7 @@ use super::*;
 use tower_lsp_server::gen_lsp_types::{Location, Position};
 
 use crate::references::push_location;
-use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan};
+use crate::symbol_map::{DocblockMemberRef, SelfStaticParentKind, SymbolKind, SymbolSpan};
 use crate::text_position::offset_to_position;
 use crate::util::build_fqn;
 use crate::virtual_members::laravel;
@@ -243,6 +243,7 @@ impl Backend {
                 member_name,
                 is_static,
                 is_method_call,
+                docblock_ref,
                 ..
             } => {
                 let Some(source) = self.symbol_map_source(uri, content) else {
@@ -253,12 +254,22 @@ impl Backend {
                 // so we only return references on related classes.
                 let (hierarchy, declaration_scope) = self.resolve_member_access_scopes(
                     uri,
-                    subject_text.as_str(source),
-                    *is_static,
+                    super::member_scope::AccessReceiver {
+                        subject_text: subject_text.as_str(source),
+                        is_static: *is_static,
+                        docblock_ref: *docblock_ref,
+                    },
                     span_start,
                     member_name,
                     mode,
                 );
+                // A string passed to `allows()` on something that is not a
+                // mock names no method, so there is nothing to search for;
+                // the name-only search an unresolved receiver falls back to
+                // would match every method of that name.
+                if hierarchy.is_none() && *docblock_ref == DocblockMemberRef::MockedMethod {
+                    return Vec::new();
+                }
 
                 // Constructors are not invoked through member accesses
                 // (`$obj->__construct()`); they are invoked through
@@ -418,6 +429,21 @@ impl Backend {
             SymbolKind::StringKey { kind, key, .. } => {
                 if !self.string_key_kind_enabled(*kind) {
                     return Vec::new();
+                }
+                if *kind == crate::symbol_map::StringKeyKind::TwigBlock {
+                    return self.twig_block_references(uri, Some(span_start as usize), key);
+                }
+                if *kind == crate::symbol_map::StringKeyKind::TwigVariable
+                    && self.is_twig_template_uri(uri)
+                {
+                    return self.twig_variable_references(uri, Some(span_start as usize), key);
+                }
+                if *kind == crate::symbol_map::StringKeyKind::WordPressHook {
+                    return self.wordpress_hook_references(
+                        key,
+                        include_declaration,
+                        mode == ReferenceSearchMode::Rename,
+                    );
                 }
                 // Config resources and their generic config spelling share a
                 // canonical index identity. Declaration lookup is independent

@@ -45,9 +45,9 @@
           "description": "Report a member access on a union when only some of its classes declare the member, since the access fails whenever one of the others arrives. Matches PHPStan's checkUnionTypes (level 7).",
           "default": false
         },
-        "downgrade-nullable-argument-mismatch": {
+        "possibly-empty-mismatches": {
           "type": "boolean",
-          "description": "Downgrade type_mismatch_argument to a warning when the only reason an argument's type fails to satisfy the parameter is a stray null (every non-null member of the argument's type is already compatible).",
+          "description": "Report a type_mismatch_argument, type_mismatch_return or type_mismatch_property whose only failing members are null or false, such as a string|false passed to a string parameter. Off by default, since the code only fails if the value turns out empty. Matches PHPStan's checkUnionTypes and checkNullables (levels 7 and 8).",
           "default": false
         },
         "workspace": {

@@ -16,6 +16,7 @@ use crate::symbol_map::extraction::laravel::{
     MethodReceiver, argument_takes_name_keys, argument_takes_name_list,
     facade_static_call_arg_kind, facade_static_call_array_key_kind,
     helper_function_accepts_name_list, helper_function_first_arg_kind, instance_method_arg_kind,
+    is_middleware_method,
 };
 use crate::text_position::position_to_offset;
 use crate::text_scan::{CodeOffsets, is_escaped, scan_ident_backward, skip_php_trivia};
@@ -527,8 +528,13 @@ pub(super) fn receiver_chain_start(prefix: &str) -> usize {
     boundary
 }
 
+/// What a middleware string is typing: the alias or group name before any
+/// `:`, or a guard of `auth:`.
 pub(super) fn middleware_completion_context(prefix: &str) -> Option<(StringKeyKind, &str, usize)> {
-    let colon = prefix.find(':')?;
+    let Some(colon) = prefix.find(':') else {
+        // A class name is completed by class completion.
+        return (!prefix.contains('\\')).then_some((StringKeyKind::Middleware, prefix, 0));
+    };
     let alias = &prefix[..=colon];
     if alias != "auth:" {
         return None;
@@ -762,7 +768,9 @@ pub(super) fn detect_laravel_string_key_context_inner<'a>(
     {
         instance_call_key(&call, receiver.trim_end(), before_name)?
     } else if let Some(attr_start) = attribute_class_start(before_paren, name_start) {
-        StringKey::Whole(attribute_key(&call, attr_start)?)
+        attribute_key(&call, attr_start)?
+    } else if let Some(key) = instantiation_key(&call) {
+        key
     } else {
         StringKey::Whole(function_call_key(&call)?)
     };
@@ -842,7 +850,8 @@ enum StringKey<'a> {
     },
 }
 
-/// The middleware key a `->middleware('auth:…')` string is typing.
+/// The middleware key a `->middleware('auth:…')` string is typing, or the
+/// alias itself.
 fn middleware_key(literal: &str) -> Option<StringKey<'_>> {
     let (kind, prefix, start) = middleware_completion_context(literal)?;
     Some(StringKey::Middleware {
@@ -854,14 +863,28 @@ fn middleware_key(literal: &str) -> Option<StringKey<'_>> {
 
 /// A string inside a PHP attribute's arguments: `#[Config('app.name')]`,
 /// grouped attributes, and fully-qualified container attributes.
-fn attribute_key(call: &StringCall<'_, '_>, attr_start: usize) -> Option<StringKeyKind> {
-    if call.argument.shape != StringArgumentShape::Scalar {
-        return None;
-    }
+fn attribute_key<'a>(call: &StringCall<'a, '_>, attr_start: usize) -> Option<StringKey<'a>> {
     let written_class = &call.before_paren[attr_start..];
     let reference = semantic_class_reference(written_class, attr_start, call.resolved_names);
     let slot = call.argument.slot;
-    if resolve_known_class_reference(
+    if call.argument.shape != StringArgumentShape::ArrayKey
+        && slot.is_first_or_named("middleware")
+        && resolve_known_class_reference(
+            call.content,
+            reference,
+            "Illuminate\\Routing\\Attributes\\Controllers",
+            &["Middleware", "WithoutMiddleware"],
+            false,
+            call.indexed_class_exists,
+        )
+        .is_some()
+    {
+        return middleware_key(call.literal);
+    }
+    if call.argument.shape != StringArgumentShape::Scalar {
+        return None;
+    }
+    let kind = if resolve_known_class_reference(
         call.content,
         reference,
         "Illuminate\\Container\\Attributes",
@@ -891,7 +914,8 @@ fn attribute_key(call: &StringCall<'_, '_>, attr_start: usize) -> Option<StringK
         (slot == ArgumentSlot::Positional(0)).then_some(StringKeyKind::Route)
     } else {
         None
-    }
+    };
+    kind.map(StringKey::Whole)
 }
 
 /// A string passed to a static call: `Config::get('…')`,
@@ -925,7 +949,7 @@ fn static_call_key<'a>(call: &StringCall<'a, '_>, before_colons: &'a str) -> Opt
             StringKey::Whole(StringKeyKind::ConfigResource(trigger.kind)),
         );
     }
-    if call.name.eq_ignore_ascii_case("middleware")
+    if is_middleware_method(call.name)
         && slot.is_first_or_named("middleware")
         && call.argument.shape != StringArgumentShape::ArrayKey
         && is_laravel_facade_reference(call.content, reference, "Route", call.indexed_class_exists)
@@ -967,18 +991,76 @@ fn instance_call_key<'a>(
         chain_start: OnceCell::new(),
     };
     let slot = call.argument.slot;
-    if call.name.eq_ignore_ascii_case("middleware")
+    if is_middleware_method(call.name)
         && slot.is_first_or_named("middleware")
         && call.argument.shape != StringArgumentShape::ArrayKey
-        && receiver.roots_at_route()
     {
-        return middleware_key(call.literal);
+        if receiver.roots_at_route() {
+            return middleware_key(call.literal);
+        }
+        // The class `$this->middleware()` is typed into may not parse yet,
+        // so `$this` reads as a controller the way it reads as a console
+        // command.  Its guards stay with the symbol map's rule, which only
+        // reads them off a route registration.
+        if receiver.is_this() {
+            return middleware_key(call.literal).filter(|key| {
+                matches!(
+                    key,
+                    StringKey::Middleware {
+                        kind: StringKeyKind::Middleware,
+                        ..
+                    }
+                )
+            });
+        }
     }
     let ArgumentSlot::Positional(index) = slot else {
         return None;
     };
     let kind = instance_method_arg_kind(call.name, index, &receiver)?;
     call.shape_fits(&kind).then_some(StringKey::Whole(kind))
+}
+
+/// A string passed to a constructor: the `new Middleware('auth')` a
+/// controller's static `middleware()` returns.
+fn instantiation_key<'a>(call: &StringCall<'a, '_>) -> Option<StringKey<'a>> {
+    if call.argument.shape == StringArgumentShape::ArrayKey
+        || !call.argument.slot.is_first_or_named("middleware")
+    {
+        return None;
+    }
+    let bp_bytes = call.before_paren.as_bytes();
+    let mut class_start = call.name_start;
+    while class_start > 0
+        && (bp_bytes[class_start - 1].is_ascii_alphanumeric()
+            || matches!(bp_bytes[class_start - 1], b'_' | b'\\'))
+    {
+        class_start -= 1;
+    }
+    let before_class = call.before_paren[..class_start].trim_end();
+    let keyword_start = before_class.len().checked_sub(3)?;
+    if !before_class
+        .get(keyword_start..)?
+        .eq_ignore_ascii_case("new")
+        || before_class
+            .get(..keyword_start)?
+            .bytes()
+            .next_back()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        return None;
+    }
+    let written_class = &call.before_paren[class_start..];
+    let reference = semantic_class_reference(written_class, class_start, call.resolved_names);
+    resolve_known_class_reference(
+        call.content,
+        reference,
+        "Illuminate\\Routing\\Controllers",
+        &["Middleware"],
+        false,
+        call.indexed_class_exists,
+    )?;
+    middleware_key(call.literal)
 }
 
 /// A string passed to a function: `route('…')`, `config('…')`, and the

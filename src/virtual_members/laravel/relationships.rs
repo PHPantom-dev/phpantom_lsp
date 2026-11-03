@@ -15,7 +15,9 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ELOQUENT_COLLECTION_FQN};
 use crate::util::{short_name, strip_fqn_prefix};
 
+use super::config_values::ConfigNode;
 use super::helpers::{camel_to_snake, snake_to_camel};
+use super::method_refinement::refine_methods;
 
 /// Eloquent query methods whose constraint callback depends on a relation
 /// argument. Argument binding locates each method's relation and callback,
@@ -410,6 +412,105 @@ pub fn infer_relationship_from_body(body_text: &str) -> Option<PhpType> {
     }
 
     None
+}
+
+/// The config key a relationship method's body reads its related model
+/// from, as in `$this->morphToMany(config('permission.models.role'), …)`.
+///
+/// Looks at the same relationship call [`infer_relationship_from_body`]
+/// does.  Returns `None` unless its first argument is a `config()` call
+/// with a string literal key and no default.
+pub(crate) fn config_related_model_key(body_text: &str) -> Option<&str> {
+    for &(method_name, _) in RELATIONSHIP_METHOD_FQN_MAP {
+        let needle = format!("$this->{method_name}(");
+        let Some(call_pos) = body_text.find(&needle) else {
+            continue;
+        };
+        if method_name == "morphTo" {
+            return None;
+        }
+        let first_arg = body_text[call_pos + needle.len()..].trim_start();
+        let first_arg = first_arg.strip_prefix('\\').unwrap_or(first_arg);
+        let args = first_arg.strip_prefix("config(")?.trim_start();
+        let quote = args.chars().next().filter(|c| matches!(c, '\'' | '"'))?;
+        let key_end = args[1..].find(quote)? + 1;
+        let key = &args[1..key_end];
+        let close = args[key_end + 1..].trim_start();
+        if key.is_empty() || key.contains(['$', '\\']) || !close.starts_with(')') {
+            return None;
+        }
+        return Some(key);
+    }
+    None
+}
+
+/// Fill in the related model of each relationship method `loaded` declares
+/// with a `config()` value as its related class, from the class the config
+/// key holds (spatie/laravel-permission's `roles()` reads
+/// `permission.models.role`).
+///
+/// Only a bare relationship return type is refined; one that already names
+/// its related model keeps it.  A key whose value could be overridden at
+/// runtime (an `env()` call, a computed value) is left alone, so the
+/// relation keeps the base `Model`.  Returns `loaded` itself when nothing
+/// changed.
+pub(crate) fn patch_config_related_models(
+    backend: &crate::Backend,
+    loaded: Arc<ClassInfo>,
+) -> Arc<ClassInfo> {
+    let Some(laravel) = loaded.laravel() else {
+        return loaded;
+    };
+    if laravel.config_related_models.is_empty() {
+        return loaded;
+    }
+    let mut related: Vec<(crate::atom::Atom, PhpType)> = Vec::new();
+    for (method, key) in &laravel.config_related_models {
+        let classes = backend
+            .with_config_node(key, |node| match node {
+                ConfigNode::Leaf(value) => Some(value.as_classes()),
+                ConfigNode::Array(_) | ConfigNode::List(_) => None,
+            })
+            .flatten();
+        let Some((classes, false)) = classes else {
+            continue;
+        };
+        let mut members: Vec<PhpType> = classes
+            .iter()
+            .map(|class| PhpType::named(atom(strip_fqn_prefix(class))))
+            .collect();
+        let model = match members.len() {
+            0 => continue,
+            1 => members.pop().unwrap_or_else(eloquent_model_type),
+            _ => PhpType::union(members),
+        };
+        related.push((*method, model));
+    }
+    if related.is_empty() {
+        return loaded;
+    }
+    refine_methods(
+        loaded,
+        |name| related.iter().any(|(method, _)| method.as_str() == name),
+        |method| {
+            let Some(model) = related
+                .iter()
+                .find(|(name, _)| *name == method.name)
+                .map(|(_, model)| model)
+            else {
+                return false;
+            };
+            let Some(TypeKind::Named(relation)) = method.return_type.as_ref().map(PhpType::kind)
+            else {
+                return false;
+            };
+            if !is_inferable_relationship_short_name(short_name(relation)) {
+                return false;
+            }
+            method.return_type = Some(PhpType::generic(relation, vec![model.clone()]));
+            true
+        },
+    )
 }
 
 /// Extract a class name from the first `X::class` argument in a

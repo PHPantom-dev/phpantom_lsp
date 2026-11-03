@@ -17,7 +17,7 @@ class StoreUserRequest extends FormRequest {
     }
 }
 ";
-    let rules = rules_from_class_source(content, "StoreUserRequest");
+    let rules = rules_from_class_source(content, "App\\Http\\Requests\\StoreUserRequest");
     assert_eq!(keys(&rules), vec!["name", "age"]);
     assert_eq!(rules.entries[0].rules, "required|string|max:255");
     assert_eq!(rules.entries[1].rules, "nullable|integer");
@@ -48,7 +48,7 @@ trait HasPostRules {
     }
 }
 ";
-    let rules = rules_from_class_source(content, "HasPostRules");
+    let rules = rules_from_class_source(content, "App\\Http\\Requests\\Concerns\\HasPostRules");
     assert_eq!(keys(&rules), vec!["headline"]);
 }
 
@@ -93,17 +93,186 @@ fn an_enum_rule_is_resolved_against_the_declaring_files_imports() {
     let content = "<?php
 namespace App\\Http\\Requests;
 use App\\Enums\\Role;
+use Illuminate\\Validation\\Rules\\Enum;
 class StoreUserRequest extends FormRequest {
     public function rules(): array {
         return ['role' => ['required', new Enum(Role::class)]];
     }
 }
 ";
-    let rules = rules_from_class_source(content, "StoreUserRequest");
+    let rules = rules_from_class_source(content, "App\\Http\\Requests\\StoreUserRequest");
     assert_eq!(
         rules.entries[0].enum_class.as_deref(),
         Some("App\\Enums\\Role")
     );
+}
+
+#[test]
+fn enum_factories_and_targets_resolve_from_the_original_source_range() {
+    let array = r"['role' => [Checks::enum(type: Role::class)->only([])], 'status' => new EnumRule(type: State::class)]";
+    let content = format!(
+        r"<?php
+namespace Requests {{
+    use Illuminate\Validation\{{Rule as Checks, Rules\Enum as EnumRule}};
+    use Domain\{{Role, Status as State}};
+    $rules = {array};
+}}
+namespace Caller {{ use Other\Role; }}
+"
+    );
+    let start = content.find(array).unwrap();
+    let rules = rules_from_source_range(&content, start, start + array.len()).unwrap();
+    assert_eq!(rules.entries[0].enum_class.as_deref(), Some("Domain\\Role"));
+    assert_eq!(
+        rules.entries[1].enum_class.as_deref(),
+        Some("Domain\\Status")
+    );
+    assert_eq!(
+        &content[rules.entries[0].key_start..rules.entries[0].key_start + 4],
+        "role"
+    );
+    assert_eq!(
+        &content[rules.entries[1].key_start..rules.entries[1].key_start + 6],
+        "status"
+    );
+}
+
+#[test]
+fn unrelated_enum_factories_do_not_supply_enum_types() {
+    let array = r"['a' => Rule::enum(Role::class), 'b' => new Enum(Role::class), 'c' => \App\Rule::enum(Role::class), 'd' => new \App\Enum(Role::class)]";
+    for imports in ["", "use App\\Rule; use App\\Enum;"] {
+        let content = format!("<?php namespace App; {imports} $rules = {array};");
+        let start = content.find(array).unwrap();
+        let rules = rules_from_source_range(&content, start, start + array.len()).unwrap();
+        assert!(rules.entries.iter().all(|entry| entry.enum_class.is_none()));
+    }
+}
+
+#[test]
+fn enum_argument_context_uses_its_namespace_block_and_global_imports() {
+    let content = r"<?php
+namespace First {
+    use Illuminate\Validation\Rule as Checks;
+    use Domain\FirstRole as Role;
+    function first() {}
+}
+namespace Second {
+    use Illuminate\Validation\Rule as Checks;
+    function second() {}
+}
+namespace {
+    use Illuminate\Validation\Rule as Checks;
+    function global_call() {}
+}
+";
+    for (site, expected) in [
+        ("function first", "Domain\\FirstRole"),
+        ("function second", "Second\\Role"),
+        ("function global_call", "Role"),
+    ] {
+        let rules = rules_from_array_text_in_context(
+            "['role' => Checks::enum(Role::class)]",
+            content,
+            content.find(site).unwrap() as u32,
+        )
+        .unwrap();
+        assert_eq!(rules.entries[0].enum_class.as_deref(), Some(expected));
+    }
+    let global = r"<?php use Illuminate\Validation\Rule as Checks;";
+    let rules = rules_from_array_text_in_context(
+        "['role' => Checks::enum(Role::class)]",
+        global,
+        global.len() as u32,
+    )
+    .unwrap();
+    assert_eq!(rules.entries[0].enum_class.as_deref(), Some("Role"));
+    let content = r"<?php namespace First; use Illuminate\Validation\Rule as Checks; namespace Second; use Illuminate\Validation\Rule as Checks;";
+    let rules = rules_from_array_text_in_context(
+        "['role' => Checks::enum(Role::class)]",
+        content,
+        content.len() as u32,
+    )
+    .unwrap();
+    assert_eq!(rules.entries[0].enum_class.as_deref(), Some("Second\\Role"));
+}
+
+#[test]
+fn source_range_rules_accept_legacy_arrays_and_reject_nonarrays() {
+    let array =
+        r"array('role' => (new \Illuminate\Validation\Rules\Enum(\Domain\Role::class))?->only([]))";
+    let content = format!("<?php $rules = {array};");
+    let start = content.find(array).unwrap();
+    let rules = rules_from_source_range(&content, start, start + array.len()).unwrap();
+    assert_eq!(rules.entries[0].enum_class.as_deref(), Some("Domain\\Role"));
+    assert!(rules_from_source_range(&content, start, start).is_none());
+    assert!(rules_from_source_range(&content, 0, content.len() + 1).is_none());
+    assert!(rules_from_source_range(&content, 0, content.len()).is_none());
+    assert!(rules_from_source_range(&content, start + 1, start + array.len()).is_none());
+}
+
+#[test]
+fn source_range_rules_keep_composed_and_parenthesized_enum_declarations() {
+    for expression in [
+        "array_merge(['role' => Checks::enum(Role::class)], ['name' => 'required'])",
+        "(array_merge(['role' => Checks::enum(Role::class)], ['name' => 'required']))",
+        "(['role' => Checks::enum(Role::class), 'name' => 'required'])",
+    ] {
+        let content = format!(
+            r"<?php namespace App;
+use Illuminate\Validation\Rule as Checks;
+use Domain\Role;
+$rules = {expression};
+"
+        );
+        let start = content.find(expression).unwrap();
+        let rules = rules_from_source_range(&content, start, start + expression.len()).unwrap();
+        assert_eq!(keys(&rules), ["role", "name"]);
+        assert_eq!(rules.entries[0].enum_class.as_deref(), Some("Domain\\Role"));
+        assert_eq!(
+            &content[rules.entries[0].key_start..rules.entries[0].key_start + 4],
+            "role"
+        );
+    }
+}
+
+#[test]
+fn request_rules_select_the_exact_declaration_namespace() {
+    let source = r"<?php
+namespace First {
+    use Illuminate\Validation\Rule;
+    class Request { public function rules() { return ['role' => Rule::enum(Role::class)]; } }
+}
+namespace Second {
+    use Illuminate\Validation\Rule;
+    class Request { public function rules() { return ['role' => Rule::enum(Role::class)]; } }
+}
+namespace {
+    class Request { public function rules() { return ['name' => 'string']; } }
+}
+";
+    let first = rules_from_class_source(source, "First\\Request");
+    let second = rules_from_class_source(source, "Second\\Request");
+    assert_eq!(first.entries[0].enum_class.as_deref(), Some("First\\Role"));
+    assert_eq!(
+        second.entries[0].enum_class.as_deref(),
+        Some("Second\\Role")
+    );
+    assert_eq!(keys(&rules_from_class_source(source, "Request")), ["name"]);
+}
+
+#[test]
+fn inline_rules_resolve_aliased_enum_factories_in_their_own_file() {
+    let source = r"<?php
+namespace App;
+use Illuminate\Validation\Rule as Checks;
+use Domain\Role;
+function validate_input($request) {
+    $request->validate(['role' => Checks::enum(Role::class)]);
+    $request->input('role');
+}
+";
+    let rules = inline_validate_rules(source, source.find("$request->input").unwrap()).unwrap();
+    assert_eq!(rules.entries[0].enum_class.as_deref(), Some("Domain\\Role"));
 }
 
 #[test]
@@ -352,6 +521,7 @@ fn rule(key: &str) -> ValidationRule {
         key: key.to_string(),
         rules: "required".to_string(),
         key_start: 0,
+        key_end: key.len(),
         origin: None,
         enum_class: None,
     }
@@ -486,4 +656,91 @@ fn the_pre_filter_admits_every_recognised_spelling() {
     assert!(mentions_validation("$request->validate([]);"));
     assert!(mentions_validation("$this->validateWithBag('b', []);"));
     assert!(mentions_validation("Validator::make($data, []);"));
+}
+
+#[test]
+fn legacy_rule_arrays_resolve_enum_imports_and_keep_source_offsets() {
+    let content = r#"<?php
+namespace App;
+use Illuminate\Validation\Rule as Rules;
+use App\Enums\State;
+$request->validate(array('state' => array('required', Rules::enum(State::class))));
+"#;
+    let start = content.find("array('state'").unwrap();
+    let end = content.rfind(");").unwrap();
+    let rules = rules_from_source_range(content, start, end).unwrap();
+    assert_eq!(keys(&rules), ["state"]);
+    assert_eq!(
+        rules.entries[0].enum_class.as_deref(),
+        Some("App\\Enums\\State")
+    );
+    assert_eq!(
+        rules.entries[0].key_start,
+        content.find("'state'").unwrap() + 1
+    );
+}
+
+#[test]
+fn qualified_array_merge_keeps_enum_metadata_and_field_origins() {
+    let content = r#"<?php
+namespace App;
+use Illuminate\Validation\Rule;
+$request->validate(\array_merge(['name' => 'required'], ['state' => [Rule::enum(State::class), 'in:active']]));
+"#;
+    let start = content.find("\\array_merge").unwrap();
+    let end = content.rfind(");").unwrap();
+    let rules = rules_from_source_range(content, start, end).unwrap();
+    assert!(rules.keys_complete);
+    assert_eq!(keys(&rules), ["name", "state"]);
+    assert_eq!(rules.entries[1].enum_class.as_deref(), Some("App\\State"));
+    assert_eq!(
+        rules.entries[1].key_start,
+        content.find("'state'").unwrap() + 1
+    );
+}
+
+#[test]
+fn decoded_rule_keys_keep_source_spans_and_keyed_enum_values() {
+    let content = r#"<?php
+namespace App;
+use Illuminate\Validation\Rule as Rules;
+use Domain\Role;
+$rules = ["\u{72}ole" => ['enum' => Rules::enum(Role::class), 'presence' => "\x72equired"]];
+"#;
+    let start = content.find("[\"").unwrap();
+    let end = content.rfind(']').unwrap() + 1;
+    let actual =
+        crate::parser::with_parsed_program(content, "decoded_validation_rules", |program, _| {
+            Some((
+                rules_from_program_range(program, content, start, end)?,
+                rules_from_program_range(program, content, end, start).is_none(),
+                rules_from_program_range(program, content, start, content.len() + 1).is_none(),
+            ))
+        });
+    let (rules, rejects_reversed, rejects_out_of_bounds) =
+        actual.expect("rules parsed without panicking");
+    assert_eq!(keys(&rules), ["role"]);
+    let field = &rules.entries[0];
+    assert_eq!(&content[field.key_start..field.key_end], r"\u{72}ole");
+    assert_eq!(field.rules, "Rules::enum(Role::class)|required");
+    assert_eq!(field.enum_class.as_deref(), Some("Domain\\Role"));
+    assert!(rejects_reversed);
+    assert!(rejects_out_of_bounds);
+}
+
+#[test]
+fn equivalent_escaped_field_keys_keep_the_last_rules() {
+    let source = r#"<?php
+use Illuminate\Validation\Rule;
+$rules = ['role' => Rule::enum(FirstRole::class), "\x72ole" => ['named' => Rule::enum(FinalRole::class)]];
+"#;
+    let start = source.find("['role'").unwrap();
+    let end = source.rfind(']').unwrap() + 1;
+    let rules = rules_from_source_range(source, start, end).unwrap();
+    assert_eq!(keys(&rules), ["role"]);
+    assert_eq!(rules.entries[0].enum_class.as_deref(), Some("FinalRole"));
+    assert_eq!(
+        &source[rules.entries[0].key_start..rules.entries[0].key_end],
+        r"\x72ole"
+    );
 }

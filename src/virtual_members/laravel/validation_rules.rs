@@ -18,22 +18,25 @@
 //! nothing, which degrades to "fewer suggestions" rather than to wrong
 //! ones.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
+use mago_names::resolver::NameResolver;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
+use crate::names::OwnedResolvedNames;
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH};
 use crate::util::short_name;
 
 use super::expr_walker::{beats_best, enclosing_body, walk_before_cursor};
-use super::helpers::extract_string_literal;
+use super::helpers::resolved_string_literal;
 
 /// The FQN of Laravel's base form-request class.
 pub(crate) const FORM_REQUEST_FQN: &str = "Illuminate\\Foundation\\Http\\FormRequest";
@@ -44,7 +47,7 @@ pub(crate) const VALIDATED_INPUT_FQN: &str = "Illuminate\\Support\\ValidatedInpu
 /// One field entry of a validation rules array.
 #[derive(Debug, Clone)]
 pub(crate) struct ValidationRule {
-    /// The field name exactly as written, e.g. `"name"` or `"items.*.id"`.
+    /// The field's runtime name, with PHP string escapes decoded.
     pub key: String,
     /// The rule specification rendered for display, e.g.
     /// `"required|string|max:255"`.  Empty when the value is not literal.
@@ -53,6 +56,8 @@ pub(crate) struct ValidationRule {
     /// in the file named by [`Self::origin`], or by the owning
     /// [`RulesSource`] when that is `None`.
     pub key_start: usize,
+    /// End of the key's source content, just before the closing quote.
+    pub key_end: usize,
     /// The file this entry was declared in, when it was merged in from a
     /// `parent::rules()` call rather than written in the array the owning
     /// [`ResolvedRules`] names.
@@ -60,8 +65,7 @@ pub(crate) struct ValidationRule {
     /// The enum class named by an enum rule (`new Enum(Role::class)`,
     /// `Rule::enum(Role::class)`), or `None` when the entry has no such rule.
     ///
-    /// Stored exactly as written until [`resolve_enum_class_names`] resolves
-    /// it against the imports of the file that declares the rules array.
+    /// Resolved once against the imports and namespace where the rule was written.
     pub enum_class: Option<String>,
 }
 
@@ -155,19 +159,27 @@ pub(crate) struct ResolvedRules {
 /// Unlike config files, rules arrays are flat: nesting is expressed in the
 /// key itself (`items.*.id`), so only the outermost level is walked.
 /// `array_merge(parent::rules(), [...])` is followed into each argument.
-fn collect_rules_from_expr(expr: &Expression<'_>, content: &str, out: &mut RulesArray) {
+fn collect_rules_from_expr(
+    expr: &Expression<'_>,
+    content: &str,
+    names: &EnumNames<'_, '_>,
+    out: &mut RulesArray,
+) {
     match expr {
-        Expression::Array(arr) => collect_rules_from_elements(arr.elements.iter(), content, out),
-        Expression::LegacyArray(arr) => {
-            collect_rules_from_elements(arr.elements.iter(), content, out)
+        Expression::Array(arr) => {
+            collect_rules_from_elements(arr.elements.iter(), content, names, out)
         }
-        Expression::Parenthesized(p) => collect_rules_from_expr(p.expression, content, out),
+        Expression::LegacyArray(arr) => {
+            collect_rules_from_elements(arr.elements.iter(), content, names, out)
+        }
+        Expression::Parenthesized(p) => collect_rules_from_expr(p.expression, content, names, out),
         Expression::Call(Call::Function(fc)) => {
             if let Expression::Identifier(ident) = fc.function
-                && ident.value().eq_ignore_ascii_case(b"array_merge")
+                && (ident.value().eq_ignore_ascii_case(b"array_merge")
+                    || ident.value().eq_ignore_ascii_case(b"\\array_merge"))
             {
                 for arg in fc.argument_list.arguments.iter() {
-                    collect_rules_from_expr(arg.value(), content, out);
+                    collect_rules_from_expr(arg.value(), content, names, out);
                 }
             } else {
                 // `rules()` returning some other call's result — the keys it
@@ -200,6 +212,7 @@ fn is_parent_rules_call(call: &StaticMethodCall<'_>) -> bool {
 fn collect_rules_from_elements<'a>(
     elements: impl Iterator<Item = &'a ArrayElement<'a>>,
     content: &str,
+    names: &EnumNames<'_, '_>,
     out: &mut RulesArray,
 ) {
     for element in elements {
@@ -209,7 +222,7 @@ fn collect_rules_from_elements<'a>(
             out.keys_complete = false;
             continue;
         };
-        let Some((key, key_start, _)) = extract_string_literal(kv.key, content) else {
+        let Some((key, key_start, key_end)) = resolved_string_literal(kv.key, content) else {
             out.keys_complete = false;
             continue;
         };
@@ -221,8 +234,9 @@ fn collect_rules_from_elements<'a>(
             key: key.to_string(),
             rules: render_rule_value(kv.value, content),
             key_start,
+            key_end,
             origin: None,
-            enum_class: enum_rule_class(kv.value),
+            enum_class: enum_rule_class(kv.value, names),
         });
     }
 }
@@ -235,7 +249,7 @@ fn collect_rules_from_elements<'a>(
 /// something useful.
 fn render_rule_value(expr: &Expression<'_>, content: &str) -> String {
     match expr {
-        Expression::Literal(literal::Literal::String(_)) => extract_string_literal(expr, content)
+        Expression::Literal(literal::Literal::String(_)) => resolved_string_literal(expr, content)
             .map_or_else(String::new, |(v, _, _)| v.to_string()),
         Expression::Array(arr) => render_rule_list(arr.elements.iter(), content),
         Expression::LegacyArray(arr) => render_rule_list(arr.elements.iter(), content),
@@ -250,6 +264,7 @@ fn render_rule_list<'a>(
     let parts: Vec<String> = elements
         .filter_map(|element| match element {
             ArrayElement::Value(v) => Some(render_rule_value(v.value, content)),
+            ArrayElement::KeyValue(v) => Some(render_rule_value(v.value, content)),
             _ => None,
         })
         .filter(|p| !p.is_empty())
@@ -259,7 +274,7 @@ fn render_rule_list<'a>(
 
 // ─── Enum rules ─────────────────────────────────────────────────────────────
 
-/// The enum class an enum rule names, exactly as written in the source.
+/// The resolved enum class an enum rule names in its declaring file.
 ///
 /// Laravel writes an enum rule as an object — `new Enum(Role::class)` or its
 /// `Rule::enum(Role::class)` shorthand — so the class is only reachable
@@ -270,19 +285,31 @@ fn render_rule_list<'a>(
 ///
 /// Returns `None` for every other rule value, and for a class expression
 /// that names no class of its own (`self::class`, a variable).
-fn enum_rule_class(expr: &Expression<'_>) -> Option<String> {
+fn enum_rule_class(expr: &Expression<'_>, names: &EnumNames<'_, '_>) -> Option<String> {
     match expr {
-        Expression::Array(arr) => arr.elements.iter().find_map(element_enum_class),
-        Expression::LegacyArray(arr) => arr.elements.iter().find_map(element_enum_class),
-        Expression::Parenthesized(p) => enum_rule_class(p.expression),
+        Expression::Array(arr) => arr
+            .elements
+            .iter()
+            .find_map(|element| element_enum_class(element, names)),
+        Expression::LegacyArray(arr) => arr
+            .elements
+            .iter()
+            .find_map(|element| element_enum_class(element, names)),
+        Expression::Parenthesized(p) => enum_rule_class(p.expression, names),
         Expression::Instantiation(inst) => {
             let Expression::Identifier(class) = inst.class else {
                 return None;
             };
-            if !short_name(bytes_to_str(class.value())).eq_ignore_ascii_case("Enum") {
+            if !names
+                .resolve(class)?
+                .eq_ignore_ascii_case("Illuminate\\Validation\\Rules\\Enum")
+            {
                 return None;
             }
-            class_const_name(argument_at(inst.argument_list.as_ref()?, 0)?)
+            class_const_name(
+                crate::call_args::first_param_arg(inst.argument_list.as_ref()?, "type")?.value(),
+                names,
+            )
         }
         Expression::Call(Call::StaticMethod(call)) => {
             let ClassLikeMemberSelector::Identifier(method) = &call.method else {
@@ -294,20 +321,27 @@ fn enum_rule_class(expr: &Expression<'_>) -> Option<String> {
             let Expression::Identifier(class) = call.class else {
                 return None;
             };
-            if !short_name(bytes_to_str(class.value())).eq_ignore_ascii_case("Rule") {
+            if !names
+                .resolve(class)?
+                .eq_ignore_ascii_case("Illuminate\\Validation\\Rule")
+            {
                 return None;
             }
-            class_const_name(argument_at(&call.argument_list, 0)?)
+            class_const_name(
+                crate::call_args::first_param_arg(&call.argument_list, "type")?.value(),
+                names,
+            )
         }
-        Expression::Call(Call::Method(mc)) => enum_rule_class(mc.object),
-        Expression::Call(Call::NullSafeMethod(mc)) => enum_rule_class(mc.object),
+        Expression::Call(Call::Method(mc)) => enum_rule_class(mc.object, names),
+        Expression::Call(Call::NullSafeMethod(mc)) => enum_rule_class(mc.object, names),
         _ => None,
     }
 }
 
-fn element_enum_class(element: &ArrayElement<'_>) -> Option<String> {
+fn element_enum_class(element: &ArrayElement<'_>, names: &EnumNames<'_, '_>) -> Option<String> {
     match element {
-        ArrayElement::Value(v) => enum_rule_class(v.value),
+        ArrayElement::Value(v) => enum_rule_class(v.value, names),
+        ArrayElement::KeyValue(v) => enum_rule_class(v.value, names),
         _ => None,
     }
 }
@@ -316,49 +350,55 @@ fn element_enum_class(element: &ArrayElement<'_>) -> Option<String> {
 ///
 /// `self::class` and friends are relative to a declaration site the rules
 /// array does not carry, so they name nothing here.
-fn class_const_name(expr: &Expression<'_>) -> Option<String> {
-    crate::parser::class_fetch_identifier(expr).map(|class| bytes_to_str(class.value()).to_string())
+fn class_const_name(expr: &Expression<'_>, names: &EnumNames<'_, '_>) -> Option<String> {
+    names.resolve(crate::parser::class_fetch_identifier(expr)?)
 }
 
-/// Resolve the enum class names in `rules` against the imports of the file
-/// `program` was parsed from.
-///
-/// `use App\Enums\Role; … new Enum(Role::class)` names `App\Enums\Role`, and
-/// only the declaring file's `use` statements and namespace say so — the
-/// class index cannot, since a bare short name matches nothing there.
-///
-/// Building the import table walks the file's top-level statements, so it is
-/// paid only when an enum rule was actually found.
-fn resolve_enum_names_in_program(rules: &mut RulesArray, program: &Program<'_>) {
-    if !rules.entries.iter().any(|e| e.enum_class.is_some()) {
-        return;
-    }
+/// Names from an original file, or from the block a separately parsed argument
+/// was written in. Plain string rules never construct a resolved-name map.
+enum EnumNames<'ast, 'arena> {
+    Program {
+        program: &'ast Program<'arena>,
+        names: OnceCell<OwnedResolvedNames>,
+    },
+    Argument {
+        content: &'ast str,
+        offset: u32,
+        names: OnceCell<(HashMap<String, String>, Option<String>)>,
+    },
+}
 
-    let mut use_map = HashMap::new();
-    Backend::extract_use_statements_from_statements(program.statements.iter(), &mut use_map, None);
-    let namespace = Backend::extract_namespace_from_statements(program.statements.iter());
-
-    for entry in &mut rules.entries {
-        if let Some(name) = &entry.enum_class {
-            entry.enum_class = Some(crate::names::resolve_to_fqn(name, &use_map, &namespace));
+impl<'ast, 'arena> EnumNames<'ast, 'arena> {
+    fn for_program(program: &'ast Program<'arena>) -> Self {
+        Self::Program {
+            program,
+            names: OnceCell::new(),
         }
     }
-}
 
-/// Resolve the enum class names in `rules` against the imports of `content`.
-///
-/// Rules recovered from a file are resolved during the parse that recovered
-/// them; this is for the one array that is parsed on its own — the argument
-/// text of a `validate([…])` call, whose imports are the calling file's.
-/// Nothing is parsed unless an enum rule was found, and the parse then goes
-/// through the shared cache, which the calling file is normally already in.
-pub(crate) fn resolve_enum_class_names(rules: &mut RulesArray, content: &str) {
-    if !rules.entries.iter().any(|e| e.enum_class.is_some()) {
-        return;
+    fn resolve(&self, identifier: &Identifier<'_>) -> Option<String> {
+        match self {
+            Self::Program { program, names } => names
+                .get_or_init(|| {
+                    let arena = LocalArena::new();
+                    OwnedResolvedNames::from_resolved(&NameResolver::new(&arena).resolve(program))
+                })
+                .get(identifier.span().start.offset)
+                .map(str::to_string),
+            Self::Argument {
+                content,
+                offset,
+                names,
+            } => {
+                let (imports, namespace) = names.get_or_init(|| argument_imports(content, *offset));
+                Some(crate::names::resolve_to_fqn(
+                    bytes_to_str(identifier.value()),
+                    imports,
+                    namespace,
+                ))
+            }
+        }
     }
-    crate::parser::with_parsed_program(content, "resolve_enum_class_names", |program, _| {
-        resolve_enum_names_in_program(rules, program);
-    });
 }
 
 fn source_text<'c>(expr: &Expression<'_>, content: &'c str) -> &'c str {
@@ -433,6 +473,7 @@ fn inline_validate_rules_in(
     cursor: u32,
 ) -> Option<RulesArray> {
     let body = enclosing_body(Node::Program(program), cursor)?;
+    let names = EnumNames::for_program(program);
 
     let mut in_force: Option<RulesArray> = None;
     walk_candidate_calls(body, cursor, false, &mut |node, conditional| {
@@ -449,7 +490,7 @@ fn inline_validate_rules_in(
             return;
         }
         let mut rules = RulesArray::new();
-        collect_rules_from_expr(arg, content, &mut rules);
+        collect_rules_from_expr(arg, content, &names, &mut rules);
         rules.without_parent_rules();
         // An array whose keys could not all be read still counts, even with
         // nothing recovered from it: it says the request carries keys this pass
@@ -467,9 +508,7 @@ fn inline_validate_rules_in(
             (slot, _) => *slot = Some(rules),
         }
     });
-    let mut rules = in_force?;
-    resolve_enum_names_in_program(&mut rules, program);
-    Some(rules)
+    in_force
 }
 
 /// Hand every node that starts before `cursor` to `visit`, together with
@@ -518,21 +557,142 @@ fn introduces_control_flow_choice(node: Node<'_, '_>) -> bool {
 /// text of `$request->validate([…])`.
 ///
 /// The text is parsed standalone, so [`ValidationRule::key_start`] offsets
-/// index `array_text` rather than any file; callers that need navigable
-/// offsets must use [`inline_validate_rules`] instead.  For the same reason
-/// there are no imports to read here, so an enum rule keeps its name as
-/// written and the caller must pass the rules through
-/// [`resolve_enum_class_names`] with the surrounding file's content.
+/// index its synthetic parse rather than any file; callers that need navigable
+/// offsets must use [`rules_from_source_range`] instead. No surrounding
+/// imports or namespace are assumed.
+#[cfg(test)]
 pub(crate) fn rules_from_array_text(array_text: &str) -> Option<RulesArray> {
+    parse_array_text(array_text, None)
+}
+
+fn parse_array_text(array_text: &str, names: Option<&EnumNames<'_, '_>>) -> Option<RulesArray> {
     let source = format!("<?php return {};", array_text.trim());
     let arena = LocalArena::new();
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, source.as_bytes());
-
+    let program_names = EnumNames::for_program(program);
+    let names = names.unwrap_or(&program_names);
     let mut out = RulesArray::new();
-    collect_returned_rules(Node::Program(program), &source, &mut out);
+    collect_returned_rules(Node::Program(program), &source, names, &mut out);
     out.without_parent_rules();
     (!out.is_empty()).then_some(out)
+}
+
+/// Parse a call argument with the imports and namespace in force at `offset`.
+/// Enum factories and targets are resolved before the synthetic parse is dropped.
+pub(crate) fn rules_from_array_text_in_context(
+    array_text: &str,
+    content: &str,
+    offset: u32,
+) -> Option<RulesArray> {
+    parse_array_text(
+        array_text,
+        Some(&EnumNames::Argument {
+            content,
+            offset,
+            names: OnceCell::new(),
+        }),
+    )
+}
+
+fn argument_imports(content: &str, offset: u32) -> (HashMap<String, String>, Option<String>) {
+    crate::parser::with_parsed_program(content, "validation_argument_names", |program, _| {
+        let mut imports = HashMap::new();
+        let block = program.statements.iter().rev().find_map(|statement| {
+            let Statement::Namespace(namespace) = statement else {
+                return None;
+            };
+            let span = namespace.span();
+            (span.start.offset <= offset
+                && (offset <= span.end.offset
+                    || matches!(namespace.body, NamespaceBody::Implicit(_))))
+            .then_some(namespace)
+        });
+        let namespace = if let Some(block) = block {
+            Backend::extract_use_statements_from_statements(
+                block.statements().iter(),
+                &mut imports,
+                None,
+            );
+            block
+                .name
+                .as_ref()
+                .map(|name| bytes_to_str(name.value()).to_string())
+        } else {
+            Backend::extract_use_statements_from_statements(
+                program
+                    .statements
+                    .iter()
+                    .filter(|statement| !matches!(statement, Statement::Namespace(_))),
+                &mut imports,
+                None,
+            );
+            None
+        };
+        (imports, namespace)
+    })
+}
+
+/// Read an array from its original file, retaining source offsets and resolving
+/// enum names in the namespace block that contains the array.
+pub(crate) fn rules_from_source_range(
+    content: &str,
+    start: usize,
+    end: usize,
+) -> Option<RulesArray> {
+    if start >= end || content.get(start..end).is_none() {
+        return None;
+    }
+    crate::parser::with_parsed_program(content, "validation_source_rules", |program, content| {
+        rules_from_program_range(program, content, start, end)
+    })
+}
+
+/// Read rules from an already parsed source range, preserving that source's
+/// offsets. The content must be the text used to parse `program`.
+pub(crate) fn rules_from_program_range(
+    program: &Program<'_>,
+    content: &str,
+    start: usize,
+    end: usize,
+) -> Option<RulesArray> {
+    if start >= end || content.get(start..end).is_none() {
+        return None;
+    }
+    let mut out = RulesArray::new();
+    let names = EnumNames::for_program(program);
+    collect_rules_in_range(
+        Node::Program(program),
+        content,
+        start,
+        end,
+        &names,
+        &mut out,
+    );
+    out.without_parent_rules();
+    (!out.is_empty()).then_some(out)
+}
+
+fn collect_rules_in_range(
+    node: Node<'_, '_>,
+    content: &str,
+    start: usize,
+    end: usize,
+    names: &EnumNames<'_, '_>,
+    out: &mut RulesArray,
+) {
+    let span = node.span();
+    if (span.start.offset as usize) > start || (span.end.offset as usize) < end {
+        return;
+    }
+    if span.start.offset as usize == start
+        && span.end.offset as usize == end
+        && let Node::Expression(expression) = node
+    {
+        collect_rules_from_expr(expression, content, names, out);
+        return;
+    }
+    node.visit_children(|child| collect_rules_in_range(child, content, start, end, names, out));
 }
 
 /// The rules argument of `->validate([...])`, `->validate($request, [...])`,
@@ -770,7 +930,7 @@ fn form_request_rules_within(
             .then(|| backend.get_file_content_arc(&uri))
             .flatten();
         let content = other.as_deref().map_or(current_content, String::as_str);
-        let mut rules = rules_from_class_source(content, short_name(&fqn));
+        let mut rules = rules_from_class_source(content, &fqn);
         if !rules.is_empty() || rules.parent_rules_at.is_some() {
             let source = match other {
                 None => RulesSource::CurrentFile,
@@ -831,7 +991,7 @@ fn trait_rules(
             .then(|| backend.get_file_content_arc(&uri))
             .flatten();
         let content = other.as_deref().map_or(current_content, String::as_str);
-        let mut rules = rules_from_class_source(content, short_name(trait_name));
+        let mut rules = rules_from_class_source(content, trait_name);
 
         if rules.is_empty() && rules.parent_rules_at.is_none() {
             // The trait itself may compose its `rules()` from another trait.
@@ -948,14 +1108,18 @@ pub(crate) fn rules_in_scope(
     })
 }
 
-/// Parse the array returned by `class_name`'s `rules()` method.
+/// Parse the array returned by the exact class FQN's `rules()` method.
 pub(crate) fn rules_from_class_source(content: &str, class_name: &str) -> RulesArray {
     crate::parser::with_parsed_program(content, "rules_from_class_source", |program, content| {
         let mut out = RulesArray::new();
-        collect_rules_method(Node::Program(program), class_name, content, &mut out);
-        // An enum rule names its class in this file's terms, and this file is
-        // already parsed — resolving here saves the caller a second pass over it.
-        resolve_enum_names_in_program(&mut out, program);
+        let names = EnumNames::for_program(program);
+        collect_rules_method(
+            Node::Program(program),
+            class_name,
+            content,
+            &names,
+            &mut out,
+        );
         Some(out)
     })
     // A parse that failed outright read no keys, not all of them.
@@ -965,7 +1129,27 @@ pub(crate) fn rules_from_class_source(content: &str, class_name: &str) -> RulesA
     })
 }
 
-fn collect_rules_method(node: Node<'_, '_>, class_name: &str, content: &str, out: &mut RulesArray) {
+fn collect_rules_method(
+    node: Node<'_, '_>,
+    class_name: &str,
+    content: &str,
+    names: &EnumNames<'_, '_>,
+    out: &mut RulesArray,
+) {
+    if let Node::Namespace(namespace) = node {
+        let source_namespace = namespace
+            .name
+            .as_ref()
+            .map_or("", |name| bytes_to_str(name.value()));
+        let (requested_namespace, short_name) =
+            class_name.rsplit_once('\\').unwrap_or(("", class_name));
+        if source_namespace.eq_ignore_ascii_case(requested_namespace) {
+            node.visit_children(|child| {
+                collect_rules_method(child, short_name, content, names, out)
+            });
+        }
+        return;
+    }
     // A trait declares `rules()` the same way a class does, and a
     // `FormRequest` is free to get its method from one.
     let declaration = match node {
@@ -982,22 +1166,27 @@ fn collect_rules_method(node: Node<'_, '_>, class_name: &str, content: &str, out
                 && bytes_to_str(method.name.value).eq_ignore_ascii_case("rules")
                 && let MethodBody::Concrete(block) = &method.body
             {
-                collect_returned_rules(Node::Block(block), content, out);
+                collect_returned_rules(Node::Block(block), content, names, out);
             }
         }
         return;
     }
-    node.visit_children(|child| collect_rules_method(child, class_name, content, out));
+    node.visit_children(|child| collect_rules_method(child, class_name, content, names, out));
 }
 
-fn collect_returned_rules(node: Node<'_, '_>, content: &str, out: &mut RulesArray) {
+fn collect_returned_rules(
+    node: Node<'_, '_>,
+    content: &str,
+    names: &EnumNames<'_, '_>,
+    out: &mut RulesArray,
+) {
     if let Node::Return(ret) = node {
         if let Some(value) = ret.value {
-            collect_rules_from_expr(value, content, out);
+            collect_rules_from_expr(value, content, names, out);
         }
         return;
     }
-    node.visit_children(|child| collect_returned_rules(child, content, out));
+    node.visit_children(|child| collect_returned_rules(child, content, names, out));
 }
 
 // ─── Candidate keys ─────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
-//! Unbalanced `<x-…>` / `<livewire:…>` component tags.
+//! Unbalanced `<x-…>` / `<livewire:…>` component tags, and tags that name
+//! no component at all.
 //!
 //! A component tag's body is a block the same way a directive's is:
 //! `<x-alert>`…`</x-alert>` compiles independently of whatever closes it,
@@ -10,11 +11,16 @@
 //! with a stack of open tags the same way [`crate::blade::balance`] walks
 //! the directive stream; this turns what it finds into reports anchored
 //! on the offending tag in the Blade source.
+//!
+//! A tag that pairs up fine can still name nothing (`<x-buttons.bakc />`),
+//! which Laravel only finds out about when the template compiles.
+//! [`crate::blade::unknown_components`] decides which names provably
+//! resolve to no class and no template.
 
-use tower_lsp_server::gen_lsp_types::Diagnostic;
+use tower_lsp_server::gen_lsp_types::{Diagnostic, DiagnosticSeverity};
 
 use crate::Backend;
-use crate::blade::component_tags::{TagImbalance, TagKind, tag_imbalances};
+use crate::blade::component_tags::{TagImbalance, TagKind, tag_imbalances, tag_spans};
 
 use super::blade_imbalance::{BlockImbalance, report_block_imbalances};
 
@@ -24,6 +30,25 @@ const MISMATCHED_CODE: &str = "mismatched_blade_component_tag";
 const UNEXPECTED_CODE: &str = "unexpected_blade_component_tag";
 /// A tag the template never closes.
 const UNCLOSED_CODE: &str = "unclosed_blade_component_tag";
+/// An `<x-…>` tag no class or template answers to.
+pub(crate) const UNKNOWN_BLADE_CODE: &str = "unknown_blade_component";
+/// A `<livewire:…>` tag no component answers to.
+pub(crate) const UNKNOWN_LIVEWIRE_CODE: &str = "unknown_livewire_component";
+
+/// The code and message reported for a `kind` tag named `name` that names
+/// nothing.
+pub(crate) fn unknown_component_report(kind: TagKind, name: &str) -> (&'static str, String) {
+    match kind {
+        TagKind::Blade => (
+            UNKNOWN_BLADE_CODE,
+            format!("Unknown Blade component: '{name}'"),
+        ),
+        TagKind::Livewire => (
+            UNKNOWN_LIVEWIRE_CODE,
+            format!("Unknown Livewire component: '{name}'"),
+        ),
+    }
+}
 
 /// A tag's opening or closing spelling, for messages: `<x-alert>` /
 /// `</x-alert>`, `<livewire:counter>` / `</livewire:counter>`.
@@ -110,5 +135,45 @@ impl Backend {
         };
 
         report_block_imbalances(&source, tag_imbalances(&source), out);
+    }
+
+    /// Report the component tags of the template at `uri` that name no
+    /// component the project has.
+    ///
+    /// Each occurrence is reported on the tag's name, so every misspelling
+    /// is visible where it is written, and a closing tag (which repeats the
+    /// name) is left to the opening tag's report.
+    pub(super) fn collect_blade_unknown_component_diagnostics(
+        &self,
+        uri: &str,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        if !self.is_blade_file(uri) {
+            return;
+        }
+        let Some(source) = self.get_file_content_arc(uri) else {
+            return;
+        };
+        let tags = tag_spans(&source);
+        if tags.is_empty() {
+            return;
+        }
+        let index = self.component_index(tags.iter().any(|tag| tag.kind == TagKind::Livewire));
+        for tag in tags {
+            if !index.is_unknown(self, tag.kind, &tag.name) {
+                continue;
+            }
+            let (code, message) = unknown_component_report(tag.kind, &tag.name);
+            out.push(super::helpers::make_diagnostic(
+                crate::text_position::byte_range_to_lsp_range(
+                    &source,
+                    tag.name_span.start,
+                    tag.name_span.end,
+                ),
+                DiagnosticSeverity::Warning,
+                code,
+                message,
+            ));
+        }
     }
 }

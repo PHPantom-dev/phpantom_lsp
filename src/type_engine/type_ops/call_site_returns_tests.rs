@@ -30,7 +30,7 @@ fn narrow(text_args: &str) -> Option<String> {
         "json_encode",
         &params(&["$value", "$flags", "$depth"]),
         text_args,
-        &string_or_false(),
+        Some(&string_or_false()),
         None,
     )
     .map(|ty| ty.to_string())
@@ -57,7 +57,7 @@ fn filter_var(text_args: &str) -> Option<String> {
         "filter_var",
         &params(&["$value", "$filter", "$options"]),
         text_args,
-        &PhpType::mixed(),
+        Some(&PhpType::mixed()),
         Some(&filter_resolver),
     )
     .map(|ty| ty.to_string())
@@ -78,7 +78,7 @@ fn class_implements(text_args: &str) -> Option<PhpType> {
         "class_implements",
         &params(&["$object_or_class", "$autoload"]),
         text_args,
-        &PhpType::union(vec![PhpType::array(), PhpType::false_()]),
+        Some(&PhpType::union(vec![PhpType::array(), PhpType::false_()])),
         Some(&resolver),
     )
 }
@@ -134,7 +134,7 @@ fn resolved_literal_int_argument_is_bit_tested() {
         "json_encode",
         &params(&["$value", "$flags", "$depth"]),
         "$value, self::FLAGS",
-        &string_or_false(),
+        Some(&string_or_false()),
         Some(&resolver),
     );
     assert_eq!(narrowed.map(|ty| ty.to_string()).as_deref(), Some("string"));
@@ -244,7 +244,7 @@ fn filter_input_adds_the_missing_variable_result() {
         "filter_input",
         &params(&["$type", "$var_name", "$filter", "$options"]),
         "INPUT_GET, 'id', FILTER_VALIDATE_INT",
-        &PhpType::mixed(),
+        Some(&PhpType::mixed()),
         None,
     );
     assert_eq!(ty.map(|t| t.to_string()).as_deref(), Some("int|false|null"));

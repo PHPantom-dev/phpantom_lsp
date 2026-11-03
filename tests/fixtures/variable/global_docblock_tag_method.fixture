@@ -1,0 +1,25 @@
+// test: a @global tag on a method types the global it imports, one of several
+// feature: completion
+// expect: have_posts(
+// expect_absent: get_var(
+---
+<?php
+
+class wpdb {
+    public function get_var(string $query): ?string { return null; }
+}
+
+class WP_Query {
+    public function have_posts(): bool { return false; }
+}
+
+class Loop {
+    /**
+     * @global wpdb     $wpdb
+     * @global WP_Query $wp_query Main query.
+     */
+    public function run(): void {
+        global $wpdb, $wp_query;
+        $wp_query-><>
+    }
+}

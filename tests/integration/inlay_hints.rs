@@ -1547,3 +1547,88 @@ myFunc($something);
         fresh.iter().map(hint_label).collect::<Vec<_>>()
     );
 }
+
+// ─── Toggling hint kinds ────────────────────────────────────────────────────
+
+/// A call that earns a parameter-name hint and a closure that earns a
+/// type hint, so one request shows whether each kind is on.
+const BOTH_KINDS: &str = r#"<?php
+/**
+ * @param callable(int): void $fn
+ */
+function run(callable $fn): void {}
+
+run(function ($x) {});
+"#;
+
+fn kinds_shown(hints: &[InlayHint]) -> (bool, bool) {
+    (
+        hints
+            .iter()
+            .any(|h| h.kind == Some(InlayHintKind::Parameter)),
+        hints.iter().any(|h| h.kind == Some(InlayHintKind::Type)),
+    )
+}
+
+#[tokio::test]
+async fn both_kinds_shown_by_default() {
+    let backend = create_test_backend();
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let hints = inlay_hints_for(&backend, &uri, BOTH_KINDS).await;
+    assert_eq!(kinds_shown(&hints), (true, true));
+}
+
+#[tokio::test]
+async fn config_file_turns_parameter_names_off() {
+    let backend = create_test_backend();
+    let mut config = phpantom_lsp::config::Config::default();
+    config.inlay_hints.parameter_names = Some(false);
+    backend.set_config(config);
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let hints = inlay_hints_for(&backend, &uri, BOTH_KINDS).await;
+    assert_eq!(kinds_shown(&hints), (false, true));
+}
+
+#[tokio::test]
+async fn editor_turns_closure_types_off() {
+    let backend = create_test_backend();
+    let options = phpantom_lsp::config::ClientInlayHintOptions::from_client_settings(
+        &serde_json::json!({ "phpantom": { "inlayHints": { "closureTypes": false } } }),
+    )
+    .unwrap();
+    assert!(backend.set_client_inlay_hint_options(options));
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let hints = inlay_hints_for(&backend, &uri, BOTH_KINDS).await;
+    assert_eq!(kinds_shown(&hints), (true, false));
+}
+
+#[tokio::test]
+async fn editor_default_does_not_undo_config_file() {
+    let backend = create_test_backend();
+    let mut config = phpantom_lsp::config::Config::default();
+    config.inlay_hints.closure_types = Some(false);
+    backend.set_config(config);
+    // What VS Code pushes when the user never touched the settings.
+    let options = phpantom_lsp::config::ClientInlayHintOptions {
+        parameter_names: Some(true),
+        closure_types: Some(true),
+    };
+    assert!(!backend.set_client_inlay_hint_options(options));
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let hints = inlay_hints_for(&backend, &uri, BOTH_KINDS).await;
+    assert_eq!(kinds_shown(&hints), (true, false));
+}
+
+#[tokio::test]
+async fn all_kinds_off_shows_nothing() {
+    let backend = create_test_backend();
+    let options = phpantom_lsp::config::ClientInlayHintOptions {
+        parameter_names: Some(false),
+        closure_types: Some(false),
+    };
+    assert!(backend.set_client_inlay_hint_options(options));
+    assert!(!backend.set_client_inlay_hint_options(options));
+    let uri = Uri::parse("file:///test.php").unwrap();
+    let hints = inlay_hints_for(&backend, &uri, BOTH_KINDS).await;
+    assert!(hints.is_empty(), "got {hints:?}");
+}

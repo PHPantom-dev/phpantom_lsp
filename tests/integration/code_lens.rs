@@ -1,5 +1,6 @@
 use crate::common::{
-    create_psr4_workspace, create_test_backend, open_document, open_php, references_response,
+    LARAVEL_SRC_COMPOSER, create_initialized_psr4_workspace, create_psr4_workspace,
+    create_test_backend, open_document, open_php, references_response,
 };
 use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
@@ -2281,4 +2282,307 @@ async fn a_constant_and_a_same_named_static_member_keep_their_own_counts() {
             "lens on line {line}"
         );
     }
+}
+
+// ─── Test pairing by naming convention ─────────────────────────────────────
+
+const LARAVEL_COMPOSER: &str = r#"{ "autoload": { "psr-4": { "App\\": "app/" } }, "autoload-dev": { "psr-4": { "Tests\\": "tests/" } } }"#;
+
+const INVOICE: (&str, &str) = (
+    "app/Billing/Invoice.php",
+    "<?php\nnamespace App\\Billing;\n\nclass Invoice {}\n",
+);
+
+const INVOICE_UNIT_TEST: (&str, &str) = (
+    "tests/Unit/Billing/InvoiceTest.php",
+    "<?php\nnamespace Tests\\Unit\\Billing;\n\nclass InvoiceTest {}\n",
+);
+
+/// A lens as `(title, targets as (file relative to the workspace, line), lens line)`.
+type PairingLens = (String, Vec<(String, u32)>, u32);
+
+/// The lenses on `file` whose title starts with `prefix`.
+fn pairing_lenses(
+    composer: &str,
+    files: &[(&str, &str)],
+    file: &str,
+    prefix: &str,
+) -> Vec<PairingLens> {
+    let (backend, dir) = create_psr4_workspace(composer, files);
+    for (rel_path, content) in files {
+        let uri = format!("file://{}", dir.path().join(rel_path).display());
+        backend.update_ast(&uri, content);
+    }
+    let uri = format!("file://{}", dir.path().join(file).display());
+    let content = std::fs::read_to_string(dir.path().join(file)).unwrap();
+    let root = format!("file://{}/", dir.path().display());
+
+    backend
+        .handle_code_lens(&uri, &content)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|lens| {
+            let command = lens.command?;
+            if !command.title.starts_with(prefix) {
+                return None;
+            }
+            let arguments = command.arguments.unwrap_or_default();
+            let locations: Vec<Location> = match command.command.as_str() {
+                "editor.action.showReferences" => {
+                    serde_json::from_value(arguments[2].clone()).unwrap()
+                }
+                _ => vec![Location {
+                    uri: serde_json::from_value(arguments[0].clone()).unwrap(),
+                    range: Range {
+                        start: serde_json::from_value(arguments[1].clone()).unwrap(),
+                        end: serde_json::from_value(arguments[1].clone()).unwrap(),
+                    },
+                }],
+            };
+            let targets = locations
+                .into_iter()
+                .map(|location| {
+                    let target = location.uri.as_str().replace(&root, "");
+                    (target, location.range.start.line)
+                })
+                .collect();
+            Some((command.title, targets, lens.range.start.line))
+        })
+        .collect()
+}
+
+#[test]
+fn a_class_links_to_the_test_its_path_mirrors() {
+    let lenses = pairing_lenses(
+        LARAVEL_COMPOSER,
+        &[INVOICE, INVOICE_UNIT_TEST],
+        INVOICE.0,
+        "Tests:",
+    );
+    assert_eq!(
+        lenses,
+        vec![(
+            "Tests: InvoiceTest".to_string(),
+            vec![(INVOICE_UNIT_TEST.0.to_string(), 3)],
+            3
+        )]
+    );
+}
+
+#[test]
+fn a_test_links_back_to_the_class_its_path_mirrors() {
+    let lenses = pairing_lenses(
+        LARAVEL_COMPOSER,
+        &[INVOICE, INVOICE_UNIT_TEST],
+        INVOICE_UNIT_TEST.0,
+        "Test subject",
+    );
+    assert_eq!(
+        lenses,
+        vec![(
+            "Test subject: Invoice".to_string(),
+            vec![(INVOICE.0.to_string(), 3)],
+            3
+        )]
+    );
+}
+
+#[test]
+fn a_test_root_without_a_grouping_directory_pairs_both_ways() {
+    let composer = r#"{ "autoload": { "psr-4": { "App\\": "src/" } }, "autoload-dev": { "psr-4": { "App\\Tests\\": "tests/" } } }"#;
+    let invoice = (
+        "src/Billing/Invoice.php",
+        "<?php\nnamespace App\\Billing;\n\nclass Invoice {}\n",
+    );
+    let test = (
+        "tests/Billing/InvoiceTest.php",
+        "<?php\nnamespace App\\Tests\\Billing;\n\nclass InvoiceTest {}\n",
+    );
+    let files = [invoice, test];
+
+    let forward = pairing_lenses(composer, &files, invoice.0, "Tests:");
+    assert_eq!(forward[0].0, "Tests: InvoiceTest");
+    assert_eq!(forward[0].1, vec![(test.0.to_string(), 3)]);
+
+    let back = pairing_lenses(composer, &files, test.0, "Test subject");
+    assert_eq!(back[0].0, "Test subject: Invoice");
+    assert_eq!(back[0].1, vec![(invoice.0.to_string(), 3)]);
+}
+
+#[test]
+fn a_pest_file_pairs_both_ways_at_its_top() {
+    let pest = (
+        "tests/Feature/Billing/InvoiceTest.php",
+        "<?php\n\nit('totals the lines', function () {\n    expect(true)->toBeTrue();\n});\n",
+    );
+    let files = [INVOICE, pest];
+
+    let forward = pairing_lenses(LARAVEL_COMPOSER, &files, INVOICE.0, "Tests:");
+    assert_eq!(
+        forward,
+        vec![(
+            "Tests: InvoiceTest".to_string(),
+            vec![(pest.0.to_string(), 0)],
+            3
+        )]
+    );
+
+    let back = pairing_lenses(LARAVEL_COMPOSER, &files, pest.0, "Test subject");
+    assert_eq!(
+        back,
+        vec![(
+            "Test subject: Invoice".to_string(),
+            vec![(INVOICE.0.to_string(), 3)],
+            0
+        )]
+    );
+}
+
+#[test]
+fn unit_and_feature_tests_of_one_class_are_listed_together() {
+    let feature = (
+        "tests/Feature/Billing/InvoiceTest.php",
+        "<?php\nnamespace Tests\\Feature\\Billing;\n\nclass InvoiceTest {}\n",
+    );
+    let lenses = pairing_lenses(
+        LARAVEL_COMPOSER,
+        &[INVOICE, INVOICE_UNIT_TEST, feature],
+        INVOICE.0,
+        "Tests:",
+    );
+    assert_eq!(
+        lenses,
+        vec![(
+            "Tests: 2 tests".to_string(),
+            vec![
+                (feature.0.to_string(), 3),
+                (INVOICE_UNIT_TEST.0.to_string(), 3)
+            ],
+            3
+        )]
+    );
+}
+
+#[test]
+fn a_test_found_by_coverage_and_by_name_is_listed_once() {
+    let test = (
+        "tests/Unit/Billing/InvoiceTest.php",
+        "<?php\nnamespace Tests\\Unit\\Billing;\n\nuse App\\Billing\\Invoice;\nuse PHPUnit\\Framework\\Attributes\\CoversClass;\n\n#[CoversClass(Invoice::class)]\nclass InvoiceTest {}\n",
+    );
+    let lenses = pairing_lenses(LARAVEL_COMPOSER, &[INVOICE, test], INVOICE.0, "Tests:");
+    assert_eq!(
+        lenses,
+        vec![(
+            "Tests: InvoiceTest".to_string(),
+            vec![(test.0.to_string(), 7)],
+            3
+        )]
+    );
+}
+
+#[test]
+fn naming_pairs_nothing_outside_autoload_dev() {
+    // Tests mapped under `autoload` are indistinguishable from source, so
+    // only coverage metadata links them.
+    let composer = r#"{ "autoload": { "psr-4": { "App\\": "app/", "Tests\\": "tests/" } } }"#;
+    let files = [INVOICE, INVOICE_UNIT_TEST];
+    assert!(pairing_lenses(composer, &files, INVOICE.0, "Tests:").is_empty());
+    assert!(pairing_lenses(composer, &files, INVOICE_UNIT_TEST.0, "Test subject").is_empty());
+}
+
+#[test]
+fn test_code_without_a_test_name_pairs_with_nothing() {
+    let helper = (
+        "tests/Unit/Billing/Invoice.php",
+        "<?php\nnamespace Tests\\Unit\\Billing;\n\nclass Invoice {}\n",
+    );
+    let files = [INVOICE, helper];
+    assert!(pairing_lenses(LARAVEL_COMPOSER, &files, helper.0, "Test").is_empty());
+}
+
+// ─── Laravel routes ─────────────────────────────────────────────────────────
+
+const ORDER_CONTROLLER: &str = "\
+<?php
+namespace App\\Http\\Controllers;
+
+class OrderController {
+    public function index(): void {}
+    public function show(int $order): void {}
+    public function export(): void {}
+}
+";
+
+const ORDER_ROUTES: &str = "\
+<?php
+use App\\Http\\Controllers\\OrderController;
+use Illuminate\\Support\\Facades\\Route;
+
+Route::get('/orders', [OrderController::class, 'index'])->name('orders.index');
+Route::get('/orders/{order}', [OrderController::class, 'show'])->name('orders.show');
+Route::post('/orders/{order}', [OrderController::class, 'show']);
+";
+
+/// Each route that reaches a controller method gets a lens above it, with
+/// its verb, URI and name, that goes to where the route is registered.  A
+/// method no route reaches gets none.
+#[tokio::test]
+async fn controller_methods_list_the_routes_that_reach_them() {
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_SRC_COMPOSER,
+        &[
+            ("src/Http/Controllers/OrderController.php", ORDER_CONTROLLER),
+            ("routes/web.php", ORDER_ROUTES),
+        ],
+        "src/Http/Controllers/OrderController.php",
+    )
+    .await;
+
+    // Before the workspace is indexed, the routes are not looked for.
+    let lenses = get_code_lenses(&backend, uri.as_str(), ORDER_CONTROLLER);
+    assert!(
+        !lens_titles(&lenses)
+            .iter()
+            .any(|title| title.contains("/orders")),
+        "got: {:?}",
+        lens_titles(&lenses)
+    );
+
+    warm_workspace_index(&backend, &uri, Position::new(3, 7)).await;
+    let lenses = get_code_lenses(&backend, uri.as_str(), ORDER_CONTROLLER);
+    let route_lenses: Vec<(u32, &str, &Command)> = lenses
+        .iter()
+        .filter_map(|lens| {
+            let command = lens.command.as_ref()?;
+            (command.title.starts_with("GET") || command.title.starts_with("POST")).then_some((
+                lens.range.start.line,
+                command.title.as_str(),
+                command,
+            ))
+        })
+        .collect();
+    let titles: Vec<(u32, &str)> = route_lenses
+        .iter()
+        .map(|(line, title, _)| (*line, *title))
+        .collect();
+    assert_eq!(
+        titles,
+        vec![
+            (4, "GET /orders · orders.index"),
+            (5, "GET /orders/{order} · orders.show"),
+            (5, "POST /orders/{order}"),
+        ]
+    );
+
+    let arguments = route_lenses[1].2.arguments.as_ref().expect("arguments");
+    assert!(
+        arguments[0]
+            .as_str()
+            .is_some_and(|target| target.ends_with("/routes/web.php")),
+        "the lens should go to the routes file, got: {arguments:?}"
+    );
+    assert_eq!(
+        arguments[1],
+        serde_json::json!({ "line": 5, "character": 0 })
+    );
 }

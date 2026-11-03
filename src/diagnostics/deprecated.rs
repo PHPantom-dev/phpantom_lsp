@@ -167,8 +167,15 @@ impl Backend {
                     member_name,
                     is_static,
                     is_method_call,
+                    docblock_ref,
                     ..
                 } => {
+                    // A mock expectation names the method it stubs rather
+                    // than calling it, and a deprecated method is still one
+                    // a test has to mock.
+                    if *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod {
+                        continue;
+                    }
                     let subject_ctx =
                         crate::type_engine::subject_resolution::SubjectResolutionCtx {
                             local_classes,

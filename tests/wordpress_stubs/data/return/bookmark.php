@@ -15,10 +15,10 @@ $stdClassOrInt = Faker::union(Faker::stdClass(), Faker::int());
  * get_bookmark()
  */
 
-assertType('stdClass|null', get_bookmark($stdClassOrInt)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('stdClass|null', get_bookmark($stdClassOrInt, 'OBJECT')); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('array<string, mixed>|null', get_bookmark($stdClassOrInt, 'ARRAY_A')); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('array<int, mixed>|null', get_bookmark($stdClassOrInt, 'ARRAY_N')); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('stdClass|null', get_bookmark($stdClassOrInt));
+assertType('stdClass|null', get_bookmark($stdClassOrInt, 'OBJECT'));
+assertType('array<string, mixed>|null', get_bookmark($stdClassOrInt, 'ARRAY_A'));
+assertType('array<int, mixed>|null', get_bookmark($stdClassOrInt, 'ARRAY_N'));
 
 /*
  * get_bookmark_field()

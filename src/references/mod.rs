@@ -94,6 +94,16 @@ impl Backend {
         self.user_file_symbol_maps_matching(candidate_uris.as_ref())
     }
 
+    /// User-file symbol maps that mention a method in any PHP-valid casing.
+    pub(crate) fn user_file_symbol_maps_for_methods(
+        &self,
+        names: &[&str],
+    ) -> Vec<(String, Arc<SymbolMap>)> {
+        self.ensure_workspace_index_ready_for_request();
+        let candidate_uris = self.reference_candidate_uris_for_methods(names);
+        self.user_file_symbol_maps_matching(candidate_uris.as_ref())
+    }
+
     /// Like [`user_file_symbol_maps_for_reference_keys`], but never
     /// blocks on (or triggers) workspace indexing — it snapshots
     /// whatever is already parsed.  For callers on hot paths

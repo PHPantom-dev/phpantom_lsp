@@ -92,7 +92,14 @@ fn resolve_call(
                 source,
                 memo: member_targets,
             }
-            .resolve(subject, false, offset, method, OccurrenceKind::Method),
+            .resolve(
+                subject,
+                false,
+                offset,
+                method,
+                OccurrenceKind::Method,
+                false,
+            ),
         );
     }
     if let Some((subject, method)) = expression.rsplit_once("::") {
@@ -104,7 +111,7 @@ fn resolve_call(
                 source,
                 memo: member_targets,
             }
-            .resolve(subject, true, offset, method, OccurrenceKind::Method),
+            .resolve(subject, true, offset, method, OccurrenceKind::Method, false),
         );
     }
     let loader = backend.function_loader_with(
@@ -134,6 +141,7 @@ impl MemberTargetResolver<'_> {
         offset: u32,
         member_name: &str,
         kind: OccurrenceKind,
+        mock_expectation: bool,
     ) -> Option<String> {
         let owner = resolve_member_owner(
             self.backend,
@@ -142,6 +150,7 @@ impl MemberTargetResolver<'_> {
             subject,
             is_static,
             offset,
+            mock_expectation,
         )?;
         let key = (owner.clone(), member_name.to_string(), kind);
         let declaring_owner = self
@@ -179,6 +188,7 @@ fn resolve_member_owner(
     subject: &str,
     is_static: bool,
     offset: u32,
+    mock_expectation: bool,
 ) -> Option<String> {
     let use_map = context.use_map_at(offset);
     let namespace = context.namespace_at(offset);
@@ -206,8 +216,15 @@ fn resolve_member_owner(
         offset,
         &resolution_context,
     )?;
-    let names = resolved.top_level_class_names();
-    (names.len() == 1).then(|| names[0].trim_start_matches('\\').to_string())
+    let mut names: Vec<String> = resolved
+        .top_level_class_names()
+        .into_iter()
+        .map(|name| name.trim_start_matches('\\').to_string())
+        .collect();
+    if mock_expectation {
+        names = crate::mock_methods::mocked_class_names(names, is_static, &class_loader);
+    }
+    (names.len() == 1).then(|| names.swap_remove(0))
 }
 
 /// The class that actually declares `member_name`, so an occurrence on a

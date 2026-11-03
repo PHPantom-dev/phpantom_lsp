@@ -227,8 +227,10 @@ pub(super) fn range_text(content: &str, range: Range) -> Option<&str> {
 
 /// Whether `new_name` is something a symbol of `kind` can be renamed to.
 ///
-/// Only PHP names are checked.  A string key is free text (it may
-/// hold dots, dashes, or slashes), so it is left to its own rename path.
+/// Only PHP names and WordPress hook names are checked.  Any other string
+/// key is free text (it may hold dots, dashes, or slashes), so it is left
+/// to its own rename path.  A hook name is free text too, but one that has
+/// to be written back into the string literals that spell it.
 pub(super) fn is_valid_new_name(kind: &SymbolKind, new_name: &str) -> bool {
     match kind {
         SymbolKind::Variable { .. }
@@ -245,6 +247,10 @@ pub(super) fn is_valid_new_name(kind: &SymbolKind, new_name: &str) -> bool {
         | SymbolKind::NamespaceDeclaration { .. } => {
             !new_name.starts_with('$') && is_name_token(new_name)
         }
+        SymbolKind::StringKey {
+            kind: crate::symbol_map::StringKeyKind::WordPressHook,
+            ..
+        } => crate::wordpress::hooks::is_valid_hook_name(new_name),
         _ => true,
     }
 }

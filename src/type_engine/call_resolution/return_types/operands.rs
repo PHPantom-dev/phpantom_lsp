@@ -22,11 +22,8 @@ use crate::text_scan::{ScanStep, scan_top_level};
 /// result type, not the cast's, so those are left to the caller's other paths
 /// rather than answered wrongly.
 pub(in crate::type_engine::call_resolution) fn resolve_cast_type(text: &str) -> Option<PhpType> {
-    let (keyword, operand) = text.strip_prefix('(')?.split_once(')')?;
-    if !operand_is_single(operand.trim()) {
-        return None;
-    }
-    let name = match keyword.trim().to_ascii_lowercase().as_str() {
+    let (keyword, _) = split_cast(text)?;
+    let name = match keyword.to_ascii_lowercase().as_str() {
         "string" | "binary" => "string",
         "int" | "integer" => "int",
         "float" | "double" | "real" => "float",
@@ -36,6 +33,15 @@ pub(in crate::type_engine::call_resolution) fn resolve_cast_type(text: &str) -> 
         _ => return None,
     };
     Some(PhpType::named(atom(name)))
+}
+
+/// Split a cast applied to a single operand into its keyword and operand
+/// (`(object) $row` is `("object", "$row")`), or `None` when the text is
+/// not one.
+pub(in crate::type_engine::call_resolution) fn split_cast(text: &str) -> Option<(&str, &str)> {
+    let (keyword, operand) = text.strip_prefix('(')?.split_once(')')?;
+    let operand = operand.trim();
+    operand_is_single(operand).then(|| (keyword.trim(), operand))
 }
 
 /// The type a `??`/`?:` result carries given what each side resolved to.

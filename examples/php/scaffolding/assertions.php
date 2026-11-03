@@ -1974,6 +1974,9 @@ function runDemoAssertions(): void
     global $globalPen;
     assert($globalPen instanceof Scaffolding\Pen, '$globalPen must be Scaffolding\Pen at top level');
     globalKeywordDemo();
+    global $globalPencil;
+    assert($globalPencil instanceof Scaffolding\Pencil, '$globalPencil must be Scaffolding\Pencil');
+    assert(is_string(globalTagDemo()), 'globalTagDemo() reads the @global-typed Pencil');
 
     // ── Built-in generic collections ────────────────────────────────────
     $demo = new BuiltinGenericCollectionDemo();

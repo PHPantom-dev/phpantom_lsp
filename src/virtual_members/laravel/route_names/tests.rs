@@ -1322,3 +1322,194 @@ fn the_segments_around_a_star_are_anchored() {
     assert!(route_name_matches("a*b*c", "axbyc"));
     assert!(!route_name_matches("a*b*c", "axc"));
 }
+
+/// The controller routes of a single route file, each as
+/// `(controller, method, verbs, uri, name)`.
+fn actions_of(content: &str) -> Vec<(String, String, String, String, Option<String>)> {
+    let mut collector = RouteCollector::default();
+    walk_route_file(
+        content,
+        &test_uri(),
+        None,
+        None,
+        &MacroScope::default(),
+        &mut collector,
+    );
+    collector
+        .into_discovery()
+        .actions
+        .into_iter()
+        .map(|action| {
+            (
+                action.controller,
+                action.method,
+                action.verbs,
+                action.uri,
+                action.name,
+            )
+        })
+        .collect()
+}
+
+fn action(
+    controller: &str,
+    method: &str,
+    verbs: &str,
+    uri: &str,
+    name: Option<&str>,
+) -> (String, String, String, String, Option<String>) {
+    (
+        controller.to_string(),
+        method.to_string(),
+        verbs.to_string(),
+        uri.to_string(),
+        name.map(str::to_string),
+    )
+}
+
+/// Every spelling of a controller action is recorded against the
+/// controller's FQN, as the file's imports resolve it, whether or not the
+/// route has a name.
+#[test]
+fn controller_actions_are_recorded_by_fqn() {
+    let actions = actions_of(
+        "<?php
+use App\\Http\\Controllers\\OrderController;
+use App\\Http\\Controllers\\ShowDashboard as Dashboard;
+use Illuminate\\Support\\Facades\\Route;
+
+Route::get('/orders/{order}', [OrderController::class, 'show'])->name('orders.show');
+Route::middleware('auth')->post('/orders', [OrderController::class, 'store']);
+Route::get('/dashboard', Dashboard::class);
+Route::delete('/orders/{order}', 'App\\Http\\Controllers\\OrderController@destroy');
+Route::match(['get', 'post'], '/search', [OrderController::class, 'search']);
+Route::get('/closure', fn () => 'ok');
+Route::view('/about', 'about');
+",
+    );
+    assert_eq!(
+        actions,
+        vec![
+            action(
+                "App\\Http\\Controllers\\OrderController",
+                "destroy",
+                "DELETE",
+                "orders/{order}",
+                None
+            ),
+            action(
+                "App\\Http\\Controllers\\OrderController",
+                "search",
+                "GET|POST",
+                "search",
+                None
+            ),
+            action(
+                "App\\Http\\Controllers\\OrderController",
+                "show",
+                "GET",
+                "orders/{order}",
+                Some("orders.show")
+            ),
+            action(
+                "App\\Http\\Controllers\\OrderController",
+                "store",
+                "POST",
+                "orders",
+                None
+            ),
+            action(
+                "App\\Http\\Controllers\\ShowDashboard",
+                "__invoke",
+                "GET",
+                "dashboard",
+                None
+            ),
+        ]
+    );
+}
+
+/// A bare method name is an action of the controller a group or the
+/// route's own chain names, and the group's prefixes reach it.
+#[test]
+fn controller_groups_supply_the_class_of_bare_method_names() {
+    let actions = actions_of(
+        "<?php
+namespace App\\Routes;
+
+use App\\Http\\Controllers\\OrderController;
+use Illuminate\\Support\\Facades\\Route;
+
+Route::controller(OrderController::class)->prefix('orders')->name('orders.')->group(function () {
+    Route::get('/', 'index')->name('index');
+    Route::patch('/{order}/cancel', 'cancel');
+});
+Route::controller(Billing::class)->get('/billing', 'show');
+",
+    );
+    assert_eq!(
+        actions,
+        vec![
+            action(
+                "App\\Http\\Controllers\\OrderController",
+                "cancel",
+                "PATCH",
+                "orders/{order}/cancel",
+                None
+            ),
+            action(
+                "App\\Http\\Controllers\\OrderController",
+                "index",
+                "GET",
+                "orders",
+                Some("orders.index")
+            ),
+            action("App\\Routes\\Billing", "show", "GET", "billing", None),
+        ]
+    );
+}
+
+/// A resource registers one route per controller method it keeps.
+#[test]
+fn resource_routes_dispatch_to_their_controller() {
+    let actions = actions_of(
+        "<?php
+use App\\Http\\Controllers\\PhotoController;
+use Illuminate\\Support\\Facades\\Route;
+
+Route::resource('photos', PhotoController::class)->only(['show', 'update']);
+",
+    );
+    assert_eq!(
+        actions,
+        vec![
+            action(
+                "App\\Http\\Controllers\\PhotoController",
+                "show",
+                "GET",
+                "photos/{photo}",
+                Some("photos.show")
+            ),
+            action(
+                "App\\Http\\Controllers\\PhotoController",
+                "update",
+                "PUT|PATCH",
+                "photos/{photo}",
+                Some("photos.update")
+            ),
+        ]
+    );
+}
+
+/// A call chain that does not start at the router registers nothing.
+#[test]
+fn a_chain_off_the_router_is_not_a_route() {
+    let actions = actions_of(
+        "<?php
+use App\\Http\\Controllers\\OrderController;
+
+$query->get('/orders', [OrderController::class, 'index']);
+",
+    );
+    assert!(actions.is_empty(), "got: {actions:?}");
+}

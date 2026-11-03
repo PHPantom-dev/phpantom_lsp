@@ -11,7 +11,7 @@ use crate::type_engine::resolver::ResolutionCtx;
 use super::return_types::{
     literal_arg_type, resolve_call_return_hint, resolve_cast_type, resolve_chain_declared_return,
     resolve_expression_to_type, resolve_literal_type, resolve_operator_type,
-    resolve_static_access_type,
+    resolve_static_access_type, split_cast,
 };
 
 impl Backend {
@@ -78,8 +78,19 @@ impl Backend {
         }
 
         // ── Casts ───────────────────────────────────────────────
+        // `(object)` turns an array's shape into the object's, so its
+        // operand is read. Every other cast names its own result:
         // `(string) $customer->id` is a `string` whatever the property
         // resolves to, so the cast answers before the operand is read.
+        if let Some((keyword, operand)) = split_cast(trimmed)
+            && keyword.eq_ignore_ascii_case("object")
+        {
+            return Some(
+                crate::type_engine::variable::rhs_resolution::object_cast_type(
+                    Self::resolve_arg_text_to_type(operand, ctx),
+                ),
+            );
+        }
         if let Some(ty) = resolve_cast_type(trimmed) {
             return Some(ty);
         }

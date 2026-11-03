@@ -1,6 +1,6 @@
 //! Laravel self-scan: the index-building passes that read the project's
 //! own source (service providers, macro registrations, morph maps, gates,
-//! console commands, published resources, migrations) and the incremental
+//! console commands, middleware, published resources, migrations) and the incremental
 //! refreshes that re-run one of them when a file the pass depends on
 //! changes.
 //!
@@ -14,6 +14,7 @@ mod commands;
 mod date_class;
 mod gates;
 mod macros;
+mod middleware;
 mod morph_map;
 mod pivots;
 mod provider_resources;
@@ -24,7 +25,9 @@ mod string_key_cache;
 
 pub(crate) use class_loading::CLASS_LOAD_HOOKS;
 pub(crate) use state::LaravelState;
-pub(crate) use string_key_cache::{LaravelStringKeyBuildLocks, LaravelStringKeyCache};
+pub(crate) use string_key_cache::{
+    LaravelStringKeyBuildLocks, LaravelStringKeyCache, has_validation_registration,
+};
 
 use crate::Backend;
 use crate::virtual_members::laravel::file_contributions::{Contribution, FileContributions};
@@ -149,6 +152,7 @@ impl Backend {
         self.build_provider_resources(&providers);
         self.build_laravel_morph_map_index(&providers);
         self.build_laravel_gate_index(&providers);
+        self.build_laravel_middleware_index(&providers);
     }
 
     /// Scan every registered service provider's file into `files`, one
@@ -225,6 +229,7 @@ impl Backend {
         self.refresh_laravel_command_index(uri);
         self.refresh_laravel_morph_map(uri, "");
         self.refresh_laravel_gates(uri, "");
+        self.refresh_laravel_middleware(uri, "");
         self.forget_laravel_provider_resources(uri);
     }
 

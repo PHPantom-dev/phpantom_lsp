@@ -33,6 +33,8 @@
 ///   named route's URI (`route('users.show', ['|' => 1])`)
 /// - **laravel_string_keys**: Route/config/view/translation key completion
 ///   (`route('|')`, `config('|')`, `view('|')`, `__('|')`)
+/// - **mock_methods**: Method name completion inside mock expectations
+///   (`$mock->method('`, `->shouldReceive('`, `Facade::shouldReceive('`)
 /// - **use_edit**: Use-statement insertion and conflict analysis
 ///
 /// ## Sub-grouped modules
@@ -76,6 +78,7 @@ pub(crate) mod array_callable;
 pub mod array_shape;
 pub(crate) mod builder;
 pub(crate) mod command_params;
+pub(crate) mod eloquent_model_attributes;
 pub(crate) mod eloquent_string;
 pub(crate) mod handler;
 pub(crate) mod laravel_paths;
@@ -84,6 +87,8 @@ pub(crate) mod laravel_route_controller;
 pub(crate) mod laravel_route_params;
 pub(crate) mod laravel_string_keys;
 pub(crate) mod laravel_translation_args;
+mod laravel_validation_strings;
+mod mock_methods;
 pub mod named_args;
 pub(crate) mod resolve;
 pub(crate) mod symfony_string_keys;

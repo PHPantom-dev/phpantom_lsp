@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use tower_lsp_server::gen_lsp_types::{Diagnostic, DiagnosticSeverity};
 
+use crate::php_type::PhpType;
 use crate::type_engine::resolver::{SubjectOutcome, UnionBranch, UnionBranches};
 use crate::types::ClassInfo;
 use crate::virtual_members::resolve_class_fully_cached;
@@ -27,9 +28,11 @@ impl UnknownMemberPass<'_> {
         access: &MemberAccessSite,
         base_classes: &[Arc<ClassInfo>],
         branches: &UnionBranches,
+        types: &[PhpType],
         out: &mut Vec<Diagnostic>,
     ) -> MemberCheckResult {
-        let (result, coarse_diags) = self.check_member_on_resolved_classes(access, base_classes);
+        let (result, coarse_diags) =
+            self.check_member_on_resolved_classes(access, base_classes, types);
         if result == MemberCheckResult::Ok && coarse_diags.is_empty() {
             self.report_partial_union(access, base_classes, branches, out);
             return result;
@@ -49,8 +52,9 @@ impl UnknownMemberPass<'_> {
                 // Use the fresh diagnostics instead of the coarse ones.
                 SubjectOutcome::Resolved {
                     classes: fresh_classes,
+                    types: fresh_types,
                     ..
-                } => self.check_member_on_resolved_classes(access, &fresh_classes),
+                } => self.check_member_on_resolved_classes(access, &fresh_classes, &fresh_types),
                 // Re-resolution changed the outcome category (e.g.
                 // became Untyped).  Keep the original diagnostic from
                 // the coarse check.
@@ -61,6 +65,41 @@ impl UnknownMemberPass<'_> {
         };
         out.extend(diags);
         result
+    }
+
+    /// Check the method a mock expectation names on the class the
+    /// receiver mocks, and push what the check reports.
+    ///
+    /// The receiver's own type also includes the mocking framework's
+    /// interfaces, whose methods (`expects()`, `shouldReceive()`) are not
+    /// methods of the mocked class, so neither the union report nor the
+    /// narrowing re-resolution of [`Self::report_on_resolved`], which both
+    /// look at the whole type, applies.  The expectation ends no chain.
+    pub(super) fn report_on_mocked(
+        &self,
+        access: &MemberAccessSite,
+        classes: &[Arc<ClassInfo>],
+        types: &[PhpType],
+        out: &mut Vec<Diagnostic>,
+    ) -> MemberCheckResult {
+        let mocked = crate::mock_methods::mocked_classes(
+            classes.to_vec(),
+            access.is_static,
+            self.class_loader(),
+        );
+        if mocked.is_empty() {
+            return MemberCheckResult::Ok;
+        }
+        let mocked_types: Vec<PhpType> = classes
+            .iter()
+            .zip(types)
+            .filter(|(class, _)| mocked.iter().any(|m| Arc::ptr_eq(m, class)))
+            .map(|(_, ty)| ty.clone())
+            .collect();
+        let (_, diagnostics) =
+            self.check_member_on_resolved_classes(access, &mocked, &mocked_types);
+        out.extend(diagnostics);
+        MemberCheckResult::Ok
     }
 
     /// Report the alternatives of a union that lack a member another
@@ -81,7 +120,9 @@ impl UnknownMemberPass<'_> {
         // ternary `instanceof`, an `&&` chain), which may have ruled the
         // lacking alternatives out at this exact position.
         if message.is_some() && access.is_narrowable_subject() {
-            let SubjectOutcome::Resolved { classes, branches } = self.resolve_subject(access)
+            let SubjectOutcome::Resolved {
+                classes, branches, ..
+            } = self.resolve_subject(access)
             else {
                 return;
             };
@@ -227,6 +268,7 @@ impl UnknownMemberPass<'_> {
         &self,
         access: &MemberAccessSite,
         base_classes: &[Arc<ClassInfo>],
+        types: &[PhpType],
     ) -> (MemberCheckResult, Vec<Diagnostic>) {
         let mut diagnostics = Vec::new();
         let report_magic = self.report_magic;
@@ -251,11 +293,17 @@ impl UnknownMemberPass<'_> {
         // `__get` handles arbitrary property names.  Unlike __call,
         // we suppress the diagnostic entirely because there is no
         // meaningful return-type recovery to perform.
-        if !is_method_call
-            && base_classes
-                .iter()
-                .any(|c| has_magic_method_for_access(c, is_static, false, report_magic))
-        {
+        //
+        // An Eloquent model's `__get` throws for a missing attribute when
+        // the app turns that on, which makes the model's declared and
+        // virtual properties the whole set, as `report_magic` does.
+        let get_accepts = |c: &ClassInfo| {
+            has_magic_method_for_access(c, is_static, false, report_magic)
+                && (report_magic
+                    || !self.eloquent_rejects_missing_attributes(c)
+                    || has_magic_method_for_access(c, is_static, false, true))
+        };
+        if !is_method_call && base_classes.iter().any(|c| get_accepts(c)) {
             return (MemberCheckResult::Ok, diagnostics);
         }
         if base_classes.iter().any(|c| c.name == "stdClass") {
@@ -295,11 +343,7 @@ impl UnknownMemberPass<'_> {
             .collect();
 
         // ── Suppress property access on __get classes (resolved) ────
-        if !is_method_call
-            && resolved_classes
-                .iter()
-                .any(|c| has_magic_method_for_access(c, is_static, false, report_magic))
-        {
+        if !is_method_call && resolved_classes.iter().any(|c| get_accepts(c)) {
             return (MemberCheckResult::Ok, diagnostics);
         }
 
@@ -329,14 +373,19 @@ impl UnknownMemberPass<'_> {
         // type.  A speculative "we can't verify this" warning here is a
         // false positive: the receiver has explicitly opted into handling
         // arbitrary method names.
-        let has_magic_call = is_method_call
-            && (base_classes
-                .iter()
-                .any(|c| has_magic_method_for_access(c, is_static, true, report_magic))
-                || resolved_classes
-                    .iter()
-                    .any(|c| has_magic_method_for_access(c, is_static, true, report_magic)));
-        if has_magic_call {
+        //
+        // Eloquent's handlers are the exception: they accept a closed set
+        // of names and throw for the rest, so a call they reject is
+        // reported like any other unknown method.
+        let has_magic_call_at = |i: usize| {
+            has_magic_method_for_access(&base_classes[i], is_static, true, report_magic)
+                || has_magic_method_for_access(&resolved_classes[i], is_static, true, report_magic)
+        };
+        let has_magic_call = is_method_call && (0..base_classes.len()).any(has_magic_call_at);
+        if has_magic_call
+            && (is_docblock_ref
+                || !self.eloquent_rejects_call(access, &resolved_classes, types, has_magic_call_at))
+        {
             return (MemberCheckResult::MagicFallback, diagnostics);
         }
 

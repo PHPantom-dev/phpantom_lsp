@@ -15,7 +15,7 @@ pub(crate) use proof_map::ProofMap;
 pub(crate) use proofs::*;
 pub(crate) use trie::AtomTrie;
 
-use crate::atom::{Atom, atom};
+use crate::atom::{Atom, AtomMap, atom};
 use crate::php_type::PhpType;
 use crate::types::ResolvedType;
 
@@ -95,6 +95,31 @@ pub(crate) struct ClosureCaptureEffect {
     pub members: bool,
     /// The method called on the subject, when it is the receiver.
     pub method: Option<Atom>,
+}
+
+/// A by-reference capturing closure literal a variable holds, so calling
+/// the variable can run its body.  See [`ScopeState::held_closure`].
+#[derive(Clone, Debug)]
+pub(crate) struct HeldClosure {
+    /// Where the closure literal starts in the file.
+    pub offset: u32,
+    /// The scope entries for the by-value captures, and the paths read
+    /// through them, as they stood where the closure was written.  A
+    /// by-value capture is copied at the definition, so a call made after
+    /// the variable was reassigned still sees the old value.
+    pub by_value: Vec<(Atom, Vec<ResolvedType>)>,
+}
+
+impl PartialEq for HeldClosure {
+    fn eq(&self, other: &Self) -> bool {
+        self.offset == other.offset
+            && self.by_value.len() == other.by_value.len()
+            && self
+                .by_value
+                .iter()
+                .zip(&other.by_value)
+                .all(|((a, at), (b, bt))| a == b && merge::same_types(at, bt))
+    }
 }
 
 /// What has to be shown about a proof's holder before the proof applies.
@@ -321,6 +346,16 @@ pub(crate) struct ScopeState {
     /// a variable's identity.
     pub closure_captures: AtomTrie<Vec<ClosureCaptureEffect>>,
 
+    /// Variable name → the closure literal it was last assigned, for a
+    /// closure that captures by reference, so calling the variable
+    /// (`$write()`) can run that closure's body right there.
+    ///
+    /// Dropped by every write to the variable, not just an assignment: a
+    /// stale entry would make a call run a closure the variable no longer
+    /// holds.  Shared behind an `Arc` because scopes are cloned far more
+    /// often than closures are assigned.
+    pub closure_literals: AtomMap<std::sync::Arc<HeldClosure>>,
+
     /// What this path knows about which keys arrays hold; see
     /// [`KeyFacts`]. Boxed and `None` while there is nothing to say, which
     /// is almost always: scopes are cloned and cached by the thousand.
@@ -359,6 +394,7 @@ impl ScopeState {
             unresolved: AtomTrie::default(),
             ruled_out: ProofMap::default(),
             closure_captures: AtomTrie::default(),
+            closure_literals: AtomMap::default(),
             key_facts: None,
             unreachable: false,
         }
@@ -386,6 +422,32 @@ impl ScopeState {
             return;
         }
         self.closure_captures.insert(atom(var_name), effects);
+    }
+
+    /// The by-reference capturing closure literal `var_name` holds, if it
+    /// holds one.
+    pub fn held_closure(&self, var_name: &str) -> Option<std::sync::Arc<HeldClosure>> {
+        self.closure_literals.get(&atom(var_name)).cloned()
+    }
+
+    /// Record that `var_name` now holds `closure`.  Must follow the write
+    /// that put it there, which drops whatever the variable held before.
+    pub fn set_held_closure(&mut self, var_name: &str, closure: HeldClosure) {
+        self.closure_literals
+            .insert(atom(var_name), std::sync::Arc::new(closure));
+    }
+
+    /// Stop treating `var_name` as holding the closure it was assigned,
+    /// for a write the scope does not otherwise see (a callee taking it by
+    /// reference).
+    pub fn forget_held_closure(&mut self, var_name: &str) {
+        self.forget_closure_literal(&atom(var_name));
+    }
+
+    fn forget_closure_literal(&mut self, key: &Atom) {
+        if !self.closure_literals.is_empty() {
+            self.closure_literals.remove(key);
+        }
     }
 
     /// Borrow the proofs this scope holds that are not variable types.
@@ -428,6 +490,7 @@ impl ScopeState {
         }
         let key = atom(var_name);
         self.unresolved.remove(&key);
+        self.forget_closure_literal(&key);
         self.locals.insert(key, types);
     }
 
@@ -449,6 +512,7 @@ impl ScopeState {
     /// it from erasing the other paths' types at the next join.
     pub fn set_unknown(&mut self, var_name: &str) {
         let key = atom(var_name);
+        self.forget_closure_literal(&key);
         self.locals.insert(key, Vec::new());
         self.unresolved.insert(key, ());
     }
@@ -465,6 +529,7 @@ impl ScopeState {
     /// way an unresolved entry does.
     pub fn set_untyped(&mut self, var_name: &str) {
         let key = atom(var_name);
+        self.forget_closure_literal(&key);
         self.locals.insert(key, Vec::new());
         self.unresolved.remove(&key);
     }
@@ -476,6 +541,7 @@ impl ScopeState {
         }
         let key = atom(var_name);
         self.unresolved.remove(&key);
+        self.forget_closure_literal(&key);
         self.locals.insert(key, types);
     }
 
@@ -572,6 +638,7 @@ impl ScopeState {
     pub fn invalidate_proofs(&mut self, var_name: &str) {
         let key = atom(var_name);
         self.closure_captures.remove(&key);
+        self.forget_closure_literal(&key);
         let stale = |subject: &Atom| {
             *subject == key
                 || crate::type_engine::type_ops::condition_facts::key_reads_variable(

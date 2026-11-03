@@ -833,7 +833,7 @@ mod tests {
                 },
                 end: Position {
                     line: 0,
-                    character: u32::MAX,
+                    character: crate::process::LINE_END_CHARACTER,
                 },
             },
             severity: Some(DiagnosticSeverity::Error),
@@ -892,7 +892,7 @@ mod tests {
             },
             end: Position {
                 line: 5,
-                character: u32::MAX,
+                character: crate::process::LINE_END_CHARACTER,
             },
         };
         assert!(ranges_overlap(&cursor, &diag_range));

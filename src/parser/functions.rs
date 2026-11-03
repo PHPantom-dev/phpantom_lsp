@@ -16,7 +16,8 @@ use crate::types::*;
 
 use super::signature::{Signature, extract_signature};
 use super::{
-    DocblockCtx, for_each_nested_statement_list, is_removed_for_version, merge_deprecation_info,
+    DocblockCtx, declares_parameter, for_each_nested_statement_list, is_removed_for_version,
+    merge_deprecation_info,
 };
 
 /// Whether a function or method body calls `func_get_args()`,
@@ -223,6 +224,7 @@ impl Backend {
                             info,
                             &mut parameters,
                             &func_template_param_bounds,
+                            |name| declares_parameter(&func.parameter_list, name),
                         );
                     }
 

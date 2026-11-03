@@ -235,6 +235,23 @@ pub(crate) fn resolve_code_class_name(
         .unwrap_or_else(|| name.to_string())
 }
 
+/// `ty` with every class name qualified the way PHP reads a name written
+/// where `namespace` and `imports` are in force, without asking whether
+/// the class exists.
+///
+/// For a type written in another file than the one being read, whose
+/// imports the reader's loaders do not know.
+pub(crate) fn qualify_written_type_names(
+    ty: &crate::php_type::PhpType,
+    namespace: Option<&str>,
+    imports: &HashMap<String, String>,
+) -> crate::php_type::PhpType {
+    ty.resolve_names(&|name| {
+        qualify_unknown_code_name(name, namespace, Some(imports))
+            .unwrap_or_else(|| name.trim_start_matches('\\').to_string())
+    })
+}
+
 /// The name PHP reads a class name no class answers to as: expanded
 /// through the import that claims its first segment, else qualified with
 /// the current namespace.  `None` when PHP reads it as written.

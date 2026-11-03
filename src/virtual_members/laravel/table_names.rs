@@ -61,6 +61,12 @@ pub(super) fn model_schema_table(
         .cloned()
 }
 
+/// Whether the migrations declare the table `class` is stored in, so its
+/// columns are all known.
+pub(crate) fn model_schema_is_known(class: &ClassInfo, cache: &ResolvedClassCache) -> bool {
+    model_schema_table(class, Some(cache)).is_some()
+}
+
 fn default_table_name(class_name: &str) -> String {
     let short = class_name
         .rsplit('\\')

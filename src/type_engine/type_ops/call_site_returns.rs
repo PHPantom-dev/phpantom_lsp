@@ -24,6 +24,9 @@
 //!
 //! `json_decode()` needs nothing here. It is declared `mixed`, so it carries
 //! no failure branch for the flag to remove.
+//!
+//! WordPress functions whose arguments decide their result the same way are
+//! in [`wordpress`].
 
 use crate::atom::atom;
 use crate::php_type::{PhpType, TypeKind};
@@ -31,6 +34,9 @@ use crate::types::ParameterInfo;
 
 use super::conditional::ArgTypeResolver;
 use crate::text_scan::{ScanStep, scan_top_level, split_top_level_commas};
+use crate::types::FunctionInfo;
+
+mod wordpress;
 
 /// `JSON_THROW_ON_ERROR`, as defined by PHP's `ext/json/php_json.h`.
 ///
@@ -123,6 +129,7 @@ enum CallSiteFunction {
     FilterVar,
     FilterInput,
     ClassRelation,
+    WordPress(wordpress::WordPressFunction),
 }
 
 fn classify(func_name: &str) -> Option<CallSiteFunction> {
@@ -139,7 +146,7 @@ fn classify(func_name: &str) -> Option<CallSiteFunction> {
     {
         Some(CallSiteFunction::ClassRelation)
     } else {
-        None
+        wordpress::classify(name).map(CallSiteFunction::WordPress)
     }
 }
 
@@ -152,18 +159,29 @@ pub(crate) fn has_call_site_return(func_name: &str) -> bool {
     classify(func_name).is_some()
 }
 
+/// The name [`call_site_return_type`] knows `function` by, or `None` when it
+/// is not one of the functions it can narrow.
+///
+/// The functions are all global, so a namespaced function of the same short
+/// name is not one of them.
+pub(crate) fn call_site_name(function: &FunctionInfo) -> Option<&str> {
+    let name = function.name.as_str();
+    (function.namespace.is_none() && has_call_site_return(name)).then_some(name)
+}
+
 /// The return type this call's arguments decide, or `None` when the function
 /// is not one this module knows or the arguments cannot be pinned down.
 ///
-/// `declared` is the function's own return type. Where the narrowing only
-/// removes a branch (`json_encode()`, `class_implements()`), it is removed
-/// from `declared`, so a stub that stops declaring the branch narrows to
-/// nothing rather than to a type this module invented.
+/// `declared` is the function's own return type, if it declares one. Where
+/// the narrowing only removes a branch (`json_encode()`,
+/// `class_implements()`), it is removed from `declared`, so a stub that
+/// stops declaring the branch narrows to nothing rather than to a type this
+/// module invented.
 pub(crate) fn call_site_return_type(
     func_name: &str,
     params: &[ParameterInfo],
     text_args: &str,
-    declared: &PhpType,
+    declared: Option<&PhpType>,
     arg_type_resolver: ArgTypeResolver<'_>,
 ) -> Option<PhpType> {
     let args = CallArgs {
@@ -172,7 +190,7 @@ pub(crate) fn call_site_return_type(
         resolver: arg_type_resolver,
     };
     match classify(func_name)? {
-        CallSiteFunction::JsonEncode => json_encode_return(&args, declared),
+        CallSiteFunction::JsonEncode => json_encode_return(&args, declared?),
         CallSiteFunction::FilterVar => filter_return(&args, "$filter", "$options"),
         CallSiteFunction::FilterInput => {
             // The variable may be missing from the input altogether, which
@@ -186,7 +204,8 @@ pub(crate) fn call_site_return_type(
             };
             Some(PhpType::union(vec![filtered, missing]))
         }
-        CallSiteFunction::ClassRelation => class_relation_return(&args, declared),
+        CallSiteFunction::ClassRelation => class_relation_return(&args, declared?),
+        CallSiteFunction::WordPress(function) => wordpress::return_type(function, &args),
     }
 }
 

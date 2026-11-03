@@ -340,6 +340,7 @@ mod tests {
         Psr4Mapping {
             prefix: prefix.to_string(),
             base_path: base.to_string(),
+            is_dev: false,
         }
     }
 

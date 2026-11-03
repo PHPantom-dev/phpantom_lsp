@@ -21,7 +21,7 @@ pub(super) fn symbol_span_to_range(content: &str, symbol: &SymbolSpan) -> Range 
 }
 
 /// Create a `Hover` with Markdown content.
-pub(super) fn make_hover(contents: String) -> Hover {
+pub(crate) fn make_hover(contents: String) -> Hover {
     Hover {
         contents: Contents::MarkupContent(MarkupContent {
             kind: MarkupKind::Markdown,

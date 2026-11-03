@@ -30,7 +30,9 @@ use super::super::helpers::{
     CallTargetCache, FileDiagnosticContext, is_position_independent_call_expression,
     make_diagnostic,
 };
-use super::{TYPE_MISMATCH_ARGUMENT_CODE, has_strict_types, is_type_compatible};
+use super::{
+    TYPE_MISMATCH_ARGUMENT_CODE, fails_only_on_empty, has_strict_types, is_type_compatible,
+};
 
 // ── Resolved argument info ──────────────────────────────────────────────────
 
@@ -310,12 +312,9 @@ impl Backend {
             content,
             class_loader: loaders.resolved_class_loader(),
             strict_types,
-            // Read once for the whole file: `config()` clones the config
-            // behind a lock, and the flag cannot change mid-pass.
-            downgrade_nullable_mismatch: self
-                .config()
-                .diagnostics
-                .downgrade_nullable_argument_mismatch_enabled(),
+            // Read once for the whole file, so the flag cannot change
+            // mid-pass.
+            report_possibly_empty: self.possibly_empty_mismatches_enabled(),
         };
 
         // Call-expression resolution cache: avoids re-resolving the
@@ -513,13 +512,16 @@ fn is_checked_site(call_site: &CallSite) -> bool {
 }
 
 /// The parameter argument `arg_idx` fills: by name for a named argument,
-/// else the next positional one, counted by `positional_idx`.
+/// else the next positional one, counted by `positional_idx`.  A trailing
+/// variadic parameter collects the positional arguments past it and the
+/// named ones no other parameter answers to.
 fn param_for_argument<'p>(
     call_site: &CallSite,
     params: &'p [ParameterInfo],
     arg_idx: usize,
     positional_idx: &mut usize,
 ) -> Option<&'p ParameterInfo> {
+    let variadic = || params.last().filter(|p| p.is_variadic);
     let index = arg_idx as u32;
     if call_site.named_arg_indices.contains(&index) {
         let name_pos = call_site
@@ -529,11 +531,33 @@ fn param_for_argument<'p>(
         let param_name = call_site.named_arg_names.get(name_pos);
         return params
             .iter()
-            .find(|p| Some(p.name.trim_start_matches('$')) == param_name);
+            .find(|p| Some(p.name.trim_start_matches('$')) == param_name)
+            .or_else(variadic);
     }
-    let param = params.get(*positional_idx);
+    let param = params.get(*positional_idx).or_else(variadic);
     *positional_idx += 1;
     param
+}
+
+/// The type each argument to an untyped variadic must have, given the
+/// type its `@param` tag declares.  A tag spelling an array type
+/// (Mockery's `@param array<class-string<T>|T> $args` on `...$args`)
+/// describes the array the arguments are collected into, so each
+/// argument is one of its elements, as PHPStan reads it.
+fn variadic_tag_element(tag_type: &PhpType) -> &PhpType {
+    let is_array = match tag_type.kind() {
+        TypeKind::Array(_) => true,
+        TypeKind::Generic(g) => matches!(
+            g.name.to_ascii_lowercase().as_str(),
+            "array" | "list" | "non-empty-array" | "non-empty-list"
+        ),
+        _ => false,
+    };
+    if is_array {
+        tag_type.extract_value_type(false).unwrap_or(tag_type)
+    } else {
+        tag_type
+    }
 }
 
 /// What every argument check in one file shares.
@@ -543,7 +567,7 @@ struct ArgumentCheck<'a> {
     content: &'a str,
     class_loader: &'a ResolvedClassLoader<'a>,
     strict_types: bool,
-    downgrade_nullable_mismatch: bool,
+    report_possibly_empty: bool,
 }
 
 /// One call site's callee and resolved arguments.
@@ -668,12 +692,11 @@ impl ArgumentCheck<'_> {
             Some(t) if !t.is_untyped() && !t.is_mixed() => t,
             _ => return,
         };
-
-        // Skip variadic parameters — hard to match individual
-        // arg types to the variadic param's inner type.
-        if param.is_variadic {
-            return;
-        }
+        let param_type = if param.is_variadic && param.native_type_hint.is_none() {
+            variadic_tag_element(param_type)
+        } else {
+            param_type
+        };
 
         let arg_type = &arg.ty;
         // Skip unresolved / empty / Raw("") sentinel types.
@@ -733,10 +756,23 @@ impl ArgumentCheck<'_> {
             return;
         }
 
+        if !self.report_possibly_empty
+            && missing_keys.is_empty()
+            && !breaks_list_order
+            && fails_only_on_empty(
+                arg_type,
+                effective_param_type,
+                self.class_loader,
+                self.strict_types,
+            )
+        {
+            return;
+        }
+
         let Some(range) = self.range(arg.start, arg.end) else {
             return;
         };
-        let (message, severity) = self.mismatch_message(
+        let message = self.mismatch_message(
             arg_idx,
             &param.name,
             arg_type,
@@ -746,7 +782,7 @@ impl ArgumentCheck<'_> {
         );
         out.push(make_diagnostic(
             range,
-            severity,
+            DiagnosticSeverity::Error,
             TYPE_MISMATCH_ARGUMENT_CODE,
             message,
         ));
@@ -841,7 +877,10 @@ impl ArgumentCheck<'_> {
         call.target.overloads.iter().any(|alt_params| {
             // An overload with fewer params has no parameter for this
             // argument, so it is not relevant for this check.
-            let Some(alt_param) = alt_params.get(positional_idx.saturating_sub(1)) else {
+            let Some(alt_param) = alt_params
+                .get(positional_idx.saturating_sub(1))
+                .or_else(|| alt_params.last().filter(|p| p.is_variadic))
+            else {
                 return false;
             };
             match &alt_param.type_hint {
@@ -859,7 +898,7 @@ impl ArgumentCheck<'_> {
         })
     }
 
-    /// The mismatch message for an argument, and its severity.
+    /// The mismatch message for an argument.
     fn mismatch_message(
         &self,
         arg_idx: usize,
@@ -868,7 +907,7 @@ impl ArgumentCheck<'_> {
         param_type: &PhpType,
         missing_keys: &[String],
         breaks_list_order: bool,
-    ) -> (String, DiagnosticSeverity) {
+    ) -> String {
         let compatible = |arg: &PhpType, param: &PhpType| {
             is_type_compatible(arg, param, self.class_loader, self.strict_types)
         };
@@ -953,45 +992,23 @@ impl ArgumentCheck<'_> {
         // Name the specific member(s) that broke a partially
         // compatible union, rather than leaving the developer to
         // work out which one out of the full union is at fault.
-        let mut only_null_unsatisfied = false;
-        match arg_type.kind() {
-            TypeKind::Union(members) => {
-                let unsatisfied: Vec<&PhpType> = members
-                    .iter()
-                    .filter(|m| !compatible(m, param_type))
-                    .collect();
-                if !unsatisfied.is_empty() && unsatisfied.len() < members.len() {
-                    message.push_str(&format!(
-                        " ({} does not satisfy {})",
-                        unsatisfied
-                            .iter()
-                            .map(|m| m.to_string())
-                            .collect::<Vec<_>>()
-                            .join("|"),
-                        param_type.conditionals_as_branch_unions(),
-                    ));
-                    only_null_unsatisfied = unsatisfied.iter().all(|m| m.is_null());
-                }
+        if let TypeKind::Union(members) = arg_type.kind() {
+            let unsatisfied: Vec<&PhpType> = members
+                .iter()
+                .filter(|m| !compatible(m, param_type))
+                .collect();
+            if !unsatisfied.is_empty() && unsatisfied.len() < members.len() {
+                message.push_str(&format!(
+                    " ({} does not satisfy {})",
+                    unsatisfied
+                        .iter()
+                        .map(|m| m.to_string())
+                        .collect::<Vec<_>>()
+                        .join("|"),
+                    param_type.conditionals_as_branch_unions(),
+                ));
             }
-            // `?T` is the same gap as `T|null`, spelled shorter, so
-            // it has to answer the same way. It carries no union
-            // members to name, so only the severity is at stake and
-            // the check is worth nothing unless it can change it.
-            TypeKind::Nullable(inner) if self.downgrade_nullable_mismatch => {
-                only_null_unsatisfied = compatible(inner, param_type);
-            }
-            _ => {}
         }
-
-        // `null` alone failing means every non-null possibility
-        // already satisfies the parameter: a nullability gap rather
-        // than a type gap. Projects can opt into treating that
-        // narrower case as a warning.
-        let severity = if only_null_unsatisfied && self.downgrade_nullable_mismatch {
-            DiagnosticSeverity::Warning
-        } else {
-            DiagnosticSeverity::Error
-        };
-        (message, severity)
+        message
     }
 }

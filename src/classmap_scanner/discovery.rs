@@ -236,7 +236,7 @@ fn scan_files_parallel_psr4(
     )
 }
 
-/// Merge one scanned file's symbols into `result`.
+/// Merge one scanned file's symbols and `@global` tags into `result`.
 ///
 /// The first file to declare a name wins, except that a later file whose
 /// stem matches the class's short name displaces one whose stem does not:
@@ -250,6 +250,9 @@ fn merge_scanned_file(
     path: &Path,
     origin: crate::ClassCompletionOrigin,
 ) {
+    if !scan.globals.is_empty() {
+        result.globals.push((path.to_path_buf(), scan.globals));
+    }
     for fqcn in scan.classes {
         let class_short_name = crate::util::short_name(&fqcn).to_owned();
         let mut origin_wins = false;
@@ -312,9 +315,12 @@ pub(super) fn scan_files_parallel_full(
         |(path, origin)| {
             progress_add_done(progress);
             let content = read_for_scan(path).ok()?;
-            let scan = super::find_symbols(&content);
-            (!scan.classes.is_empty() || !scan.functions.is_empty() || !scan.constants.is_empty())
-                .then_some((scan, path, *origin))
+            let scan = super::find_symbols_and_global_tags(&content);
+            (!scan.classes.is_empty()
+                || !scan.functions.is_empty()
+                || !scan.constants.is_empty()
+                || !scan.globals.is_empty())
+            .then_some((scan, path, *origin))
         },
     );
 
@@ -603,6 +609,7 @@ fn read_phpstorm_stubs_map(
         constant_index,
         constant_origins,
         package_roots: Vec::new(),
+        globals: Vec::new(),
     })
 }
 
@@ -681,12 +688,15 @@ pub fn scan_drupal_directories(
     scan_files_parallel_full(&php_files, progress)
 }
 
+/// The extensions besides `.php` that Drupal treats as PHP source.
+pub(crate) const DRUPAL_PHP_EXTENSIONS: [&str; 6] =
+    ["module", "install", "theme", "profile", "inc", "engine"];
+
 /// Return `true` for file extensions that Drupal treats as PHP source.
 fn is_drupal_php_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("php" | "module" | "install" | "theme" | "profile" | "inc" | "engine")
-    )
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext == "php" || DRUPAL_PHP_EXTENSIONS.contains(&ext))
 }
 
 /// Derive the class name a PSR-4 mapping expects a file to declare, from

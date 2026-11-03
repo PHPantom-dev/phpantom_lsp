@@ -358,3 +358,15 @@ class DataProviderDemo
         yield 'small' => [1, 2, 3];
     }
 }
+
+
+// ── Mocked method names (go-to-definition) ──────────────────────────────────
+// A mock expectation names a method of the mocked class by string.  Once
+// PHPUnit or Mockery is installed, that name completes from the mocked class,
+// jumps to the method, renames with it, and is reported when the class has no
+// such method:
+// `$this->createMock(Scaffolding\CoverageLedger::class)->method('total')`,
+// `$ledger->expects($this->once())->method('total')`,
+// `Mockery::mock(Scaffolding\CoverageLedger::class)->shouldReceive('total')`,
+// and a Laravel facade's `Cache::shouldReceive('get')`, which names a method
+// of the class the facade stands for.

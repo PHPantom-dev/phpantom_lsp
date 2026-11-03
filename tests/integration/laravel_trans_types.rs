@@ -5,7 +5,7 @@
 //! at the call site settles which branch applies.
 
 use crate::common::create_psr4_workspace;
-use crate::common::{hover_response, open_php};
+use crate::common::{hover_response, message_text, open_php};
 use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
 
@@ -188,5 +188,61 @@ class Banner
     assert!(
         diags.is_empty(),
         "a translated line is a string wherever the key came from, got: {diags:?}"
+    );
+}
+
+#[tokio::test]
+async fn another_projects_translation_function_keeps_its_own_return_type() {
+    // WordPress declares `__()` as well, returning the translated string.
+    const COMPOSER_JSON_WORDPRESS: &str = r#"{
+    "autoload": { "psr-4": { "App\\": "src/" } }
+}"#;
+    const WORDPRESS_L10N: &str = "\
+<?php
+
+/**
+ * @param string $text
+ * @param string $domain
+ * @return string
+ */
+function __($text, $domain = 'default') { return $text; }
+";
+    const CALLER: &str = "\
+<?php
+namespace App;
+
+class Banner
+{
+    public function show(int $line): void {}
+
+    public function demo(): void
+    {
+        $this->show(__('Hello', 'acme'));
+    }
+}
+";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON_WORDPRESS,
+        &[
+            ("lang/en/messages.php", LANG_MESSAGES),
+            ("src/l10n.php", WORDPRESS_L10N),
+            ("src/Banner.php", CALLER),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let l10n_uri = Uri::from_file_path(dir.path().join("src/l10n.php")).unwrap();
+    open_php(&backend, &l10n_uri, WORDPRESS_L10N).await;
+    let uri = Uri::from_file_path(dir.path().join("src/Banner.php")).unwrap();
+    open_php(&backend, &uri, CALLER).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), CALLER, &mut diags);
+
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    let message = message_text(&diags[0].message);
+    assert!(
+        message.contains("got string") && !message.contains("array"),
+        "`__()` returns what its own declaration says, got: {message}"
     );
 }

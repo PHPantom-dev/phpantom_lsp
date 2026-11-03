@@ -160,6 +160,11 @@ impl Backend {
         // files that mention neither `Gate` nor `$policies`.
         self.refresh_laravel_gates(uri, content);
 
+        // Keep the middleware aliases and groups coherent with edits to the
+        // files that register them.  Cheap no-op for files that spell none
+        // of the registration methods or properties.
+        self.refresh_laravel_middleware(uri, content);
+
         // Keep the container bindings, package config files, view and
         // translation directories, route files, and component namespaces
         // coherent with edits to the providers that register them.  Cheap
@@ -464,6 +469,10 @@ impl Backend {
             for (cls, _, _) in &mut decls.classes_with_ns {
                 crate::stub_patches::apply_class_stub_patches(cls);
             }
+        } else if !self.is_external_stub_uri(uri) {
+            for func in &mut functions {
+                crate::stub_patches::apply_third_party_function_patches(func);
+            }
         }
 
         Self::qualify_function_names(
@@ -556,6 +565,25 @@ impl Backend {
                 yii_dir.as_deref(),
             )
         };
+        // A router that loads its routes from somewhere else than the
+        // routing files is a loader whose routes cannot be read (see
+        // `resource_symbol_map` for the YAML and XML counterpart).
+        if self.is_symfony_project()
+            && uri.contains("/config/packages/")
+            && crate::symfony::config_tree::php_configures_foreign_router_resource(
+                program,
+                content,
+                &owned_resolved,
+            )
+        {
+            symbol_map
+                .route_imports
+                .push(crate::symbol_map::RouteImport {
+                    resource: None,
+                    loader: None,
+                    name_prefix: String::new(),
+                });
+        }
         // An open file's slow diagnostics are built on the previous
         // pass's, which is only sound if that pass read an index built
         // from exactly the text it diagnosed.

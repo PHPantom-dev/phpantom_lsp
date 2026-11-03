@@ -65,6 +65,7 @@ pub(crate) fn resolve_laravel_string_key(
             .collect(),
         StringKeyKind::MorphAlias => resolve_morph_alias_definitions(backend, key),
         StringKeyKind::GateAbility => resolve_gate_ability_definitions(backend, key),
+        StringKeyKind::Middleware => resolve_middleware_definitions(backend, key),
         StringKeyKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
         StringKeyKind::Env => super::env_vars::resolve_env_definitions(backend, key),
         StringKeyKind::ServiceId
@@ -78,7 +79,13 @@ pub(crate) fn resolve_laravel_string_key(
         | StringKeyKind::MessengerBus
         | StringKeyKind::YiiRoute => backend.symfony_declaration_locations(*kind, key),
         StringKeyKind::YiiView => backend.resolve_yii_view_definitions(key),
+        StringKeyKind::TwigBlock => backend.twig_block_definitions(uri, None, key),
+        StringKeyKind::TwigVariable => backend.twig_variable_definitions(uri, None, key),
+        StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
+            backend.twig_callable_definitions(*kind, key)
+        }
         StringKeyKind::YiiRouteArgument => backend.yii_route_argument_locations(key),
+        StringKeyKind::WordPressHook => backend.wordpress_hook_definitions(key),
     }
 }
 
@@ -208,6 +215,38 @@ fn resolve_morph_alias_definitions(backend: &crate::Backend, alias: &str) -> Vec
     locations
 }
 
+/// Resolve a middleware alias or group to where it is registered, and an
+/// alias to the middleware class it runs as well.
+fn resolve_middleware_definitions(backend: &crate::Backend, name: &str) -> Vec<Location> {
+    let (site, class) = {
+        let index = backend.laravel.middleware.read();
+        match index.get(name) {
+            Some(super::MiddlewareTarget::Alias(alias)) => {
+                ((alias.uri.clone(), alias.offset), alias.class.clone())
+            }
+            Some(super::MiddlewareTarget::Group(group)) => {
+                ((group.uri.clone(), group.offset), None)
+            }
+            None => return Vec::new(),
+        }
+    };
+
+    let mut locations = Vec::new();
+    let (uri, offset) = site;
+    if let Some(parsed_uri) = crate::util::parse_url(&uri)
+        && let Some(content) = backend.get_file_content(&uri)
+    {
+        let position = crate::text_position::offset_to_position(&content, offset as usize);
+        locations.push(crate::definition::point_location(parsed_uri, position));
+    }
+    if let Some(class) = class
+        && let Some(location) = backend.class_declaration_location(&class)
+    {
+        locations.push(location);
+    }
+    locations
+}
+
 /// Resolve an Artisan command name to the declaration site inside its
 /// command class (the `$signature` / `$name` / `#[AsCommand]` literal).
 fn resolve_command_definition(backend: &crate::Backend, name: &str) -> Option<Location> {
@@ -259,15 +298,17 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::Command
         | StringKeyKind::MorphAlias
         | StringKeyKind::GateAbility
+        | StringKeyKind::Middleware
         | StringKeyKind::ContainerBinding
         | StringKeyKind::Env => find_string_key_usages(kind, key, backend, snapshot, true),
         // A Symfony declaration is a span in a configuration file's (or a
         // template's) map like any use, so the usages already hold it.
         StringKeyKind::ServiceId
         | StringKeyKind::ContainerParameter
-        | StringKeyKind::SymfonyRoute
         | StringKeyKind::SymfonyTranslation
         | StringKeyKind::TwigTemplate
+        | StringKeyKind::TwigFilter
+        | StringKeyKind::TwigFunction
         | StringKeyKind::SymfonyConfigKey
         | StringKeyKind::SymfonyEvent
         | StringKeyKind::MessengerBus
@@ -275,14 +316,37 @@ pub(crate) fn find_laravel_string_key_references(
             return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
         }
         // The catalogues named after a domain declare it, and the paths of
-        // its handler's routes a route argument, and are added below.
-        StringKeyKind::TranslationDomain | StringKeyKind::YiiRouteArgument => {
+        // its handler's routes a route argument, and are added below.  A
+        // route's name may be put together by the imports that load it, or
+        // declared by a bundle's routing file outside the workspace, so its
+        // declarations are too.
+        StringKeyKind::TranslationDomain
+        | StringKeyKind::YiiRouteArgument
+        | StringKeyKind::SymfonyRoute => {
             find_string_key_usages(kind, key, backend, snapshot, false)
         }
         // Two spellings of one view share no key, so the renders are found
         // by the file they name rather than in the key's snapshot.
         StringKeyKind::YiiView => {
             return backend.find_yii_view_references(key, include_declaration);
+        }
+        // Like a Blade section, a block is shared only by the templates
+        // that extend each other.
+        StringKeyKind::TwigBlock => {
+            return backend.twig_block_references(uri, None, key);
+        }
+        // A template's variable is its own, but a global is every
+        // template's.
+        StringKeyKind::TwigVariable if backend.is_twig_template_uri(uri) => {
+            return backend.twig_variable_references(uri, None, key);
+        }
+        StringKeyKind::TwigVariable => {
+            return find_string_key_usages(kind, key, backend, snapshot, include_declaration);
+        }
+        // A pattern only names a hook by matching it, so the places that
+        // fire or use it are found by matching too.
+        StringKeyKind::WordPressHook => {
+            return backend.wordpress_hook_references(key, include_declaration, false);
         }
     };
 

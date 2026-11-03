@@ -407,7 +407,10 @@ mod tests {
             Some("https://phpmd.org/rules/unusedcode.html#unusedlocalvariable")
         );
         assert_eq!(diags[0].range.start.line, 5);
-        assert_eq!(diags[0].range.end.character, u32::MAX);
+        assert_eq!(
+            diags[0].range.end.character,
+            crate::process::LINE_END_CHARACTER
+        );
     }
 
     #[test]

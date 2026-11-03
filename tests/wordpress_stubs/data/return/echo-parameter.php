@@ -34,7 +34,7 @@ use function PHPStan\Testing\assertType;
 
 // Default value of true
 assertType('null', comment_class());
-assertType('null', edit_term_link()); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('null', edit_term_link());
 assertType('null', get_calendar());
 assertType('null', next_posts());
 assertType('null', post_type_archive_title());
@@ -54,7 +54,7 @@ assertType('null', wp_title());
 // Explicit value of true
 $value = true;
 assertType('null', comment_class('', null, null, $value));
-assertType('null', edit_term_link('', '', '', null, $value)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('null', edit_term_link('', '', '', null, $value));
 assertType('null', get_calendar(['initial' => true, 'display' => $value]));
 assertType('null', next_posts(0, $value));
 assertType('null', post_type_archive_title('', $value));
@@ -74,7 +74,7 @@ assertType('null', wp_title('', $value));
 // Explicit value of false
 $value = false;
 assertType('string', comment_class('', null, null, $value));
-assertType('string|null', edit_term_link('', '', '', null, $value)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('string|null', edit_term_link('', '', '', null, $value));
 assertType('string', get_calendar(['initial' => true, 'display' => $value]));
 assertType('string', next_posts(0, $value));
 assertType('string|null', post_type_archive_title('', $value));
@@ -94,7 +94,7 @@ assertType('string', wp_title('', $value));
 // Unknown boolean value
 $value = Faker::bool();
 assertType('string|null', comment_class('', null, null, $value));
-assertType('string|null', edit_term_link('', '', '', null, $value)); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('string|null', edit_term_link('', '', '', null, $value));
 assertType('string|null', get_calendar(['initial' => true, 'display' => $value]));
 assertType('string|null', next_posts(0, $value));
 assertType('string|null', post_type_archive_title('', $value));

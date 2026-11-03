@@ -281,7 +281,8 @@ fn resolve_variable_class(
             variable,
             FileCtx::new(content, &ctx.classes, resolved_class_loader, class_loader)
                 .with_imports(Some(ctx.use_map_at(cursor_offset)))
-                .with_backend(Some(backend)),
+                .with_backend(Some(backend))
+                .with_uri(ctx.uri.as_deref()),
             current_class,
             cursor_offset,
         )

@@ -282,6 +282,7 @@ pub(in crate::symbol_map::extraction) fn record_view_receiver_sites(
             key,
             is_write: false,
             is_optional,
+            guards: 0,
             receiver,
         });
     }

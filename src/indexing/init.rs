@@ -128,6 +128,12 @@ impl Backend {
         self.set_is_symfony(packages().any(composer::is_symfony_project));
         self.set_is_twig(packages().any(composer::is_twig_project));
         self.set_is_yii(packages().any(composer::is_yii_project));
+        self.set_phpunit_major(
+            std::iter::once(root)
+                .chain(subprojects.iter().map(|(sub_root, _)| sub_root.as_path()))
+                .filter_map(composer::locked_phpunit_major)
+                .min(),
+        );
 
         // A permission package answers authorization checks from the database,
         // so the abilities this project uses are not written in its source and
@@ -230,6 +236,14 @@ impl Backend {
         let explicit_deps = composer_json
             .map(crate::composer::explicit_dependency_names)
             .unwrap_or_default();
+
+        // Detected before the filters are read, so the walks below see
+        // Drupal's `.module`, `.install`, … files as PHP too.
+        let drupal_web_root =
+            composer_json.and_then(|pkg| composer::detect_drupal_web_root(root, pkg));
+        if drupal_web_root.is_some() {
+            self.mark_drupal_project();
+        }
 
         // Composer's class lists name files without any walk reaching
         // them, so `exclude` is applied to them here, where they merge.
@@ -335,9 +349,7 @@ impl Backend {
         // contain every base interface and hook definition that modules
         // depend on.  detect_drupal_web_root() returns None for
         // non-Drupal projects so this block is a no-op in that case.
-        if let Some(pkg) = composer_json
-            && let Some(drupal_web_root) = composer::detect_drupal_web_root(root, pkg)
-        {
+        if let Some(drupal_web_root) = drupal_web_root {
             if let Some(p) = progress {
                 p.set_scope(at(55), at(59), "Scanning Drupal directories");
             }
@@ -447,6 +459,7 @@ impl Backend {
         let mut any_symfony = false;
         let mut any_twig = false;
         let mut any_yii = false;
+        let mut phpunit_major: Option<u8> = None;
 
         for (sub_idx, (sub_root, _)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;
@@ -477,6 +490,10 @@ impl Backend {
                 any_symfony |= composer::is_symfony_project(pkg);
                 any_twig |= composer::is_twig_project(pkg);
                 any_yii |= composer::is_yii_project(pkg);
+                if let Some(major) = composer::locked_phpunit_major(sub_root) {
+                    phpunit_major =
+                        Some(phpunit_major.map_or(major, |lowest: u8| lowest.min(major)));
+                }
                 any_application |=
                     composer::is_application_project(pkg) || sub_root.join("artisan").is_file();
             }
@@ -500,6 +517,7 @@ impl Backend {
         self.set_is_symfony(any_symfony);
         self.set_is_twig(any_twig);
         self.set_is_yii(any_yii);
+        self.set_phpunit_major(phpunit_major);
         self.laravel
             .gates
             .write()

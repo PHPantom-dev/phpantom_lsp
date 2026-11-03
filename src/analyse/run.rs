@@ -58,6 +58,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         file_data: &indexed.file_data,
         ignore_rules: &ignore_rules,
         severity_filter: options.severity_filter,
+        code_filter: &options.code_filter,
         debug,
         verbosity,
         show_progress,
@@ -95,6 +96,16 @@ pub async fn run(options: AnalyseOptions) -> i32 {
 
     // Sort by path so output order is deterministic.
     all_file_diagnostics.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let reported_codes = all_file_diagnostics
+        .iter()
+        .flat_map(|(_, diagnostics)| diagnostics)
+        .filter_map(|diagnostic| diagnostic.identifier.as_deref());
+    for code in options.code_filter.unmatched(reported_codes) {
+        eprintln!(
+            "Note: no diagnostics with code '{code}' were reported. If that is unexpected, check its spelling and --severity."
+        );
+    }
 
     report(
         &all_file_diagnostics,

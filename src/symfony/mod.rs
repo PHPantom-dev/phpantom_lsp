@@ -29,11 +29,13 @@
 //! that define its routes (see [`crate::yii`]), so the files holding one, or
 //! a route of any kind, are tracked here too.
 
+pub(crate) mod bundles;
 pub(crate) mod config_tree;
 pub(crate) mod container;
 pub(crate) mod forms;
 pub(crate) mod messenger;
 pub(crate) mod resources;
+pub(crate) mod route_world;
 pub(crate) mod routes;
 pub(crate) mod tags;
 pub(crate) mod translations;
@@ -103,27 +105,43 @@ pub(crate) fn slot_spans(content: &str, slots: Vec<NameSlot>) -> Vec<SymbolSpan>
 }
 
 /// The files whose symbol maps declare a Symfony service ID, container
-/// parameter, route, translation key, Twig template, configuration key,
+/// parameter, route, translation key, Twig template, Twig filter or
+/// function, configuration key,
 /// event listener, or Messenger bus, or register a Messenger handler, or
 /// define a Yii route.
 #[derive(Default)]
 pub(crate) struct SymfonyState {
     declaring_uris: RwLock<HashSet<String>>,
+    /// The routing files of dependencies, read from disk.
+    foreign_routing: route_world::ForeignRoutingFiles,
+    /// The service IDs and parameters the installed bundles declare, once
+    /// read.
+    /// Held while they are read, so the workers that ask at once read them
+    /// once.
+    bundle_declarations: parking_lot::Mutex<Option<std::sync::Arc<bundles::BundleDeclarations>>>,
+    /// The translation domains an undeclared key is reported in.
+    judged_translation_domains: translations::JudgedDomains,
 }
 
 /// Whether `map` declares a service ID, a container parameter, a route, a
-/// translation key, a template, a configuration key, an event listener, or
-/// a Messenger bus, outright or through a configurator call still to be
-/// confirmed, or registers a Messenger handler.
+/// translation key, a template, a Twig filter or function, a configuration
+/// key, an event listener, or a Messenger bus, outright or through a configurator call still to be
+/// confirmed, or registers a Messenger handler, or imports routes, or
+/// declares a Twig loader.
 ///
 /// Only the kinds `enabled` takes count: outside Symfony, a project that
-/// uses Twig declares its templates and nothing else.  A Yii route is
+/// uses Twig declares its templates, filters, and functions and nothing
+/// else.  A Yii route is
 /// counted whether it has a name or not, for the arguments its handler
 /// reads from its path.
 fn declares_symfony_keys(map: &SymbolMap, enabled: impl Fn(StringKeyKind) -> bool) -> bool {
-    let counts = |kind: StringKeyKind| (kind.is_symfony() || kind.is_yii()) && enabled(kind);
+    let counts = |kind: StringKeyKind| {
+        (kind.is_symfony() || kind.is_yii() || kind.is_twig()) && enabled(kind)
+    };
     (!map.messenger_handlers.is_empty() && enabled(StringKeyKind::MessengerBus))
         || (!map.routes.is_empty() && enabled(StringKeyKind::YiiRoute))
+        || (!map.route_imports.is_empty() && enabled(StringKeyKind::SymfonyRoute))
+        || (map.declares_twig_loader && enabled(StringKeyKind::TwigTemplate))
         || map.spans.iter().any(|span| {
             matches!(
                 &span.kind,
@@ -156,8 +174,13 @@ impl Backend {
     /// Whether the framework a string key of `kind` belongs to is the one
     /// this project uses.
     pub(crate) fn string_key_kind_enabled(&self, kind: StringKeyKind) -> bool {
-        if kind == StringKeyKind::TwigTemplate {
+        if kind.is_twig() {
             self.is_twig_project()
+        } else if kind.is_wordpress() {
+            // The hook functions' names are WordPress's own, and a project
+            // that calls them is a WordPress one whatever its
+            // `composer.json` says, or whether it has one at all.
+            true
         } else if kind.is_yii() {
             self.is_yii_project()
         } else if kind.is_symfony() {
@@ -214,14 +237,26 @@ impl Backend {
     }
 
     /// Visit every declaration of a `kind` key: the file and its symbol
-    /// map, the span's byte range, and the key.
-    fn visit_symfony_declarations(
+    /// map, the span's byte range, and the key.  A route is visited under
+    /// each name the imports that load it give it (see [`route_world`]),
+    /// and a service ID or parameter the installed bundles declare after
+    /// the project's own (see [`bundles`]).
+    pub(crate) fn visit_symfony_declarations(
         &self,
         kind: StringKeyKind,
         mut visit: impl FnMut(&str, &SymbolMap, u32, u32, &str),
     ) {
-        let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
-        uris.sort_unstable();
+        self.visit_project_symfony_declarations(kind, &mut visit);
+        self.visit_bundle_declarations(kind, visit);
+    }
+
+    /// [`Self::visit_symfony_declarations`], leaving out what the installed
+    /// bundles declare.
+    fn visit_project_symfony_declarations(
+        &self,
+        kind: StringKeyKind,
+        mut visit: impl FnMut(&str, &SymbolMap, u32, u32, &str),
+    ) {
         // The configurator calls are confirmed in their own files, whose
         // offsets have nothing to do with the file a diagnostic pass may be
         // checking on this thread, so neither of its caches may answer for
@@ -230,6 +265,13 @@ impl Backend {
             crate::type_engine::variable::forward_walk::suspend_diagnostic_scope(),
             crate::type_engine::resolver::with_isolated_chain_cache(),
         );
+        if kind == StringKeyKind::SymfonyRoute {
+            let world = self.symfony_route_world();
+            self.visit_route_declarations(&world, visit);
+            return;
+        }
+        let mut uris: Vec<String> = self.symfony.declaring_uris.read().iter().cloned().collect();
+        uris.sort_unstable();
         for uri in uris {
             let Some(map) = self.symbol_map_for(&uri) else {
                 continue;
@@ -257,6 +299,43 @@ impl Backend {
         self.symfony_declared_names_except(kind, None)
     }
 
+    /// Every route name the project declares, sorted, with the world they
+    /// were read from, which tells which of the names nothing declares
+    /// are mistakes.
+    pub(crate) fn symfony_routes(&self) -> (Vec<String>, route_world::RouteWorld) {
+        // See `visit_symfony_declarations`.
+        let _isolated = (
+            crate::type_engine::variable::forward_walk::suspend_diagnostic_scope(),
+            crate::type_engine::resolver::with_isolated_chain_cache(),
+        );
+        let world = self.symfony_route_world();
+        let mut names = Vec::new();
+        self.visit_route_declarations(&world, |_, _, _, _, name| names.push(name.to_string()));
+        names.sort_unstable();
+        names.dedup();
+        (names, world)
+    }
+
+    /// Whether the project declares a Twig loader of its own, which can
+    /// serve template names no file under the Twig roots holds.
+    pub(crate) fn declares_twig_loader(&self) -> bool {
+        let mut declares = false;
+        self.visit_declaring_symbol_maps(|_, map| declares |= map.declares_twig_loader);
+        declares
+    }
+
+    /// The service IDs or parameters the project's own configuration
+    /// declares, sorted, leaving out the installed bundles'.
+    pub(crate) fn symfony_project_declared_names(&self, kind: StringKeyKind) -> Vec<String> {
+        let mut names = Vec::new();
+        self.visit_project_symfony_declarations(kind, |_, _, _, _, key| {
+            names.push(key.to_string());
+        });
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
+
     /// [`Self::symfony_declared_names`], leaving out the declaration that
     /// starts at `except` (a file and an offset): the one being typed,
     /// which an event listener's subscription is.
@@ -277,8 +356,17 @@ impl Backend {
                 },
             );
         } else {
+            // A parameter set under a name built at runtime is declared as a
+            // pattern (`app.*`), which is no name anyone writes, and a route
+            // is named after its controller (`App\Controller\Foo::bar`) as
+            // well as by its own name, which is the one to offer.
+            let is_unlisted = |key: &str| match kind {
+                StringKeyKind::ContainerParameter => key.ends_with('*'),
+                StringKeyKind::SymfonyRoute => key.contains('\\'),
+                _ => false,
+            };
             self.visit_symfony_declarations(kind, |uri, _, start, _, key| {
-                if except != Some((uri, start)) {
+                if except != Some((uri, start)) && !is_unlisted(key) {
                     names.push(key.to_string());
                 }
             });

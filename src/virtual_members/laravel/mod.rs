@@ -131,6 +131,7 @@ mod inflector;
 mod macros;
 mod magic_uses;
 mod method_refinement;
+pub(crate) mod middleware;
 mod model_extraction;
 mod model_provider;
 mod model_type;
@@ -156,13 +157,15 @@ pub(crate) mod typed_morph_columns;
 mod unique_ids;
 pub(crate) mod validated_shape;
 pub(crate) mod validation_rules;
+pub(crate) mod validation_strings;
 mod view_data;
 mod view_names;
 pub(crate) mod where_property;
 
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use auth::{
-    AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type,
+    AUTH_FACADE_FQN, GUARD_FQN, REQUEST_FQN, is_computing_auth_model, patch_auth_user_class,
+    resolve_auth_user_type,
 };
 pub(crate) use cache_state::LaravelCacheState;
 pub(crate) use collections::{
@@ -186,11 +189,12 @@ pub(crate) use gates::{
 };
 pub(crate) use inflector::singularize_english_word;
 pub(crate) use macros::{
-    LaravelMacroIndex, MacroRegistration, extract_date_factory_class, extract_macro_registrations,
-    extract_mixin_registrations, inject_macros, macro_closure_this_target,
-    parse_installed_providers, parse_provider_class_list, parse_provider_referenced_classes,
-    synthesize_mixin_macros,
+    LaravelMacroIndex, MacroRegistration, OpenCallName, extract_date_factory_class,
+    extract_macro_registrations, extract_mixin_registrations, extract_open_call_names,
+    extract_strict_attributes, inject_macros, macro_closure_this_target, parse_installed_providers,
+    parse_provider_class_list, parse_provider_referenced_classes, synthesize_mixin_macros,
 };
+pub(crate) use middleware::{LaravelMiddlewareIndex, MiddlewareTarget};
 pub(crate) use model_extraction::{
     attribute_entry_offset, extract_laravel_metadata, extract_laravel_trait_metadata,
     has_inheritable_model_metadata, has_scope_attribute, inherit_model_metadata,
@@ -211,17 +215,16 @@ pub(crate) use provider_resources::{
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::{
-    RouteDiscovery, enumerate_all_routes, find_route_registration_references, route_name_matches,
-    route_uri_parameters,
+    RouteAction, RouteDiscovery, enumerate_all_routes, find_route_registration_references,
+    route_name_matches, route_uri_parameters,
 };
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,
 };
-pub(crate) use table_names::model_table_name;
+pub(crate) use table_names::{model_schema_is_known, model_table_name};
 pub(crate) use trans_catalog::TranslationCatalog;
 pub(crate) use trans_json::find_json_trans_references;
-pub(crate) use trans_keys::unresolved_trans_type;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_data::{SharedViewVar, composer_class_vars, is_view_facade};
 pub(crate) use view_names::canonical_view_name;
@@ -232,7 +235,9 @@ pub(crate) use higher_order_proxy::{
 };
 pub(crate) use string_keys::{find_laravel_string_key_references, resolve_laravel_string_key};
 
-pub(crate) use expr_walker::walk_all_php_expressions;
+pub(crate) use expr_walker::{
+    walk_all_php_expressions, walk_block_expressions, walk_program_expressions,
+};
 pub use helpers::extends_eloquent_model;
 pub(crate) use helpers::{accessor_method_candidates, camel_to_snake};
 pub use model_provider::LaravelModelProvider;
@@ -247,6 +252,7 @@ pub(crate) use relationships::class_has_relation_method_ci;
 pub(crate) use relationships::classify_relationship_typed;
 pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
+pub(crate) use relationships::patch_config_related_models;
 pub(crate) use relationships::{
     RELATION_QUERY_METHODS, related_model_type, relation_query_method, resolve_relation_chain,
     resolve_relation_chain_details, resolve_relation_type,

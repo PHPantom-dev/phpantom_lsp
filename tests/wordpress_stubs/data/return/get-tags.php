@@ -8,30 +8,30 @@ use function get_tags;
 use function PHPStan\Testing\assertType;
 
 // Default argument values (fields => all)
-assertType('array<int, WP_Term>|WP_Error', get_tags()); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('array<int, WP_Term>|WP_Error', get_tags([])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('array<int, WP_Term>|WP_Error', get_tags());
+assertType('array<int, WP_Term>|WP_Error', get_tags([]));
 
 // Requesting a count
-assertType('numeric-string|WP_Error', get_tags(['fields' => 'count'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('numeric-string|WP_Error', get_tags(['foo' => 'bar','fields' => 'count'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('numeric-string|WP_Error', get_tags(['fields' => 'count']));
+assertType('numeric-string|WP_Error', get_tags(['foo' => 'bar','fields' => 'count']));
 
 // Requesting names or slugs
-assertType('list<string>|WP_Error', get_tags(['fields' => 'names'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('list<string>|WP_Error', get_tags(['fields' => 'slugs'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('array<int, string>|WP_Error', get_tags(['fields' => 'id=>name'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('array<int, string>|WP_Error', get_tags(['fields' => 'id=>slug'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('list<string>|WP_Error', get_tags(['fields' => 'names']));
+assertType('list<string>|WP_Error', get_tags(['fields' => 'slugs']));
+assertType('array<int, string>|WP_Error', get_tags(['fields' => 'id=>name']));
+assertType('array<int, string>|WP_Error', get_tags(['fields' => 'id=>slug']));
 
 // Requesting IDs
-assertType('list<int>|WP_Error', get_tags(['fields' => 'ids'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('list<int>|WP_Error', get_tags(['fields' => 'tt_ids'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('list<int>|WP_Error', get_tags(['fields' => 'ids']));
+assertType('list<int>|WP_Error', get_tags(['fields' => 'tt_ids']));
 
 // Requesting parent IDs
-assertType('array<int, int>|WP_Error', get_tags(['fields' => 'id=>parent'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('array<int, int>|WP_Error', get_tags(['fields' => 'id=>parent']));
 
 // Requesting objects
-assertType('array<int, WP_Term>|WP_Error', get_tags(['fields' => 'all'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('array<int, WP_Term>|WP_Error', get_tags(['fields' => 'all_with_object_id'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
-assertType('array<int, WP_Term>|WP_Error', get_tags(['fields' => 'foo'])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('array<int, WP_Term>|WP_Error', get_tags(['fields' => 'all']));
+assertType('array<int, WP_Term>|WP_Error', get_tags(['fields' => 'all_with_object_id']));
+assertType('array<int, WP_Term>|WP_Error', get_tags(['fields' => 'foo']));
 
 // Unknown fields value
-assertType('array<int, int|string|WP_Term>|numeric-string|WP_Error', get_tags(['fields' => Faker::string()])); // SKIP: a conditional type inside a union, an intersection or a generic argument is not evaluated
+assertType('numeric-string|list<string>|array<int, string>|array<int, int>|list<int>|array<int, WP_Term>|WP_Error', get_tags(['fields' => Faker::string()])); // PHPantom keeps the array types apart where PHPStan merges them

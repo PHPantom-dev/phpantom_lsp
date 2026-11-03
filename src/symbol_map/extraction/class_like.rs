@@ -15,10 +15,13 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
 
     extract_from_attribute_lists(&class.attribute_lists, ctx, 0);
     emit_symfony_route_spans(class, ctx);
+    note_symfony_framework_class(class, ctx);
     emit_symfony_form_field_spans(class, ctx);
     emit_symfony_config_tree_spans(class, ctx);
     emit_symfony_listener_spans(class, ctx);
     emit_messenger_handler_sites(class, ctx);
+    emit_twig_callable_attributes(class, ctx);
+    emit_twig_global_declarations(class, ctx);
     emit_yii_route_argument_spans(class, ctx);
 
     if let Some(ref extends) = class.extends {
@@ -70,21 +73,22 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     // too plain to key on outside that context.
     let prev_in_mailable = ctx.in_mailable;
     ctx.in_mailable = class_extends_named(class, b"Mailable");
+    let prev_in_controller = ctx.in_controller;
+    ctx.in_controller = class_extends_named(class, b"Controller");
     let prev_covers_default_class = ctx.covers_default_class;
     ctx.covers_default_class = covers_default_class;
     let yii_view_scope = yii_class_scope(class, ctx);
     let prev_yii_view_scope = std::mem::replace(&mut ctx.yii_view_scope, yii_view_scope);
-    let prev_yii_class_name_offset = ctx
-        .yii_class_name_offset
-        .replace(class.name.span.start.offset);
+    let prev_class_name_offset = ctx.class_name_offset.replace(class.name.span.start.offset);
 
     for member in class.members.iter() {
         extract_from_class_member(member, ctx);
     }
 
-    ctx.yii_class_name_offset = prev_yii_class_name_offset;
+    ctx.class_name_offset = prev_class_name_offset;
     ctx.yii_view_scope = prev_yii_view_scope;
     ctx.covers_default_class = prev_covers_default_class;
+    ctx.in_controller = prev_in_controller;
     ctx.in_mailable = prev_in_mailable;
     ctx.in_console_command = prev_in_console_command;
 }
@@ -353,6 +357,24 @@ pub(super) fn extract_from_attribute_lists<'a>(
                     emit_template_attribute_span(arg_list, ctx);
                 }
 
+                // `#[Middleware('auth')]` on a controller or an action names
+                // the middleware it runs, `#[WithoutMiddleware]` the
+                // middleware it leaves out.
+                if is_laravel_middleware_attr(semantic_class_name)
+                    && let Some(middleware) =
+                        partial_argument_expr_for_parameter(arg_list, "middleware")
+                {
+                    emit_middleware_value_spans(
+                        middleware,
+                        MiddlewareSpans {
+                            alias: true,
+                            auth_guards: true,
+                        },
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+
                 // `#[RedirectToRoute('login')]` on a form request names the
                 // route a failed validation bounces back to.
                 if is_laravel_redirect_route_attr(
@@ -589,6 +611,7 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
     });
 
     extract_from_attribute_lists(&method.attribute_lists, ctx, 0);
+    record_template_action_context(method, ctx);
 
     // Docblock on the method.  We extract type spans and template params
     // now, but defer `@param $var` variable spans until after we know
@@ -815,6 +838,7 @@ pub(super) fn extract_from_parameter<'a>(
     if let Some(ref hint) = param.hint {
         extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
     }
+    note_routing_configurator_parameter(param, ctx);
     if let Some((doc_text, doc_offset)) =
         get_docblock_text_with_offset(ctx.trivias, ctx.content, param)
     {

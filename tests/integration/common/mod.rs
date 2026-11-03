@@ -85,7 +85,7 @@ pub async fn completion_response(
 /// Flatten a completion response into its items, keeping "the server had
 /// nothing to offer" (`None`) distinct from "the server offered an empty
 /// list".
-fn response_items(response: Option<CompletionResponse>) -> Option<Vec<CompletionItem>> {
+pub fn response_items(response: Option<CompletionResponse>) -> Option<Vec<CompletionItem>> {
     match response {
         Some(CompletionResponse::CompletionItemList(items)) => Some(items),
         Some(CompletionResponse::CompletionList(list)) => Some(list.items),
@@ -1599,10 +1599,7 @@ pub const ILLUMINATE_COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\
 /// editor would hold and the position the marker stood at.
 pub fn split_cursor(content: &str) -> (String, Position) {
     let offset = content.find('§').expect("test source needs a § cursor");
-    let before = &content[..offset];
-    let line = before.matches('\n').count() as u32;
-    let character = before.rsplit('\n').next().unwrap_or("").chars().count() as u32;
-    (content.replace('§', ""), Position { line, character })
+    (content.replace('§', ""), offset_position(content, offset))
 }
 
 // ── Shared Laravel fixtures ─────────────────────────────────────────────────

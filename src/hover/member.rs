@@ -345,6 +345,7 @@ impl Backend {
         member_name: &str,
         is_static: bool,
         kind: MemberRefKind,
+        mock_expectation: bool,
     ) -> Option<Hover> {
         let HoverSite {
             uri,
@@ -359,12 +360,16 @@ impl Backend {
         let access_kind = AccessKind::of_member_access(is_static);
 
         let source = self.symbol_map_source(uri, content)?;
-        let candidates =
+        let mut candidates =
             ResolvedType::into_arced_classes(crate::type_engine::resolver::resolve_target_classes(
                 subject_text.as_str(source),
                 access_kind,
                 &rctx,
             ));
+        if mock_expectation {
+            candidates =
+                crate::mock_methods::mocked_classes(candidates, is_static, &resolved_class_loader);
+        }
 
         // Collect hover results from all union candidates,
         // deduplicating by declaring class so that a member

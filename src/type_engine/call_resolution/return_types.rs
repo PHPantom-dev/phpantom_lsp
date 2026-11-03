@@ -45,7 +45,7 @@ use laravel::{
 };
 pub(crate) use literals::literal_arg_type;
 pub(super) use literals::{resolve_literal_type, resolve_operator_type};
-pub(super) use operands::resolve_cast_type;
+pub(super) use operands::{resolve_cast_type, split_cast};
 
 /// Bundled parameters for [`Backend::resolve_method_return_types_with_args`].
 ///
@@ -223,6 +223,7 @@ fn resolve_conditional_return_hint(
         bindings: method.template_bindings(),
         arg_type_resolver: None,
         this_type: Some(&this_type),
+        subs: None,
     };
     let resolved = if !text_args.is_empty() {
         resolve_conditional_with_text_args_and_defaults(
@@ -462,6 +463,7 @@ impl Backend {
                 bindings: method.template_bindings(),
                 arg_type_resolver: None,
                 this_type: None,
+                subs: None,
             };
             crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
                 &ty,

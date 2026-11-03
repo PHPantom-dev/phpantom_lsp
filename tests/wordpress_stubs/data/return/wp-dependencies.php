@@ -20,15 +20,15 @@ assertType('false', Faker::wpDependencies()->query('', Faker::string()));
 assertType('false', Faker::wpScripts()->query('', Faker::string()));
 assertType('false', Faker::wpStyles()->query('', Faker::string()));
 
-assertType('_WP_Dependency|false', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'registered')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('_WP_Dependency|false', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'scripts')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'enqueued')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'queued')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'to_do')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'to_print')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'done')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'printed')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('_WP_Dependency|false', Faker::wpScripts()->query(Faker::nonEmptyString(), 'registered')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('bool', Faker::wpScripts()->query(Faker::nonEmptyString(), 'enqueued')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('_WP_Dependency|false', Faker::wpStyles()->query(Faker::nonEmptyString(), 'registered')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
-assertType('bool', Faker::wpStyles()->query(Faker::nonEmptyString(), 'enqueued')); // SKIP: a condition over an integer range, a refined string, `numeric`, `empty`, `resource` or an array key type is misjudged
+assertType('_WP_Dependency|false', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'registered'));
+assertType('_WP_Dependency|false', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'scripts'));
+assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'enqueued'));
+assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'queued'));
+assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'to_do'));
+assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'to_print'));
+assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'done'));
+assertType('bool', Faker::wpDependencies()->query(Faker::nonEmptyString(), 'printed'));
+assertType('_WP_Dependency|false', Faker::wpScripts()->query(Faker::nonEmptyString(), 'registered'));
+assertType('bool', Faker::wpScripts()->query(Faker::nonEmptyString(), 'enqueued'));
+assertType('_WP_Dependency|false', Faker::wpStyles()->query(Faker::nonEmptyString(), 'registered'));
+assertType('bool', Faker::wpStyles()->query(Faker::nonEmptyString(), 'enqueued'));

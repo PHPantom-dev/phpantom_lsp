@@ -1,0 +1,18 @@
+// test: a @global tag on the function types the global it imports
+// feature: completion
+// expect: get_var(
+---
+<?php
+
+class wpdb {
+    public string $prefix = 'wp_';
+    public function get_var(string $query): ?string { return null; }
+}
+
+/**
+ * @global wpdb $wpdb WordPress database abstraction object.
+ */
+function acme_count_orders(): int {
+    global $wpdb;
+    return (int) $wpdb-><>
+}

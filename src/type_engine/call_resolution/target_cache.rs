@@ -490,6 +490,7 @@ pub(crate) struct TypeEngineCaches {
     _body_infer: BodyInferMemoGuard,
     _out_type: super::out_param::OutTypeMemoGuard,
     _walk: crate::type_engine::variable::forward_walk::WalkMemoGuard,
+    _include: crate::type_engine::variable::forward_walk::IncludeMemoGuard,
     _form_request_rules: crate::virtual_members::laravel::validation_rules::RulesMemoGuard,
 }
 
@@ -508,6 +509,7 @@ pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
         _body_infer: with_body_infer_memo(),
         _out_type: super::out_param::with_out_type_memo(),
         _walk: crate::type_engine::variable::forward_walk::with_walk_memo(),
+        _include: crate::type_engine::variable::forward_walk::with_include_memo(),
         _form_request_rules: crate::virtual_members::laravel::validation_rules::with_rules_memo(),
     }
 }

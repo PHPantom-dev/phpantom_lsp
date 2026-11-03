@@ -199,6 +199,7 @@ mod tests {
             vec![Psr4Mapping {
                 prefix: "App\\Models\\".to_string(),
                 base_path: "app/Models/".to_string(),
+                is_dev: false,
             }],
         );
         let uri = "file:///project/app/Models/ExampleState.php";

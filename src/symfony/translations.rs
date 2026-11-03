@@ -15,7 +15,13 @@
 //! a key through the `trans` filter, in the domain the filter names or
 //! else the template's `trans_default_domain`.
 
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+
 use super::resources::{yaml_content_before_comment, yaml_mapping_key};
+use crate::Backend;
 use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolSpan};
 
 /// The domain a message is looked up in when the call names none.
@@ -56,6 +62,19 @@ fn is_message(message: &str) -> bool {
     !message.trim().is_empty() && !message.contains(['\n', '\r', DOMAIN_SEPARATOR])
 }
 
+/// Whether `message` is spelled like a key (`demo.title`) rather than like
+/// text that is its own translation (`Save`, `Saved.`): two or more words
+/// joined by dots, with no spaces.
+pub(crate) fn is_dotted_key(message: &str) -> bool {
+    message.contains('.')
+        && message.split('.').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        })
+}
+
 /// The directories and the file name of `uri`, without a query or
 /// fragment.
 fn file_name(uri: &str) -> Option<(&str, &str)> {
@@ -72,10 +91,17 @@ pub(crate) fn is_xliff_uri(uri: &str) -> bool {
     })
 }
 
+/// Whether a catalogue in `format` (its file extension) is one this reads.
+fn is_read_format(format: &str) -> bool {
+    matches!(
+        format.to_ascii_lowercase().as_str(),
+        "yaml" | "yml" | "xlf" | "xliff"
+    )
+}
+
 /// The domain the catalogue `uri` holds messages for, when it is one Symfony
 /// loads: a YAML or XLIFF file under a `translations/` directory, named
-/// `<domain>.<locale>.<format>`.  An ICU catalogue (`messages+intl-icu`)
-/// belongs to the domain it is named after.
+/// `<domain>.<locale>.<format>`.
 pub(crate) fn catalogue_domain(uri: &str) -> Option<&str> {
     let (directories, name) = file_name(uri)?;
     if !directories
@@ -84,13 +110,18 @@ pub(crate) fn catalogue_domain(uri: &str) -> Option<&str> {
     {
         return None;
     }
-    let (rest, format) = name.rsplit_once('.')?;
-    if !matches!(
-        format.to_ascii_lowercase().as_str(),
-        "yaml" | "yml" | "xlf" | "xliff"
-    ) {
+    let (_, format) = name.rsplit_once('.')?;
+    if !is_read_format(format) {
         return None;
     }
+    catalogue_file_domain(name)
+}
+
+/// The domain of a catalogue file named `<domain>.<locale>.<format>`, in
+/// any format.  An ICU catalogue (`messages+intl-icu`) belongs to the domain
+/// it is named after.
+fn catalogue_file_domain(name: &str) -> Option<&str> {
+    let (rest, _format) = name.rsplit_once('.')?;
     let (domain, _locale) = rest.rsplit_once('.')?;
     let domain = ["+intl-icu", "%2Bintl-icu", "%2bintl-icu"]
         .iter()
@@ -143,6 +174,257 @@ fn domain_span(domain: &str, start: usize) -> SymbolSpan {
             is_write: false,
             is_optional: false,
         },
+    }
+}
+
+// ─── Which domains can be judged ────────────────────────────────────────────
+
+/// Where an installed package keeps its catalogues: a bundle's
+/// `translations/` (or the older `Resources/translations/`) beside its class,
+/// at the package's root or under `src/`.  Symfony's own components keep
+/// theirs in `Resources/translations/`.
+const PACKAGE_CATALOGUE_DIRS: &[&str] = &[
+    "translations",
+    "Resources/translations",
+    "src/Resources/translations",
+    "src/translations",
+];
+
+/// The domains [`Backend::symfony_judged_translation_domains`] found, kept
+/// until a file they were read from changes (see
+/// [`is_translation_setup_uri`]).
+#[derive(Default)]
+pub(crate) struct JudgedDomains {
+    cached: RwLock<Option<Arc<[String]>>>,
+}
+
+/// Whether a change to the file at `uri` can change which translation
+/// domains are judged: a catalogue, the configuration that says where the
+/// translator loads them from, or what Composer installed.
+pub(crate) fn is_translation_setup_uri(uri: &str) -> bool {
+    let Some((directories, name)) = file_name(uri) else {
+        return false;
+    };
+    directories
+        .split('/')
+        .any(|segment| segment == "translations")
+        || directories.contains("/config/packages")
+        || matches!(name, "composer.json" | "composer.lock" | "installed.json")
+}
+
+/// Visit every catalogue file under `dir`, at any depth, with its domain
+/// and whether it is in a format this reads.
+fn visit_catalogue_files(dir: &Path, visit: &mut impl FnMut(&str, bool)) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            visit_catalogue_files(&entry.path(), visit);
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if let Some(domain) = catalogue_file_domain(name) {
+            let read = name
+                .rsplit_once('.')
+                .is_some_and(|(_, format)| is_read_format(format));
+            visit(domain, read);
+        }
+    }
+}
+
+/// The domains the packages installed into `vendor` ship catalogues for,
+/// or `false` when what is installed cannot be read.
+fn shipped_domains(vendor: &Path, domains: &mut Vec<String>) -> bool {
+    let Some(installed) = crate::composer::read_installed_packages(vendor, "") else {
+        return false;
+    };
+    for package in &installed.packages {
+        let Some(root) = installed.package_root(package) else {
+            continue;
+        };
+        for dir in PACKAGE_CATALOGUE_DIRS {
+            visit_catalogue_files(&root.join(dir), &mut |domain, _| {
+                domains.push(domain.to_string());
+            });
+        }
+    }
+    true
+}
+
+/// The directories the translator of the project at `root` loads its own
+/// catalogues from: `framework.translator.default_path` (`translations/` by
+/// default) and `framework.translator.paths`, as the YAML under
+/// `config/packages/` sets them.  `None` when they cannot be told: a
+/// configuration in another format names the translator, or a directory is
+/// spelled with a parameter other than `%kernel.project_dir%`.
+fn translator_dirs(root: &Path) -> Option<Vec<PathBuf>> {
+    let mut default_paths = Vec::new();
+    let mut paths = Vec::new();
+    let mut pending = vec![root.join("config/packages")];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+                pending.push(path);
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let uri = path.to_string_lossy();
+            match super::config_format(&uri) {
+                Some(super::ConfigFormat::Yaml) => {
+                    scan_translator_yaml(&content, &mut default_paths, &mut paths);
+                }
+                _ if content.contains("translator") => return None,
+                _ => {}
+            }
+        }
+    }
+    if default_paths.is_empty() {
+        default_paths.push("%kernel.project_dir%/translations".to_string());
+    }
+    default_paths
+        .iter()
+        .chain(&paths)
+        .map(|path| {
+            let rest = path.strip_prefix("%kernel.project_dir%")?;
+            (!rest.contains('%')).then(|| root.join(rest.trim_start_matches('/')))
+        })
+        .collect()
+}
+
+/// The `default_path` and `paths` a YAML configuration file gives
+/// `framework.translator`, in any environment.
+fn scan_translator_yaml(content: &str, default_paths: &mut Vec<String>, paths: &mut Vec<String>) {
+    let scalar = |raw: &str| {
+        crate::framework::strip_yaml_quotes(raw.trim())
+            .0
+            .to_string()
+    };
+    // The mapping keys the line being read is nested under, by indentation.
+    let mut path: Vec<(usize, &str)> = Vec::new();
+    for (_, line) in crate::framework::line_offsets(content) {
+        let semantic = yaml_content_before_comment(line);
+        let trimmed = semantic.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let indent = crate::framework::leading_spaces(semantic);
+        if let Some(item) = trimmed.strip_prefix('-') {
+            if matches!(path.as_slice(), [.., (_, "translator"), (at, "paths")] if *at <= indent) {
+                paths.push(scalar(item));
+            }
+            continue;
+        }
+        let Some((raw_key, _)) = yaml_mapping_key(semantic, 0) else {
+            continue;
+        };
+        let (key, _) = crate::framework::strip_yaml_quotes(raw_key);
+        while path.last().is_some_and(|(at, _)| *at >= indent) {
+            path.pop();
+        }
+        if matches!(path.as_slice(), [.., (_, "framework"), (_, "translator")]) {
+            let value = semantic
+                .split_once(':')
+                .map_or("", |(_, value)| value.trim());
+            match key {
+                "default_path" => default_paths.push(scalar(value)),
+                "paths" => {
+                    if let Some(list) = value.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
+                        paths.extend(list.split(',').map(scalar).filter(|p| !p.is_empty()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        path.push((indent, key));
+    }
+}
+
+impl Backend {
+    /// The Composer projects of the workspace: each root, with its vendor
+    /// directory.
+    fn translation_projects(&self) -> Vec<(PathBuf, PathBuf)> {
+        let projects: Vec<(PathBuf, PathBuf)> = self
+            .workspace
+            .composer_projects
+            .read()
+            .iter()
+            .filter_map(|project| {
+                Some((project.root.clone(), project.vendor_paths.first()?.clone()))
+            })
+            .collect();
+        if !projects.is_empty() {
+            return projects;
+        }
+        let Some(root) = self.workspace_root().read().clone() else {
+            return Vec::new();
+        };
+        let vendor_dir = crate::composer::read_composer_package(&root).map_or_else(
+            || "vendor".to_string(),
+            |package| crate::composer::get_vendor_dir(&package),
+        );
+        let vendor = root.join(vendor_dir);
+        vec![(root, vendor)]
+    }
+
+    /// The translation domains a key no catalogue declares is a mistake in,
+    /// sorted: the ones the translator loads a catalogue of the project's
+    /// own for that this reads, unless it loads one this does not read too,
+    /// or an installed package ships one.  Any other key may be translated
+    /// by a catalogue that is not read, or be a message that is its own
+    /// translation in a domain the project keeps no catalogue of.
+    ///
+    /// Empty when what is installed, or where the translator loads the
+    /// project's catalogues from, cannot be told.
+    pub(crate) fn symfony_judged_translation_domains(&self) -> Arc<[String]> {
+        let cache = &self.symfony.judged_translation_domains.cached;
+        if let Some(domains) = cache.read().as_ref() {
+            return Arc::clone(domains);
+        }
+        let domains: Arc<[String]> = self.find_judged_translation_domains().into();
+        *cache.write() = Some(Arc::clone(&domains));
+        domains
+    }
+
+    /// Forget the judged domains, after a file they were read from changed.
+    pub(crate) fn forget_symfony_judged_translation_domains(&self) {
+        *self.symfony.judged_translation_domains.cached.write() = None;
+    }
+
+    fn find_judged_translation_domains(&self) -> Vec<String> {
+        let mut shipped = Vec::new();
+        let mut read = Vec::new();
+        let mut unread = Vec::new();
+        for (root, vendor) in self.translation_projects() {
+            let Some(dirs) = translator_dirs(&root) else {
+                return Vec::new();
+            };
+            if !shipped_domains(&vendor, &mut shipped) {
+                return Vec::new();
+            }
+            for dir in dirs {
+                visit_catalogue_files(&dir, &mut |domain, is_read| {
+                    let into = if is_read { &mut read } else { &mut unread };
+                    into.push(domain.to_string());
+                });
+            }
+        }
+        read.sort_unstable();
+        read.dedup();
+        read.retain(|domain| !unread.contains(domain) && !shipped.contains(domain));
+        read
     }
 }
 
@@ -612,6 +894,68 @@ mod tests {
         assert_eq!(
             catalogue_domain("file:///p/translations/messages.en.php"),
             None
+        );
+    }
+
+    #[test]
+    fn only_dotted_identifiers_are_spelled_like_keys() {
+        for key in ["demo.title", "app.user_name", "form.save-label", "v1.2"] {
+            assert!(is_dotted_key(key), "{key}");
+        }
+        for message in ["Save", "Saved.", "e.g.", ".hidden", "Hello world.", "a..b"] {
+            assert!(!is_dotted_key(message), "{message}");
+        }
+    }
+
+    #[test]
+    fn catalogue_files_of_any_format_name_their_domain() {
+        assert_eq!(
+            catalogue_file_domain("validators.en.xlf"),
+            Some("validators")
+        );
+        assert_eq!(
+            catalogue_file_domain("messages+intl-icu.de.php"),
+            Some("messages")
+        );
+        assert_eq!(
+            catalogue_file_domain("EasyAdminBundle.fr.php"),
+            Some("EasyAdminBundle")
+        );
+        assert_eq!(catalogue_file_domain("README.md"), None);
+    }
+
+    #[test]
+    fn catalogues_configuration_and_composer_change_the_judged_domains() {
+        for uri in [
+            "file:///p/translations/messages.en.php",
+            "file:///p/assets/translations/sub/admin.de.yaml",
+            "file:///p/config/packages/translation.yaml",
+            "file:///p/config/packages/prod/framework.yaml",
+            "file:///p/composer.lock",
+        ] {
+            assert!(is_translation_setup_uri(uri), "{uri}");
+        }
+        for uri in [
+            "file:///p/src/Controller/A.php",
+            "file:///p/config/routes.yaml",
+        ] {
+            assert!(!is_translation_setup_uri(uri), "{uri}");
+        }
+    }
+
+    #[test]
+    fn the_translator_configuration_names_its_directories() {
+        let yaml = "framework:\n    default_locale: en\n    translator:\n        default_path: '%kernel.project_dir%/i18n'\n        paths:\n            - '%kernel.project_dir%/extra'\n        fallbacks: [en]\nwhen@test:\n    framework:\n        translator:\n            paths: ['%kernel.project_dir%/test', \"%kernel.project_dir%/more\"]\ntwig:\n    paths:\n        - templates\n";
+        let (mut default_paths, mut paths) = (Vec::new(), Vec::new());
+        scan_translator_yaml(yaml, &mut default_paths, &mut paths);
+        assert_eq!(default_paths, vec!["%kernel.project_dir%/i18n"]);
+        assert_eq!(
+            paths,
+            vec![
+                "%kernel.project_dir%/extra",
+                "%kernel.project_dir%/test",
+                "%kernel.project_dir%/more"
+            ]
         );
     }
 

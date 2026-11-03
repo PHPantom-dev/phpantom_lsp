@@ -203,6 +203,8 @@ phpantom_lsp analyze src/Foo.php                 # scan a single file
 phpantom_lsp analyze app/ lib/Helper.php         # scan several paths at once
 phpantom_lsp analyze --severity warning          # errors and warnings only
 phpantom_lsp analyze --severity error            # errors only
+phpantom_lsp analyze --code unused_import        # one diagnostic code only
+phpantom_lsp analyze --exclude-code unused_import # everything but one code
 phpantom_lsp analyze --project-root /path/to/app # explicit project root
 phpantom_lsp analyze --no-colour                 # plain text output
 phpantom_lsp analyze --debug -vv                 # trace file-by-file progress
@@ -214,6 +216,8 @@ phpantom_lsp analyze --debug -vv                 # trace file-by-file progress
 | -------------------------- | ---------------------------------------------------------------- |
 | `[PATH]...`                | Files or directories to analyze. Repeatable; the results are the union of every path given. Defaults to the entire project. |
 | `--severity <LEVEL>`       | Minimum severity: `all` (default), `warning`, or `error`.        |
+| `--code <CODE>`            | Only report diagnostics with this code. Repeatable. A code nothing reported gets a note on stderr, since a misspelled one would otherwise read as a clean run. |
+| `--exclude-code <CODE>`    | Leave out diagnostics with this code. Repeatable. Wins over `--code`. |
 | `--project-root <DIR>`     | Project root directory. Defaults to the current working directory.|
 | `--no-colour`              | Disable ANSI colour output.                                      |
 | `--format <FORMAT>`        | Output format: `table` (default), `github`, or `json`.           |
@@ -244,22 +248,23 @@ phpantom_lsp analyze --debug -vv                 # trace file-by-file progress
 ### Reported diagnostics
 
 The analyze command reports the same diagnostics you see in your editor.
-Each has a rule identifier shown below the message.
+Each has a rule identifier shown below the message, which is what `--code`
+and `--exclude-code` take. The most common ones are:
 
-| Identifier               | Severity | Description                                          |
-| ------------------------ | -------- | ---------------------------------------------------- |
-| `syntax_error`           | Error    | PHP parse errors                                     |
-| `unknown_class`          | Warning  | Class, interface, trait, or enum not resolvable       |
-| `unknown_member`         | Warning  | Property or method not found on the resolved class    |
-| `partial_union_member`   | Warning  | Member only some classes of a union declare (opt-in)  |
-| `unknown_function`       | Error    | Function call not resolvable                          |
-| `argument_count`         | Error    | Wrong number of arguments to a function or method     |
-| `implementation_error`   | Error    | Missing required interface or abstract methods        |
-| `scalar_member_access`   | Error    | Member access on a scalar type (int, string, etc.)    |
-| `invalid_member_access`  | Error    | `private` or `protected` member reached from outside  |
-| `unused_import`          | Hint     | `use` statement with no references in the file        |
-| `unreachable_code`       | Hint     | Statements after a `return`, `throw`, `exit`, or `break` |
-| `deprecated`             | Hint     | Reference to a `@deprecated` symbol                   |
+| Identifier                | Severity | Description                                          |
+| ------------------------- | -------- | ---------------------------------------------------- |
+| `syntax_error`            | Error    | PHP parse errors                                     |
+| `unknown_class`           | Warning  | Class, interface, trait, or enum not resolvable      |
+| `unknown_member`          | Warning  | Property or method not found on the resolved class   |
+| `partial_union_member`    | Warning  | Member only some classes of a union declare (opt-in) |
+| `unknown_function`        | Error    | Function call not resolvable                         |
+| `argument_count_mismatch` | Error    | Wrong number of arguments to a function or method    |
+| `missing_implementation`  | Error    | Missing required interface or abstract methods       |
+| `scalar_member_access`    | Error    | Member access on a scalar type (int, string, etc.)   |
+| `invalid_member_access`   | Error    | `private` or `protected` member reached from outside |
+| `unused_import`           | Hint     | `use` statement with no references in the file       |
+| `unreachable_code`        | Hint     | Statements after a `return`, `throw`, `exit`, or `break` |
+| `deprecated_usage`        | Hint     | Reference to a `@deprecated` symbol                  |
 
 ---
 

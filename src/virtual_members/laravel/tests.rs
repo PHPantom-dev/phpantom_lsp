@@ -451,6 +451,81 @@ fn schema_timestamp_columns_keep_database_source_and_configured_date_type() {
 }
 
 #[test]
+fn nullable_schema_timestamp_column_is_nullable_date() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut();
+
+    let schema = SchemaIndex::from_tables(
+        Some("primary".to_string()),
+        parse_schema_dump(
+            "primary",
+            "CREATE TABLE users (id bigint NOT NULL, created_at timestamp NOT NULL, updated_at timestamp NULL DEFAULT NULL);",
+        ),
+    );
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().laravel_mut().set_schema_index(schema);
+
+    let result = provider.provide(&user, &no_loader, Some(&cache));
+    let type_of = |name: &str| {
+        result
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.type_hint_str())
+    };
+    assert_eq!(
+        type_of("created_at").as_deref(),
+        Some(CONFIGURED_DATE_CLASS_FQN)
+    );
+    assert_eq!(
+        type_of("updated_at"),
+        Some(format!("?{CONFIGURED_DATE_CLASS_FQN}"))
+    );
+}
+
+#[test]
+fn primitive_cast_on_nullable_column_keeps_null() {
+    let provider = LaravelModelProvider;
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Model"));
+    user.laravel_mut().casts_definitions = vec![
+        ("is_franchise".to_string(), "boolean".to_string()),
+        ("active".to_string(), "boolean".to_string()),
+        ("approved_at".to_string(), "datetime:Y-m-d".to_string()),
+        ("unknown".to_string(), "App\\Casts\\Missing".to_string()),
+    ];
+
+    let schema = SchemaIndex::from_tables(
+        Some("primary".to_string()),
+        parse_schema_dump(
+            "primary",
+            "CREATE TABLE users (id bigint NOT NULL, is_franchise tinyint(1) DEFAULT NULL, active tinyint(1) NOT NULL, approved_at datetime, unknown varchar(255));",
+        ),
+    );
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    cache.write().laravel_mut().set_schema_index(schema);
+
+    let result = provider.provide(&user, &no_loader, Some(&cache));
+    let type_of = |name: &str| {
+        result
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.type_hint_str())
+    };
+    assert_eq!(type_of("is_franchise").as_deref(), Some("?bool"));
+    assert_eq!(type_of("active").as_deref(), Some("bool"));
+    assert_eq!(
+        type_of("approved_at"),
+        Some(format!("?{CONFIGURED_DATE_CLASS_FQN}"))
+    );
+    // A cast we cannot resolve says nothing about `null`.
+    assert_eq!(type_of("unknown").as_deref(), Some("mixed"));
+}
+
+#[test]
 fn schema_lookup_uses_snake_plural_table_convention() {
     let provider = LaravelModelProvider;
     let mut category = make_class("App\\Models\\BusinessCategory");

@@ -77,3 +77,116 @@ fn a_root_goes_with_the_files_that_made_it() {
             .is_empty()
     );
 }
+
+/// Open `path` in the editor with `content`.
+async fn open(
+    backend: &crate::Backend,
+    dir: &tempfile::TempDir,
+    path: &str,
+    content: &str,
+) -> String {
+    let uri = crate::util::path_to_uri(&dir.path().join(path));
+    backend
+        .on_did_open(tower_lsp_server::gen_lsp_types::DidOpenTextDocumentParams {
+            text_document: tower_lsp_server::gen_lsp_types::TextDocumentItem {
+                uri: uri.parse().unwrap(),
+                language_id: "twig".to_string().into(),
+                version: 1,
+                text: content.to_string(),
+            },
+        })
+        .await;
+    uri
+}
+
+#[tokio::test]
+async fn an_open_template_is_diagnosed_and_its_namers_follow_its_creation() {
+    use std::sync::atomic::Ordering;
+
+    let page = "{% include 'menu.html' %}\n{% include 'footer.html' %}\n";
+    let (backend, dir) = workspace(&[
+        ("theme/default/menu.html", "<nav></nav>\n"),
+        ("theme/default/index.html", page),
+    ]);
+    backend.ensure_workspace_indexed();
+    backend.init_complete.store(true, Ordering::Release);
+
+    let index = open(&backend, &dir, "theme/default/index.html", page).await;
+    assert!(backend.diag.pending_uris.lock().contains(&index));
+    let mut found = Vec::new();
+    backend.collect_template_diagnostics(&index, page, &mut found);
+    let messages: Vec<String> = found
+        .iter()
+        .map(|diagnostic| match &diagnostic.message {
+            tower_lsp_server::gen_lsp_types::Message::String(text) => text.clone(),
+            other => format!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        messages,
+        vec!["Unknown template: 'footer.html'".to_string()]
+    );
+    assert_eq!(found[0].range.start.line, 1);
+
+    // Reopening a template the project already declares changes nothing
+    // another file is judged by.
+    backend.diag.pending_uris.lock().clear();
+    open(&backend, &dir, "theme/default/menu.html", "<nav></nav>\n").await;
+    assert!(!backend.diag.pending_uris.lock().contains(&index));
+
+    // Creating the missing one does.
+    std::fs::write(
+        dir.path().join("theme/default/footer.html"),
+        "<footer></footer>\n",
+    )
+    .unwrap();
+    open(
+        &backend,
+        &dir,
+        "theme/default/footer.html",
+        "<footer></footer>\n",
+    )
+    .await;
+    assert!(backend.diag.pending_uris.lock().contains(&index));
+    assert!(
+        backend
+            .diag
+            .full_slow_pass_requested
+            .lock()
+            .contains(&index)
+    );
+}
+
+#[test]
+fn deleting_a_template_on_disk_rediagnoses_the_files_that_name_it() {
+    use std::sync::atomic::Ordering;
+    use tower_lsp_server::gen_lsp_types::{DidChangeWatchedFilesParams, FileChangeType, FileEvent};
+
+    let page = "{% include 'menu.html' %}\n";
+    let (backend, dir) = workspace(&[
+        ("theme/default/menu.html", "<nav></nav>\n"),
+        ("theme/default/index.html", page),
+        ("theme/default/other.html", "{% include 'index.html' %}\n"),
+    ]);
+    backend.ensure_workspace_indexed();
+    backend.init_complete.store(true, Ordering::Release);
+    let index = crate::util::path_to_uri(&dir.path().join("theme/default/index.html"));
+    backend
+        .open_files
+        .write()
+        .insert(index.clone(), std::sync::Arc::new(page.to_string()));
+
+    let menu = dir.path().join("theme/default/menu.html");
+    std::fs::remove_file(&menu).unwrap();
+    backend.apply_watched_file_changes(
+        &DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: crate::util::path_to_uri(&menu).parse().unwrap(),
+                kind: FileChangeType::Deleted,
+            }],
+        },
+        dir.path(),
+    );
+
+    assert!(backend.diag.pending_uris.lock().contains(&index));
+}

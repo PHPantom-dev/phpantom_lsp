@@ -274,6 +274,51 @@ Until then the properties stay, so this is a precision gap rather
 than a missing feature. Reported as a follow-up on
 [#312](https://github.com/PHPantom-dev/phpantom_lsp/issues/312).
 
+#### L70. Read-only accessors are offered as columns
+
+**Impact: Low-Medium · Complexity: Low**
+
+`collect_column_names` reads the fully resolved model, so every virtual
+property counts as a column, including an accessor with no backing
+column and no mutator (a legacy `getDisplayNameAttribute()`, or an
+`Attribute::make(get: ...)` with no `set:`). `display_name` then
+completes in `where('…')`, `orderBy('…')` and `create([...])`. None of
+these work at runtime: the query hits a column that does not exist, and
+mass assignment of a computed-only attribute does nothing. `$appends`
+entries are counted as columns for the same reason, though they only
+name accessors to serialize.
+
+Skip `PropertySource::Accessor { column: None, mutator: None }` and
+`ComputedProperty { mutator: None }` in `collect_column_names`, and stop
+treating `$appends` as a column source there. An accessor that
+overrides a real column (one that `$casts`, `$fillable` or the
+migration schema also declares) stays. `create()` and `fill()` still
+want accessors that have a mutator.
+
+**Where to look:** `collect_column_names` in
+`virtual_members/laravel/where_property.rs` and its callers in
+`completion/eloquent_string.rs`; `extract_column_names` in
+`virtual_members/laravel/model_extraction/` for `$appends`.
+
+#### L71. Model-level attributes as column sources
+
+**Impact: Medium · Complexity: Low-Medium**
+
+Laravel models can declare their column lists with class attributes
+instead of properties: `#[Fillable(['name'])]`, `#[Guarded([...])]`,
+`#[Hidden([...])]`, `#[Visible([...])]` and `#[Appends([...])]` from
+`Illuminate\Database\Eloquent\Attributes`, which the framework merges
+into the matching property when the model boots. PHPantom reads only the
+properties. A model that uses the attributes gets no column completion
+from them, no fillable-first ordering in `create([...])`, and none of
+the column names they list. Read their `columns` argument alongside the
+property it stands in for, so the two forms behave the same. L49 needs
+the same read for `#[Fillable]`, `#[Guarded]` and `#[Unguarded]`.
+
+**Where to look:** `extract_column_names` and the `$fillable`/`$guarded`
+reads in `virtual_members/laravel/model_extraction/`, which already
+reads the `#[Table]` attribute.
+
 #### L8. `withSum()` / `withAvg()` / `withMin()` / `withMax()` aggregate properties
 
 **Impact: Low-Medium · Complexity: High**
@@ -388,62 +433,6 @@ The scanners already enumerate every valid key for go-to-definition. The
 items below mostly wire that existing enumeration into three more LSP
 endpoints rather than building new analysis.
 
-#### L62. Validation rule strings
-
-**Impact: High · Complexity: Medium**
-
-Completion, hover, and diagnostics for the rule strings in
-`'field' => 'required|email'`. Laravel Idea completes these and
-advertises it on its front page; rules arrays are written in nearly every
-controller and form request, so this is the most frequent string context
-we leave blank.
-
-Rather than hardcoding a rule list (the Laravel LSP ships ~90 rules as
-LSP snippets, e.g. `between:${min},${max}`), derive it from the installed
-framework: the `Validator` concern declares one `validate{Rule}` method
-per rule, so scanning that vendor class yields the exact rule set for the
-project's Laravel version, plus whether each rule takes parameters.
-Custom rule classes (implementing `ValidationRule`) and literal
-`Validator::extend('name', …)` registrations extend the set. Trigger
-contexts to match: `$request->validate()` arg 0, `Validator::make()`
-arg 1, `$validator->sometimes()` arg 1, and array *values* (never keys,
-which are field names) inside the `rules()` method of `FormRequest` /
-`Livewire\Form` subclasses.
-
-**Rule parameters are references too:** `exists:users,email` and
-`unique:users` name a table and column (resolve to the model/column via
-the schema/migration table map or the model's own column sources);
-`same:password`, `different:`, `required_with:`, `gt/gte/lt/lte:`,
-`after:`/`before:` name *other fields* in the same rules array (complete
-and navigate to the sibling key); `in:`/`Rule::in()` values on an
-enum-cast field can complete from the enum's cases.
-
-**Messages and attributes.** The keys of a form request's `messages()`
-(`'email.required'`) and `attributes()` arrays name a field from
-`rules()`, optionally followed by a rule. Complete them from the rules
-array and report a key that names neither.
-
-#### L63. Middleware alias names
-
-**Impact: Medium-High · Complexity: Medium**
-
-Completion, go-to-definition, diagnostics, and hover for
-`->middleware('auth')`, `->withoutMiddleware(...)`, and the
-`#[Middleware]` controller attribute (string and array arguments).
-Every route file names middleware, and today only the parameter part
-(`auth:web`, `can:update`) is understood. Aliases are declared statically
-in `bootstrap/app.php` (`$middleware->alias([...])`) on Laravel 11+, or
-the HTTP Kernel's `$middlewareAliases`/`$routeMiddleware` on older
-versions (an application may have more than one kernel); the framework's
-built-in aliases and default groups live in
-`Illuminate\Foundation\Configuration\Middleware` and the Kernel base
-class, parseable from vendor source the same way the container alias
-table already is. Be **parameter-aware**: `auth:web` and `throttle:60,1`
-validate the alias before the `:`, and hover can show the middleware's
-`handle()` parameter signature. For groups (`'web'`, `'api'`), hover
-lists the member middleware. Named `throttle:` limiters are
-[L58](#l58-laravel-rate-limiter-names).
-
 #### L17. Additional string contexts without booting
 
 **Impact: Medium · Complexity: Medium**
@@ -528,24 +517,6 @@ in its view are implemented (`blade/discovery.rs`). Three gaps remain:
   actions `backing_class.rs` already tells apart from view variables).
   Neither value completes, navigates, or reports a name the component
   does not declare. Laravel Idea reports an unknown `wire:click` action.
-
-#### L30. Eloquent attribute-array key completion
-
-**Impact: High · Complexity: Medium**
-
-Our Eloquent string completion covers where-style column arguments and
-relation names, but not **attribute-array keys**: `User::create(['name'
-=> …])`, `fill()`, `make()`, `update()`, `updateOrCreate()`,
-`firstOrCreate()`, `firstOrNew()`, `createOrFirst()` should complete
-array keys from the model's column sources (preferring fillable
-columns, skipping keys already present in the literal). Also extend the
-scalar column list with `firstWhere()`, `whereColumn()`, and the
-aggregate methods (`min`/`max`/`sum`/`avg`), and cover the model-level
-PHP attributes that take column-name arguments where the installed
-framework version has them. The Laravel LSP gets its column list from
-`artisan model:show --json` (live DB required); ours comes from the
-same static sources the model provider already uses (casts, fillable,
-accessors, `@property` tags) — no database needed.
 
 #### L31. String-key rename, highlight, and semantic tokens
 
@@ -669,9 +640,9 @@ individually) and whose target model declares neither `$fillable` nor
 `$guarded`, nor the `#[Fillable]`/`#[Guarded]`/`#[Unguarded]` model
 attributes, and the project never calls `Model::unguard()`, on `create()`, `fill()`, `update()`,
 `updateOrCreate()`, `firstOrCreate()`, and `firstOrNew()`. The model
-resolution and column-source machinery L30 already needs (and the
-diagnostic's model-argument matching) share the same receiver-typing
-path, so build them together.
+resolution and column-source machinery used by attribute-array key
+completion shares the same receiver-typing path as the diagnostic's
+model-argument matching, so reuse it.
 
 **Where to look:** `virtual_members/laravel/model_extraction/` for
 existing `$fillable`/`$guarded` reads; `diagnostics/` for the
@@ -700,80 +671,6 @@ including grouped imports, without treating unrelated classes named
 ## Navigation and code actions
 
 Editor features Laravel Idea has that do not live inside a string.
-
-#### L64. Routes on controller methods
-
-**Impact: Medium-High · Complexity: Medium**
-
-A controller method that a route points at shows nothing about it: not
-the URL, not the HTTP verb, not the route name. Laravel Idea marks each
-such method in the gutter, lists its routes, and jumps to the
-registration. Add a code lens above the method (`GET /orders/{order}
-· orders.show`, one per route, navigating to the route definition), fed
-by the route discovery that already resolves `[Controller::class,
-'method']` actions, `Route::controller()` groups, and resource routes.
-A method no route reaches gets no lens. Code lens already carries
-framework annotations for Doctrine, Messenger, and Yii, so the shape is
-established.
-
-**Where to look:** `code_lens.rs`;
-`virtual_members/laravel/route_names/` for the discovered routes and
-their actions.
-
-#### L65. Unknown Blade and Livewire components
-
-**Impact: Medium-High · Complexity: Medium**
-
-`<x-buttons.bakc />` and `<livewire:orders.overveiw />` name nothing, and
-nothing says so: component tags complete and navigate, but a tag that
-resolves to no class and no view is not reported (the tag diagnostics in
-`diagnostics/blade_component_tags.rs` only check that tags balance).
-Laravel Idea reports both, though on a project that keeps its Blade views
-outside `resources/views` it also flags components that exist. Report a
-tag that `blade/discovery.rs` cannot resolve, keeping the world open for
-component namespaces and paths the project registers in a way we cannot
-read.
-
-Pair it with a "Create component" quick fix, as an unknown view already
-offers "Create view" (`create_missing_view.rs`). Offer to create the anonymous component's Blade file at the path the tag
-resolves to (`resources/views/components/alert.blade.php`, honouring
-anonymous component namespaces and nested names), and as a second option
-the class-backed pair (`app/View/Components/Alert.php` plus its view).
-
-#### L68. Unknown methods on Eloquent models and builders
-
-**Impact: High · Complexity: Medium**
-
-```php
-$order->getTotl();          // BadMethodCallException at runtime, reported by nothing
-Order::whereStatsu('paid'); // fine: a dynamic where on a column
-```
-
-A method call on a class with `__call` is never reported
-(`diagnostics/unknown_members/member_check.rs` returns `MagicFallback`),
-which is right for a proxy that accepts any name but wrong for Eloquent.
-`Model::__call` forwards to the model's query builder, and the builder's
-`__call` accepts only a closed set: its own and the base query builder's
-methods, scopes, macros registered on the builder, and dynamic
-`where{Column}` calls. Anything else throws. So a typo in any model method
-call, in PHP or in a Blade template, goes unreported, while Larastan and
-Laravel Idea both report it.
-
-Judge an Eloquent receiver against that set instead of letting `__call`
-accept everything. The set is what completion already offers on a model
-and its builder, so the work is in the open-world edges: a project that
-registers macros we cannot read, `resolveRelationUsing()` dynamic
-relations, and a model or builder that overrides `__call` itself. In
-each of those, stay silent. Properties are a different case:
-`Model::__get` returns `null` for an unknown attribute instead of
-throwing, unless the application enables
-`Model::preventAccessingMissingAttributes()`, so property reports should
-follow that setting. An application that turns it on (directly or through
-`Model::shouldBeStrict()`) makes an unknown attribute a
-`MissingAttributeException`, so there the report belongs on by default
-rather than behind `report-magic-properties`. A production Laravel app
-used for comparison does exactly this, and its attribute typos go
-unreported unless the opt-in is set.
 
 #### L66. Related-file navigation for models, events, and listeners
 
@@ -807,3 +704,50 @@ because each is a small, independent code action:
   new component.
 
 Pick them off individually; none depends on another.
+
+---
+
+## Test suites and benchmarks
+
+#### L68. Port Larastan's type and rule tests
+
+**Impact: High · Complexity: Medium**
+
+The Symfony, Doctrine, and WordPress extensions' tests are ported in
+`tests/phpstan_symfony/`, `tests/phpstan_doctrine/`, and
+`tests/wordpress_stubs/`. Larastan's are not, though Laravel is the
+framework PHPantom is measured on most. Its `tests/Type/data/` holds
+about ninety `assertType()` fixtures (Eloquent builders and relations,
+collections, `config()`, `app()->make()`, facades, `abort()`, request
+input, model properties), and `tests/Rules/` nineteen rule tests.
+
+Port them into `tests/larastan/` the same way: the type fixtures run by
+`tests/assert_type_runner.rs`, the rule tests as `.fixture` files in
+`tests/fixtures/larastan/`, a slice of `laravel/framework` copied by
+`scripts/extract-framework-stubs.php` as the stubs, and upstream's
+`tests/application/` (models, migrations, config) as the project they
+run in. Larastan boots that application; we read the same files
+statically.
+
+Larastan's types are not the reference: where one disagrees with what
+the framework actually returns, assert the correct type and say why in
+the README. Rule tests for checks PHPantom has no counterpart for and
+does not plan one (Octane compatibility, `env()` outside config,
+unnecessary collection calls) are listed in the README as not ported,
+not marked `SKIP`. Every other gap is a `// SKIP: reason` filed in
+`docs/todo/`.
+
+#### L69. Benchmarks for Laravel string names and Blade
+
+**Impact: Medium · Complexity: Low-Medium**
+
+`benches/laravel_completion.rs` measures Eloquent member and morph
+column completion only. Symfony and Yii benchmark their name completion
+over a generated application (`benches/symfony_completion.rs`,
+`benches/yii_completion.rs`); Laravel, with the most string contexts of
+any framework, has no equivalent. Add one that generates an application
+with a few hundred routes, config keys, views, and translation keys, and
+times completion inside `route('…')`, `config('…')`, `view('…')`, and
+`__('…')`, plus completion of a variable and a member inside a Blade
+template whose type comes from its signature. Register it in
+`Cargo.toml` so `benches/ci_benchmarks.py` picks it up.

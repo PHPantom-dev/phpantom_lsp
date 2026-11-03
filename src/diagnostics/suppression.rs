@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn keeps_full_line_phpstan_with_precise_diagnostic_on_same_line() {
         let phpstan = Diagnostic {
-            range: make_range(5, 0, 5, u32::MAX),
+            range: make_range(5, 0, 5, crate::process::LINE_END_CHARACTER),
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("argument.type".to_string())),
             source: Some("phpstan".to_string()),
@@ -512,7 +512,7 @@ mod tests {
         // same line: the critical finding is surfaced first regardless
         // of which tool reported it or how precise its range is.
         let full_line_error = Diagnostic {
-            range: make_range(5, 0, 5, u32::MAX),
+            range: make_range(5, 0, 5, crate::process::LINE_END_CHARACTER),
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("argument.type".to_string())),
             source: Some("phpstan".to_string()),
@@ -537,7 +537,7 @@ mod tests {
     #[test]
     fn keeps_phpstan_type_dump_with_unknown_function() {
         let dump = Diagnostic {
-            range: make_range(5, 0, 5, u32::MAX),
+            range: make_range(5, 0, 5, crate::process::LINE_END_CHARACTER),
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("phpstan.dumpType".to_string())),
             source: Some("phpstan".to_string()),
@@ -562,7 +562,7 @@ mod tests {
     #[test]
     fn keeps_full_line_diagnostic_regardless_of_code() {
         let phpstan = Diagnostic {
-            range: make_range(5, 0, 5, u32::MAX),
+            range: make_range(5, 0, 5, crate::process::LINE_END_CHARACTER),
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("class.prefixed".to_string())),
             source: Some("phpstan".to_string()),
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn keeps_full_line_phpstan_when_no_precise_diagnostic_on_line() {
         let phpstan = Diagnostic {
-            range: make_range(5, 0, 5, u32::MAX),
+            range: make_range(5, 0, 5, crate::process::LINE_END_CHARACTER),
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("argument.type".to_string())),
             source: Some("phpstan".to_string()),
@@ -636,7 +636,7 @@ mod tests {
     #[test]
     fn keeps_multiple_full_line_diags_when_precise_exists() {
         let phpstan1 = Diagnostic {
-            range: make_range(5, 0, 5, u32::MAX),
+            range: make_range(5, 0, 5, crate::process::LINE_END_CHARACTER),
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("argument.type".to_string())),
             source: Some("phpstan".to_string()),
@@ -644,7 +644,7 @@ mod tests {
             ..Default::default()
         };
         let phpstan2 = Diagnostic {
-            range: make_range(5, 0, 5, u32::MAX),
+            range: make_range(5, 0, 5, crate::process::LINE_END_CHARACTER),
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String("return.type".to_string())),
             source: Some("phpstan".to_string()),
@@ -691,7 +691,7 @@ mod tests {
         // If PHPStan reports five issues on a line and no precise
         // diagnostic exists, all five survive.
         let make_phpstan = |code: &str, msg: &str| Diagnostic {
-            range: make_range(10, 0, 10, u32::MAX),
+            range: make_range(10, 0, 10, crate::process::LINE_END_CHARACTER),
             severity: Some(DiagnosticSeverity::Error),
             code: Some(Code::String(code.to_string())),
             source: Some("phpstan".to_string()),

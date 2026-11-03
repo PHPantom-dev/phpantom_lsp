@@ -36,10 +36,12 @@ use crate::symbol_map::{StringKeyKind, SymbolKind, SymbolMap};
 use crate::type_engine::resolver::{FileCtx, Loaders};
 use crate::type_engine::variable::resolution::VarQuery;
 
-pub(crate) use super::view_call_walker::string_literal_contents;
 use super::view_call_walker::{
     BladeDirectiveCollectCtx, BladeDirectiveWalker, CollectCtx, SiteDraft, SiteEntry,
-    ViewCallWalker, data_shape_entries, each_variable_type, qualify_class_names,
+    ViewCallWalker, each_variable_type,
+};
+pub(crate) use super::view_call_walker::{
+    data_shape_entries, qualify_class_names, string_literal_contents,
 };
 
 /// A variable passed to a template at one call site: the name (without
@@ -171,7 +173,7 @@ fn push_undeclared(declared: &mut InjectedVars, vars: InjectedVars) {
 /// so the result does not depend on the order the call sites were visited
 /// in (the snapshot they come from is built from a `HashMap`, whose
 /// iteration order varies across runs).
-fn join_call_site_types(types: Vec<PhpType>) -> PhpType {
+pub(crate) fn join_call_site_types(types: Vec<PhpType>) -> PhpType {
     let mut unique: Vec<PhpType> = Vec::new();
     for ty in types {
         if !unique.iter().any(|u| u.equivalent(&ty)) {
@@ -758,7 +760,8 @@ impl Backend {
                     &class_loader,
                 )
                 .with_imports(Some(&file_ctx.use_map))
-                .with_backend(Some(self)),
+                .with_backend(Some(self))
+                .with_uri(file_ctx.uri.as_deref()),
                 crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset),
                 offset,
             )

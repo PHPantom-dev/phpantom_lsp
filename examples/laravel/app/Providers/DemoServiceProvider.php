@@ -21,6 +21,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\View;
 use Illuminate\View\View as ViewInstance;
 use League\Flysystem\Filesystem;
@@ -72,6 +73,8 @@ class DemoServiceProvider extends BaseDemoServiceProvider
 
     public function boot(): void
     {
+        $this->registerValidationRules();
+
         // Omitting the namespace adds ordinary PHP and JSON translation keys
         // from this directory, just like those under lang/.
         $this->loadTranslationsFrom(resource_path('bakery-lang'));
@@ -177,6 +180,14 @@ class DemoServiceProvider extends BaseDemoServiceProvider
             $adapter = new LocalFilesystemAdapter($config['root']);
 
             return new FilesystemAdapter(new Filesystem($adapter), $adapter, $config);
+        });
+    }
+
+    public function registerValidationRules(): void
+    {
+        // ValidationDemoRequest uses this name as a string rule.
+        Validator::extend('bakery_code', static function (string $attribute, mixed $value): bool {
+            return is_string($value) && str_starts_with($value, 'BAK-');
         });
     }
 }

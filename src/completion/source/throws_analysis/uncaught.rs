@@ -260,6 +260,7 @@ impl Analysis<'_, '_> {
             &PerBlock::single(self.ctx.class_loader),
             &PerBlock::single(self.ctx.use_map),
             self.ctx.backend,
+            None,
             Loaders::with_function(self.ctx.function_loader),
             self.ctx
                 .backend

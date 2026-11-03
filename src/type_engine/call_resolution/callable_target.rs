@@ -102,6 +102,7 @@ impl Backend {
                 bindings: bound.template_bindings(),
                 arg_type_resolver: Some(&arg_ty_resolver),
                 this_type: None,
+                subs: None,
             };
             let evaluated =
                 crate::type_engine::type_ops::conditional::evaluate_nested_conditionals_text(

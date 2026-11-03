@@ -119,14 +119,23 @@ pub(crate) enum DocblockMemberRef {
     See,
     /// PHPUnit metadata naming a member: coverage (a `@covers` / `@uses`
     /// tag, a `@covers ::name` under a `@coversDefaultClass`, or a
-    /// `#[CoversMethod]` / `#[UsesMethod]` attribute), a data provider
-    /// (`@dataProvider`, `#[DataProvider]`, `#[DataProviderExternal]`), or
-    /// a test dependency (`@depends`, `#[Depends]` and its variants).
+    /// `#[CoversMethod]` / `#[UsesMethod]` attribute) or a test dependency
+    /// (`@depends`, `#[Depends]` and its variants).  A data provider is
+    /// marked [`Self::PhpUnitDataProvider`] instead.
     ///
     /// Unlike `@see`, the target names a code unit that has to exist —
     /// PHPUnit errors out on metadata that names nothing — so it is still
     /// checked.
     PhpUnit,
+    /// The method a PHPUnit data provider names: `@dataProvider`,
+    /// `#[DataProvider]`, or `#[DataProviderExternal]`.  Checked like
+    /// [`Self::PhpUnit`], and additionally for the modifiers PHPUnit
+    /// requires of a provider.
+    ///
+    /// `attribute` records the attribute form, which only PHPUnit 10 and
+    /// later read, and so implies a version that requires the provider to
+    /// be static.
+    PhpUnitDataProvider { attribute: bool },
     /// A Symfony form field, naming the property path of the form's data
     /// class it reads and writes.
     ///
@@ -134,6 +143,16 @@ pub(crate) enum DocblockMemberRef {
     /// a hasser as readily as through a property, so a field with no
     /// property of its name is not an error.
     PropertyPath,
+    /// The method a mock expectation names: PHPUnit's
+    /// `$mock->method('name')`, Mockery's `$mock->shouldReceive('name')`
+    /// and its siblings, and Laravel's `Facade::shouldReceive('name')`.
+    ///
+    /// The span's subject is the expectation's receiver, but the
+    /// extractor cannot tell a mock from any other object with a method
+    /// of the same name (`$gate->allows('update')`), so a consumer that
+    /// resolves the subject keeps only what [`crate::mock_methods`]
+    /// accepts as a mock, and drops the span otherwise.
+    MockedMethod,
 }
 
 impl DocblockMemberRef {

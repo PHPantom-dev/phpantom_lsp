@@ -474,7 +474,10 @@ mod tests {
         assert_eq!(diags[0].range.start.line, 41); // 42 - 1
         assert_eq!(diags[0].range.start.character, 0);
         assert_eq!(diags[0].range.end.line, 41);
-        assert_eq!(diags[0].range.end.character, u32::MAX);
+        assert_eq!(
+            diags[0].range.end.character,
+            crate::process::LINE_END_CHARACTER
+        );
         assert_eq!(diags[0].severity, Some(DiagnosticSeverity::Error));
         assert_eq!(diags[0].source.as_deref(), Some("phpcs"));
         assert_eq!(
@@ -488,7 +491,10 @@ mod tests {
 
         // Second diagnostic — WARNING
         assert_eq!(diags[1].range.start.line, 0); // 1 - 1
-        assert_eq!(diags[1].range.end.character, u32::MAX);
+        assert_eq!(
+            diags[1].range.end.character,
+            crate::process::LINE_END_CHARACTER
+        );
         assert_eq!(diags[1].severity, Some(DiagnosticSeverity::Warning));
         assert_eq!(
             diags[1].code,
@@ -825,7 +831,10 @@ mod tests {
         assert_eq!(diags[0].range.start.line, 9);
         assert_eq!(diags[0].range.start.character, 0);
         assert_eq!(diags[0].range.end.line, 9);
-        assert_eq!(diags[0].range.end.character, u32::MAX);
+        assert_eq!(
+            diags[0].range.end.character,
+            crate::process::LINE_END_CHARACTER
+        );
     }
 
     #[test]

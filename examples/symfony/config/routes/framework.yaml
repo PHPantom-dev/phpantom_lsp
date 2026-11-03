@@ -1,0 +1,7 @@
+# Try: go-to-definition on '_preview_error' in
+# templates/demo/index.html.twig. The route is declared by FrameworkBundle's
+# own routing file, which this import names.
+when@dev:
+  _errors:
+    resource: '@FrameworkBundle/Resources/config/routing/errors.php'
+    prefix: /_error

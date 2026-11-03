@@ -37,6 +37,7 @@ mod seeding;
 mod stored_conditions;
 mod type_guards;
 
+pub(crate) use assertions::narrow_to_assertion;
 use assertions::*;
 use bool_comparisons::*;
 pub(crate) use count_size::apply_count_assertion;

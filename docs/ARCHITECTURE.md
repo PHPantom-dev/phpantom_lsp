@@ -100,7 +100,7 @@ src/
 ├── definition/             # Go-to-definition (resolve, member, variable/, implementation, declaration, type_definition)
 ├── resource_navigation.rs  # Schema-free PHP class/member indexing and navigation in YAML/XML
 ├── symfony/                # Symfony service IDs, container parameters, routes, translations, bundle configuration keys, form fields, validation mappings, event names, and Messenger buses and handlers: YAML/XML/XLIFF/Twig scanners, declaring files
-├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner
+├── twig/                   # Twig template names in any project that uses Twig: template roots discovered from the names templates reference, the template-name scanner, block names paired across the templates that extend, use, or embed each other, the filters and functions extensions declare (the installed packages' read from disk), and the variables a template reads, traced to the renders, templates, and globals that pass them and typed by what those pass, with the attributes read off them
 ├── yii/                    # Yii views and the path aliases they are named through (the alias table read from the params files, view keys resolved to templates), and route names and route arguments (route paths and handlers, looked up in the declaring files' route side tables)
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
@@ -765,6 +765,8 @@ The `[stubs] paths` of `.phpantom.toml`, the stub packages Composer installed, a
 
 A stub file is an ordinary `file://` file in every other respect: it is parsed and cached like any other, so go-to-definition lands in it and the watcher's re-parse covers it, and its scanned names are merged into the discovery indexes so they complete before anything loads them. What keeps it out of analysis, rename and find-references is its registration as library code, inside the workspace or not. The parse-time skip of a redeclared built-in function, the constant publisher's last-writer-wins, and the third-party class patches all exempt a stub file. A phpstorm-stubs checkout has the gaps the embedded copy has, so it gets the same `stub_patches` corrections.
 
+An untyped `global $x;` looks last, after the function's own `@global` tag and the file's top level, at the `@global` tags of every file discovery reads for its functions and constants: the stub paths, vendor packages, autoload and include files, and the workspace walk of a project without Composer (`SymbolIndex::global_tags`). The scans record only which files document which global, since a tag's type is written against its file's imports; the first lookup of a global reads those files, qualifies each tag's type with its own file's namespace and imports, and caches the union until the tags change (`load_global_tag_type`). When a stub path documents the global, only its tags count. A tag on one function counts for the global everywhere: it states what the global holds. A class file a Composer project autoloads by PSR-4 is scanned for its classes only, so its tags do not count, rather than counting once something happens to parse it. The watcher rereads a changed file's tags along with the rest of its rescan, and also for an open file and for a never-parsed file already known to hold tags. Other never-parsed files are left alone, since an editor's refocus reports the whole workspace as changed.
+
 The index is rebuilt whole by `refresh_stub_paths` at the end of discovery, when the paths change (`DiscoveryInputs`), when a watched file under one changes, and after a Composer rescan, whose replacement of the vendor tree also drops the discovery entries of the stub packages inside it. A rebuild first drops everything parsed from a file under the old or new paths, so a removed path stops overriding at once and an added one is re-parsed in its new role.
 
 #### Function Completion: Namespace Awareness
@@ -1371,7 +1373,7 @@ The batch pipeline runs in two parallel phases:
 
 2. **Diagnose phase.** Run all seven diagnostic collectors on every file in parallel (`std::thread::scope` with one chunk per CPU core). Because Phase 1 already indexed all user classes, the diagnostic phase never triggers lazy `parse_and_cache_file` for other user files, eliminating write-lock contention.
 
-Output uses PHPStan's table format (with progress bar and coloured output) so the results are familiar to teams already using PHPStan. Severity filtering (`--severity error|warning|all`) and path scoping let users focus on specific areas.
+Output uses PHPStan's table format (with progress bar and coloured output) so the results are familiar to teams already using PHPStan. Severity filtering (`--severity error|warning|all`), code filtering (`--code`, `--exclude-code`) and path scoping let users focus on specific areas.
 
 ## Diagnostic Worker Architecture
 

@@ -66,6 +66,7 @@
 //!   [`Backend::lookup_global_constant`](crate::Backend::lookup_global_constant).
 //! - [`loaders`]: the loader closures handed to the type engine.
 //! - [`external_stubs`]: loading what the stub paths declare.
+//! - [`global_variables`]: the type `@global` tags give a global variable.
 //! - [`project_scope`]: which Composer project's dependencies a lookup
 //!   sees, in a workspace of several.
 
@@ -73,6 +74,8 @@ mod classes;
 mod constants;
 mod external_stubs;
 mod functions;
+mod global_variables;
+mod include_paths;
 mod inflight;
 mod lazy_parse;
 mod loaders;
@@ -80,6 +83,7 @@ pub(crate) mod project_scope;
 
 pub(crate) use classes::{ClassLoadHooks, needs_linking};
 pub(crate) use constants::{DefineSearch, unversioned_php_version_constant_type};
+pub(crate) use include_paths::include_sites;
 pub(crate) use inflight::ParseInflight;
 pub(crate) use loaders::FileLoaders;
 pub(crate) use project_scope::{ProjectScope, ProjectScopes};

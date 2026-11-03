@@ -152,7 +152,13 @@ async fn go_to_definition_opens_the_projects_own_copy() {
         let target = backend
             .class_declaration_uri("Acme\\Lib\\Client")
             .expect("both projects installed acme/lib");
-        let own_vendor = crate::util::dir_uri_prefix(&dir.path().join(project).join("vendor"));
+        let own_vendor = crate::util::dir_uri_prefix(
+            &dir.path()
+                .join(project)
+                .join("vendor")
+                .canonicalize()
+                .unwrap(),
+        );
         assert!(
             target.starts_with(&own_vendor),
             "{project}/ must open its own copy, got {target}"

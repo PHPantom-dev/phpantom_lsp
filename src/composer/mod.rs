@@ -49,7 +49,7 @@ pub(crate) use project::{
     detect_drupal_web_root, explicit_dependency_names, has_dependency, has_laravel_aware_phpstan,
     has_require_dev, has_runtime_permission_package, is_application_project, is_doctrine_project,
     is_laravel_application, is_laravel_project, is_symfony_project, is_twig_project,
-    is_yii_project,
+    is_yii_project, locked_phpunit_major,
 };
 pub use project::{detect_php_version, detect_php_version_from_package};
 pub use psr4::{
@@ -57,8 +57,8 @@ pub use psr4::{
     resolve_class_path, resolve_namespace_from_path,
 };
 pub(crate) use psr4::{
-    psr4_class_files, psr4_directories_for_namespace, psr4_directory_for_namespace,
-    psr4_path_for_class,
+    conventional_test_files, conventional_test_subjects, new_test_file, psr4_class_files,
+    psr4_directories_for_namespace, psr4_directory_for_namespace, psr4_path_for_class,
 };
 
 /// Parse a `composer.json` file at the given workspace root and extract all

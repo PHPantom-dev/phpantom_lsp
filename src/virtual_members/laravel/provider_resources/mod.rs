@@ -159,6 +159,20 @@ pub(crate) struct ProviderResources {
     /// which this scan cannot see.  An empty prefix is the prefix-less
     /// registration, whose templates every un-namespaced tag can address.
     pub anonymous_component_paths: Vec<(String, PathBuf)>,
+    /// The tag names `Blade::component()`, `Blade::components()`, and
+    /// `loadViewComponentsAs()` register an alias under (`alert`,
+    /// `pkg-calendar`), whichever class or view each one points at.
+    pub component_aliases: Vec<String>,
+    /// The prefixes an alias was registered under whose name this scan
+    /// could not read (`Blade::component($name, Icon::class)`), so any tag
+    /// spelled `{prefix}-…` may be one of them.  An empty prefix covers
+    /// every tag that names no namespace.
+    pub open_component_alias_prefixes: Vec<String>,
+    /// The component names `Livewire::component()` registers.
+    pub livewire_aliases: Vec<String>,
+    /// A provider registered a Livewire component under a name this scan
+    /// could not read, so any component name may be one.
+    pub open_livewire_aliases: bool,
     /// `Blade::directive('datetime', …)` and `Blade::if('admin', …)`
     /// registrations, in registration order.  These name directives the
     /// preprocessor would otherwise mask as comments, and the four members
@@ -200,6 +214,11 @@ impl ProviderResources {
             .extend(other.anonymous_component_namespaces);
         self.anonymous_component_paths
             .extend(other.anonymous_component_paths);
+        self.component_aliases.extend(other.component_aliases);
+        self.open_component_alias_prefixes
+            .extend(other.open_component_alias_prefixes);
+        self.livewire_aliases.extend(other.livewire_aliases);
+        self.open_livewire_aliases |= other.open_livewire_aliases;
         self.custom_directives.extend(other.custom_directives);
         self.shared_view_vars.extend(other.shared_view_vars);
         self.view_composers.extend(other.view_composers);

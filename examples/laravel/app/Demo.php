@@ -65,6 +65,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\View;
 use Illuminate\View\Factory as ViewFactory;
 
@@ -220,6 +221,13 @@ class Demo
         Bakery::whereOvenCode('X9');                  // from $hidden
         Bakery::whereFlour('rye')->whereApricot(true)->get();
         Bakery::where('open', true)->whereFlour('spelt')->freshlyBaked()->first();
+
+        // Try: change freshlyBaked() to freshlyBakd() on either line. Eloquent
+        // throws for a name its builder does not answer, so the typo is
+        // reported even though models and builders have __call(). Any
+        // where...() call stays valid: the builder treats it as a column filter.
+        (new Bakery())->freshlyBaked();
+        Bakery::query()->freshlyBaked();
 
         // Conditionable when()/unless() chain continuation
         BlogAuthor::where('active', 1)->when(true, fn($q) => $q)->get();
@@ -1095,6 +1103,35 @@ class Demo
         BlogAuthor::where('');           // offers: name, email, active, genre, …
         BlogPost::orderBy('');           // offers: title, published, author_id, …
         Bakery::select('');              // offers: flour, apricot, kitchen_id, …
+
+        // Try: complete the column strings, including both whereColumn arguments.
+        Customer::firstWhere('email', 'ada@example.test');
+        Customer::whereColumn('name', 'email');
+        Bakery::min('egg_count');
+        Bakery::max('egg_count');
+        Bakery::sum('egg_count');
+        Bakery::avg('egg_count');
+    }
+
+
+    // ── Eloquent Attribute Array Completion ─────────────────────────────────
+
+    public function eloquentAttributeArrays(): void
+    {
+        // Model PHP attributes complete columns too: see Hidden in Models/Customer.php.
+        // Try: complete each array key. Fillable attributes appear first.
+        $customer = Customer::create(['name' => 'Ada', 'email' => 'ada@example.test']);
+
+        // Try: erase email and complete its key; name is already present and omitted.
+        Customer::make(['name' => 'Grace', 'email' => 'grace@example.test']);
+        $customer->fill(['name' => 'Ada Lovelace']);
+        $customer->update(['email' => 'ada.lovelace@example.test']);
+
+        // Both arrays complete columns: matching attributes, then values to save.
+        Customer::updateOrCreate(['email' => 'ada@example.test'], ['name' => 'Ada']);
+
+        // Flour is fillable, so it ranks ahead of other known Bakery attributes.
+        Bakery::make(['flour' => 'whole wheat']);
     }
 
 
@@ -1177,6 +1214,28 @@ class Demo
         // matching child needs to exist in cache.php or queue.php.
         Cache::store('null');
         Queue::connection('null');
+    }
+
+    // ── Middleware names ────────────────────────────────────────────────
+
+    public function middlewareNames(): void
+    {
+        // Try: trigger completion inside the quotes to list every alias and
+        // group: the framework's (`auth`, `throttle`, `web`, …) and the ones
+        // bootstrap/app.php registers (`bakery.open`, `storefront`).
+        Route::middleware('');
+
+        // Try: hover `bakery.open` to see the class it runs and the
+        // parameter its handle() takes; Ctrl+Click jumps to the alias in
+        // bootstrap/app.php and to App\Http\Middleware\EnsureBakeryIsOpen.
+        Route::middleware(['auth:admin', 'bakery.open:sunday'])
+            ->get('/bakery/open', fn () => 'open');
+
+        // Try: hover `storefront` to list the middleware the group runs.
+        Route::middleware('storefront')->get('/storefront', fn () => 'shop');
+
+        // Unknown middleware name → `invalid_laravel_middleware` diagnostic.
+        Route::get('/closed', fn () => 'closed')->withoutMiddleware('bakery.closed');
     }
 
 
@@ -1264,6 +1323,30 @@ class Demo
         }
 
         strtoupper($search);              // → string
+    }
+
+
+    // ── Validation rule strings ─────────────────────────────────────────
+
+    public function validationRuleStrings(Request $request): void
+    {
+        // Try: complete or hover required and email. Misspell a rule to see
+        // an unknown-rule diagnostic; the field keys are input names.
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required|string|min:8',
+            // Try: complete after same:, or jump to password's key above.
+            'password_confirmation' => 'required|same:password',
+        ]);
+
+        // Try: complete rule values in make() and sometimes().
+        $validator = Validator::make($request->all(), [
+            'email' => ['required', 'email'],
+        ]);
+        $validator->sometimes('email', 'max:255', static fn (): bool => true);
+
+        // app/Http/Requests/ValidationDemoRequest.php also demonstrates
+        // database references, enum values, custom rules, and message keys.
     }
 
 

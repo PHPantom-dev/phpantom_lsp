@@ -133,6 +133,34 @@ class Consumer {
     );
 }
 
+/// A member read through a dynamic property name is whichever property the
+/// name picks, not the object the property is read from.
+#[test]
+fn member_on_dynamic_property_is_not_checked_against_the_holder() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Money {
+    public function equals($other): bool { return true; }
+}
+class Holder {
+    public Money $price;
+}
+function compare(Holder $holder, string $column): void {
+    $holder->{$column}->equals(1);
+    $holder->$column->equals(1);
+    $holder->price->missing();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<&str> = diags.iter().map(|d| message_text(&d.message)).collect();
+    assert_eq!(
+        messages,
+        vec!["Method 'missing' not found on class 'Money'"],
+        "only the access on a known property should be checked"
+    );
+}
+
 /// A plain `/* … */` comment above a method is not its docblock, so the
 /// method does not read an earlier method's `@param` through it.
 #[test]
@@ -7755,6 +7783,52 @@ function probeIsset(CanApply $item): int {
             .iter()
             .any(|d| message_text(&d.message).contains("salesCampaignGroupId")),
         "access after the isset branch must still be flagged, got: {diags:?}"
+    );
+}
+
+/// `!empty($obj->prop)` implies `isset($obj->prop)`, so it proves the
+/// property on every union member, as does the guard clause
+/// `if (empty($obj->prop)) return;`.  A bare `empty()` proves nothing.
+#[test]
+fn not_empty_property_guard_allows_property_access() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class ApiError {
+    public function message(): string { return ''; }
+}
+/** @return object|array|ApiError */
+function fetchInfo() { return new stdClass(); }
+function probeNotEmpty(): void {
+    $result = fetchInfo();
+    if (!empty($result->name)) {
+        echo $result->name;
+    }
+    if (empty($result->slug)) {
+        return;
+    }
+    echo $result->slug;
+}
+function probeEmpty(): void {
+    $result = fetchInfo();
+    if (empty($result->version)) {
+        echo $result->version;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| {
+            let msg = message_text(&d.message);
+            msg.contains("'name'") || msg.contains("'slug'")
+        }),
+        "!empty($result->prop) must allow the guarded property, got: {diags:?}"
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| message_text(&d.message).contains("'version'")),
+        "a bare empty() must not prove the property, got: {diags:?}"
     );
 }
 

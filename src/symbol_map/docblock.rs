@@ -315,8 +315,19 @@ fn emit_tag_symbols(tag: &Tag<'_>, docblock: &str, base_offset: u32, sink: &mut 
                     sink.spans,
                 );
             }
-            TagKind::DataProvider | TagKind::Depends => {
-                emit_test_method_tag_symbol(&text.value, docblock, base_offset, sink.spans);
+            kind @ (TagKind::DataProvider | TagKind::Depends) => {
+                let docblock_ref = if kind == TagKind::DataProvider {
+                    DocblockMemberRef::PhpUnitDataProvider { attribute: false }
+                } else {
+                    DocblockMemberRef::PhpUnit
+                };
+                emit_test_method_tag_symbol(
+                    &text.value,
+                    docblock,
+                    base_offset,
+                    docblock_ref,
+                    sink.spans,
+                );
             }
             _ => {}
         },
@@ -693,6 +704,7 @@ fn emit_test_method_tag_symbol(
     text: &Text<'_>,
     docblock: &str,
     base_offset: u32,
+    member_ref: DocblockMemberRef,
     spans: &mut Vec<SymbolSpan>,
 ) {
     let start = text.span.start.offset.saturating_sub(base_offset) as usize;
@@ -734,7 +746,7 @@ fn emit_test_method_tag_symbol(
             } = &mut span.kind
             {
                 *is_method_call = true;
-                *docblock_ref = DocblockMemberRef::PhpUnit;
+                *docblock_ref = member_ref;
             }
         }
         return;
@@ -760,7 +772,7 @@ fn emit_test_method_tag_symbol(
             member_name: crate::atom::atom(reference),
             is_static: true,
             is_method_call: true,
-            docblock_ref: DocblockMemberRef::PhpUnit,
+            docblock_ref: member_ref,
             is_array_callable: false,
             is_nullsafe: false,
         },

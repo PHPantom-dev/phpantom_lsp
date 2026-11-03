@@ -1,0 +1,29 @@
+// test: a @global tag's class name resolves through the file's imports, not to a global class of the same name
+// feature: hover
+// expect: namespace Acme\Db;
+// expect: $acme_db = Connection
+---
+=== src/Db/Connection.php ===
+<?php
+namespace Acme\Db;
+class Connection {
+    public function query(): void {}
+}
+=== src/Connection.php ===
+<?php
+class Connection {
+    public function other(): void {}
+}
+=== src/Plugin/Main.php ===
+<?php
+namespace Acme\Plugin;
+
+use Acme\Db\Connection;
+
+/**
+ * @global Connection $acme_db
+ */
+function run(): void {
+    global $acme_db;
+    echo $acme_d<>b;
+}

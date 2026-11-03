@@ -17,13 +17,15 @@
 
 mod class;
 mod constants;
-mod formatting;
+pub(crate) mod formatting;
 mod function;
 mod laravel;
 mod laravel_trans;
 mod member;
 mod see_refs;
 mod templates;
+mod twig;
+mod validation_strings;
 mod variable;
 
 use tower_lsp_server::gen_lsp_types::*;
@@ -111,6 +113,17 @@ impl Backend {
         let _scope = self.enter_request_scope_borrowed(uri, content);
         let offset = crate::text_position::position_to_offset(content, position);
 
+        // An attribute read off a Twig variable is no span of the
+        // template's map: what it reads depends on the variable's type.
+        if self.is_twig_template_uri(uri)
+            && let Some(Some(hover)) =
+                crate::util::catch_panic_unwind_safe("hover", uri, Some(position), || {
+                    self.twig_attribute_hover(uri, content, offset as usize)
+                })
+        {
+            return Some(hover);
+        }
+
         if let Some(symbol) = self.lookup_symbol_map(uri, offset)
             && let Some(Some(mut hover)) =
                 crate::util::catch_panic_unwind_safe("hover", uri, Some(position), || {
@@ -130,6 +143,10 @@ impl Backend {
                 })
         {
             hover.range = Some(symbol_span_to_range(content, &symbol));
+            return Some(hover);
+        }
+
+        if let Some(hover) = self.validation_string_hover(uri, content, position) {
             return Some(hover);
         }
 
@@ -233,6 +250,7 @@ impl Backend {
                 subject_text,
                 member_name,
                 is_static,
+                docblock_ref,
                 ..
             } => self.hover_member_access(
                 &site,
@@ -240,6 +258,7 @@ impl Backend {
                 member_name,
                 *is_static,
                 MemberRefKind::of_access(symbol)?,
+                *docblock_ref == crate::symbol_map::DocblockMemberRef::MockedMethod,
             ),
             SymbolKind::ClassReference {
                 name,
@@ -274,7 +293,7 @@ impl Backend {
                 if !self.string_key_kind_enabled(*kind) {
                     return None;
                 }
-                self.hover_laravel_string_key(kind, key, uri)
+                self.hover_laravel_string_key(kind, key, uri, symbol.start)
             }
             SymbolKind::CommandOwnParam { name, is_option } => {
                 hover_command_own_param(content, cursor_offset as usize, name, *is_option)

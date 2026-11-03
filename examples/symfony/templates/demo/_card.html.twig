@@ -1,1 +1,5 @@
-<article>{{ 'demo.card'|trans }}</article>
+{# Try: go-to-definition on sender. demo/index.html.twig includes this
+   template, so it is handed what DemoController::index() passes there, and
+   the types tag declares what it expects. #}
+{% types {sender: 'string'} %}
+<article>{{ 'demo.card'|trans }}, {{ sender }}</article>

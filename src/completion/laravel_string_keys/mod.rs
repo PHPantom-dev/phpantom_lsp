@@ -37,20 +37,24 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
         StringKeyKind::TranslationDomain => CompletionItemKind::Module,
         StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
+        StringKeyKind::Middleware => CompletionItemKind::Class,
         StringKeyKind::GateAbility => CompletionItemKind::Method,
         StringKeyKind::Env => CompletionItemKind::Constant,
         StringKeyKind::ServiceId => CompletionItemKind::Reference,
         StringKeyKind::ContainerParameter => CompletionItemKind::Property,
         StringKeyKind::SymfonyConfigKey => CompletionItemKind::Field,
-        StringKeyKind::SymfonyEvent => CompletionItemKind::Event,
+        StringKeyKind::SymfonyEvent | StringKeyKind::WordPressHook => CompletionItemKind::Event,
         StringKeyKind::MessengerBus => CompletionItemKind::Reference,
         StringKeyKind::YiiRouteArgument => CompletionItemKind::Field,
+        StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => CompletionItemKind::Function,
+        StringKeyKind::TwigVariable => CompletionItemKind::Variable,
         StringKeyKind::Route
         | StringKeyKind::SymfonyRoute
         | StringKeyKind::YiiRoute
         | StringKeyKind::Command
         | StringKeyKind::Section
         | StringKeyKind::Stack
+        | StringKeyKind::TwigBlock
         | StringKeyKind::ContainerBinding => CompletionItemKind::Value,
     }
 }
@@ -168,6 +172,7 @@ impl Backend {
                 aliases.into()
             }
             StringKeyKind::GateAbility => self.cached_gate_abilities(),
+            StringKeyKind::Middleware => self.laravel.middleware.read().all_names().into(),
             StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
             StringKeyKind::ServiceId
             | StringKeyKind::ContainerParameter
@@ -177,15 +182,23 @@ impl Backend {
             | StringKeyKind::SymfonyEvent
             | StringKeyKind::MessengerBus
             | StringKeyKind::YiiRoute => self.symfony_declared_names(*kind).into(),
+            StringKeyKind::TwigFilter | StringKeyKind::TwigFunction => {
+                self.twig_callable_names(*kind).into()
+            }
             // A translation key is completed in the domain it is looked up
             // in, a configuration key under the key it is nested in, which
             // only the Symfony completion knows, and a route argument from
-            // the routes of the handler it is written in.
+            // the routes of the handler it is written in.  A hook name is
+            // completed with its patterns as snippets, which only the
+            // WordPress completion builds.
             StringKeyKind::SymfonyTranslation
+            | StringKeyKind::WordPressHook
             | StringKeyKind::SymfonyConfigKey
             | StringKeyKind::YiiRouteArgument
             | StringKeyKind::Section
             | StringKeyKind::Stack
+            | StringKeyKind::TwigBlock
+            | StringKeyKind::TwigVariable
             | StringKeyKind::ContainerBinding
             | StringKeyKind::YiiView => Arc::new([]),
         }

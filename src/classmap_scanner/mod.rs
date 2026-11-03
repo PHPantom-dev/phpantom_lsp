@@ -86,7 +86,8 @@ mod vendor;
 mod walk;
 
 pub(crate) use discovery::{
-    collect_include_files, is_phpstorm_stubs_checkout, scan_roots_full, scan_stub_paths,
+    DRUPAL_PHP_EXTENSIONS, collect_include_files, is_phpstorm_stubs_checkout, scan_roots_full,
+    scan_stub_paths,
 };
 pub use discovery::{
     scan_directories, scan_drupal_directories, scan_include_paths, scan_psr4_directories,
@@ -167,6 +168,10 @@ pub struct ScanResult {
     pub functions: Vec<String>,
     /// Constant names from `define('NAME', ...)` and top-level `const NAME`.
     pub constants: Vec<String>,
+    /// The global variables the file documents with an `@global` tag,
+    /// with their `$`.  Filled by [`find_symbols_and_global_tags`], not by
+    /// [`find_symbols`].
+    pub globals: Vec<String>,
 }
 
 /// Combined workspace scan results for classes, functions, and constants.
@@ -194,6 +199,9 @@ pub struct WorkspaceScanResult {
     /// longest-path-first for prefix-match origin lookups. Empty for
     /// scans that never touch a vendor tree.
     pub(crate) package_roots: Vec<(PathBuf, crate::ClassCompletionOrigin, String)>,
+    /// Each scanned file that documents a global variable with an
+    /// `@global` tag, with the names it documents, in scan order.
+    pub(crate) globals: Vec<(PathBuf, Vec<String>)>,
 }
 
 impl WorkspaceScanResult {
@@ -214,16 +222,23 @@ impl WorkspaceScanResult {
                 .map(|name| (name, path.to_path_buf()))
                 .collect()
         };
+        let globals = if scan.globals.is_empty() {
+            Vec::new()
+        } else {
+            vec![(path.to_path_buf(), scan.globals)]
+        };
         Self {
             classmap: at_path(scan.classes),
             function_index: at_path(scan.functions),
             constant_index: at_path(scan.constants),
+            globals,
             ..Default::default()
         }
     }
 
     /// Fold `other`'s classes, functions and constants into `self`,
-    /// keeping `self`'s entry when both define the same name.
+    /// keeping `self`'s entry when both define the same name, and add its
+    /// `@global` tags.
     ///
     /// Origins ride alongside the winning path: one is only recorded for
     /// an entry of `other` that actually wins, so a symbol's recorded
@@ -263,6 +278,7 @@ impl WorkspaceScanResult {
             other.constant_index,
             &other.constant_origins,
         );
+        self.globals.extend(other.globals);
     }
 }
 
@@ -307,5 +323,42 @@ pub fn scan_file_full(path: &Path) -> ScanResult {
     if content.is_empty() {
         return ScanResult::default();
     }
-    find_symbols(&content)
+    find_symbols_and_global_tags(&content)
+}
+
+/// [`find_symbols`], with the global variables the source documents with
+/// an `@global` tag in [`ScanResult::globals`].
+///
+/// Only the names are read here. A tag's type is written against its
+/// file's imports, which only a parse of the file knows.
+pub(crate) fn find_symbols_and_global_tags(content: &[u8]) -> ScanResult {
+    let mut scan = find_symbols(content);
+    scan.globals = find_global_tags(content);
+    scan
+}
+
+/// The global variables the file at `path` documents with an `@global`
+/// tag, empty when it cannot be read.
+pub(crate) fn scan_global_tags(path: &Path) -> Vec<String> {
+    read_for_scan(path)
+        .map(|content| find_global_tags(&content))
+        .unwrap_or_default()
+}
+
+/// The global variables `content` documents with an `@global` tag, each
+/// once, with its `$`.
+fn find_global_tags(content: &[u8]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    if memchr::memmem::find(content, b"@global").is_none() {
+        return names;
+    }
+    let content = String::from_utf8_lossy(content);
+    for (_, doc) in crate::docblock::docblocks_with_global_tags(&content) {
+        for (name, _) in crate::docblock::extract_global_tags(doc) {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    names
 }

@@ -99,6 +99,11 @@ impl Backend {
             SymbolKind::SelfStaticParent(ssp_kind) => {
                 self.highlight_keyword(symbol_map, content, *ssp_kind, span.start, uri)
             }
+            SymbolKind::StringKey {
+                kind: crate::symbol_map::StringKeyKind::WordPressHook,
+                key,
+                ..
+            } => self.wordpress_hook_highlights(symbol_map, content, key),
             SymbolKind::NamespaceDeclaration { .. }
             | SymbolKind::StringKey { .. }
             | SymbolKind::LaravelMacroString { .. }

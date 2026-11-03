@@ -72,6 +72,21 @@
 //!   diagnostic), offer to create the `.blade.php` file under the
 //!   project's configured view root (or the matching package namespace's
 //!   own view directory) and open it.
+//! - **Create missing component** — when a `<x-…>` or `<livewire:…>` tag
+//!   names no component (`unknown_blade_component`,
+//!   `unknown_livewire_component`), offer the closest component names and
+//!   to create the component: an anonymous component's template, or a
+//!   component class and its template.
+//! - **Create test** — on a class, or one of its public methods, that
+//!   has no test yet, offer to write a PHPUnit test (or a Pest file)
+//!   where the class' test lens looks for it, and open it.
+//! - **Data provider fixes** — when a PHPUnit data provider is not
+//!   `public` (or, from PHPUnit 10, not `static`), offer to add the
+//!   modifier; when the provider a test names does not exist, offer to
+//!   create it on the test class.
+//! - **Parent call fixes** — when a PHPUnit `setUp()`, `tearDown()`,
+//!   `setUpBeforeClass()`, or `tearDownAfterClass()` never calls the
+//!   parent's, offer to insert the call.
 //!
 //! ## Deferred edit computation (`codeAction/resolve`)
 //!
@@ -94,9 +109,12 @@ mod convert_to_arrow_function;
 mod convert_to_closure;
 mod convert_to_instance_variable;
 mod convert_to_interpolation;
+mod create_missing_component;
 mod create_missing_route;
 mod create_missing_view;
+mod create_test;
 pub(crate) mod cursor_context;
+mod data_provider_fixes;
 mod extract_constant;
 mod extract_function;
 mod extract_interface;
@@ -114,6 +132,7 @@ mod inline_variable;
 mod insert_translation_key;
 mod mago;
 mod naming;
+mod parent_call_fixes;
 pub(crate) mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;

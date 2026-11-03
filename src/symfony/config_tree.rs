@@ -481,18 +481,217 @@ pub(crate) fn config_key_spans(content: &str) -> Vec<SymbolSpan> {
         let Some(key) = walk.path().filter(|path| !path.is_empty()) else {
             continue;
         };
-        spans.push(SymbolSpan {
-            start: start as u32,
-            end: end as u32,
-            kind: SymbolKind::StringKey {
+        // A key under `twig.globals` declares a variable every template
+        // receives.
+        let global = key
+            .strip_prefix("twig.globals.")
+            .filter(|name| crate::twig::variables::is_twig_variable_name(name));
+        let kind = match global {
+            Some(name) => SymbolKind::StringKey {
+                kind: StringKeyKind::TwigVariable,
+                key: name.to_string(),
+                is_write: true,
+                is_optional: false,
+            },
+            None => SymbolKind::StringKey {
                 kind: StringKeyKind::SymfonyConfigKey,
                 key,
                 is_write: false,
                 is_optional: false,
             },
+        };
+        spans.push(SymbolSpan {
+            start: start as u32,
+            end: end as u32,
+            kind,
         });
     }
     spans
+}
+
+/// The resource the kernel's own route loading is configured with, which
+/// is what the routing files are read for (see
+/// [`crate::symfony::route_world`]).
+const KERNEL_ROUTE_RESOURCE: &str = "kernel::loadRoutes";
+
+/// Whether one `config/packages/` YAML or XML file points
+/// `framework.router.resource` (in any environment) anywhere but the
+/// kernel's own route loading, so that the routes the application has are
+/// loaded from somewhere the routing files do not say.
+pub(crate) fn configures_foreign_router_resource(uri: &str, content: &str) -> bool {
+    let is_foreign = |resource: &str| {
+        let resource = crate::framework::strip_yaml_quotes(resource.trim()).0;
+        !resource.is_empty() && resource != KERNEL_ROUTE_RESOURCE
+    };
+    match crate::symfony::config_format(uri) {
+        Some(crate::symfony::ConfigFormat::Yaml) => {
+            let mut walk = KeyPath::default();
+            crate::framework::line_offsets(content)
+                .into_iter()
+                .any(|(line_start, line)| {
+                    let Some((_, end)) = walk.feed(line, line_start) else {
+                        return false;
+                    };
+                    if walk.path().as_deref() != Some("framework.router.resource") {
+                        return false;
+                    }
+                    let semantic =
+                        crate::symfony::resources::yaml_content_before_comment(&content[end..]);
+                    let value = semantic.lines().next().unwrap_or("");
+                    value.trim_start().strip_prefix(':').is_some_and(is_foreign)
+                })
+        }
+        Some(crate::symfony::ConfigFormat::Xml) => content
+            .match_indices("router")
+            .filter(|(at, _)| {
+                content[..*at].ends_with("<framework:") || content[..*at].ends_with('<')
+            })
+            .any(|(at, _)| {
+                let tag_end = content[at..]
+                    .find('>')
+                    .map_or(content.len(), |end| at + end);
+                crate::framework::xml_attr_value(&content[at..tag_end], at, &["resource"])
+                    .is_some_and(|(resource, _, _)| is_foreign(&resource))
+            }),
+        None => false,
+    }
+}
+
+/// The fluent builder `config/packages/` PHP files configure the framework
+/// bundle with.
+const FRAMEWORK_CONFIG: &str = "Symfony\\Config\\FrameworkConfig";
+
+/// Whether a router resource, as written in PHP, points anywhere but the
+/// kernel's own route loading.  A resource that is not a literal cannot be
+/// told to be the kernel's.
+fn is_foreign_php_resource(value: &Expression<'_>, content: &str) -> bool {
+    match crate::virtual_members::laravel::helpers::resolved_string_literal(value, content) {
+        Some((resource, _, _)) => {
+            let resource = resource.trim();
+            !resource.is_empty() && resource != KERNEL_ROUTE_RESOURCE
+        }
+        None => !matches!(value, Expression::Literal(Literal::String(_))),
+    }
+}
+
+/// The value of the literal key `key` in an array expression.
+fn array_entry<'e, 'a>(array: &'e Expression<'a>, key: &str) -> Option<&'e Expression<'a>> {
+    let elements = match array {
+        Expression::Array(array) => &array.elements,
+        Expression::LegacyArray(array) => &array.elements,
+        _ => return None,
+    };
+    elements.iter().find_map(|element| match element {
+        ArrayElement::KeyValue(entry)
+            if matches!(entry.key, Expression::Literal(Literal::String(literal))
+                if literal.value.and_then(crate::atom::literal_bytes_to_str) == Some(key)) =>
+        {
+            Some(entry.value)
+        }
+        _ => None,
+    })
+}
+
+/// Whether the framework bundle's configuration array `framework` sets a
+/// foreign `router.resource`.
+fn framework_array_has_foreign_resource(framework: &Expression<'_>, content: &str) -> bool {
+    array_entry(framework, "router")
+        .and_then(|router| array_entry(router, "resource"))
+        .is_some_and(|resource| is_foreign_php_resource(resource, content))
+}
+
+/// Whether one `config/packages/` PHP file points `framework.router.resource`
+/// (in any environment) anywhere but the kernel's own route loading: with
+/// the fluent `FrameworkConfig` builder (`$framework->router()->resource(…)`
+/// or `->router(['resource' => …])`), with
+/// `$container->extension('framework', […])`, or in the array the file
+/// returns, `App::config()`'s or a plain one.  The PHP counterpart of
+/// [`configures_foreign_router_resource`].
+pub(crate) fn php_configures_foreign_router_resource(
+    program: &Program<'_>,
+    content: &str,
+    names: &crate::names::OwnedResolvedNames,
+) -> bool {
+    use std::ops::ControlFlow;
+
+    let mut framework_params: Vec<String> = Vec::new();
+    let mut found = false;
+    let note_params = |parameters: &FunctionLikeParameterList<'_>,
+                       framework_params: &mut Vec<String>| {
+        for param in parameters.parameters.iter() {
+            if let Some(Hint::Identifier(hint)) = &param.hint
+                && names
+                    .get(hint.span().start.offset)
+                    .unwrap_or_else(|| bytes_to_str(hint.value()))
+                    .trim_start_matches('\\')
+                    .eq_ignore_ascii_case(FRAMEWORK_CONFIG)
+            {
+                framework_params.push(bytes_to_str(param.variable.name).to_string());
+            }
+        }
+    };
+    crate::virtual_members::laravel::walk_program_expressions(program, &mut |expr: &Expression<
+        '_,
+    >| {
+        found = match expr {
+            Expression::Closure(closure) => {
+                note_params(&closure.parameter_list, &mut framework_params);
+                false
+            }
+            Expression::ArrowFunction(arrow) => {
+                note_params(&arrow.parameter_list, &mut framework_params);
+                false
+            }
+            Expression::Array(_) | Expression::LegacyArray(_) => array_entry(expr, "framework")
+                .is_some_and(|framework| framework_array_has_foreign_resource(framework, content)),
+            Expression::Call(Call::Method(call)) => {
+                let ClassLikeMemberSelector::Identifier(method) = &call.method else {
+                    return ControlFlow::Continue(());
+                };
+                let method = bytes_to_str(method.value);
+                let first = call.argument_list.arguments.first().map(|a| a.value());
+                if method.eq_ignore_ascii_case("extension")
+                    || method.eq_ignore_ascii_case("loadFromExtension")
+                {
+                    first.is_some_and(|namespace| {
+                        crate::virtual_members::laravel::helpers::resolved_string_literal(
+                            namespace, content,
+                        )
+                        .is_some_and(|(namespace, _, _)| namespace == "framework")
+                    }) && call.argument_list.arguments.get(1).is_some_and(|config| {
+                        framework_array_has_foreign_resource(config.value(), content)
+                    })
+                } else if method.eq_ignore_ascii_case("router") {
+                    is_framework_param(call.object, &framework_params)
+                        && first
+                            .and_then(|value| array_entry(value, "resource"))
+                            .is_some_and(|resource| is_foreign_php_resource(resource, content))
+                } else if method.eq_ignore_ascii_case("resource") {
+                    matches!(call.object, Expression::Call(Call::Method(router))
+                            if matches!(&router.method, ClassLikeMemberSelector::Identifier(name)
+                                if bytes_to_str(name.value).eq_ignore_ascii_case("router"))
+                            && is_framework_param(router.object, &framework_params))
+                        && first.is_some_and(|resource| is_foreign_php_resource(resource, content))
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+        if found {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    });
+    found
+}
+
+/// Whether `object` is a variable a closure of the file takes as the
+/// framework bundle's configuration builder.
+fn is_framework_param(object: &Expression<'_>, framework_params: &[String]) -> bool {
+    matches!(object, Expression::Variable(Variable::Direct(variable))
+        if framework_params.iter().any(|name| name.as_bytes() == variable.name))
 }
 
 /// The key being typed at `cursor`, as the path of the key it is nested in
@@ -543,6 +742,25 @@ pub(crate) fn child_keys(declared: &[String], parent: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_router_resource_other_than_the_kernels_is_noted() {
+        let foreign = |uri: &str, content: &str| configures_foreign_router_resource(uri, content);
+        let yaml = "framework:\n    router:\n        utf8: true\n        resource: 'app.route_loader' # a service\n";
+        assert!(foreign("file:///p/config/packages/routing.yaml", yaml));
+        let yaml = "framework:\n    router:\n        resource: kernel::loadRoutes\n";
+        assert!(!foreign("file:///p/config/packages/routing.yaml", yaml));
+        let yaml = "when@prod:\n    framework:\n        router:\n            resource: '%kernel.project_dir%/config/routes.php'\n";
+        assert!(foreign("file:///p/config/packages/routing.yaml", yaml));
+        // A `resource` key somewhere else is something else.
+        let yaml = "framework:\n    router:\n        default_uri: x\n    assets:\n        resource: x\nresource: y\n";
+        assert!(!foreign("file:///p/config/packages/framework.yaml", yaml));
+
+        let xml = r#"<container><framework:config><framework:router resource="app.loader" utf8="true"/></framework:config></container>"#;
+        assert!(foreign("file:///p/config/packages/framework.xml", xml));
+        let xml = r#"<container><framework:config><framework:router utf8="true"/></framework:config></container>"#;
+        assert!(!foreign("file:///p/config/packages/framework.xml", xml));
+    }
 
     fn declared(php: &str) -> Vec<(String, String)> {
         let arena = mago_allocator::LocalArena::new();

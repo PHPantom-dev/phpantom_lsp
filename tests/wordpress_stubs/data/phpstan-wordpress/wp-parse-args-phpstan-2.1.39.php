@@ -24,7 +24,7 @@ function wpParseArgsWithMaybeEmptyDefaults(array $args, bool $condition): void
 {
     $defaults = $condition ? [] : ['page' => 1];
 
-    assertType('array{page?: int}', wp_parse_args($args, $defaults)); // SKIP: the shape `wp_parse_args()` or `shortcode_atts()` merges is not computed
+    assertType('array{page?: int}', wp_parse_args($args, $defaults));
 }
 
 /**
@@ -32,5 +32,5 @@ function wpParseArgsWithMaybeEmptyDefaults(array $args, bool $condition): void
  */
 function wpParseArgsWithObject(\WP_Post $post): void
 {
-    assertType("non-empty-array<mixed>&hasOffset('extra')", wp_parse_args($post, ['extra' => 1])); // SKIP: the shape `wp_parse_args()` or `shortcode_atts()` merges is not computed
+    assertType("non-empty-array<mixed>&hasOffset('extra')", wp_parse_args($post, ['extra' => 1])); // SKIP: `wp_parse_args()` of an object does not read the properties WordPress sees
 }

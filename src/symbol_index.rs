@@ -5,7 +5,7 @@
 //! `Arc`-wrapped, so `#[derive(Clone)]` shares them with a cloned `Backend`
 //! (the same semantics the per-request clone had as individual fields).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,6 +14,7 @@ use parking_lot::RwLock;
 
 use crate::ci_map::{CiMap, CiSet};
 use crate::classmap_scanner::WorkspaceScanResult;
+use crate::php_type::PhpType;
 use crate::types::{ClassInfo, DefineInfo, FunctionInfo};
 use crate::{ClassCompletionOrigin, UriGlobals};
 
@@ -105,6 +106,9 @@ pub(crate) struct SymbolIndex {
     /// its own `extends`/`implements` clause rather than the list of every
     /// implementor of a popular interface.
     pub(crate) gti_parents_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// The files that document each global variable with an `@global`
+    /// tag, and the type each one looked up so far was found to have.
+    pub(crate) global_tags: Arc<RwLock<GlobalTags>>,
     /// Identity of this set of indexes, unique for the life of the process
     /// and shared by every clone (a cloned `Backend` shares the indexes
     /// themselves).  Per-thread caches key on it so that a worker thread
@@ -148,6 +152,7 @@ impl SymbolIndex {
             function_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
             gti_parents_index: Arc::new(RwLock::new(HashMap::new())),
+            global_tags: Arc::new(RwLock::new(GlobalTags::default())),
         }
     }
 
@@ -308,6 +313,7 @@ impl SymbolIndex {
             constant_index,
             constant_origins,
             package_roots: _,
+            globals,
         } = scan;
         // An entry of `tree` may also be a single file, which its own URI
         // matches exactly.
@@ -389,7 +395,42 @@ impl SymbolIndex {
                 None,
             );
         }
+        {
+            let mut tags = self.global_tags.write();
+            tags.withdraw(|path| tree.iter().any(|dir| path.starts_with(dir)));
+            for (path, names) in globals {
+                tags.add(path, names);
+            }
+            // A stub path's tags decide over the others, so the tree may
+            // have become or stopped being one with the same tags.
+            tags.forget_types();
+        }
         self.prune_orphaned_origins();
+    }
+
+    /// Drop the `@global` tags of every file `gone` accepts, for files
+    /// that were deleted or are about to be rescanned.
+    pub(crate) fn withdraw_global_tags(&self, gone: impl Fn(&Path) -> bool) {
+        self.global_tags.write().withdraw(gone);
+    }
+
+    /// Read the `@global` tags of `paths` again from disk, in place of the
+    /// ones recorded for them.
+    pub(crate) fn rescan_global_tags(&self, paths: &[PathBuf]) {
+        let scanned: Vec<(PathBuf, Vec<String>)> = paths
+            .iter()
+            .map(|path| {
+                (
+                    path.clone(),
+                    crate::classmap_scanner::scan_global_tags(path),
+                )
+            })
+            .collect();
+        let mut tags = self.global_tags.write();
+        tags.withdraw(|path| paths.iter().any(|p| p == path));
+        for (path, names) in scanned {
+            tags.add(path, names);
+        }
     }
 
     /// The merge behind [`merge_scan`](Self::merge_scan) and
@@ -404,7 +445,14 @@ impl SymbolIndex {
             constant_index,
             constant_origins,
             package_roots: _,
+            globals,
         } = scan;
+        if !globals.is_empty() {
+            let mut tags = self.global_tags.write();
+            for (path, names) in globals {
+                tags.add(path, names);
+            }
+        }
         if !classmap.is_empty() {
             let mut index = self.fqn_uri_index.write();
             let mut origins = self.fqn_origin_index.write();
@@ -441,6 +489,95 @@ impl SymbolIndex {
                 None,
             );
         }
+    }
+}
+
+/// The global variables library and project code documents with an
+/// `@global Type $name` tag, which type a `global $name;` that has no type
+/// of its own.
+///
+/// Fed by the discovery scans that read a file for its functions and
+/// constants, so the same files count whatever has been opened.  Each
+/// name's files are kept sorted, so the union of their types comes out
+/// the same whichever scan found them first.
+#[derive(Default)]
+pub(crate) struct GlobalTags {
+    /// The files that document each global, keyed by its name with its `$`.
+    files: HashMap<String, BTreeSet<PathBuf>>,
+    /// Every file that appears in `files`.
+    tagged: HashSet<PathBuf>,
+    /// The type each global looked up so far was found to have, `None`
+    /// when its tags declare none.
+    types: HashMap<String, Option<PhpType>>,
+    /// Bumped whenever `types` is dropped, so a lookup that read the files
+    /// before a change does not cache what it found after it.
+    generation: u64,
+}
+
+impl GlobalTags {
+    /// The files that document `name` with an `@global` tag.
+    pub(crate) fn files(&self, name: &str) -> Option<&BTreeSet<PathBuf>> {
+        self.files.get(name)
+    }
+
+    /// Whether the file at `path` documents any global.
+    pub(crate) fn documents_any(&self, path: &Path) -> bool {
+        self.tagged.contains(path)
+    }
+
+    /// The type an earlier lookup found `name` to have, if one did since
+    /// the tags last changed.
+    pub(crate) fn cached_type(&self, name: &str) -> Option<&Option<PhpType>> {
+        self.types.get(name)
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Record the type a lookup that began at `generation` found `name`
+    /// to have, unless the tags changed since.
+    pub(crate) fn cache_type(&mut self, name: &str, php_type: Option<PhpType>, generation: u64) {
+        if generation == self.generation {
+            self.types.insert(name.to_owned(), php_type);
+        }
+    }
+
+    fn add(&mut self, path: PathBuf, names: Vec<String>) {
+        if names.is_empty() {
+            return;
+        }
+        let mut changed = false;
+        for name in names {
+            changed |= self.files.entry(name).or_default().insert(path.clone());
+        }
+        self.tagged.insert(path);
+        if changed {
+            self.forget_types();
+        }
+    }
+
+    fn withdraw(&mut self, gone: impl Fn(&Path) -> bool) {
+        let before = self.tagged.len();
+        self.tagged.retain(|path| !gone(path));
+        if self.tagged.len() == before {
+            return;
+        }
+        let mut changed = false;
+        self.files.retain(|_, files| {
+            let before = files.len();
+            files.retain(|path| !gone(path));
+            changed |= files.len() != before;
+            !files.is_empty()
+        });
+        if changed {
+            self.forget_types();
+        }
+    }
+
+    fn forget_types(&mut self) {
+        self.types.clear();
+        self.generation += 1;
     }
 }
 

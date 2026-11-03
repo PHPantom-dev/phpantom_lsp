@@ -7,6 +7,11 @@ use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\View\View;
 
+// Try: each action below shows a code lens for every route that reaches
+// it, such as `GET /bakeries · bakeries.index` above index(). Click it to
+// jump to the registration in routes/web.php. show() has two: its own route
+// and the one `Route::resource('bakeries.ovens', ...)` generates. index() is
+// also reached by that resource and by every route of the campaign loop.
 class BakeryController
 {
     use AuthorizesRequests;

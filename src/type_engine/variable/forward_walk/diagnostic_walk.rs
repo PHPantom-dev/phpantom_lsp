@@ -49,6 +49,7 @@ pub(crate) fn build_diagnostic_scopes(
     source_class_loaders: &BlockClassLoaders<'_>,
     block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
+    uri: Option<&str>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
 ) {
@@ -73,6 +74,7 @@ pub(crate) fn build_diagnostic_scopes(
         source_class_loaders,
         block_imports,
         backend,
+        uri,
         loaders,
         resolved_class_cache,
         &[],
@@ -102,6 +104,7 @@ pub(crate) fn build_diagnostic_scopes_for_offsets(
     source_class_loaders: &BlockClassLoaders<'_>,
     block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
+    uri: Option<&str>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
     offsets: &[u32],
@@ -134,6 +137,7 @@ pub(crate) fn build_diagnostic_scopes_for_offsets(
         source_class_loaders,
         block_imports,
         backend,
+        uri,
         loaders,
         resolved_class_cache,
         &targets,
@@ -155,6 +159,7 @@ fn walk_file_for_scopes(
     source_class_loaders: &BlockClassLoaders<'_>,
     block_imports: &BlockImports<'_>,
     backend: Option<&crate::Backend>,
+    uri: Option<&str>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
     targets: &[u32],
@@ -177,6 +182,7 @@ fn walk_file_for_scopes(
         source_class_loaders,
         block_imports,
         backend,
+        uri,
         loaders,
         resolved_class_cache,
         targets,
@@ -473,6 +479,8 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     source_class_loaders: &'a BlockClassLoaders<'a>,
     block_imports: &'a BlockImports<'a>,
     backend: Option<&'a crate::Backend>,
+    /// The file's URI; see [`FileCtx::uri`].
+    uri: Option<&'a str>,
     loaders: Loaders<'a>,
     resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
     /// Sorted byte offsets the caller needs scopes for, or empty to walk
@@ -531,7 +539,8 @@ impl<'a> DiagnosticWalkCtx<'a> {
                     self.source_class_loader,
                 )
                 .with_imports(Some(self.source_imports))
-                .with_backend(self.backend),
+                .with_backend(self.backend)
+                .with_uri(self.uri),
                 current_class,
                 u32::MAX,
                 self.flow,

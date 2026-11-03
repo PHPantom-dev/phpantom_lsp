@@ -245,7 +245,7 @@
 
 mod argument_count;
 mod blade_call_site;
-mod blade_component_tags;
+pub(crate) mod blade_component_tags;
 mod blade_directives;
 mod blade_imbalance;
 mod blade_sections;
@@ -255,6 +255,7 @@ mod class_init_facts;
 pub(crate) mod class_name_mismatch;
 mod collect;
 pub(crate) mod cross_file;
+pub(crate) mod data_providers;
 mod delivery;
 mod deprecated;
 mod destructuring_offsets;
@@ -276,6 +277,7 @@ pub(crate) mod member_lookup;
 pub(crate) mod member_visibility;
 pub(crate) mod namespace_mismatch;
 mod override_attribute;
+pub(crate) mod parent_calls;
 mod property_type_errors;
 mod pull;
 mod readonly_writes;
@@ -298,6 +300,7 @@ pub(crate) mod unresolved_member_access;
 mod unused_imports;
 pub(crate) mod unused_variables;
 pub(crate) mod use_statements;
+mod validation_strings;
 pub(crate) mod workspace;
 
 use tower_lsp_server::gen_lsp_types::*;

@@ -20,24 +20,55 @@ catalogues together, the way a real Symfony project does.
   `src/Controller/DemoController.php`, go to the definition of
   `app.welcome_mailer` or `app.sender_name`, find their references, or
   complete a name inside `$container->has('')` or
-  `#[Autowire(param: '')]`.
+  `#[Autowire(param: '')]`. The names the installed bundles declare complete
+  and navigate too: in `config/services.php`, go to the definition of
+  `cache.app` to reach FrameworkBundle's own configuration. A container
+  builder declares them as well: `app.default_mailer` in `DemoController`
+  leads to `src/DependencyInjection/AcmeDemoExtension.php`. A `%name%`
+  placeholder in a configurator's string, such as `app.greeting`'s, reads
+  the parameter it names.
 - Route names navigate between their `#[Route]` attribute or
   `config/routes.yaml` entry and the controllers and Twig templates that
   link to them. In `templates/demo/index.html.twig`, go to the definition of
   `app_demo` or `app_demo_legacy`, find references on `app_demo` in
   `DemoController`, or complete a name inside `generateUrl('')` or
-  `path('')`.
+  `path('')`. Names are followed through the imports that load them: in
+  the same template, `admin_dashboard` is `src/Admin/DashboardController.php`'s
+  `dashboard` under the import's `name_prefix`, and `_preview_error` is
+  declared by FrameworkBundle's own routing file. A route name nothing
+  declares is reported, in a template too.
 - Translation keys navigate between the YAML and XLIFF catalogues in
   `translations/` and the PHP and Twig that translate them, within the
   domain each call names. In `DemoController`, go to the definition of
   `demo.title` or `user.invalid_email`, or complete a key inside
-  `trans('')`.
+  `trans('')`. A key spelled like one (`demo.titel`) that nothing declares
+  is reported, in a domain the project's own catalogues hold and no
+  installed package ships a catalogue for.
 - Template names navigate between the controllers and templates that render,
   extend, or include them and the files in `templates/`. In
   `DemoController`, go to the definition of `demo/index.html.twig`, or
   complete a name inside `render('')` or `{% include '' %}`. A template that
-  does not exist is reported, with quick fixes that change it to a close
-  name or create it.
+  does not exist is reported, in PHP and Twig alike, with quick fixes that
+  change it to a close name or create it.
+- Blocks navigate between the templates that override them. In
+  `templates/demo/index.html.twig`, go to the definition of `title` or of
+  `parent()` to reach `base.html.twig`'s block, and in `base.html.twig` go to
+  the definition of `body` to reach the template that overrides it.
+- Twig filters and functions lead to the PHP behind them. In
+  `templates/demo/index.html.twig`, go to the definition of `initials` to
+  reach `src/Twig/AppExtension.php`, of `badge` to reach the
+  `#[AsTwigFunction]` in `src/Twig/Badges.php`, or of `upper` to reach
+  Twig's own extension. Hover one for its signature, complete a filter after
+  `|`, and misspell one to see it reported.
+- Template variables lead to what passes them. In
+  `templates/demo/index.html.twig`, go to the definition of `sender` to reach
+  the key `DemoController` renders the template with, or of `support_url` to
+  reach the global `config/packages/twig.yaml` declares. In
+  `templates/demo/_card.html.twig`, `sender` comes through the template that
+  includes it. Hover a variable to see where it comes from and what it
+  holds, and complete one where an expression starts. Go to the definition
+  of `displayName` in `user.displayName` to reach `User::getDisplayName()`,
+  and complete after `user.` to see what else the class has.
 - Form fields and validation mappings name the properties of the class they
   map. In `src/Form/RegistrationType.php` or `config/validator/User.yaml`, go
   to the definition of `email`, find the references of `$displayName` in

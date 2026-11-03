@@ -346,30 +346,6 @@ feeding to the framework index the YAML occurrences are kept in. Sidux's
 
 ---
 
-## F26. Symfony service IDs a bundle or a definition API declares
-
-**Impact: Low-Medium · Complexity: Medium**
-
-Service IDs and container parameters are read from the application's YAML,
-XML, and PHP configurators. A bundle's own declarations, and the ones a
-kernel or an extension makes through the `ContainerBuilder` API
-(`register('app.mailer', …)`, `setAlias()`, `setParameter()` on a builder,
-`setDefinition()`), are not, so those names neither complete nor navigate,
-and only names under the application's own `app.` prefix can be reported
-as undeclared. Two reading shapes are missing too: a configurator's
-`->parent('app.base')`, and the `%name%` placeholders in a string a
-configurator passes as an argument (`->args(['%app.sender%'])`).
-
-Reading the installed bundles' `Resources/config/` would also let the
-unknown-ID check judge names outside `app.`; it has to stay cheap enough
-for a project with dozens of bundles.
-
-**Where to look:** `src/symbol_map/extraction/symfony.rs`
-(`symfony_receiver_method`), `src/symbol_map/string_keys.rs`
-(`ReceiverClass`), `src/symfony/`.
-
----
-
 ## F27. Symfony route parameters
 
 **Impact: Medium · Complexity: Medium**
@@ -409,78 +385,6 @@ of the same design: `src/symbol_map/extraction/yii_routes.rs`, `src/yii/routes.r
 
 ---
 
-## F28. Symfony route names a loader composes
-
-**Impact: Medium-High · Complexity: Medium**
-
-Until this lands, the unknown-route diagnostic is inert in most real
-applications: it only judges names under `app_`, and applications that
-name their routes by area (`blog_post`, `admin_post_edit`, as the official
-Symfony demo does) never trigger it. A typo in `redirectToRoute()` or
-`path()` goes unreported there.
-
-Unlike service IDs, routes are a closed world the project spells out:
-every route enters through an import in `config/routes.yaml` /
-`config/routes/*` (or the kernel's `configureRoutes()`), and a bundle's
-routes come from the file that import names
-(`resource: '@WebProfilerBundle/Resources/config/routing/wdt.php'`).
-Following those imports into the bundle's routing files gives the full set,
-so the `app_` restriction can go. The exceptions are imports that run code,
-`type: service` loaders (the security logout loader) and custom loaders;
-an application with one of those keeps the world open only for the names
-that loader could produce, or entirely if that cannot be told.
-
-A route's name is read where it is declared: a `#[Route]` attribute, with
-its class's name prefix, a routing YAML or XML entry, or a routing
-configurator's `add()`. A few names are put together elsewhere, and are
-missed:
-
-- an import's `name_prefix:` in the routing YAML (or `->namePrefix()` in a
-  configurator), which prefixes every route it loads, attribute routes
-  included;
-- the routes a collection's `add()` declares under its
-  `$routes->collection('blog_')` prefix;
-- the `@Route` docblock annotations older applications still use;
-- the routes bundles declare in their own routing files, which is also why
-  only names under the application's own `app_` prefix are reported as
-  undeclared.
-
-**Where to look:** `src/symfony/routes.rs`,
-`src/symbol_map/extraction/symfony.rs`, `src/symbol_map/string_keys.rs`
-(`ReceiverClass::RoutingConfigurator`).
-
----
-
-## F29. Report Symfony translation keys nothing declares
-
-**Impact: Medium-High · Complexity: Medium**
-
-Blocks full Symfony support: the README keeps Symfony marked as partial until this lands.
-
-```php
-$translator->trans('demo.titel'); // a typo of demo.title
-```
-
-Translation keys complete and navigate within their domain, but one that no
-catalogue declares is not reported. Service IDs and routes are only judged
-under the application's own `app.` and `app_` prefixes; translation keys
-have no such convention, so judging needs a fuller picture of what is
-declared:
-
-- the catalogues installed bundles ship (`validators`, `security`, and any
-  bundle's own domain), which a key in the same domain may come from;
-- the project's messages that are their own translation (`trans('Save')`
-  with no catalogue entry translates to `Save`), which only a domain the
-  project declares keys in, and keys that look like keys, can tell apart.
-
-A starting point is to judge only domains no installed package ships a
-catalogue for, and only keys spelled like dotted identifiers.
-
-**Where to look:** `src/diagnostics/laravel_string_keys.rs`
-(`CheckedStringKind::of`), `src/symfony/translations.rs`.
-
----
-
 ## F30. Symfony translations outside YAML, XLIFF, and the `trans` filter
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -502,6 +406,13 @@ Catalogues are read when they are YAML or XLIFF files under a
   clause.
 - Keys in other domains by convention: validation constraint messages
   (`validators`) and form labels under a form's `translation_domain`.
+
+An undeclared key is only reported in a domain whose every catalogue the
+translator loads is read, and that no installed package ships, so each
+catalogue read here lets more domains be judged. Where the translator loads
+from is read from `framework.translator` in the YAML under
+`config/packages/`; a configuration in PHP or XML that names the translator
+leaves every domain unjudged.
 
 **Where to look:** `src/symfony/translations.rs`,
 `src/symbol_map/extraction/symfony.rs` (`push_translatable_spans`).
@@ -569,30 +480,6 @@ registered for.
 
 ---
 
-## F32. Report unknown Symfony names in Twig templates
-
-**Impact: Medium-High · Complexity: Medium**
-
-Blocks full Twig support: the README keeps Twig marked as partial until this lands.
-
-```twig
-{% include 'partials/crad.html.twig' %}
-<a href="{{ path('app_hme') }}">Home</a>
-```
-
-An unknown template or `app_` route is reported where PHP names it, but not
-in a Twig template: diagnostics are not run on resource documents at all.
-They need scheduling for a Twig file the way a PHP file's are, the
-string-key check reading the template's resource symbol map, and the
-"Create missing template" quick fix offered there too. A template being
-created or deleted should also refresh the open files that name it.
-
-**Where to look:** `src/backend/documents.rs` (`did_open`, `did_change`
-for resource documents), `src/diagnostics/laravel_string_keys.rs`,
-`src/code_actions/create_missing_view.rs`.
-
----
-
 ## F58. Configured Twig roots and namespaces
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -642,6 +529,16 @@ the directory it prepends). That could be a docblock type in the spirit
 of Laravel's `view-string`, or a `.phpantom.toml` entry for wrappers a
 project does not own (OpenCart's `Loader::view()`).
 
+A name built around a variable at the render itself is the same gap
+from the other side. The official Symfony demo renders
+`'blog/index.'.$_format.'.twig'`, with `$_format` limited to `html` and
+`xml` by the route, so `blog/index.html.twig` and `blog/index.xml.twig`
+get no render context: their `paginator` and `tagName` read as "not
+passed by any render", and the PhpStorm Symfony plugin misses them too.
+The literal parts already narrow it to the templates that fit
+`blog/index.*.twig`; the route's `_format` requirement narrows it to the
+exact two.
+
 **Where to look:** `src/symbol_map/extraction/symfony.rs`
 (`symfony_receiver_method`), how `view-string` parameters are read for
 Laravel views. TwigStan's context collectors (the ones that find
@@ -650,56 +547,111 @@ recognises as rendering a template.
 
 ---
 
-## F36. Twig block navigation
+## F61. Port TwigStan's tests
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
-Blocks full Twig support: the README keeps Twig marked as partial until this lands.
-
-```twig
-{% extends 'base.html.twig' %}
-{% block body %}…{% endblock %}
-```
-
-A `{% block %}` in a child template overrides the block of the same name
-in the template it extends, possibly several levels up, and `{{ block('x') }}`
-and `{{ parent() }}` refer to them. None of that navigates. It is the Twig
-counterpart of Blade's section and stack navigation (`blade/blocks.rs`),
-and the `extends` links are already `TwigTemplate` spans, so it needs
-the blocks each template declares and a resolver that walks up the
-chain: go to the overridden block, find the overrides of a parent's
-block, and complete the block names a child can override.
-
-**Where to look:** `src/twig/templates.rs`, `src/blade/blocks.rs`,
-`src/blade/block_index.rs`.
+PHPantom types Twig template variables from the render calls and
+navigates templates, blocks, filters, and functions, but tests that
+against fixtures of its own only. TwigStan's `tests/EndToEnd/` holds
+templates with the variables, filters, functions, and globals they use
+and the errors and types it reports for each. Port them as fixtures in
+`tests/fixtures/twigstan/` with a project under `tests/twigstan/` holding
+the templates and a slice of `twig/twig`, and file every case PHPantom
+answers differently as a `// SKIP: reason` entry in `docs/todo/`. Tests
+of TwigStan's compiler and its PHPStan baseline have no counterpart here;
+list them in the README as not ported.
 
 ---
 
-## F37. Twig template variables
+## F62. Check Symfony logout route names
 
-**Impact: Medium-High · Complexity: Medium-High**
-
-Blocks full Twig support: the README keeps Twig marked as partial until this lands.
+**Impact: Low · Complexity: Low-Medium**
 
 ```php
-return $this->render('post/show.html.twig', ['post' => $post]);
+$this->generateUrl('_logout_mian');   // typo of _logout_main, not reported
 ```
+
+Importing `security.route_loader.logout` leaves every name with the
+`_logout_` prefix open (`symfony/route_world.rs`), so a misspelled
+firewall passes. Symfony defines `_logout_<firewall>` for each firewall
+whose `security.yaml` entry configures `logout`. When the security
+configuration is readable, declare exactly those names, so they
+navigate to the firewall's `logout` setting and anything else with the
+prefix is reported.
+
+---
+
+## F63. Check container parameters outside `app.*`
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```yaml
+parameters:
+    mailer.from: 'noreply@example.com'
+```
+
+```php
+$this->getParameter('mailer.form');   // typo, not reported
+```
+
+Unknown-parameter diagnostics judge only the `app.*` family. A name
+outside it goes unchecked even when the project defines its whole
+family (`mailer.*` above) or every bundle extension that could set it
+has been read. Judge a family once every source that could add to it
+is readable. A computed `setParameter()` name already declares the
+family its literal start names as a pattern (`mailer.*`) that leaves it
+open; an extension whose `load()` cannot be read has to do the same.
+
+---
+
+## F64. Report unknown parameters in YAML and XML configuration
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```yaml
+services:
+    App\Mailer:
+        arguments: ['%mailer.form%']   # not reported
+```
+
+A `%param%` placeholder in `config/` names a container parameter just
+as `getParameter()` does, and it navigates, but configuration files
+are never diagnosed (`diagnostics/collect.rs` skips resource files other
+than Twig templates). Run the same unknown-parameter check over the
+placeholders in the YAML and XML files the container reads.
+
+---
+
+## F65. Check interpolated and listed Twig names
+
+**Impact: Low · Complexity: Medium**
 
 ```twig
-{{ post.title }}
+{{ path("shop_#{kind}") }}
+{% include "cards/#{type}.html.twig" %}
+{% include ['cards/featured.html.twig', 'cards/default.html.twig'] %}
 ```
 
-The variables a template receives come from the keys every `render()`
-of it passes, the names a `#[Template]` action returns, Twig's globals,
-and the `{% types %}` tag. Completing and hovering those names is feasible
-from the call sites alone, the way Blade's call-site inference collects a
-template's variables (`blade/call_site_inference.rs`). Typing what follows
-(`post.title` as the `Post` class's `getTitle()`) is a much larger
-project: TwigStan does it by compiling templates to PHP and analysing
-that. Start with the names; decide on types separately.
+An interpolated route or template name is skipped entirely
+(`symfony/routes.rs`, `twig/templates.rs`), and every element of a
+template list is treated as optional. Match an interpolated name as a
+pattern (literal prefix and suffix) and report it when no declared
+route or template fits, and report a list only when none of its
+templates exist, since Twig renders the first one that does.
 
-**Where to look:** `src/blade/call_site_inference.rs`,
-`src/symbol_map/extraction/symfony.rs` (the render sites).
+---
+
+## F66. Report Twig template diagnostics from `analyze`
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+The editor reports unknown routes, templates and translation keys in
+`.twig` files (`collect_template_diagnostics`, called from
+`diagnostics/delivery.rs`), but `phpantom_lsp analyze` only diagnoses
+PHP files, so a CI run never sees a broken name in a template. Collect
+template diagnostics for every Twig template in the project during
+`analyze`, with the same vendor exclusion as PHP files.
 
 ---
 
@@ -743,8 +695,9 @@ lets an array node take any, `canBeEnabled()` and `canBeDisabled()` add an
 `enabled` key no string names, and `fixXmlConfig()` lets the YAML spell a
 key in its plural. A key is only worth judging under a root a project
 schema declares, and only once its parent is a closed array node the schema
-fully describes. Diagnostics are not run on resource documents yet either
-(see F32).
+fully describes. Diagnostics are not run on YAML files yet either: only a
+Twig template's names are judged outside PHP (see
+`Backend::collect_template_diagnostics`).
 
 **Where to look:** `src/symfony/config_tree.rs` (`tree_builder_keys`),
 `src/diagnostics/laravel_string_keys.rs` (`CheckedStringKind::of`).
@@ -1048,29 +1001,6 @@ them.
 
 ---
 
-## F50. Twig filters and functions
-
-**Impact: Medium · Complexity: Medium**
-
-Blocks full Twig support: the README keeps Twig marked as partial until this lands.
-
-A project's Twig extensions declare filters and functions with `new
-TwigFilter('price', …)` and `new TwigFunction('icon', …)` in
-`getFilters()` and `getFunctions()`, or with `#[AsTwigFilter]` and
-`#[AsTwigFunction]` on a method. A template's `{{ amount|price }}` and
-`{{ icon('x') }}` neither complete, navigate to the PHP method behind
-them, nor show its signature on hover, and an unknown one is not
-reported. Twig's own filters and functions come from its core extension,
-which is read the same way.
-
-This applies to Twig outside Symfony too.
-
-**Where to look:** `src/twig/templates.rs` (the Twig scan), and
-`references/symfony-language-tools` (`docs/features/twig-callables.rst`)
-and `references/twigstan`.
-
----
-
 ## F51. Class names in Twig's `constant()` and `enum()`
 
 **Impact: Low · Complexity: Low-Medium**
@@ -1204,7 +1134,7 @@ renames, and a name the class does not declare is not reported. Only a
 writable prop can be bound by `data-model`, and only a `#[LiveAction]`
 method can be called, so completion should offer just those. The template
 also sees the component's public properties and methods as `this.…` and
-bare variables, which F37's template variables would type. Builds on F38's
+bare variables, typed by the class. Builds on F38's
 link between a component class and its template.
 
 **Where to look:** `src/twig/templates.rs`, `src/blade/component_tags/`
@@ -1214,15 +1144,15 @@ link between a component class and its template.
 
 ## F57. "Add translation" quick fix for an undeclared Symfony key
 
-**Impact: Medium · Complexity: Medium** (depends on F29)
+**Impact: Medium · Complexity: Medium**
 
 ```php
 $translator->trans('checkout.confirm'); // not in any catalogue
 ```
 
 Laravel offers to add a missing translation to each locale's language file
-(`insert_translation_key.rs`). Symfony keys get no such fix. Once F29
-reports an undeclared key, offer one action per catalogue of the key's
+(`insert_translation_key.rs`). Symfony keys get no such fix. For an
+`invalid_symfony_translation` diagnostic, offer one action per catalogue of the key's
 domain (`messages.en.yaml`, `messages.da.xlf`, …) that inserts the key with
 an empty or source-text value: nested under its dotted parents in YAML,
 or flat when the file already spells its keys flat, and as a new
