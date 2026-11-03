@@ -255,7 +255,7 @@ impl Backend {
                             result.push((cls, block_ns.clone(), block.map(|(i, _)| i)));
                         }
                     }
-                    statement if Self::is_classlike_extraction_candidate(statement) => {
+                    statement => {
                         let mut top_classes = Vec::new();
                         Self::extract_classes_from_statements(
                             std::iter::once(statement),
@@ -266,7 +266,6 @@ impl Backend {
                             result.push((cls, None, None));
                         }
                     }
-                    _ => {}
                 }
             }
 

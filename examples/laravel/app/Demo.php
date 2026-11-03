@@ -14,6 +14,7 @@ use App\Http\Controllers\BakeryController;
 use App\Mail\OrderShipped;
 use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
+use App\Jobs\SendBakeryReport;
 use App\Models\Baker;
 use App\Models\Bakery;
 use App\Models\BakeryOrder;
@@ -27,6 +28,7 @@ use App\Models\Loaf;
 use App\Models\PostCollection;
 use App\Models\Review;
 use App\Models\ReviewCollection;
+use App\Models\ReportingCustomer;
 use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
@@ -37,6 +39,9 @@ use Illuminate\Container\Attributes\Database as InjectDatabase;
 use Illuminate\Container\Attributes\Log as InjectLog;
 use Illuminate\Container\Attributes\Storage as InjectStorage;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Contracts\Broadcasting\Factory as BroadcastFactory;
+use Illuminate\Contracts\Queue\Factory as QueueFactory;
+use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
@@ -1214,6 +1219,23 @@ class Demo
         Queue::connection('null');
     }
 
+    public function typedConnections(
+        ConnectionResolverInterface $database,
+        QueueFactory $queue,
+        BroadcastFactory $broadcast,
+        SendBakeryReport $job,
+        ReportingCustomer $customer,
+    ): void {
+        // Try: complete, hover, Ctrl+Click, or find references on each name.
+        // The receiver selects database.php, queue.php, or broadcasting.php.
+        $database->connection('mysql');
+        $queue->connection('redis');
+        $broadcast->connection('internal');
+        $job->onConnection('redis');
+        // Try: open these classes and complete their $connection values.
+        $customer->getConnectionName();
+    }
+
     // ── Middleware names ────────────────────────────────────────────────
 
     public function middlewareNames(): void
@@ -1232,8 +1254,8 @@ class Demo
         // Try: hover `storefront` to list the middleware the group runs.
         Route::middleware('storefront')->get('/storefront', fn () => 'shop');
 
-        // Unknown middleware name → `invalid_laravel_middleware` diagnostic.
-        Route::get('/closed', fn () => 'closed')->withoutMiddleware('bakery.closed');
+        // Try: replace bakery.open with bakery.closed for an unknown-name diagnostic.
+        Route::get('/closed', fn () => 'closed')->withoutMiddleware('bakery.open');
     }
 
 

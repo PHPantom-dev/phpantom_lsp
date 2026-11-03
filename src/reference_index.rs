@@ -764,13 +764,7 @@ impl Backend {
                 }
             }
             for kind in kinds {
-                entries.push((
-                    ReferenceIndexKey::StringKey {
-                        kind,
-                        key: site.key.clone(),
-                    },
-                    false,
-                ));
+                entries.push((string_key_reference_key(kind, &site.key), false));
             }
         }
         if is_laravel {

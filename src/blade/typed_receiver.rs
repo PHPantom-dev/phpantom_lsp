@@ -118,8 +118,8 @@ impl Backend {
             .or_else(|| self.get_file_content_arc(uri))
     }
 
-    /// Resolve the receiver of every candidate site and keep the spans of
-    /// the ones that turn out to be renders.
+    /// Resolve the receiver of every candidate site and keep the confirmed
+    /// string-key spans, including property defaults on their enclosing class.
     fn confirm_typed_receiver_sites(
         &self,
         uri: &str,
@@ -148,13 +148,19 @@ impl Backend {
             for call in calls {
                 // The receiver is resolved where the call is written, so a
                 // local reassigned earlier reads as it does there.
-                let var_ctx = loaders.var_ctx_at(content, call.receiver.span().start.offset);
-                let Some(ty) =
+                let ty = if let Some(receiver) = call.receiver {
+                    let var_ctx = loaders.var_ctx_at(content, receiver.span().start.offset);
                     crate::type_engine::variable::iterable_elements::resolve_expression_type(
-                        call.receiver,
-                        &var_ctx,
+                        receiver, &var_ctx,
                     )
-                else {
+                } else {
+                    crate::class_lookup::find_class_at_offset(
+                        &file_ctx.classes,
+                        call.sites[0].0.start,
+                    )
+                    .map(|class| PhpType::named(class.fqn()))
+                };
+                let Some(ty) = ty else {
                     continue;
                 };
                 for (site, index) in call.sites {
@@ -186,12 +192,55 @@ impl Backend {
         receiver: ReceiverClass,
         class_loader: &ResolvedClassLoader<'_>,
     ) -> Option<StringKeyKind> {
+        let connection = matches!(
+            receiver,
+            ReceiverClass::LaravelConnection
+                | ReceiverClass::LaravelQueueConnection
+                | ReceiverClass::LaravelConnectionProperty
+        );
+        let ty = if connection { ty.unwrap_nullable() } else { ty };
         if let Some((_, kind)) = receiver
             .targets()
             .iter()
             .find(|(fqn, _)| crate::class_lookup::is_subtype_of_named(ty, fqn, class_loader))
         {
             return Some(*kind);
+        }
+        if connection && let crate::php_type::TypeKind::Union(members) = ty.kind() {
+            let mut kinds = members
+                .iter()
+                .filter(|ty| !ty.is_null())
+                .map(|ty| self.typed_receiver_key_kind(ty, method, index, receiver, class_loader));
+            let kind = kinds.next()??;
+            return kinds.all(|other| other == Some(kind)).then_some(kind);
+        }
+        // Queueable supplies the connection behavior through a trait, not
+        // a subtype relationship. Follow the same ancestor/trait walk used
+        // for member declarations, including traits used by a parent.
+        if matches!(
+            receiver,
+            ReceiverClass::LaravelQueueConnection | ReceiverClass::LaravelConnectionProperty
+        ) {
+            let queueable = |class: &crate::types::ClassInfo| {
+                class
+                    .fqn()
+                    .eq_ignore_ascii_case("Illuminate\\Bus\\Queueable")
+            };
+            if ty.top_level_class_names().iter().any(|name| {
+                class_loader(crate::Fqn::new(name)).is_some_and(|class| {
+                    queueable(&class)
+                        || crate::inheritance::find_declaring_ancestor(
+                            &class,
+                            class_loader,
+                            &queueable,
+                        )
+                        .is_some()
+                })
+            }) {
+                return Some(StringKeyKind::ConfigResource(
+                    crate::symbol_map::LaravelConfigResource::QueueConnection,
+                ));
+            }
         }
         if !receiver.follows_wrappers() {
             return None;
@@ -429,7 +478,8 @@ fn empty_spans() -> Arc<Vec<SymbolSpan>> {
 /// One method call that names at least one candidate key, paired with the
 /// receiver whose type decides what it names, and the method it calls.
 struct ReceiverCall<'ast, 'arena, 'sites> {
-    receiver: &'ast Expression<'arena>,
+    /// `None` for a property default, whose enclosing class supplies the type.
+    receiver: Option<&'ast Expression<'arena>>,
     method: &'ast str,
     /// Each candidate, with the position of the argument it is in.
     sites: Vec<(&'sites TypedReceiverSite, usize)>,
@@ -502,24 +552,75 @@ impl<'ast, 'arena, 'w, 'sites>
     mago_syntax::walker::Walker<'ast, 'arena, CollectCtx<'w, 'ast, 'arena, 'sites>>
     for ReceiverCallWalker<'_, 'sites>
 {
-    fn walk_in_method_call(
+    fn walk_in_call(
         &self,
-        node: &'ast MethodCall<'arena>,
+        node: &'ast Call<'arena>,
         ctx: &mut CollectCtx<'w, 'ast, 'arena, 'sites>,
     ) {
-        let ClassLikeMemberSelector::Identifier(method) = &node.method else {
+        let (object, selector, arguments) = match node {
+            Call::Method(call) => (call.object, &call.method, &call.argument_list),
+            Call::NullSafeMethod(call) => (call.object, &call.method, &call.argument_list),
+            _ => return,
+        };
+        let ClassLikeMemberSelector::Identifier(method) = selector else {
             return;
         };
         let mut sites = Vec::new();
-        for (index, argument) in node.argument_list.arguments.iter().enumerate() {
+        for (index, argument) in arguments.arguments.iter().enumerate() {
             self.matching_sites(argument.value(), index, &mut sites);
         }
         if !sites.is_empty() {
             ctx.calls.push(ReceiverCall {
-                receiver: node.object,
+                receiver: Some(object),
                 method: crate::atom::bytes_to_str(method.value),
                 sites,
             });
+        }
+    }
+
+    fn walk_in_assignment(
+        &self,
+        node: &'ast Assignment<'arena>,
+        ctx: &mut CollectCtx<'w, 'ast, 'arena, 'sites>,
+    ) {
+        let Some(receiver) =
+            crate::symbol_map::extraction::laravel::connection_assignment_receiver(node)
+        else {
+            return;
+        };
+        let mut sites = Vec::new();
+        self.matching_sites(node.rhs, 0, &mut sites);
+        if !sites.is_empty() {
+            ctx.calls.push(ReceiverCall {
+                receiver: Some(receiver),
+                method: "",
+                sites,
+            });
+        }
+    }
+
+    fn walk_in_property(
+        &self,
+        node: &'ast Property<'arena>,
+        ctx: &mut CollectCtx<'w, 'ast, 'arena, 'sites>,
+    ) {
+        let items = match node {
+            Property::Plain(plain) => plain.items.as_slice(),
+            Property::Hooked(hooked) => std::slice::from_ref(&hooked.item),
+        };
+        for item in items {
+            if let PropertyItem::Concrete(item) = item {
+                let mut sites = Vec::new();
+                self.matching_sites(item.value, 0, &mut sites);
+                sites.retain(|(site, _)| site.receiver == ReceiverClass::LaravelConnectionProperty);
+                if !sites.is_empty() {
+                    ctx.calls.push(ReceiverCall {
+                        receiver: None,
+                        method: "",
+                        sites,
+                    });
+                }
+            }
         }
     }
 }
