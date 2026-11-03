@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
+use mago_syntax::walker::Walker;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
@@ -60,6 +61,16 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
                     process_by_ref_closure_captures(arg_expr, scope, ctx);
                 }
             }
+
+            // `$write()` on a variable still holding the closure literal it
+            // was assigned runs that body here, after the arguments, just
+            // as the immediately invoked closure above does.
+            if let Call::Function(fc) = call
+                && let Expression::Variable(Variable::Direct(var)) =
+                    crate::parser::unwrap_parens(fc.function)
+            {
+                invoke_closure_literal_held_by(bytes_to_str(var.name), scope, ctx);
+            }
         }
         // A closure that is defined but not provably invoked (stored in a
         // variable, passed somewhere opaque) may still run any time later,
@@ -95,6 +106,113 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
             process_by_ref_closure_captures(assignment.rhs, scope, ctx);
         }
         _ => {}
+    }
+}
+
+/// What a variable assigned `closure` holds, for [`ScopeState::held_closure`],
+/// read off `scope` as it stands before the assignment.  `None` for a
+/// closure that captures nothing by reference, since calling it cannot
+/// change a local.
+pub(crate) fn held_closure_of(closure: &Closure<'_>, scope: &ScopeState) -> Option<HeldClosure> {
+    let use_clause = closure.use_clause.as_ref()?;
+    if !use_clause
+        .variables
+        .iter()
+        .any(|use_var| use_var.ampersand.is_some())
+    {
+        return None;
+    }
+    let mut by_value = Vec::new();
+    for use_var in use_clause.variables.iter() {
+        if use_var.ampersand.is_some() {
+            continue;
+        }
+        let name = bytes_to_str(use_var.variable.name);
+        let bare = atom(name);
+        if let Some(types) = scope.locals.get(&bare) {
+            by_value.push((bare, types.clone()));
+        }
+        for key in scope.locals.compound_keys() {
+            if crate::type_engine::type_ops::condition_facts::key_reads_variable(key.as_str(), name)
+                && let Some(types) = scope.locals.get(key)
+            {
+                by_value.push((*key, types.clone()));
+            }
+        }
+    }
+    Some(HeldClosure {
+        offset: closure.span().start.offset,
+        by_value,
+    })
+}
+
+/// Run the by-reference capturing closure literal `var_name` holds, if
+/// [`ScopeState::held_closure`] says it holds one.
+///
+/// The scope only keeps the closure's offset, since it outlives the
+/// syntax tree being walked, so the closure is found again in the parsed
+/// file.  Not finding it leaves the captures as the definition widened
+/// them.
+fn invoke_closure_literal_held_by(
+    var_name: &str,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let Some(held) = scope.held_closure(var_name) else {
+        return;
+    };
+    let offset = held.offset;
+    crate::parser::with_parsed_program(ctx.file.content, "invoke_closure_literal", |program, _| {
+        let mut found = None;
+        let containing = program.statements.iter().find(|stmt| {
+            let span = stmt.span();
+            span.start.offset <= offset && offset < span.end.offset
+        });
+        if let Some(stmt) = containing {
+            Walker::walk_statement(&ClosureAtOffset(offset), stmt, &mut found);
+        }
+        let Some(closure) = found else {
+            return;
+        };
+        let captured = by_ref_captured_names(closure);
+        let mut closure_scope = ScopeState::new();
+        seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
+        // The by-value captures were copied where the closure was written,
+        // not here.
+        if let Some(use_clause) = closure.use_clause.as_ref() {
+            for use_var in use_clause.variables.iter() {
+                if use_var.ampersand.is_some() {
+                    continue;
+                }
+                let name = bytes_to_str(use_var.variable.name);
+                closure_scope.locals.remove(&atom(name));
+                closure_scope.locals.retain_compound(|key| {
+                    !crate::type_engine::type_ops::condition_facts::key_reads_variable(
+                        key.as_str(),
+                        name,
+                    )
+                });
+            }
+        }
+        for (key, types) in &held.by_value {
+            closure_scope.locals.insert(*key, types.clone());
+        }
+        run_by_ref_closure(closure, captured, closure_scope, scope, ctx, true, true);
+    });
+}
+
+/// Finds the closure literal starting at an offset.
+struct ClosureAtOffset(u32);
+
+impl<'ast, 'arena> Walker<'ast, 'arena, Option<&'ast Closure<'arena>>> for ClosureAtOffset {
+    fn walk_in_closure(
+        &self,
+        closure: &'ast Closure<'arena>,
+        found: &mut Option<&'ast Closure<'arena>>,
+    ) {
+        if closure.span().start.offset == self.0 {
+            *found = Some(closure);
+        }
     }
 }
 
@@ -427,13 +545,33 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
     if captured.is_empty() {
         return;
     }
+    let mut closure_scope = ScopeState::new();
+    seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
+    run_by_ref_closure(
+        closure,
+        captured,
+        closure_scope,
+        scope,
+        ctx,
+        invoked_immediately,
+        runs_once,
+    );
+}
 
+/// [`process_by_ref_closure_capture`] once the closure's scope has been
+/// entered with its captures.
+fn run_by_ref_closure<'b>(
+    closure: &'b Closure<'b>,
+    captured: Vec<String>,
+    mut closure_scope: ScopeState,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    invoked_immediately: bool,
+    runs_once: bool,
+) {
     let full_ctx = ctx
         .with_cursor_offset(u32::MAX)
         .with_in_loop(ctx.in_loop || !runs_once);
-    let mut closure_scope = ScopeState::new();
-
-    seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
 
     seed_closure_params(
         &mut closure_scope,
@@ -496,6 +634,21 @@ pub(crate) fn process_pass_by_ref<'b>(
     if !passes_a_variable(expr) && !is_extract_call(expr) {
         return;
     }
+
+    // A callee taking the closure variable by reference may put something
+    // else in it without the passes below noticing (an untyped `&$cb`
+    // leaves a typed variable alone), so passing it on is enough to stop
+    // trusting that a later call runs the closure it was assigned.
+    if !scope.closure_literals.is_empty()
+        && let Some(arg_list) = call_argument_list(expr)
+    {
+        for arg in arg_list.arguments.iter() {
+            if let Expression::Variable(Variable::Direct(dv)) = arg.value() {
+                scope.forget_held_closure(bytes_to_str(dv.name));
+            }
+        }
+    }
+
     if !super::array_assignment::process_array_push_call(expr, scope, ctx)
         && !super::array_assignment::process_array_cursor_call(expr, scope, ctx)
         && !super::array_assignment::process_array_sort_call(expr, scope)
@@ -625,19 +778,22 @@ fn method_call_on<'b>(
 /// (`$matches` in `preg_match($pattern, $subject, $matches)`), the only
 /// kind of argument a by-reference parameter can write through.
 fn passes_a_variable(expr: &Expression<'_>) -> bool {
-    let arg_list = match expr {
-        Expression::Call(Call::Function(fc)) => &fc.argument_list,
-        Expression::Call(Call::Method(mc)) => &mc.argument_list,
-        Expression::Call(Call::NullSafeMethod(mc)) => &mc.argument_list,
-        Expression::Call(Call::StaticMethod(sc)) => &sc.argument_list,
-        Expression::Instantiation(inst) => match &inst.argument_list {
-            Some(al) => al,
-            None => return false,
-        },
-        _ => return false,
-    };
-    arg_list
-        .arguments
-        .iter()
-        .any(|arg| matches!(arg.value(), Expression::Variable(Variable::Direct(_))))
+    call_argument_list(expr).is_some_and(|arg_list| {
+        arg_list
+            .arguments
+            .iter()
+            .any(|arg| matches!(arg.value(), Expression::Variable(Variable::Direct(_))))
+    })
+}
+
+/// The arguments the call or instantiation `expr` passes, if it is one.
+fn call_argument_list<'a, 'b>(expr: &'a Expression<'b>) -> Option<&'a ArgumentList<'b>> {
+    match expr {
+        Expression::Call(Call::Function(fc)) => Some(&fc.argument_list),
+        Expression::Call(Call::Method(mc)) => Some(&mc.argument_list),
+        Expression::Call(Call::NullSafeMethod(mc)) => Some(&mc.argument_list),
+        Expression::Call(Call::StaticMethod(sc)) => Some(&sc.argument_list),
+        Expression::Instantiation(inst) => inst.argument_list.as_ref(),
+        _ => None,
+    }
 }
