@@ -36,6 +36,7 @@ enum CheckedStringKind {
     MorphAlias,
     GateAbility,
     Middleware,
+    RateLimiter,
     ServiceId,
     ContainerParameter,
     SymfonyRoute,
@@ -65,6 +66,7 @@ impl CheckedStringKind {
             StringKeyKind::MorphAlias => Self::MorphAlias,
             StringKeyKind::GateAbility => Self::GateAbility,
             StringKeyKind::Middleware => Self::Middleware,
+            StringKeyKind::RateLimiter => Self::RateLimiter,
             StringKeyKind::ServiceId => Self::ServiceId,
             StringKeyKind::ContainerParameter => Self::ContainerParameter,
             StringKeyKind::SymfonyRoute => Self::SymfonyRoute,
@@ -140,6 +142,8 @@ struct DeclaredKeys<'a> {
     /// Whether the middleware aliases and groups the project registers
     /// are all known.
     middleware_known: bool,
+    /// Provider-defined rate limiters, only read when the file names one.
+    rate_limiters: Option<Arc<crate::virtual_members::laravel::rate_limiters::RateLimiterCatalog>>,
     /// The service IDs the project's configuration declares, sorted.
     services: Vec<String>,
     /// The container parameters the project's configuration declares,
@@ -185,6 +189,8 @@ impl<'a> DeclaredKeys<'a> {
         let has_morph_alias = names(|kind| kind == CheckedStringKind::MorphAlias);
         let has_gate_ability = names(|kind| kind == CheckedStringKind::GateAbility);
         let has_middleware = names(|kind| kind == CheckedStringKind::Middleware);
+        let rate_limiters = names(|kind| kind == CheckedStringKind::RateLimiter)
+            .then(|| backend.cached_rate_limiters());
         let has_service = names(|kind| kind == CheckedStringKind::ServiceId);
         let has_parameter = names(|kind| kind == CheckedStringKind::ContainerParameter);
         let has_symfony_route = names(|kind| kind == CheckedStringKind::SymfonyRoute);
@@ -373,6 +379,7 @@ impl<'a> DeclaredKeys<'a> {
             morph_map_enforced,
             gate_abilities,
             middleware_known,
+            rate_limiters,
             services,
             parameters,
             symfony_routes,
@@ -442,6 +449,16 @@ impl<'a> DeclaredKeys<'a> {
                 )
             }),
             CheckedStringKind::ServiceId => self.judge_service(key),
+            CheckedStringKind::RateLimiter => {
+                let catalog = self.rate_limiters.as_ref()?;
+                catalog.complete.then(|| {
+                    (
+                        catalog.location(key).is_some(),
+                        "rate limiter",
+                        "invalid_laravel_rate_limiter",
+                    )
+                })
+            }
             CheckedStringKind::ContainerParameter => self.judge_parameter(key),
             CheckedStringKind::SymfonyRoute => self.judge_symfony_route(key),
             CheckedStringKind::SymfonyTranslation => self.judge_symfony_translation(key),

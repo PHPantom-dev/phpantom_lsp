@@ -250,6 +250,17 @@ impl Backend {
             }
             StringKeyKind::GateAbility => ("Ability", self.gate_ability_detail(key)),
             StringKeyKind::Middleware => self.middleware_hover(key),
+            StringKeyKind::RateLimiter => {
+                let detail = self
+                    .cached_rate_limiters()
+                    .location(key)
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                    .map_or_else(
+                        || "Rate limiter".to_string(),
+                        |path| format!("Registered in `{path}`"),
+                    );
+                ("Rate limiter", detail)
+            }
             StringKeyKind::ContainerBinding => {
                 let detail = match self.container_binding_target(key) {
                     Some(target) => {

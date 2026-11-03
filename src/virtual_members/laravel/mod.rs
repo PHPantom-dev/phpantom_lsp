@@ -141,6 +141,7 @@ pub(crate) mod patches;
 mod path_helpers;
 mod pivots;
 mod provider_resources;
+pub(crate) mod rate_limiters;
 mod relationships;
 mod request_fields;
 pub(crate) mod request_input;
