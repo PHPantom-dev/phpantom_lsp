@@ -115,6 +115,7 @@ impl Backend {
             &self.resolved_class_cache,
         );
         let prefix = content.get(quote + 1..cursor)?.to_lowercase();
+        let current = content.get(quote + 1..argument.string_end)?;
         let range = Range {
             start: offset_to_position(content, quote + 1),
             end: offset_to_position(content, argument.string_end),
@@ -122,7 +123,11 @@ impl Backend {
         let items: Vec<_> = collect_column_names(&model)
             .into_iter()
             .filter(|column| {
-                column.to_lowercase().starts_with(&prefix) && !argument.used_values.contains(column)
+                // The declaration being edited can now supply its own partial
+                // spelling as a column; offering it back is not a completion.
+                (is_route_key || cursor < argument.string_end || column != current)
+                    && column.to_lowercase().starts_with(&prefix)
+                    && !argument.used_values.contains(column)
             })
             .map(|column| CompletionItem {
                 label: column.clone(),

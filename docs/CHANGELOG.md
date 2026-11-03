@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Eloquent model attributes supply column suggestions.** Column lists declared with PHP attributes such as `#[Fillable(['name'])]` now contribute to model and query completion, with fillable names first in attribute arrays. Inherited declarations and property-based lists work together. Contributed by @shuvroroy.
+
 - **Switch inlay hints off by kind.** `parameter-names = false` or `closure-types = false` under `[inlay_hints]` hides parameter name hints at call sites or inferred types on closures, without touching other extensions' hints. Editor extensions can pass the same toggles, and changes apply to open files right away.
 - **WordPress hook names.** A hook name in `add_action()`, `add_filter()` and the rest of the listener API completes, jumps to every `do_action()` or `apply_filters()` that fires it, lists its references, highlights, and renames. A hook fired under a name built at runtime, like `"save_post_{$post->post_type}"`, matches the names it can produce, and completes as a snippet. Core's hooks, and those of plugins and themes installed with Composer, complete and navigate as well, and a project with only the stubs still completes core's.
 - **`@global` tags type the globals a function imports.** A `@global wpdb $wpdb` tag on a function or method docblock types `$wpdb` after `global $wpdb;`, so WordPress code gets completion and diagnostics on `$wpdb`, `$wp_query` and the rest. A function without a tag gets the type the `@global` tags elsewhere give the global, in the stubs, in libraries, or in the project's own code, so `global $wpdb;` is typed wherever WordPress core or `php-stubs/wordpress-stubs` is indexed.

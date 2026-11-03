@@ -399,3 +399,153 @@ protected $model = "\u{}";
         assert!(model.is_none(), "{class_name} must not declare a model");
     }
 }
+
+#[test]
+fn model_column_attributes_parse_literal_arrays_and_variadic_arguments() {
+    use crate::types::model_declaration::*;
+    let src = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Attributes as Lists;
+use Illuminate\Database\Eloquent\Attributes\Fillable as Assignable;
+#[Assignable(['name', 'shared', 'it\'s', "line\nname"])]
+#[Lists\Guarded('secret', 'shared', extra: 'named')]
+#[Lists\Hidden(array(0 => 'token', 'shared', ...UNKNOWN, 12, SOME_CONSTANT))]
+#[Lists\Visible(['public'], 'ignored')]
+#[Lists\Appends(['computed'])]
+class Record {
+    protected $fillable = ['existing', 'shared'];
+}
+"#;
+    let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+    let metadata = classes[0].0.laravel().unwrap();
+    let columns: HashMap<_, _> = metadata
+        .column_lists()
+        .map(|(name, flags)| (name.as_str(), flags))
+        .collect();
+    for name in ["name", "existing", "it's", "line\nname"] {
+        assert_eq!(columns[name], FILLABLE);
+    }
+    assert_eq!(columns["shared"], FILLABLE | GUARDED | HIDDEN);
+    assert_eq!(columns["secret"], GUARDED);
+    assert_eq!(columns["named"], GUARDED);
+    assert_eq!(columns["token"], HIDDEN);
+    assert_eq!(columns["public"], VISIBLE);
+    assert_eq!(columns["computed"], APPENDS);
+    assert_eq!(columns.len(), 10);
+}
+
+#[test]
+fn model_column_attributes_follow_php_name_resolution() {
+    for (namespace, imports, attribute, recognized) in [
+        ("App", "", "Fillable", false),
+        ("", "", "Fillable", false),
+        ("App", "use Fillable;", "Fillable", false),
+        ("App", "use Other\\Fillable;", "Fillable", false),
+        (
+            "App",
+            "",
+            "Illuminate\\Database\\Eloquent\\Attributes\\Fillable",
+            false,
+        ),
+        (
+            "App",
+            "",
+            "\\Illuminate\\Database\\Eloquent\\Attributes\\Fillable",
+            true,
+        ),
+        (
+            "App",
+            "use Illuminate\\Database\\Eloquent\\Attributes\\Fillable as Fields;",
+            "fields",
+            true,
+        ),
+        (
+            "App",
+            "use Illuminate\\Database\\Eloquent\\Attributes as Lists;",
+            "Lists\\Fillable",
+            true,
+        ),
+        (
+            "Illuminate\\Database\\Eloquent\\Attributes",
+            "",
+            "Fillable",
+            true,
+        ),
+        (
+            "Illuminate\\Database\\Eloquent\\Attributes",
+            "",
+            "namespace\\Fillable",
+            true,
+        ),
+        (
+            "App",
+            "",
+            "\\Illuminate\\Database\\Eloquent\\Attributes\\Other",
+            false,
+        ),
+    ] {
+        let namespace = if namespace.is_empty() {
+            String::new()
+        } else {
+            format!("namespace {namespace};")
+        };
+        let src =
+            format!("<?php {namespace} {imports} #[{attribute}(['column'])] class Record {{}}");
+        let classes = Backend::parse_php_versioned_with_namespaces(&src, None);
+        let metadata = classes[0].0.laravel().unwrap();
+        assert_eq!(
+            metadata.column_names.contains(&"column".to_string()),
+            recognized,
+            "{src}"
+        );
+    }
+}
+
+#[test]
+fn model_column_attributes_ignore_unknown_values_and_invalid_argument_shapes() {
+    for arguments in [
+        "",
+        "()",
+        "(columns: ['ignored'])",
+        "(...COLUMNS)",
+        "(UNKNOWN)",
+        "(UNKNOWN, 'ignored')",
+        "(['', 1, UNKNOWN])",
+        "('' . 'ignored')",
+        "(SomeClass::class)",
+        "('known', ...UNKNOWN, 3)",
+    ] {
+        let src = format!(
+            "<?php use Illuminate\\Database\\Eloquent\\Attributes\\Fillable; #[Fillable{arguments}] class Record {{}}"
+        );
+        let classes = Backend::parse_php_versioned_with_namespaces(&src, None);
+        let metadata = classes[0].0.laravel().unwrap();
+        assert_ne!(
+            metadata.declared & crate::types::model_declaration::FILLABLE_ATTRIBUTE,
+            0
+        );
+        let expected = if arguments.contains("known") {
+            vec!["known"]
+        } else {
+            vec![]
+        };
+        assert_eq!(metadata.column_names, expected, "{src}");
+    }
+}
+
+#[test]
+fn model_column_attributes_use_first_declaration_and_preserve_empty_overrides() {
+    use crate::types::model_declaration::*;
+    let src = r#"<?php
+use Illuminate\Database\Eloquent\Attributes\{Fillable, Hidden, Unguarded};
+#[Fillable([]), Fillable(['ignored']), Hidden(UNKNOWN), Unguarded]
+class Record {}
+"#;
+    let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+    let metadata = classes[0].0.laravel().unwrap();
+    assert!(metadata.column_names.is_empty());
+    assert_eq!(
+        metadata.declared,
+        FILLABLE_ATTRIBUTE | HIDDEN_ATTRIBUTE | UNGUARDED_ATTRIBUTE
+    );
+}

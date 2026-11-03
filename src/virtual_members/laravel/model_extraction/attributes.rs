@@ -71,20 +71,117 @@ fn extract_laravel_model_string_attribute(
 }
 
 fn resolve_attribute_fqn(name: &str, doc_ctx: Option<&DocblockCtx<'_>>) -> String {
-    let name = name.trim_start_matches('\\');
-    if name.contains('\\') {
-        return name.to_string();
-    }
     let Some(ctx) = doc_ctx else {
-        return name.to_string();
+        return name.trim_start_matches('\\').to_string();
     };
-    if let Some(imported) = ctx.use_map.get(name) {
-        return imported.trim_start_matches('\\').to_string();
+    if let Some(relative) = name.strip_prefix("namespace\\") {
+        return match &ctx.namespace {
+            Some(namespace) => format!("{namespace}\\{relative}"),
+            None => relative.to_string(),
+        };
     }
-    if let Some(ns) = &ctx.namespace {
-        return format!("{}\\{}", ns, name);
+    crate::names::resolve_to_fqn(name, &ctx.use_map, &ctx.namespace)
+}
+
+/// Read the literal column lists declared by Eloquent's class attributes.
+/// Attribute flags stay separate from property flags: each inherits from its
+/// own nearest declaration before Laravel combines the two values.
+pub(super) fn extract_column_attributes(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    doc_ctx: Option<&DocblockCtx<'_>>,
+    names: &mut Vec<String>,
+    sources: &mut Vec<u16>,
+) -> u16 {
+    use model_declaration::*;
+    let mut declared = 0;
+    for attribute in attribute_lists
+        .iter()
+        .flat_map(|list| list.attributes.iter())
+    {
+        let fqn = resolve_attribute_fqn(bytes_to_str(attribute.name.value()), doc_ctx);
+        let Some((namespace, name)) = fqn.rsplit_once('\\') else {
+            continue;
+        };
+        if !namespace.eq_ignore_ascii_case("Illuminate\\Database\\Eloquent\\Attributes") {
+            continue;
+        }
+        let Some(flag) = [
+            ("Fillable", FILLABLE_ATTRIBUTE),
+            ("Guarded", GUARDED_ATTRIBUTE),
+            ("Hidden", HIDDEN_ATTRIBUTE),
+            ("Visible", VISIBLE_ATTRIBUTE),
+            ("Appends", APPENDS_ATTRIBUTE),
+            ("Unguarded", UNGUARDED_ATTRIBUTE),
+        ]
+        .into_iter()
+        .find_map(|(target, flag)| name.eq_ignore_ascii_case(target).then_some(flag)) else {
+            continue;
+        };
+        // Laravel uses the first matching attribute, including an empty or
+        // dynamically computed declaration that hides an ancestor's list.
+        if declared & flag != 0 {
+            continue;
+        }
+        declared |= flag;
+        if flag == UNGUARDED_ATTRIBUTE {
+            continue;
+        }
+        let Some(arguments) = &attribute.argument_list else {
+            continue;
+        };
+        let mut arguments = arguments.arguments.iter();
+        let Some(argument::PartialArgument::Positional(first)) = arguments.next() else {
+            continue;
+        };
+        if first.ellipsis.is_some() {
+            continue;
+        }
+        let elements = match first.value {
+            Expression::Array(array) => Some(&array.elements),
+            Expression::LegacyArray(array) => Some(&array.elements),
+            Expression::Literal(literal::Literal::String(_)) => None,
+            _ => continue,
+        };
+        let mut push = |value: &Expression<'_>| {
+            let Expression::Literal(literal::Literal::String(value)) = value else {
+                return;
+            };
+            let Some(name) = value
+                .value
+                .and_then(crate::atom::literal_bytes_to_str)
+                .filter(|name| !name.is_empty())
+            else {
+                return;
+            };
+            if let Some(index) = names.iter().position(|existing| existing == name) {
+                sources[index] |= flag;
+            } else {
+                names.push(name.to_string());
+                sources.push(flag);
+            }
+        };
+        if let Some(elements) = elements {
+            for element in elements.iter() {
+                match element {
+                    ArrayElement::Value(value) => push(value.value),
+                    ArrayElement::KeyValue(value) => push(value.value),
+                    _ => {}
+                }
+            }
+        } else {
+            push(first.value);
+            for argument in arguments {
+                match argument {
+                    argument::PartialArgument::Positional(value) if value.ellipsis.is_none() => {
+                        push(value.value)
+                    }
+                    argument::PartialArgument::Named(value) => push(value.value),
+                    _ => {}
+                }
+            }
+        }
     }
-    name.to_string()
+    declared
 }
 
 pub(super) fn extract_laravel_connection_attribute(
@@ -200,4 +297,26 @@ fn extract_customisation(
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_attribute_fqn;
+    use crate::parser::DocblockCtx;
+
+    #[test]
+    fn model_column_attributes_resolve_names_without_namespace_context() {
+        assert_eq!(resolve_attribute_fqn("\\Fillable", None), "Fillable");
+        let context = DocblockCtx {
+            trivias: &[],
+            content: "",
+            php_version: None,
+            use_map: Default::default(),
+            namespace: None,
+        };
+        assert_eq!(
+            resolve_attribute_fqn("namespace\\Fillable", Some(&context)),
+            "Fillable"
+        );
+    }
 }

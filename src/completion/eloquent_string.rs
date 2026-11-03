@@ -584,20 +584,9 @@ impl Backend {
             }
             let fillable = es_ctx.kind == EloquentStringKind::AttributeKey
                 && model.laravel().is_some_and(|metadata| {
-                    metadata
-                        .column_names
-                        .iter()
-                        .enumerate()
-                        .any(|(index, name)| {
-                            name == col
-                                && metadata
-                                    .column_sources
-                                    .get(index)
-                                    .copied()
-                                    .unwrap_or(metadata.declared)
-                                    & crate::types::model_declaration::FILLABLE
-                                    != 0
-                        })
+                    metadata.column_lists().any(|(name, sources)| {
+                        name == col && sources & crate::types::model_declaration::FILLABLE != 0
+                    })
                 });
 
             items.push(CompletionItem {
