@@ -242,6 +242,11 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_method_call_spans<'a>(
     argument_list: &'a ArgumentList<'a>,
     ctx: &mut ExtractionCtx<'a>,
 ) {
+    if let Some((receiver, parameter)) = connection_receiver_method(member_name)
+        && let Some(value) = argument_expr_for_parameter(argument_list, parameter)
+    {
+        record_connection_site(receiver, value, ctx);
+    }
     let receiver = AstReceiver {
         object,
         in_console_command: ctx.in_console_command,

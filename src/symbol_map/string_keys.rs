@@ -698,10 +698,16 @@ pub(crate) const SYMFONY_CONTAINER_CONFIGURATOR_NS: &str =
 pub(crate) const SYMFONY_ROUTING_CONFIGURATOR_NS: &str =
     "Symfony\\Component\\Routing\\Loader\\Configurator\\";
 
-/// The classes a receiver has to be an instance of for the call it receives
-/// to name a string key, and which kind of key each one makes it.
+/// The classes or traits whose behavior makes a receiver's call or property
+/// value name a string key, and which kind of key each one makes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReceiverClass {
+    /// A Laravel manager or factory whose `connection()` selects a config subtree.
+    LaravelConnection,
+    /// A queued dispatch or an object using Laravel's Queueable trait.
+    LaravelQueueConnection,
+    /// The connection selected by an Eloquent model or a queueable job property.
+    LaravelConnectionProperty,
     /// Laravel's view factory, whose `make()` / `first()` / `exists()` /
     /// `renderWhen()` / `renderUnless()` / `renderEach()` all name a
     /// template.
@@ -780,11 +786,69 @@ impl ReceiverClass {
     /// Each class the receiver's type can be a subtype of, most specific
     /// first, with the kind of key the call names when it is.
     pub(crate) fn targets(self) -> &'static [(&'static str, StringKeyKind)] {
+        use super::LaravelConfigResource::{
+            BroadcastConnection, DatabaseConnection, QueueConnection,
+        };
+        use StringKeyKind::ConfigResource;
         use StringKeyKind::{
             ContainerParameter, ServiceId, SymfonyEvent, SymfonyRoute, SymfonyTranslation,
             TranslationDomain, TwigTemplate, TwigVariable, View, YiiRoute, YiiView,
         };
         match self {
+            Self::LaravelConnection => &[
+                (
+                    "Illuminate\\Database\\ConnectionResolverInterface",
+                    ConfigResource(DatabaseConnection),
+                ),
+                (
+                    "Illuminate\\Contracts\\Queue\\Factory",
+                    ConfigResource(QueueConnection),
+                ),
+                (
+                    "Illuminate\\Contracts\\Broadcasting\\Factory",
+                    ConfigResource(BroadcastConnection),
+                ),
+            ],
+            Self::LaravelQueueConnection => &[
+                (
+                    "Illuminate\\Foundation\\Bus\\PendingDispatch",
+                    ConfigResource(QueueConnection),
+                ),
+                (
+                    "Illuminate\\Foundation\\Bus\\PendingChain",
+                    ConfigResource(QueueConnection),
+                ),
+                (
+                    "Illuminate\\Bus\\PendingBatch",
+                    ConfigResource(QueueConnection),
+                ),
+                (
+                    "Illuminate\\Events\\QueuedClosure",
+                    ConfigResource(QueueConnection),
+                ),
+                (
+                    "Illuminate\\Bus\\Queueable",
+                    ConfigResource(QueueConnection),
+                ),
+            ],
+            Self::LaravelConnectionProperty => &[
+                (
+                    "Illuminate\\Database\\Eloquent\\Model",
+                    ConfigResource(DatabaseConnection),
+                ),
+                (
+                    "Illuminate\\Contracts\\Queue\\ShouldQueue",
+                    ConfigResource(QueueConnection),
+                ),
+                (
+                    "Illuminate\\Events\\QueuedClosure",
+                    ConfigResource(QueueConnection),
+                ),
+                (
+                    "Illuminate\\Bus\\Queueable",
+                    ConfigResource(QueueConnection),
+                ),
+            ],
             // The concrete `Illuminate\View\Factory` implements the
             // contract, so the contract covers both spellings.
             Self::ViewFactory => &[("Illuminate\\Contracts\\View\\Factory", View)],
@@ -906,7 +970,7 @@ impl ReceiverClass {
     }
 }
 
-/// A method call that names a string key, but whose meaning lives in its
+/// A call or property value that names a string key, but whose meaning lives in its
 /// receiver's *type* rather than its spelling: a constructor-injected
 /// `Factory $views` behind `$this->views->make('page')`, a mailable held in
 /// a local behind `$mail->view('emails.shipped')`, a `ContainerInterface

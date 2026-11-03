@@ -221,6 +221,7 @@ mod laravel_binding_precedence;
 mod laravel_commands;
 mod laravel_config_keys;
 mod laravel_config_values;
+mod laravel_connection_names;
 mod laravel_container_bindings;
 mod laravel_contract_concrete;
 mod laravel_custom_builder;

@@ -632,6 +632,18 @@ foreach ($namedResourceConfigs as $file => [$subtree, $names]) {
 $databaseManager = (new ReflectionClass(
     \Illuminate\Database\DatabaseManager::class
 ))->newInstanceWithoutConstructor();
+foreach ([
+    \Illuminate\Database\DatabaseManager::class => \Illuminate\Database\ConnectionResolverInterface::class,
+    \Illuminate\Queue\QueueManager::class => \Illuminate\Contracts\Queue\Factory::class,
+    \Illuminate\Broadcasting\BroadcastManager::class => \Illuminate\Contracts\Broadcasting\Factory::class,
+] as $managerClass => $contract) {
+    check("$managerClass implements $contract", is_subclass_of($managerClass, $contract));
+    check("$contract selects its connection by name", (new ReflectionMethod($contract, 'connection'))->getParameters()[0]->getName() === 'name');
+}
+$reportJob = new \App\Jobs\SendBakeryReport();
+check('SendBakeryReport selects the redis queue connection', $reportJob->connection === 'redis');
+check('Queueable::onConnection retains the job and selects its connection', $reportJob->onConnection('redis') === $reportJob && $reportJob->connection === 'redis');
+check('ReportingCustomer selects the mysql database connection', (new \App\Models\ReportingCustomer())->getConnectionName() === 'mysql');
 $parseConnectionName = new ReflectionMethod($databaseManager, 'parseConnectionName');
 foreach (['read', 'write', 'direct'] as $role) {
     check(

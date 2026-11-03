@@ -441,7 +441,7 @@ pub(crate) fn find_all_config_references(
     }
     let mut locations = Vec::new();
 
-    // Usages: walk pre-built symbol spans — no file re-parse needed.
+    // Resolve only candidates that could name this same config entry.
     for (file_uri, symbol_map) in snapshot {
         let Some(parsed_uri) = crate::util::parse_url(file_uri) else {
             continue;
@@ -450,7 +450,21 @@ pub(crate) fn find_all_config_references(
         // one line table rather than rescanning the file per hit.
         let file_content = std::cell::OnceCell::new();
         let lines = std::cell::OnceCell::new();
-        for span in &symbol_map.spans {
+        let extra = symbol_map
+            .typed_receiver_sites
+            .iter()
+            .any(|site| {
+                site.receiver
+                    .targets()
+                    .iter()
+                    .any(|(_, kind)| config_keys_match(target_kind, target_key, kind, &site.key))
+            })
+            .then(|| backend.typed_receiver_spans_for(file_uri, symbol_map));
+        for span in symbol_map
+            .spans
+            .iter()
+            .chain(extra.iter().flat_map(|spans| spans.iter()))
+        {
             if config_span_matches(span, target_kind, target_key) {
                 let Some(content) = file_content
                     .get_or_init(|| backend.get_file_content_arc(file_uri))
