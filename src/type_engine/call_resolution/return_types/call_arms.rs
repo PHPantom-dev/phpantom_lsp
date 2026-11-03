@@ -56,6 +56,24 @@ impl Backend {
             return classes;
         }
 
+        // `->__invoke()` / `->call()` on a closure signature returns what
+        // the signature says, which the `Closure` class cannot know.
+        if crate::type_engine::call_resolution::is_closure_invoke_call(method_name)
+            && let Some(ty) =
+                crate::type_engine::call_resolution::closure_invoke_return(&lhs_resolved)
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                &ty,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            );
+            if let Some(ref mut hint_out) = return_type_hint_out {
+                **hint_out = Some(ty);
+            }
+            return classes;
+        }
+
         // Guard-aware auth user model: a `user()` call on a
         // `Guard`/`Request` subtype resolves to the model
         // configured for the guard named at the call site
