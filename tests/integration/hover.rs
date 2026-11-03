@@ -17237,3 +17237,34 @@ fn hover_static_call_assigned_in_bound_closure_binds_static_to_the_bound_class()
     assert!(text.contains("Foo"), "{text}");
     assert!(!text.contains("Host"), "{text}");
 }
+
+/// `->__invoke()` and `->call()` on a value typed with a closure signature
+/// return the signature's return type, nullsafe or not.
+#[test]
+fn hover_closure_signature_invoke_returns_signature_return_type() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///closure_invoke.php";
+    let content = r#"<?php
+class Foo {}
+class Holder {
+    /**
+     * @param \Closure(int): Foo $cb
+     * @param (\Closure(): Foo)|null $then
+     */
+    public function run(\Closure $cb, ?\Closure $then, \Closure $plain): void {
+        $invoked = $cb->__invoke(1);
+        $called = $cb->call($this, 1);
+        $maybe = $then?->__invoke();
+        $untyped = $plain->__invoke();
+        $invoked; $called; $maybe; $untyped;
+    }
+}
+"#;
+    let hover = |character| {
+        hover_text(&hover_at(&backend, uri, content, 12, character).expect("hover")).to_string()
+    };
+    assert!(hover(9).contains("$invoked = Foo"), "{}", hover(9));
+    assert!(hover(19).contains("$called = Foo"), "{}", hover(19));
+    assert!(hover(28).contains("$maybe = ?Foo"), "{}", hover(28));
+    assert!(hover(36).contains("$untyped = mixed"), "{}", hover(36));
+}

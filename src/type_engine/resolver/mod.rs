@@ -482,9 +482,21 @@ fn resolve_call_subject(
                 .any(|m| matches!(m.kind(), TypeKind::Intersection(_))),
             _ => false,
         };
+        // A closure signature resolves to the `Closure` class, which
+        // cannot say what calling it returns; the hint can.
+        let is_closure_signature = |t: &PhpType| match t.kind() {
+            TypeKind::Callable(c) => c.is_closure(),
+            _ => false,
+        };
+        let carries_closure_signature = match h.kind() {
+            TypeKind::Nullable(inner) => is_closure_signature(inner),
+            TypeKind::Union(members) => members.iter().any(is_closure_signature),
+            _ => is_closure_signature(&h),
+        };
         if is_intersection
             || classes.iter().any(|c| !c.template_params.is_empty())
             || hint_names_a_class
+            || carries_closure_signature
         {
             return ResolvedType::from_classes_with_hint(classes, h);
         }
