@@ -1426,17 +1426,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#l64-routes-on-controller-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L64. Routes on controller methods
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l66-related-file-navigation-for-models-events-and-listeners" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2186,17 +2175,6 @@
   
     <nav class="md-nav" aria-label="Navigation and code actions">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#l64-routes-on-controller-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L64. Routes on controller methods
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#l66-related-file-navigation-for-models-events-and-listeners" class="md-nav__link">
@@ -2985,21 +2963,6 @@ including grouped imports, without treating unrelated classes named
 <hr />
 <h2 id="navigation-and-code-actions">Navigation and code actions<a class="headerlink" href="#navigation-and-code-actions" title="Permanent link">&para;</a></h2>
 <p>Editor features Laravel Idea has that do not live inside a string.</p>
-<h4 id="l64-routes-on-controller-methods">L64. Routes on controller methods<a class="headerlink" href="#l64-routes-on-controller-methods" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
-<p>A controller method that a route points at shows nothing about it: not
-the URL, not the HTTP verb, not the route name. Laravel Idea marks each
-such method in the gutter, lists its routes, and jumps to the
-registration. Add a code lens above the method (<code>GET /orders/{order}
-· orders.show</code>, one per route, navigating to the route definition), fed
-by the route discovery that already resolves <code>[Controller::class,
-'method']</code> actions, <code>Route::controller()</code> groups, and resource routes.
-A method no route reaches gets no lens. Code lens already carries
-framework annotations for Doctrine, Messenger, and Yii, so the shape is
-established.</p>
-<p><strong>Where to look:</strong> <code>code_lens.rs</code>;
-<code>virtual_members/laravel/route_names/</code> for the discovered routes and
-their actions.</p>
 <h4 id="l66-related-file-navigation-for-models-events-and-listeners">L66. Related-file navigation for models, events, and listeners<a class="headerlink" href="#l66-related-file-navigation-for-models-events-and-listeners" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Laravel Idea links an Eloquent model to its factory, policy, observer,
