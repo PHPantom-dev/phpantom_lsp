@@ -3,7 +3,7 @@
 //!
 //! Both read the spans the symbol map recorded for a file, resolve each name
 //! against what the project actually registers (routes, config keys,
-//! views, translation keys, console commands, morph aliases, gate
+//! views, translation keys, console commands, morph aliases, middleware, gate
 //! abilities, Symfony service IDs, container parameters, routes, translation
 //! keys and Twig templates, Yii views, routes, and the route arguments a handler reads),
 //! and report the ones nothing declares.
@@ -35,6 +35,7 @@ enum CheckedStringKind {
     Command,
     MorphAlias,
     GateAbility,
+    Middleware,
     ServiceId,
     ContainerParameter,
     SymfonyRoute,
@@ -63,6 +64,7 @@ impl CheckedStringKind {
             StringKeyKind::Command => Self::Command,
             StringKeyKind::MorphAlias => Self::MorphAlias,
             StringKeyKind::GateAbility => Self::GateAbility,
+            StringKeyKind::Middleware => Self::Middleware,
             StringKeyKind::ServiceId => Self::ServiceId,
             StringKeyKind::ContainerParameter => Self::ContainerParameter,
             StringKeyKind::SymfonyRoute => Self::SymfonyRoute,
@@ -135,6 +137,9 @@ struct DeclaredKeys<'a> {
     commands_indexed: bool,
     morph_map_enforced: bool,
     gate_abilities: Arc<[String]>,
+    /// Whether the middleware aliases and groups the project registers
+    /// are all known.
+    middleware_known: bool,
     /// The service IDs the project's configuration declares, sorted.
     services: Vec<String>,
     /// The container parameters the project's configuration declares,
@@ -179,6 +184,7 @@ impl<'a> DeclaredKeys<'a> {
         let has_command = names(|kind| kind == CheckedStringKind::Command);
         let has_morph_alias = names(|kind| kind == CheckedStringKind::MorphAlias);
         let has_gate_ability = names(|kind| kind == CheckedStringKind::GateAbility);
+        let has_middleware = names(|kind| kind == CheckedStringKind::Middleware);
         let has_service = names(|kind| kind == CheckedStringKind::ServiceId);
         let has_parameter = names(|kind| kind == CheckedStringKind::ContainerParameter);
         let has_symfony_route = names(|kind| kind == CheckedStringKind::SymfonyRoute);
@@ -296,6 +302,15 @@ impl<'a> DeclaredKeys<'a> {
                 Arc::default()
             };
 
+        // An empty table means not even the framework's defaults were
+        // found (no `vendor/`), and an incomplete one that something
+        // registers a name the scan could not read.  Either way an unknown
+        // name proves nothing.
+        let middleware_known = has_middleware && {
+            let index = backend.laravel.middleware.read();
+            !index.is_empty() && !index.is_incomplete()
+        };
+
         let services = if has_service {
             backend.symfony_project_declared_names(crate::symbol_map::StringKeyKind::ServiceId)
         } else {
@@ -357,6 +372,7 @@ impl<'a> DeclaredKeys<'a> {
             commands_indexed,
             morph_map_enforced,
             gate_abilities,
+            middleware_known,
             services,
             parameters,
             symfony_routes,
@@ -415,6 +431,16 @@ impl<'a> DeclaredKeys<'a> {
             // An ability is reported with its own message, see
             // `Backend::gate_ability_problem`.
             CheckedStringKind::GateAbility => None,
+            // A name the router knows neither as an alias nor as a group
+            // is instantiated as a class, so a class name is valid too.
+            CheckedStringKind::Middleware => self.middleware_known.then(|| {
+                (
+                    self.backend.laravel.middleware.read().contains(key)
+                        || self.backend.find_or_load_class(key).is_some(),
+                    "middleware",
+                    "invalid_laravel_middleware",
+                )
+            }),
             CheckedStringKind::ServiceId => self.judge_service(key),
             CheckedStringKind::ContainerParameter => self.judge_parameter(key),
             CheckedStringKind::SymfonyRoute => self.judge_symfony_route(key),

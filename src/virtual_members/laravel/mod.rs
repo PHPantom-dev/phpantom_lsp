@@ -131,6 +131,7 @@ mod inflector;
 mod macros;
 mod magic_uses;
 mod method_refinement;
+pub(crate) mod middleware;
 mod model_extraction;
 mod model_provider;
 mod model_type;
@@ -192,6 +193,7 @@ pub(crate) use macros::{
     extract_strict_attributes, inject_macros, macro_closure_this_target, parse_installed_providers,
     parse_provider_class_list, parse_provider_referenced_classes, synthesize_mixin_macros,
 };
+pub(crate) use middleware::{LaravelMiddlewareIndex, MiddlewareTarget};
 pub(crate) use model_extraction::{
     attribute_entry_offset, extract_laravel_metadata, extract_laravel_trait_metadata,
     has_inheritable_model_metadata, has_scope_attribute, inherit_model_metadata,

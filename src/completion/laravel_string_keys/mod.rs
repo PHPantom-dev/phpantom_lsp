@@ -37,6 +37,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::Trans | StringKeyKind::SymfonyTranslation => CompletionItemKind::Text,
         StringKeyKind::TranslationDomain => CompletionItemKind::Module,
         StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
+        StringKeyKind::Middleware => CompletionItemKind::Class,
         StringKeyKind::GateAbility => CompletionItemKind::Method,
         StringKeyKind::Env => CompletionItemKind::Constant,
         StringKeyKind::ServiceId => CompletionItemKind::Reference,
@@ -171,6 +172,7 @@ impl Backend {
                 aliases.into()
             }
             StringKeyKind::GateAbility => self.cached_gate_abilities(),
+            StringKeyKind::Middleware => self.laravel.middleware.read().all_names().into(),
             StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
             StringKeyKind::ServiceId
             | StringKeyKind::ContainerParameter

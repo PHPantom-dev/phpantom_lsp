@@ -24,6 +24,24 @@ pub(super) fn extract_instantiation_expr<'a>(
         {
             try_emit_mailable_content_view_spans(args, ctx.content, &mut ctx.spans);
         }
+        // A controller's static `middleware()` returns
+        // `new Middleware('auth', only: [...])`.
+        if let Expression::Identifier(ident) = inst.class
+            && is_laravel_controller_middleware_class(
+                ctx.resolved_name_at(ident.span().start.offset)
+                    .unwrap_or(&class_text),
+            )
+        {
+            try_emit_middleware_spans(
+                args,
+                MiddlewareSpans {
+                    alias: true,
+                    auth_guards: true,
+                },
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
         emit_symfony_instantiation_spans(inst.class, args, ctx);
         emit_twig_callable_instantiation(inst.class, args, ctx);
         if !class_text.is_empty() {

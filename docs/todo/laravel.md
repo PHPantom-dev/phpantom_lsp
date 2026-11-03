@@ -433,27 +433,6 @@ The scanners already enumerate every valid key for go-to-definition. The
 items below mostly wire that existing enumeration into three more LSP
 endpoints rather than building new analysis.
 
-#### L63. Middleware alias names
-
-**Impact: Medium-High · Complexity: Medium**
-
-Completion, go-to-definition, diagnostics, and hover for
-`->middleware('auth')`, `->withoutMiddleware(...)`, and the
-`#[Middleware]` controller attribute (string and array arguments).
-Every route file names middleware, and today only the parameter part
-(`auth:web`, `can:update`) is understood. Aliases are declared statically
-in `bootstrap/app.php` (`$middleware->alias([...])`) on Laravel 11+, or
-the HTTP Kernel's `$middlewareAliases`/`$routeMiddleware` on older
-versions (an application may have more than one kernel); the framework's
-built-in aliases and default groups live in
-`Illuminate\Foundation\Configuration\Middleware` and the Kernel base
-class, parseable from vendor source the same way the container alias
-table already is. Be **parameter-aware**: `auth:web` and `throttle:60,1`
-validate the alias before the `:`, and hover can show the middleware's
-`handle()` parameter signature. For groups (`'web'`, `'api'`), hover
-lists the member middleware. Named `throttle:` limiters are
-[L58](#l58-laravel-rate-limiter-names).
-
 #### L17. Additional string contexts without booting
 
 **Impact: Medium · Complexity: Medium**

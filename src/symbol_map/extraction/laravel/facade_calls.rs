@@ -309,14 +309,21 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
         );
     }
     // Authorization abilities checked (or defined) through the
-    // `Gate` facade, and the `can:ability,Model` middleware
-    // parameter of a route registration.
+    // `Gate` facade, and the middleware a route registration names,
+    // with the parameters of `can:ability,Model` and `auth:guard`.
     if is_gate_facade(clean_subject) {
         emit_gate_facade_ability_spans(member_name, argument_list, ctx);
-    } else if matches_laravel_facade(semantic_subject, "Route")
-        && member_name.eq_ignore_ascii_case("middleware")
+    } else if matches_laravel_facade(semantic_subject, "Route") && is_middleware_method(member_name)
     {
-        try_emit_can_middleware_spans(argument_list, true, ctx.content, &mut ctx.spans);
+        try_emit_middleware_spans(
+            argument_list,
+            MiddlewareSpans {
+                alias: true,
+                auth_guards: true,
+            },
+            ctx.content,
+            &mut ctx.spans,
+        );
     }
     // Eloquent morph aliases: the keys of a
     // `Relation::morphMap(['post' => Post::class])` registration,

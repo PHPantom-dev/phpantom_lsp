@@ -1214,6 +1214,28 @@ class Demo
         Queue::connection('null');
     }
 
+    // ── Middleware names ────────────────────────────────────────────────
+
+    public function middlewareNames(): void
+    {
+        // Try: trigger completion inside the quotes to list every alias and
+        // group: the framework's (`auth`, `throttle`, `web`, …) and the ones
+        // bootstrap/app.php registers (`bakery.open`, `storefront`).
+        Route::middleware('');
+
+        // Try: hover `bakery.open` to see the class it runs and the
+        // parameter its handle() takes; Ctrl+Click jumps to the alias in
+        // bootstrap/app.php and to App\Http\Middleware\EnsureBakeryIsOpen.
+        Route::middleware(['auth:admin', 'bakery.open:sunday'])
+            ->get('/bakery/open', fn () => 'open');
+
+        // Try: hover `storefront` to list the middleware the group runs.
+        Route::middleware('storefront')->get('/storefront', fn () => 'shop');
+
+        // Unknown middleware name → `invalid_laravel_middleware` diagnostic.
+        Route::get('/closed', fn () => 'closed')->withoutMiddleware('bakery.closed');
+    }
+
 
     // ── Cache::remember() — closure return type binding ─────────────────
 

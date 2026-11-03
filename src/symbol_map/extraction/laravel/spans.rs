@@ -125,7 +125,7 @@ pub(in crate::symbol_map::extraction) fn argument_expr_for_parameter<'a>(
         })
 }
 
-fn partial_argument_expr_for_parameter<'a>(
+pub(in crate::symbol_map::extraction) fn partial_argument_expr_for_parameter<'a>(
     argument_list: &PartialArgumentList<'a>,
     parameter: &str,
 ) -> Option<&'a Expression<'a>> {

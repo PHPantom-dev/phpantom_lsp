@@ -231,6 +231,7 @@ mod laravel_facade_resolution;
 mod laravel_gates;
 mod laravel_macro_facade;
 mod laravel_macros;
+mod laravel_middleware;
 mod laravel_migration_columns;
 mod laravel_morph_columns;
 mod laravel_morph_map;

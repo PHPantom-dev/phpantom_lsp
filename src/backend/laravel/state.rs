@@ -99,6 +99,14 @@ pub(crate) struct LaravelState {
     /// `$user->can()`, `$this->authorize()`, and `@can` check.  Empty for
     /// non-Laravel projects.  See [`virtual_members::laravel::gates`].
     pub(crate) gates: RwLock<laravel::LaravelGateIndex>,
+    /// Middleware aliases and groups: the framework's defaults, an HTTP
+    /// kernel's, the ones `bootstrap/app.php` configures, and the ones a
+    /// service provider registers on the router.  Built during
+    /// `initialized` for Laravel projects and refreshed when a registering
+    /// file changes.  Powers completion, hover, go-to-definition, and the
+    /// unknown-middleware diagnostic for `->middleware('auth')`.  Empty for
+    /// non-Laravel projects.  See [`virtual_members::laravel::middleware`].
+    pub(crate) middleware: RwLock<laravel::LaravelMiddlewareIndex>,
     /// Config keys the project declares at runtime rather than in a
     /// `config/` file (`Config::set()`, the array form of the `config()`
     /// helper, `Storage::fake()`), keyed by the file each write is written
@@ -182,6 +190,7 @@ impl LaravelState {
             commands: GatedIndex::default(),
             morph_map: RwLock::default(),
             gates: RwLock::default(),
+            middleware: RwLock::default(),
             runtime_config_keys: RwLock::default(),
             macro_seeds: RwLock::default(),
             macro_mixin_uris: RwLock::default(),

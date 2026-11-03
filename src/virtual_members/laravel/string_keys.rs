@@ -65,6 +65,7 @@ pub(crate) fn resolve_laravel_string_key(
             .collect(),
         StringKeyKind::MorphAlias => resolve_morph_alias_definitions(backend, key),
         StringKeyKind::GateAbility => resolve_gate_ability_definitions(backend, key),
+        StringKeyKind::Middleware => resolve_middleware_definitions(backend, key),
         StringKeyKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
         StringKeyKind::Env => super::env_vars::resolve_env_definitions(backend, key),
         StringKeyKind::ServiceId
@@ -214,6 +215,38 @@ fn resolve_morph_alias_definitions(backend: &crate::Backend, alias: &str) -> Vec
     locations
 }
 
+/// Resolve a middleware alias or group to where it is registered, and an
+/// alias to the middleware class it runs as well.
+fn resolve_middleware_definitions(backend: &crate::Backend, name: &str) -> Vec<Location> {
+    let (site, class) = {
+        let index = backend.laravel.middleware.read();
+        match index.get(name) {
+            Some(super::MiddlewareTarget::Alias(alias)) => {
+                ((alias.uri.clone(), alias.offset), alias.class.clone())
+            }
+            Some(super::MiddlewareTarget::Group(group)) => {
+                ((group.uri.clone(), group.offset), None)
+            }
+            None => return Vec::new(),
+        }
+    };
+
+    let mut locations = Vec::new();
+    let (uri, offset) = site;
+    if let Some(parsed_uri) = crate::util::parse_url(&uri)
+        && let Some(content) = backend.get_file_content(&uri)
+    {
+        let position = crate::text_position::offset_to_position(&content, offset as usize);
+        locations.push(crate::definition::point_location(parsed_uri, position));
+    }
+    if let Some(class) = class
+        && let Some(location) = backend.class_declaration_location(&class)
+    {
+        locations.push(location);
+    }
+    locations
+}
+
 /// Resolve an Artisan command name to the declaration site inside its
 /// command class (the `$signature` / `$name` / `#[AsCommand]` literal).
 fn resolve_command_definition(backend: &crate::Backend, name: &str) -> Option<Location> {
@@ -265,6 +298,7 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::Command
         | StringKeyKind::MorphAlias
         | StringKeyKind::GateAbility
+        | StringKeyKind::Middleware
         | StringKeyKind::ContainerBinding
         | StringKeyKind::Env => find_string_key_usages(kind, key, backend, snapshot, true),
         // A Symfony declaration is a span in a configuration file's (or a

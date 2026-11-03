@@ -78,6 +78,25 @@ pub(in crate::symbol_map::extraction) fn is_laravel_redirect_route_attr(
         .get_or_insert_with(|| content.contains("use Illuminate\\Foundation\\Http\\Attributes\\"))
 }
 
+/// Whether an attribute class name, resolved through the file's imports,
+/// is a controller's `#[Middleware]` or `#[WithoutMiddleware]`.
+pub(in crate::symbol_map::extraction) fn is_laravel_middleware_attr(class_name: &str) -> bool {
+    let class_name = class_name.trim_start_matches('\\');
+    class_name.eq_ignore_ascii_case("Illuminate\\Routing\\Attributes\\Controllers\\Middleware")
+        || class_name
+            .eq_ignore_ascii_case("Illuminate\\Routing\\Attributes\\Controllers\\WithoutMiddleware")
+}
+
+/// Whether a class name, resolved through the file's imports, is the
+/// `Middleware` a controller's static `middleware()` returns instances of.
+pub(in crate::symbol_map::extraction) fn is_laravel_controller_middleware_class(
+    class_name: &str,
+) -> bool {
+    class_name
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case("Illuminate\\Routing\\Controllers\\Middleware")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

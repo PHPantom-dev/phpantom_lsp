@@ -128,6 +128,10 @@ struct ExtractionCtx<'a> {
     /// of `$this->view('emails.shipped')` and of `new Content(view: …)` as
     /// view-name references.
     in_mailable: bool,
+    /// Whether the members currently being extracted belong to a class that
+    /// syntactically extends a `Controller`.  Gates recognition of
+    /// `$this->middleware('auth')` as a middleware name.
+    in_controller: bool,
     /// The `@coversDefaultClass` of the class whose members are currently
     /// being extracted.  It is what gives `@covers ::name` on a test method
     /// a subject; without one that shape names a global function.
@@ -440,6 +444,7 @@ fn extract_symbol_map_inner(
         has_laravel_http_attrs: None,
         in_console_command: false,
         in_mailable: false,
+        in_controller: false,
         covers_default_class: None,
         symfony,
         twig,

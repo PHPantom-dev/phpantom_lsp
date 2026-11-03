@@ -56,6 +56,12 @@ pub(crate) enum StringKeyKind {
     /// `$this->app->make('payments')` asks the container for, and the one a
     /// service provider registers it under.
     ContainerBinding,
+    /// A middleware alias or group name: the part before any `:` of a
+    /// string `->middleware()`, `->withoutMiddleware()`, or the
+    /// `#[Middleware]` controller attribute names, resolving against the
+    /// aliases and groups the framework, the HTTP kernel, `bootstrap/app.php`,
+    /// and the service providers register.
+    Middleware,
     /// An environment variable name: the string `env('APP_NAME')` or
     /// `Env::get('APP_NAME')` reads, resolving to the line that declares it
     /// in the project's `.env`.

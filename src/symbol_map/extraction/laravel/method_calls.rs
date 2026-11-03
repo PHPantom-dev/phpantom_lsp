@@ -337,22 +337,35 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_method_call_spans<'a>(
     }
 }
 
+/// Whether a route registration's method names middleware to run or to
+/// leave out.
+pub(crate) fn is_middleware_method(name: &str) -> bool {
+    name.eq_ignore_ascii_case("middleware") || name.eq_ignore_ascii_case("withoutMiddleware")
+}
+
 /// Emit ability spans for an instance-method authorization check (see
-/// [`ability_arguments`]), and for the `can:ability,Model` parameter of a
-/// route registration's or a controller's `->middleware()`.
+/// [`ability_arguments`]), and the middleware a route registration's or a
+/// controller's `->middleware()` names, with the `can:ability,Model`
+/// parameter.
 fn emit_gate_ability_spans_for_method<'a>(
     receiver: &AstReceiver<'a>,
     member_name: &str,
     argument_list: &'a ArgumentList<'a>,
     ctx: &mut ExtractionCtx<'a>,
 ) {
-    if member_name.eq_ignore_ascii_case("middleware") {
+    if is_middleware_method(member_name) {
         let route_receiver = receiver.roots_at_route();
         if !route_receiver && !receiver.is_this() {
             return;
         }
+        // `->middleware()` is a plain enough name that `$this` only names
+        // middleware inside a controller.
+        let parts = MiddlewareSpans {
+            alias: route_receiver || ctx.in_controller,
+            auth_guards: route_receiver,
+        };
         let span_start = ctx.spans.len();
-        try_emit_can_middleware_spans(argument_list, route_receiver, ctx.content, &mut ctx.spans);
+        try_emit_middleware_spans(argument_list, parts, ctx.content, &mut ctx.spans);
         defer_on_route_root(receiver, span_start, ctx);
         return;
     }

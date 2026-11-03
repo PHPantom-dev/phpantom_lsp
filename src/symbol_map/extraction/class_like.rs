@@ -73,6 +73,8 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     // too plain to key on outside that context.
     let prev_in_mailable = ctx.in_mailable;
     ctx.in_mailable = class_extends_named(class, b"Mailable");
+    let prev_in_controller = ctx.in_controller;
+    ctx.in_controller = class_extends_named(class, b"Controller");
     let prev_covers_default_class = ctx.covers_default_class;
     ctx.covers_default_class = covers_default_class;
     let yii_view_scope = yii_class_scope(class, ctx);
@@ -86,6 +88,7 @@ pub(super) fn extract_from_class<'a>(class: &'a Class<'a>, ctx: &mut ExtractionC
     ctx.class_name_offset = prev_class_name_offset;
     ctx.yii_view_scope = prev_yii_view_scope;
     ctx.covers_default_class = prev_covers_default_class;
+    ctx.in_controller = prev_in_controller;
     ctx.in_mailable = prev_in_mailable;
     ctx.in_console_command = prev_in_console_command;
 }
@@ -352,6 +355,24 @@ pub(super) fn extract_from_attribute_lists<'a>(
                 // result with a template.
                 if is_template_attribute(semantic_class_name) {
                     emit_template_attribute_span(arg_list, ctx);
+                }
+
+                // `#[Middleware('auth')]` on a controller or an action names
+                // the middleware it runs, `#[WithoutMiddleware]` the
+                // middleware it leaves out.
+                if is_laravel_middleware_attr(semantic_class_name)
+                    && let Some(middleware) =
+                        partial_argument_expr_for_parameter(arg_list, "middleware")
+                {
+                    emit_middleware_value_spans(
+                        middleware,
+                        MiddlewareSpans {
+                            alias: true,
+                            auth_guards: true,
+                        },
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
                 }
 
                 // `#[RedirectToRoute('login')]` on a form request names the

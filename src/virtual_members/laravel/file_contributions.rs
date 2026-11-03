@@ -1,6 +1,6 @@
 //! The per-file half of a project-wide Laravel registry.
 //!
-//! The macro, command, morph-map, gate, and storage-driver indexes are all
+//! The macro, command, morph-map, gate, middleware, and storage-driver indexes are all
 //! built the same way: every contributing file is scanned on its own, the
 //! scan is kept under the file's URI so an edit replaces just that file's
 //! registrations, and the merged lookups the features read are rebuilt
@@ -54,6 +54,10 @@ macro_rules! impl_registry {
 
 impl_registry!(super::LaravelGateIndex, super::gates::GateScan);
 impl_registry!(super::LaravelMorphMapIndex, super::MorphMapScan);
+impl_registry!(
+    super::LaravelMiddlewareIndex,
+    super::middleware::MiddlewareScan
+);
 impl_registry!(
     super::LaravelCommandIndex,
     Vec<super::commands::CommandEntry>

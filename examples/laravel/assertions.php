@@ -2280,6 +2280,40 @@ check(
     !$throwsBadMethodCall(fn () => \App\Models\Bakery::query()->whereFreshlyBakd(true))
 );
 
+// ─── Middleware names ───────────────────────────────────────────────────────
+// `Demo::middlewareNames()` relies on the aliases and groups bootstrap/app.php
+// registers sitting next to the framework's defaults, and on a group being
+// able to list an alias.
+
+$middlewareApp = require __DIR__ . '/bootstrap/app.php';
+$middlewareKernel = $middlewareApp->make(\Illuminate\Contracts\Http\Kernel::class);
+$middlewareAliases = $middlewareKernel->getMiddlewareAliases();
+$middlewareGroups = $middlewareKernel->getMiddlewareGroups();
+check(
+    'bootstrap/app.php registers the bakery.open alias',
+    ($middlewareAliases['bakery.open'] ?? null) === \App\Http\Middleware\EnsureBakeryIsOpen::class
+);
+check(
+    'The framework\'s auth alias stays registered next to the application\'s',
+    ($middlewareAliases['auth'] ?? null) === \Illuminate\Auth\Middleware\Authenticate::class
+);
+check(
+    'bootstrap/app.php registers the storefront group, which lists an alias',
+    ($middlewareGroups['storefront'] ?? null) === ['web', 'bakery.open']
+);
+check(
+    'The framework\'s web group stays registered',
+    isset($middlewareGroups['web'])
+);
+check(
+    'bakery.closed is not a registered alias or group',
+    !isset($middlewareAliases['bakery.closed']) && !isset($middlewareGroups['bakery.closed'])
+);
+check(
+    'EnsureBakeryIsOpen::handle() takes a day after the request and the next closure',
+    (new ReflectionMethod(\App\Http\Middleware\EnsureBakeryIsOpen::class, 'handle'))->getParameters()[2]->getName() === 'day'
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";
