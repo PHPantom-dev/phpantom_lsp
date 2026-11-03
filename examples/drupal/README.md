@@ -22,6 +22,24 @@ Run `composer install` here first. Composer puts core and contrib into
 - In `web/modules/custom/acme/acme.module`, complete after `$route_match->`
   inside the procedural `acme_help()` hook.
 
+## What the Symfony support already reads
+
+Drupal declares some things in shapes PHPantom already reads for any
+project. What works today:
+
+- **Class names and `Class::method` strings in YAML.** In
+  `web/modules/custom/acme/acme.routing.yml`, the `_controller` string goes
+  to `GreetingController` and to its `greet()` method, and in
+  `web/modules/custom/acme/acme.services.yml`, `class:` goes to `Greeter`.
+  Each counts among the references of the class or method it names.
+
+What does not work yet:
+
+- **Event subscribers.** The `getSubscribedEvents()` map of an event
+  subscriber is read only in a Symfony project, so in a Drupal site its
+  event names and listener methods neither complete nor navigate. See
+  `docs/todo/drupal.md`.
+
 ## Runtime assertions
 
 `assertions.php` reads the module's declarations with Drupal's own loaders

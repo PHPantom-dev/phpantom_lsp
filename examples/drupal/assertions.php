@@ -88,6 +88,7 @@ $container = new ContainerBuilder();
 
 check('acme.greeter is declared in acme.services.yml', $container->hasDefinition('acme.greeter'));
 check('acme.greeter is built from Greeter', $container->getDefinition('acme.greeter')->getClass() === Greeter::class);
+check('The class acme.services.yml names exists', class_exists((string) $container->getDefinition('acme.greeter')->getClass()));
 check('The Greeter class name is an alias of acme.greeter', $container->hasAlias(Greeter::class) && (string) $container->getAlias(Greeter::class) === 'acme.greeter');
 check("acme.greeter receives core's config.factory", (string) $container->getDefinition('acme.greeter')->getArgument(0) === 'config.factory');
 
@@ -98,6 +99,7 @@ $routes = Yaml::decode((string) file_get_contents("$module/acme.routing.yml"));
 
 check('acme.greeting is declared in acme.routing.yml', isset($routes['acme.greeting']));
 check('acme.greeting points at GreetingController::greet()', $controllerClass === GreetingController::class && method_exists($controllerClass, $controllerMethod));
+check('The _controller string names a public method', (new ReflectionMethod($controllerClass, $controllerMethod))->isPublic());
 check('acme.greeting declares the {name} the controller takes', str_contains($routes['acme.greeting']['path'], '{name}') && (new ReflectionMethod(GreetingController::class, 'greet'))->getParameters()[0]->getName() === 'name');
 check('GreetingController inherits the helpers of ControllerBase', is_subclass_of(GreetingController::class, ControllerBase::class));
 

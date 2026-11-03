@@ -347,3 +347,26 @@ Once Drupal service IDs complete (DR2), add
 each declaring services, routes, and hooks, and time completion of
 service IDs, route names, and hook names as each ships. Register it in
 `Cargo.toml` so `benches/ci_benchmarks.py` picks it up.
+
+---
+
+## DR16. Event subscribers
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+final class AcmeSubscriber implements EventSubscriberInterface {
+    public static function getSubscribedEvents(): array {
+        return [KernelEvents::REQUEST => 'onRequest'];
+    }
+}
+```
+
+Drupal's event subscribers are Symfony's: a service tagged
+`event_subscriber` maps event names to its own methods in
+`getSubscribedEvents()`. The Symfony support reads that map, jumps from
+a listener name to its method, and reports one that does not exist,
+but only in a Symfony project, and a Drupal site's `composer.json`
+requires none of the packages that make it one. Read the map in a
+Drupal site too, so the listener methods navigate and are checked, and
+the event names complete where Drupal's event dispatcher takes one.
