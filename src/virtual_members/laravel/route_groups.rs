@@ -13,7 +13,7 @@ use super::helpers::{
 /// `Route::group([…], fn(){})` argument list.
 ///
 /// The array may be in any position; all non-array arguments are skipped.
-fn group_option_expression<'a>(
+pub(crate) fn group_option_expression<'a>(
     args: impl Iterator<Item = &'a Expression<'a>>,
     content: &str,
     option: &str,

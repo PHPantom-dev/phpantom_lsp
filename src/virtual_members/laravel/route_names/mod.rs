@@ -1,5 +1,8 @@
 use mago_syntax::cst::*;
 
+mod actions;
+pub(crate) use actions::RouteAction;
+use actions::*;
 mod resources;
 use resources::*;
 mod traversal;

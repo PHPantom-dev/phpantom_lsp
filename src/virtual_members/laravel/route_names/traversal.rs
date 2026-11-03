@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
+use mago_names::ResolvedNames;
 use mago_span::HasSpan;
 use tower_lsp_server::gen_lsp_types::Uri;
 
@@ -33,6 +34,9 @@ pub(super) struct ScanPaths<'a> {
     pub(super) open: &'a RefCell<HashSet<PathBuf>>,
     pub(super) macros: &'a MacroScope,
     pub(super) program: &'a Program<'a>,
+    /// The names `program` writes, resolved against its imports and
+    /// namespace, so a controller named by `X::class` is known by its FQN.
+    pub(super) names: &'a ResolvedNames<'a>,
     /// The file the walk is currently reading, which is where the route names
     /// it finds are declared.
     pub(super) uri: &'a Arc<Uri>,
@@ -41,26 +45,6 @@ pub(super) struct ScanPaths<'a> {
 }
 
 impl<'a> ScanPaths<'a> {
-    pub(super) fn new(
-        dir: Option<&'a Path>,
-        root: Option<&'a Path>,
-        open: &'a RefCell<HashSet<PathBuf>>,
-        macros: &'a MacroScope,
-        program: &'a Program<'a>,
-        uri: &'a Arc<Uri>,
-        lines: &'a LineIndex<'a>,
-    ) -> Self {
-        Self {
-            dir,
-            root,
-            open,
-            macros,
-            program,
-            uri,
-            lines,
-        }
-    }
-
     /// A route registered at byte `offset` of the file being read, with the
     /// byte range of the `->name()` argument spelling its name.
     pub(super) fn declaration(
@@ -76,7 +60,8 @@ impl<'a> ScanPaths<'a> {
     }
 }
 
-/// Parse a route file and hand the program to `walk`.
+/// Parse a route file and hand the program, with its names resolved, to
+/// `walk`.
 ///
 /// The arena the program is allocated in lives only as long as the call, so
 /// every walk of a file — the route file itself, one it includes, a macro
@@ -84,12 +69,13 @@ impl<'a> ScanPaths<'a> {
 pub(super) fn in_parsed_route_file<R>(
     content: &str,
     name: &'static [u8],
-    walk: impl FnOnce(&Program<'_>) -> R,
+    walk: impl FnOnce(&Program<'_>, &ResolvedNames<'_>) -> R,
 ) -> R {
     let arena = LocalArena::new();
     let file_id = FileId::new(name);
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
-    walk(program)
+    let names = mago_names::resolver::NameResolver::new(&arena).resolve(program);
+    walk(program, &names)
 }
 
 // ─── Router macros ───────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 use crate::common::{
-    create_psr4_workspace, create_test_backend, open_document, open_php, references_response,
+    LARAVEL_SRC_COMPOSER, create_initialized_psr4_workspace, create_psr4_workspace,
+    create_test_backend, open_document, open_php, references_response,
 };
 use tower_lsp_server::LanguageServer;
 use tower_lsp_server::gen_lsp_types::*;
@@ -2497,4 +2498,91 @@ fn test_code_without_a_test_name_pairs_with_nothing() {
     );
     let files = [INVOICE, helper];
     assert!(pairing_lenses(LARAVEL_COMPOSER, &files, helper.0, "Test").is_empty());
+}
+
+// ─── Laravel routes ─────────────────────────────────────────────────────────
+
+const ORDER_CONTROLLER: &str = "\
+<?php
+namespace App\\Http\\Controllers;
+
+class OrderController {
+    public function index(): void {}
+    public function show(int $order): void {}
+    public function export(): void {}
+}
+";
+
+const ORDER_ROUTES: &str = "\
+<?php
+use App\\Http\\Controllers\\OrderController;
+use Illuminate\\Support\\Facades\\Route;
+
+Route::get('/orders', [OrderController::class, 'index'])->name('orders.index');
+Route::get('/orders/{order}', [OrderController::class, 'show'])->name('orders.show');
+Route::post('/orders/{order}', [OrderController::class, 'show']);
+";
+
+/// Each route that reaches a controller method gets a lens above it, with
+/// its verb, URI and name, that goes to where the route is registered.  A
+/// method no route reaches gets none.
+#[tokio::test]
+async fn controller_methods_list_the_routes_that_reach_them() {
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_SRC_COMPOSER,
+        &[
+            ("src/Http/Controllers/OrderController.php", ORDER_CONTROLLER),
+            ("routes/web.php", ORDER_ROUTES),
+        ],
+        "src/Http/Controllers/OrderController.php",
+    )
+    .await;
+
+    // Before the workspace is indexed, the routes are not looked for.
+    let lenses = get_code_lenses(&backend, uri.as_str(), ORDER_CONTROLLER);
+    assert!(
+        !lens_titles(&lenses)
+            .iter()
+            .any(|title| title.contains("/orders")),
+        "got: {:?}",
+        lens_titles(&lenses)
+    );
+
+    warm_workspace_index(&backend, &uri, Position::new(3, 7)).await;
+    let lenses = get_code_lenses(&backend, uri.as_str(), ORDER_CONTROLLER);
+    let route_lenses: Vec<(u32, &str, &Command)> = lenses
+        .iter()
+        .filter_map(|lens| {
+            let command = lens.command.as_ref()?;
+            (command.title.starts_with("GET") || command.title.starts_with("POST")).then_some((
+                lens.range.start.line,
+                command.title.as_str(),
+                command,
+            ))
+        })
+        .collect();
+    let titles: Vec<(u32, &str)> = route_lenses
+        .iter()
+        .map(|(line, title, _)| (*line, *title))
+        .collect();
+    assert_eq!(
+        titles,
+        vec![
+            (4, "GET /orders · orders.index"),
+            (5, "GET /orders/{order} · orders.show"),
+            (5, "POST /orders/{order}"),
+        ]
+    );
+
+    let arguments = route_lenses[1].2.arguments.as_ref().expect("arguments");
+    assert!(
+        arguments[0]
+            .as_str()
+            .is_some_and(|target| target.ends_with("/routes/web.php")),
+        "the lens should go to the routes file, got: {arguments:?}"
+    );
+    assert_eq!(
+        arguments[1],
+        serde_json::json!({ "line": 5, "character": 0 })
+    );
 }

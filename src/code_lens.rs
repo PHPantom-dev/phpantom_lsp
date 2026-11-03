@@ -3,7 +3,8 @@
 //! Shows reference and implementation counts, override/implement
 //! annotations, the links between a Doctrine entity and its repository,
 //! the links between a Messenger message and its handlers, the links
-//! between a class and its tests, and the renders of a Yii template.
+//! between a class and its tests, the routes that dispatch to a Laravel
+//! controller method, and the renders of a Yii template.
 
 use std::sync::Arc;
 
@@ -63,6 +64,32 @@ fn line_indent(index: &LineIndex, line: usize) -> u32 {
         .count() as u32
 }
 
+/// The title of the lens for a route that dispatches to a controller
+/// method: its verbs, its URI and its name, as far as they are known
+/// (`GET /orders/{order} · orders.show`).
+fn route_lens_title(action: &crate::virtual_members::laravel::RouteAction) -> String {
+    let mut title = action.verbs.clone();
+    if !action.uri.is_empty() {
+        if !title.is_empty() {
+            title.push(' ');
+        }
+        if !action.uri.starts_with('/') {
+            title.push('/');
+        }
+        title.push_str(&action.uri);
+    }
+    if let Some(name) = &action.name {
+        if !title.is_empty() {
+            title.push_str(" · ");
+        }
+        title.push_str(name);
+    }
+    if title.is_empty() {
+        title.push_str("Route");
+    }
+    title
+}
+
 /// Information about a prototype (ancestor) method that a local method
 /// overrides or implements.
 struct Prototype {
@@ -83,8 +110,9 @@ impl Backend {
     /// navigation lenses for methods that override or implement an
     /// ancestor declaration, in a Doctrine project the lenses that link an
     /// entity and its repository, in a Symfony project the ones that
-    /// link a Messenger message and its handlers, and the ones that link a
-    /// class and its tests.
+    /// link a Messenger message and its handlers, the ones that link a
+    /// class and its tests, and in a Laravel project the routes that
+    /// dispatch to each controller method.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
             let map = self.symbols.uri_classes_index.read();
@@ -101,6 +129,16 @@ impl Backend {
         let class_loader = |name: Fqn<'_>| self.find_or_load_class(&name);
         let is_doctrine = self.is_doctrine_project();
         let is_symfony = self.is_symfony_project();
+        // Discovering the routes reads every user file's symbol map, which
+        // waits for the workspace index, so like the implementation lenses
+        // they appear once indexing is done and the client re-pulls.
+        let routes = (!classes.is_empty()
+            && self.resolved_class_cache.read().laravel().is_enabled()
+            && self
+                .workspace_index
+                .indexed
+                .load(std::sync::atomic::Ordering::Acquire))
+        .then(|| self.cached_routes());
 
         for class in &classes {
             let class_fqn = class.fqn();
@@ -140,6 +178,10 @@ impl Backend {
                 self.push_messenger_lenses(uri, class, &index, &mut lenses);
             }
 
+            let route_actions = routes
+                .as_deref()
+                .map_or(&[][..], |routes| routes.controller_actions(&class_fqn));
+
             for method in &class.methods {
                 if method.name_offset == 0
                     || method.is_virtual
@@ -158,6 +200,21 @@ impl Backend {
                     start: position,
                     end: position,
                 };
+
+                for action in route_actions
+                    .iter()
+                    .filter(|action| action.method.eq_ignore_ascii_case(&method.name))
+                {
+                    lenses.push(CodeLens {
+                        range,
+                        command: Some(self.build_code_lens_command(
+                            route_lens_title(action),
+                            (*action.declaration.file).clone(),
+                            action.declaration.position,
+                        )),
+                        data: None,
+                    });
+                }
 
                 let proto = self.find_prototype(class, &method.name, uri, content);
                 if !method.name.starts_with("__")

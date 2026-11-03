@@ -169,6 +169,9 @@ fn resource_string_pairs<'a>(
 pub(super) struct ResourceRegistration<'a> {
     /// A resource name or the name-to-controller map of a plural registration.
     pub(super) names: &'a Expression<'a>,
+    /// The controller of a single registration; a plural one names each
+    /// resource's in `names`.
+    pub(super) controller: Option<&'a Expression<'a>>,
     /// Whether `names` is a map such as `resources(['photos' => …])`.
     pub(super) multiple: bool,
     /// Conventional resource or singleton, with or without API restrictions.
@@ -270,6 +273,11 @@ fn resource_call_info<'a>(
     };
     let mut registration = ResourceRegistration {
         names: argument(0, name_parameter)?,
+        controller: if multiple {
+            None
+        } else {
+            argument(1, b"controller")
+        },
         multiple,
         kind,
         default_methods: RESOURCE_SUFFIXES

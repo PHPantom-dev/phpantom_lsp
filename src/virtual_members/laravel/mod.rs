@@ -214,8 +214,8 @@ pub(crate) use provider_resources::{
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::{
-    RouteDiscovery, enumerate_all_routes, find_route_registration_references, route_name_matches,
-    route_uri_parameters,
+    RouteAction, RouteDiscovery, enumerate_all_routes, find_route_registration_references,
+    route_name_matches, route_uri_parameters,
 };
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,

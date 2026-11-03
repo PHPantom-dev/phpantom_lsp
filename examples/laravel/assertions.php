@@ -2314,6 +2314,45 @@ check(
     (new ReflectionMethod(\App\Http\Middleware\EnsureBakeryIsOpen::class, 'handle'))->getParameters()[2]->getName() === 'day'
 );
 
+// ─── Routes on controller methods ───────────────────────────────────────────
+
+// BakeryController's "Try:" comment counts the routes routes/web.php points
+// at each of its actions.  Load the real route file onto a fresh router and
+// count them the way the code lens does: one per registered route.
+$actionApp = new \Illuminate\Foundation\Application(__DIR__);
+$actionApp->instance('router', new \Illuminate\Routing\Router(new \Illuminate\Events\Dispatcher(), $actionApp));
+$previousFacadeApp = \Illuminate\Support\Facades\Facade::getFacadeApplication();
+\Illuminate\Support\Facades\Facade::setFacadeApplication($actionApp);
+\Illuminate\Support\Facades\Facade::clearResolvedInstances();
+\Illuminate\Support\Facades\Route::macro('bakeryAuth', function (): void {});
+(static function (): void {
+    require __DIR__ . '/routes/web.php';
+})();
+$bakeryActionRoutes = [];
+foreach ($actionApp['router']->getRoutes() as $route) {
+    $action = $route->getActionName();
+    if (str_starts_with($action, \App\Http\Controllers\BakeryController::class . '@')) {
+        $method = substr($action, strlen(\App\Http\Controllers\BakeryController::class) + 1);
+        $bakeryActionRoutes[$method][] = $route->getName();
+    }
+}
+\Illuminate\Support\Facades\Facade::setFacadeApplication($previousFacadeApp);
+\Illuminate\Support\Facades\Facade::clearResolvedInstances();
+check(
+    'show() is reached by its own route and by the nested resource',
+    ($bakeryActionRoutes['show'] ?? []) === ['bakeries.show', 'bakeries.ovens.show']
+);
+check(
+    'index() is reached by its own route, the nested resource, and the campaign loop',
+    in_array('bakeries.index', $bakeryActionRoutes['index'] ?? [], true)
+        && in_array('bakeries.ovens.index', $bakeryActionRoutes['index'] ?? [], true)
+        && in_array('campaigns.valentines.gifts', $bakeryActionRoutes['index'] ?? [], true)
+);
+check(
+    'cancel() is reached by one route',
+    ($bakeryActionRoutes['cancel'] ?? []) === ['bakeries.cancel']
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";

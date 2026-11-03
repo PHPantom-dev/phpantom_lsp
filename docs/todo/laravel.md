@@ -689,25 +689,6 @@ including grouped imports, without treating unrelated classes named
 
 Editor features Laravel Idea has that do not live inside a string.
 
-#### L64. Routes on controller methods
-
-**Impact: Medium-High · Complexity: Medium**
-
-A controller method that a route points at shows nothing about it: not
-the URL, not the HTTP verb, not the route name. Laravel Idea marks each
-such method in the gutter, lists its routes, and jumps to the
-registration. Add a code lens above the method (`GET /orders/{order}
-· orders.show`, one per route, navigating to the route definition), fed
-by the route discovery that already resolves `[Controller::class,
-'method']` actions, `Route::controller()` groups, and resource routes.
-A method no route reaches gets no lens. Code lens already carries
-framework annotations for Doctrine, Messenger, and Yii, so the shape is
-established.
-
-**Where to look:** `code_lens.rs`;
-`virtual_members/laravel/route_names/` for the discovered routes and
-their actions.
-
 #### L66. Related-file navigation for models, events, and listeners
 
 **Impact: Medium · Complexity: Medium**
