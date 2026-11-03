@@ -63,6 +63,52 @@ final class StaticConsumer {
 const DRUPAL_SERVICES_PATH: &str = "drupal/web/modules/custom/acme/acme.services.yml";
 const DRUPAL_CONSUMER_PATH: &str = "drupal/web/modules/custom/acme/src/StaticConsumer.php";
 
+/// An entity type the Drupal site declares, its manager, and a reader;
+/// and a Symfony container builder looking a service definition up with
+/// the same method name the manager has.
+const ENTITY_FILES: &[(&str, &str)] = &[
+    (
+        "drupal/web/core/lib/Drupal/Core/Entity/EntityTypeManagerInterface.php",
+        "<?php\nnamespace Drupal\\Core\\Entity;\ninterface EntityTypeManagerInterface {\n    public function getStorage(string $entity_type_id): object;\n    public function getDefinition(string $entity_type_id, bool $exception_on_invalid = true): ?object;\n}\n",
+    ),
+    (DRUPAL_NOTE_PATH, DRUPAL_NOTE),
+    (DRUPAL_NOTES_PATH, DRUPAL_NOTES),
+    (
+        "symfony/stubs/dependency-injection/ContainerBuilder.php",
+        "<?php\nnamespace Symfony\\Component\\DependencyInjection;\nclass ContainerBuilder implements ContainerInterface {\n    public function get(string $id): mixed {}\n    public function has(string $id): bool {}\n    public function getParameter(string $name): mixed {}\n    public function getDefinition(string $id): object {}\n}\n",
+    ),
+    (SYMFONY_KERNEL_PATH, SYMFONY_KERNEL),
+];
+
+const DRUPAL_NOTE: &str = r#"<?php
+namespace Drupal\acme\Entity;
+
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+
+#[ContentEntityType(
+    id: 'acme_note',
+)]
+class Note {}
+"#;
+
+const DRUPAL_NOTES: &str = r#"<?php
+namespace Drupal\acme;
+
+use Drupal\Core\Entity\EntityTypeManagerInterface;
+
+final class Notes {
+    public function __construct(private EntityTypeManagerInterface $manager) {}
+
+    public function run(): void {
+        $this->manager->getStorage('acme_note');
+        $this->manager->getDefinition('acme_note');
+    }
+}
+"#;
+
+const DRUPAL_NOTE_PATH: &str = "drupal/web/modules/custom/acme/src/Entity/Note.php";
+const DRUPAL_NOTES_PATH: &str = "drupal/web/modules/custom/acme/src/Notes.php";
+
 // ─── Symfony, in `symfony/` ─────────────────────────────────────────────────
 
 const SYMFONY_COMPOSER: &str = r#"{
@@ -138,6 +184,21 @@ final class MailController
 }
 "#;
 
+const SYMFONY_KERNEL: &str = r#"<?php
+namespace Shop;
+
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+
+final class Kernel
+{
+    public function build(ContainerBuilder $container): void
+    {
+        $container->getDefinition('app.mailer');
+    }
+}
+"#;
+
+const SYMFONY_KERNEL_PATH: &str = "symfony/src/Kernel.php";
 const SYMFONY_YAML_PATH: &str = "symfony/config/services.yaml";
 const SYMFONY_PHP_PATH: &str = "symfony/config/services.php";
 const SYMFONY_CONSUMER_PATH: &str = "symfony/src/Controller/MailController.php";
@@ -220,6 +281,11 @@ fn mixed_files() -> Vec<(String, &'static str)> {
         SYMFONY_STUBS
             .iter()
             .map(|(path, content)| (format!("symfony/{path}"), *content)),
+    );
+    files.extend(
+        ENTITY_FILES
+            .iter()
+            .map(|(path, content)| (path.to_string(), *content)),
     );
     files
 }
@@ -434,6 +500,44 @@ async fn drupal_services_work_in_the_drupal_site() {
         vec![(
             uri_for(&dir, DRUPAL_SERVICES_PATH),
             line_of(DRUPAL_SERVICES, "acme.greeter:")
+        )]
+    );
+}
+
+#[tokio::test]
+async fn drupal_entity_types_work_in_the_drupal_site() {
+    let (backend, dir) = workspace(&mixed_files()).await;
+    let notes = uri_for(&dir, DRUPAL_NOTES_PATH);
+    for needle in ["getStorage('acme_note')", "getDefinition('acme_note')"] {
+        let inside = needle.find('\'').unwrap() + 2;
+        let found = definitions(&backend, &notes, position_in(DRUPAL_NOTES, needle, inside)).await;
+        assert_eq!(
+            found,
+            vec![(
+                uri_for(&dir, DRUPAL_NOTE_PATH),
+                line_of(DRUPAL_NOTE, "id: 'acme_note'")
+            )],
+            "{needle}"
+        );
+    }
+}
+
+/// `getDefinition()` on Symfony's container builder still names a service,
+/// though Drupal's entity type manager has a method of the same name.
+#[tokio::test]
+async fn a_symfony_container_builder_still_names_services_beside_a_drupal_site() {
+    let (backend, dir) = workspace(&mixed_files()).await;
+    let found = definitions(
+        &backend,
+        &uri_for(&dir, SYMFONY_KERNEL_PATH),
+        position_in(SYMFONY_KERNEL, "getDefinition('app.mailer')", 17),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![(
+            uri_for(&dir, SYMFONY_YAML_PATH),
+            line_of(SYMFONY_SERVICES_YAML, "app.mailer:")
         )]
     );
 }

@@ -2583,6 +2583,45 @@ mod tests {
         );
     }
 
+    /// Each `(method, argument)` Drupal code reads a name from through
+    /// `symfony_receiver_method`, with the Drupal class and kind the
+    /// receiver it gets must offer, so that a same-named arm placed before
+    /// Drupal's takes nothing away from it.
+    const DRUPAL_RECEIVER_METHODS: &[(&str, usize, &str, crate::symbol_map::StringKeyKind)] = &[
+        ("getStorage", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("getDefinition", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("hasDefinition", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        (
+            "getAccessControlHandler",
+            0,
+            ENTITY_TYPE_MANAGER,
+            ENTITY_TYPE,
+        ),
+        ("getViewBuilder", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("getListBuilder", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("getFormObject", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("getRouteProviders", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("hasHandler", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("getHandler", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+    ];
+
+    const ENTITY_TYPE_MANAGER: &str = "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
+    const ENTITY_TYPE: crate::symbol_map::StringKeyKind =
+        crate::symbol_map::StringKeyKind::DrupalEntityType;
+
+    #[test]
+    fn every_drupal_receiver_method_reaches_its_drupal_class() {
+        for &(method, index, class, kind) in DRUPAL_RECEIVER_METHODS {
+            let (receiver, _) =
+                crate::symbol_map::extraction::symfony_receiver_method(method, index)
+                    .unwrap_or_else(|| panic!("{method}#{index} names no receiver"));
+            assert!(
+                receiver.targets().contains(&(class, kind)),
+                "{method}#{index}: {receiver:?} has no {class} target of {kind:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_container_builders_definition_lookups_name_a_service() {
         let php = "<?php\nfunction f($container) {\n    $container->getDefinition('app.a');\n    $container->hasDefinition('app.b');\n}\n";
