@@ -1418,7 +1418,10 @@ them too. What they show PHPantom getting wrong is filed below under
 WP3, WP9 and WP15. Hooks and template parts produce no diagnostics
 today, so the baseline cannot rank WP5 and WP6; they rank by what an
 editor user compares first.</p>
-<p><strong>Benchmarks.</strong> <code>benches/wordpress_completion.rs</code> measures hook name
+<p><strong>Benchmarks.</strong> <code>benches/memory_usage.py</code> measures memory on a plugin
+project that installs the stubs and core through Composer
+(<code>memory_wordpress_plugin</code>), next to the Laravel, Symfony, and Yii
+scenarios. <code>benches/wordpress_completion.rs</code> measures hook name
 completion, going from a listener to the places that fire its hook, and
 member completion on values the stubs type, over a generated plugin and
 the plugins Composer installs beside it. Every item that adds a hook or

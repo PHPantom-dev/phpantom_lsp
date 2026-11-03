@@ -1097,6 +1097,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#p88-a-statement-the-end-of-the-file-cuts-off-parses-the-file-twice-per-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P88. A statement the end of the file cuts off parses the file twice per request
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1395,6 +1406,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#p88-a-statement-the-end-of-the-file-cuts-off-parses-the-file-twice-per-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P88. A statement the end of the file cuts off parses the file twice per request
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#appendix-profiling" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1553,6 +1575,31 @@ it is.</p>
 <code>src/type_engine/variable/forward_walk/scope_state/proofs.rs</code>,
 <code>shape_is_subshape</code> in <code>src/php_type/subtype.rs</code>, <code>runtime_shape_keys</code>
 in <code>src/php_type/shape_keys.rs</code>.</p>
+<hr />
+<h2 id="p88-a-statement-the-end-of-the-file-cuts-off-parses-the-file-twice-per-request">P88. A statement the end of the file cuts off parses the file twice per request<a class="headerlink" href="#p88-a-statement-the-end-of-the-file-cuts-off-parses-the-file-twice-per-request" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>While the last top-level statement of a file is unfinished (<code>$x-&gt;</code> typed
+at the end of a script or a routes file), every pass parses the whole
+file at least twice: <code>recovery::parse_program</code> parses it normally, sees
+<code>UnexpectedEndOfFile</code>, and parses it again with <code>recover_incomplete</code>
+through <code>parse_keeping_end</code>, and bracket recovery can add a third. The
+parse cache holds one result per pass, so each completion, hover, or
+diagnostic request pays it again.</p>
+<p>It is the step in <code>completion_classmap_size</code> (+30%, scaling with file
+size) and <code>completion_inheritance_depth</code> (+20%) on the latency
+dashboard, both of which end on such a statement; <code>completion_carbon_class</code>
+stayed flat. Measured locally with <code>cargo bench --bench completion</code>
+(2026-11-03): <code>classmap_size/1000_classes</code> went from 1.55 ms before
+<code>fe14e1ffe</code> to 2.04 ms after it, and is 2.00 ms at <code>4b99db3ba</code>.</p>
+<p>Parse with <code>recover_incomplete</code> from the start instead of as a retry, if
+mago's recovery leaves a file with no unfinished statement parsed the
+same; the syntax-error reporters that read the first parse's <code>errors</code>
+would then read the one parse's. Otherwise, keep the recovered parse
+across passes for an unchanged document version.</p>
+<p><strong>Where to look:</strong> <code>parse_program</code> and <code>reparse_dropped_code</code> in
+<code>src/parser/recovery.rs</code>, <code>close_open_brackets</code> in
+<code>src/parser/bracket_recovery.rs</code>, <code>ParsedTree</code> in
+<code>src/parser/parse_cache.rs</code>.</p>
 <hr />
 <h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
 <h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
