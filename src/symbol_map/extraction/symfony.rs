@@ -2637,11 +2637,27 @@ mod tests {
         ("getRouteProviders", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
         ("hasHandler", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
         ("getHandler", 0, ENTITY_TYPE_MANAGER, ENTITY_TYPE),
+        ("generate", 0, URL_GENERATOR, ROUTE),
+        ("generateFromRoute", 0, URL_GENERATOR, ROUTE),
+        ("setRedirect", 0, FORM_STATE, ROUTE),
+        ("redirect", 0, CONTROLLER_BASE, ROUTE),
+        ("redirect", 0, FORM_BASE, ROUTE),
+        ("redirect", 0, ENTITY_CONTROLLER, ROUTE),
+        ("checkNamedRoute", 0, ACCESS_MANAGER, ROUTE),
+        ("getRouteByName", 0, ROUTE_PROVIDER, ROUTE),
     ];
 
     const ENTITY_TYPE_MANAGER: &str = "Drupal\\Core\\Entity\\EntityTypeManagerInterface";
     const ENTITY_TYPE: crate::symbol_map::StringKeyKind =
         crate::symbol_map::StringKeyKind::DrupalEntityType;
+    const URL_GENERATOR: &str = "Drupal\\Core\\Routing\\UrlGeneratorInterface";
+    const FORM_STATE: &str = "Drupal\\Core\\Form\\FormStateInterface";
+    const CONTROLLER_BASE: &str = "Drupal\\Core\\Controller\\ControllerBase";
+    const FORM_BASE: &str = "Drupal\\Core\\Form\\FormBase";
+    const ENTITY_CONTROLLER: &str = "Drupal\\Core\\Entity\\Controller\\EntityController";
+    const ACCESS_MANAGER: &str = "Drupal\\Core\\Access\\AccessManagerInterface";
+    const ROUTE_PROVIDER: &str = "Drupal\\Core\\Routing\\RouteProviderInterface";
+    const ROUTE: crate::symbol_map::StringKeyKind = crate::symbol_map::StringKeyKind::DrupalRoute;
 
     #[test]
     fn every_drupal_receiver_method_reaches_its_drupal_class() {

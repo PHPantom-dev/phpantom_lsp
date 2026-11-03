@@ -109,6 +109,55 @@ final class Notes {
 const DRUPAL_NOTE_PATH: &str = "drupal/web/modules/custom/acme/src/Entity/Note.php";
 const DRUPAL_NOTES_PATH: &str = "drupal/web/modules/custom/acme/src/Notes.php";
 
+/// Each framework's routes, and the templates and calls that name them;
+/// and a Twig filter a Drupal module declares.
+const ROUTE_FILES: &[(&str, &str)] = &[
+    (LARAVEL_ROUTES_PATH, LARAVEL_ROUTES),
+    (LARAVEL_LINKS_PATH, LARAVEL_LINKS),
+    (DRUPAL_ROUTING_PATH, DRUPAL_ROUTING),
+    (DRUPAL_TEMPLATE_PATH, DRUPAL_TEMPLATE),
+    (DRUPAL_TWIG_EXTENSION_PATH, DRUPAL_TWIG_EXTENSION),
+    (SYMFONY_ROUTES_PATH, SYMFONY_ROUTES),
+    (SYMFONY_TEMPLATE_PATH, SYMFONY_TEMPLATE),
+];
+
+const LARAVEL_ROUTES: &str = "<?php\nRoute::get('/', 'home')->name('home');\n";
+const LARAVEL_LINKS: &str = "<?php\nnamespace App;\nclass Links {\n    public function demo(): void {\n        route('home');\n    }\n}\n";
+const LARAVEL_ROUTES_PATH: &str = "routes/web.php";
+const LARAVEL_LINKS_PATH: &str = "app/Links.php";
+
+const DRUPAL_ROUTING: &str = "acme.greeting:\n  path: '/greeting'\n";
+const DRUPAL_TEMPLATE: &str = "{{ path('acme.greeting') }}\n{{ name|acme_ }}\n";
+const DRUPAL_TWIG_EXTENSION: &str = r#"<?php
+namespace Drupal\acme\Twig;
+
+use Twig\Extension\AbstractExtension;
+use Twig\TwigFilter;
+
+final class AcmeExtension extends AbstractExtension
+{
+    public function getFilters(): array
+    {
+        return [new TwigFilter('acme_shout', [$this, 'shout'])];
+    }
+
+    public function shout(string $text): string
+    {
+        return '';
+    }
+}
+"#;
+const DRUPAL_ROUTING_PATH: &str = "drupal/web/modules/custom/acme/acme.routing.yml";
+const DRUPAL_TEMPLATE_PATH: &str =
+    "drupal/web/modules/custom/acme/templates/acme-greeting.html.twig";
+const DRUPAL_TWIG_EXTENSION_PATH: &str =
+    "drupal/web/modules/custom/acme/src/Twig/AcmeExtension.php";
+
+const SYMFONY_ROUTES: &str = "app_home:\n    path: /\n";
+const SYMFONY_TEMPLATE: &str = "<a href=\"{{ path('app_home') }}\">Home</a>\n";
+const SYMFONY_ROUTES_PATH: &str = "symfony/config/routes.yaml";
+const SYMFONY_TEMPLATE_PATH: &str = "symfony/templates/home.html.twig";
+
 // ─── Symfony, in `symfony/` ─────────────────────────────────────────────────
 
 const SYMFONY_COMPOSER: &str = r#"{
@@ -285,13 +334,14 @@ fn mixed_files() -> Vec<(String, &'static str)> {
     files.extend(
         ENTITY_FILES
             .iter()
+            .chain(ROUTE_FILES)
             .map(|(path, content)| (path.to_string(), *content)),
     );
     files
 }
 
-/// An initialized workspace holding `files`, with every PHP and YAML file
-/// among them open.
+/// An initialized workspace holding `files`, with every PHP, YAML, and
+/// Twig file among them open.
 async fn workspace(files: &[(String, &str)]) -> (Backend, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     for (path, content) in files {
@@ -306,6 +356,8 @@ async fn workspace(files: &[(String, &str)]) -> (Backend, tempfile::TempDir) {
             "php"
         } else if path.ends_with(".yml") || path.ends_with(".yaml") {
             "yaml"
+        } else if path.ends_with(".twig") {
+            "twig"
         } else {
             continue;
         };
@@ -540,6 +592,66 @@ async fn a_symfony_container_builder_still_names_services_beside_a_drupal_site()
             line_of(SYMFONY_SERVICES_YAML, "app.mailer:")
         )]
     );
+}
+
+/// A Symfony template outside the Drupal web root names Symfony's routes,
+/// and Laravel's `route()` names Laravel's.
+#[tokio::test]
+async fn symfony_and_laravel_routes_keep_working_beside_a_drupal_site() {
+    let (backend, dir) = workspace(&mixed_files()).await;
+
+    let found = definitions(
+        &backend,
+        &uri_for(&dir, SYMFONY_TEMPLATE_PATH),
+        position_in(SYMFONY_TEMPLATE, "path('app_home')", 7),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![(
+            uri_for(&dir, SYMFONY_ROUTES_PATH),
+            line_of(SYMFONY_ROUTES, "app_home:")
+        )]
+    );
+
+    let found = definitions(
+        &backend,
+        &uri_for(&dir, LARAVEL_LINKS_PATH),
+        position_in(LARAVEL_LINKS, "route('home')", 8),
+    )
+    .await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, uri_for(&dir, LARAVEL_ROUTES_PATH));
+}
+
+/// A Drupal template names Drupal's routes, and still completes the Twig
+/// filters an extension declares.
+#[tokio::test]
+async fn drupal_templates_work_in_the_drupal_site() {
+    let (backend, dir) = workspace(&mixed_files()).await;
+    let template = uri_for(&dir, DRUPAL_TEMPLATE_PATH);
+
+    let found = definitions(
+        &backend,
+        &template,
+        position_in(DRUPAL_TEMPLATE, "path('acme.greeting')", 8),
+    )
+    .await;
+    assert_eq!(
+        found,
+        vec![(
+            uri_for(&dir, DRUPAL_ROUTING_PATH),
+            line_of(DRUPAL_ROUTING, "acme.greeting:")
+        )]
+    );
+
+    let labels = completion_labels(
+        &backend,
+        &template,
+        position_in(DRUPAL_TEMPLATE, "|acme_", 6),
+    )
+    .await;
+    assert!(labels.contains(&"acme_shout".to_string()), "{labels:?}");
 }
 
 /// A Drupal lookup reads every project's service declarations, the
