@@ -442,18 +442,6 @@ moving the Blade file — defer that one until the rest is in place.
 Symfony service IDs and container parameters are string-key spans too,
 declarations included, so their rename comes with the same work.
 
-#### L56. Typed Laravel connection names
-
-**Impact: Medium · Complexity: Medium**
-
-The method name `->connection()` does not identify one config subtree: the
-receiver may select `database.connections.*`, `queue.connections.*`, or
-`broadcasting.connections.*`. Resolve it through the shared type engine, and
-treat `->onConnection()` as a queue connection. A model's `$connection` is a
-database connection, while the same property on a queueable job selects a
-queue connection. Each confirmed literal should receive the same completion,
-hover, navigation, diagnostics, and references as the direct facade spelling.
-
 #### L59. Typed controller middleware names
 
 **Impact: Low-Medium · Complexity: Medium**

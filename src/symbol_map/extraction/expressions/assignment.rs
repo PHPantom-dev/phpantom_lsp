@@ -19,6 +19,9 @@ pub(super) fn extract_assignment_expr<'a>(
     emit_drupal_render_array_assignment(assign, ctx);
     emit_drupal_attached_assignment_spans(assign, ctx);
     emit_drupal_callback_assignment(assign, ctx);
+    if connection_assignment_receiver(assign).is_some() {
+        record_connection_site(ReceiverClass::LaravelConnectionProperty, assign.rhs, ctx);
+    }
 
     // The definition only becomes visible *after* the entire
     // assignment expression — the RHS still sees the previous

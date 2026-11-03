@@ -10,6 +10,7 @@ use super::*;
 mod attributes;
 mod commands;
 mod config;
+mod connections;
 mod container;
 mod facade_calls;
 mod gates;
@@ -24,6 +25,9 @@ mod views;
 pub(in crate::symbol_map::extraction) use attributes::*;
 pub(in crate::symbol_map::extraction) use commands::*;
 pub(in crate::symbol_map::extraction) use config::*;
+pub(in crate::symbol_map::extraction) use connections::{
+    record_connection_property, record_connection_site,
+};
 pub(in crate::symbol_map::extraction) use container::*;
 pub(in crate::symbol_map::extraction) use facade_calls::*;
 pub(in crate::symbol_map::extraction) use gates::*;
@@ -36,6 +40,7 @@ pub(in crate::symbol_map::extraction) use spans::*;
 pub(in crate::symbol_map::extraction) use views::*;
 
 pub(crate) use config::{config_keys_written_by, is_config_repository_method};
+pub(crate) use connections::{connection_assignment_receiver, connection_receiver_method};
 pub(crate) use container::is_laravel_container_expr;
 pub(crate) use facade_calls::{
     argument_takes_name_keys, argument_takes_name_list, facade_static_call_arg_kind,
