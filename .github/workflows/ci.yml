@@ -13,6 +13,11 @@ env:
   # it exercises exactly what users run, including the mimalloc
   # allocator that is only compiled in for musl.
   CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
+  # Full debuginfo makes every debug test binary 500-900 MB, and the
+  # coverage and lint jobs build a dozen of them, which fills the
+  # runner's disk. Line tables keep file:line in panic backtraces,
+  # and coverage does not read debuginfo at all.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   lint:
@@ -43,7 +48,9 @@ jobs:
       # run here rather than in the test job so that job keeps measuring
       # exactly the feature set the released binary is built with.
       - run: cargo clippy --all-targets --features semantic-export -- -D warnings
-      - run: cargo test --features semantic-export semantic_export
+      # Only the lib and the integration binary hold these tests; building
+      # every other test target as well would only cost disk.
+      - run: cargo test --features semantic-export --lib --test integration semantic_export
 
   test-shard:
     name: Test (shard ${{ matrix.shard }}/${{ strategy.job-total }})
@@ -53,6 +60,14 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
+      # Every shard builds the full instrumented test suite, the largest
+      # build in this workflow. Drop preinstalled toolchains we never use
+      # to give it headroom.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -73,6 +88,12 @@ jobs:
         with:
           tool: cargo-llvm-cov,cargo-nextest
       - name: Run tests with coverage
+        env:
+          # nextest runs each test in its own process, and the default
+          # `%p` (per-pid) profile name leaves one full-size .profraw per
+          # test, thousands per shard. `%m` without `%p` merges every
+          # process of the same binary into a small pool of files instead.
+          LLVM_PROFILE_FILE_NAME: phpantom-%8m.profraw
         run: >-
           cargo llvm-cov nextest
           --partition hash:${{ matrix.shard }}/${{ strategy.job-total }}
