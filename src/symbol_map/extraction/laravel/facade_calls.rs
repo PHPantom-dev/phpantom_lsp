@@ -253,8 +253,11 @@ pub(in crate::symbol_map::extraction) fn emit_laravel_static_call_spans<'a>(
     ctx: &mut ExtractionCtx<'a>,
 ) {
     let laravel_span_start = ctx.spans.len();
-    if semantic_subject
+    // A bare global `RateLimiter` is Laravel's root alias for the facade;
+    // the span is deferred below until no real global class claims it.
+    if (semantic_subject
         .eq_ignore_ascii_case(crate::virtual_members::laravel::rate_limiters::RATE_LIMITER_FACADE)
+        || semantic_subject.eq_ignore_ascii_case("RateLimiter"))
         && member_name.eq_ignore_ascii_case("for")
         && let Some(name) =
             crate::virtual_members::laravel::rate_limiters::registration_name(argument_list)

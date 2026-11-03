@@ -134,7 +134,7 @@ new RateLimited('typo');
     assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
     assert_eq!(
         message_text(&diagnostics[0].message),
-        "Unknown rate limiter: 'missing'"
+        "Unknown rate limiter 'missing'"
     );
     assert_eq!(
         diagnostics[0].range.start,
@@ -142,7 +142,7 @@ new RateLimited('typo');
     );
     assert_eq!(
         message_text(&diagnostics[1].message),
-        "Unknown rate limiter: 'typo'"
+        "Unknown rate limiter 'typo'"
     );
 }
 
@@ -208,7 +208,7 @@ new \Illuminate\Queue\Middleware\RateLimited(other: 'missing');
 Route::middleware('throttle:fake');
 "#;
     let homonym = r#"<?php namespace App\Providers;
-class AppServiceProvider { public function boot() { RateLimiter::for('fake', fn () => null); \RateLimiter::for('also-fake', fn () => null); } }
+class AppServiceProvider { public function boot() { RateLimiter::for('fake', fn () => null); } }
 "#;
     let (backend, _dir, uri) = workspace(
         source,
@@ -223,7 +223,7 @@ class AppServiceProvider { public function boot() { RateLimiter::for('fake', fn 
             source,
             "invalid_laravel_rate_limiter"
         ),
-        ["Unknown rate limiter: 'fake'"]
+        ["Unknown rate limiter 'fake'"]
     );
 }
 
@@ -255,7 +255,7 @@ async fn rate_limiters_refresh_after_provider_buffer_edits() {
             source,
             "invalid_laravel_rate_limiter"
         ),
-        ["Unknown rate limiter: 'uploads'"]
+        ["Unknown rate limiter 'uploads'"]
     );
     open_php_at(
         &backend,
@@ -323,31 +323,8 @@ async fn rate_limiters_are_gated_on_a_laravel_project() {
 }
 
 #[tokio::test]
-async fn rate_limiters_decode_literals_and_escape_completion_edits() {
+async fn rate_limiters_decode_escaped_literals() {
     let provider = PROVIDER.replace("'uploads'", r"'baker\'s\\uploads'");
-    for (expression, needle, replacement) in [
-        (
-            r"Route::middleware('throttle:baker\'s');",
-            r"throttle:baker\'s",
-            r"baker\'s\\uploads",
-        ),
-        (
-            r#"new \Illuminate\Queue\Middleware\RateLimited("baker");"#,
-            "\"baker",
-            r"baker's\\uploads",
-        ),
-    ] {
-        let source = format!("<?php use Illuminate\\Support\\Facades\\Route; {expression}");
-        let (backend, _dir, uri) = workspace(&source, &provider, &[]).await;
-        let pos = position_after(&source, needle);
-        let items = complete_at_opened(&backend, &uri, pos.line, pos.character).await;
-        assert_eq!(items.len(), 1, "{items:?}");
-        assert_eq!(items[0].label, r"baker's\uploads");
-        let CompletionItemTextEdit::TextEdit(edit) = items[0].text_edit.as_ref().unwrap() else {
-            panic!("text edit")
-        };
-        assert_eq!(edit.new_text, replacement);
-    }
     let source = r"<?php use Illuminate\Support\Facades\Route; Route::middleware('throttle:baker\'s\\uploads');";
     let (backend, _dir, uri) = workspace(source, &provider, &[]).await;
     assert!(
@@ -606,5 +583,80 @@ class ExtraProvider { public function boot() { Limits::register(); AppServicePro
     assert_eq!(
         locations[0].range.start.line, 2,
         "the later declaration replaces the first"
+    );
+}
+
+#[tokio::test]
+async fn rate_limiters_read_every_place_an_application_registers_them() {
+    let provider = r#"<?php namespace App\Providers;
+use Illuminate\Cache\RateLimiter;
+class AppServiceProvider extends BaseProvider {
+    use RegistersLimits;
+    public function boot(RateLimiter $limiter): void {
+        \RateLimiter::for('aliased', fn () => null);
+        $limiter->for('injected', fn () => null);
+    }
+}
+"#;
+    let base = r"<?php namespace App\Providers; abstract class BaseProvider { public function register() { \Illuminate\Support\Facades\RateLimiter::for('inherited', fn () => null); } }";
+    let registers = r"<?php namespace App\Providers; trait RegistersLimits { public function limits() { \Illuminate\Support\Facades\RateLimiter::for('from-trait', fn () => null); } }";
+    let bootstrap = r"<?php use Illuminate\Support\Facades\RateLimiter; return fn ($app) => $app->booted(fn () => RateLimiter::for('booted', fn () => null));";
+    let routes = r"<?php use Illuminate\Support\Facades\RateLimiter; RateLimiter::for('in-routes', fn () => null);";
+    let source = r#"<?php use Illuminate\Queue\Middleware\RateLimited;
+new RateLimited('aliased');
+new RateLimited('injected');
+new RateLimited('inherited');
+new RateLimited('from-trait');
+new RateLimited('booted');
+new RateLimited('in-routes');
+new RateLimited('missing');
+"#;
+    let (backend, _dir, uri) = workspace(
+        source,
+        provider,
+        &[
+            ("src/Providers/BaseProvider.php", base),
+            ("src/Providers/RegistersLimits.php", registers),
+            ("bootstrap/app.php", bootstrap),
+            ("routes/web.php", routes),
+        ],
+    )
+    .await;
+    assert_eq!(
+        slow_diagnostic_messages(
+            &backend,
+            uri.as_str(),
+            source,
+            "invalid_laravel_rate_limiter"
+        ),
+        ["Unknown rate limiter 'missing'"]
+    );
+    // The root alias's registration is a declaration for find references.
+    let pos = position_after(source, "'alia");
+    let locations = references_response(&backend, &uri, pos, true)
+        .await
+        .unwrap_or_default();
+    assert_eq!(locations.len(), 2, "{locations:?}");
+}
+
+#[tokio::test]
+async fn rate_limiters_leave_unproven_instance_registrations_open() {
+    let provider = r#"<?php namespace App\Providers;
+class AppServiceProvider {
+    public function boot(): void {
+        app('limiter')->for($this->name(), fn () => null);
+    }
+}
+"#;
+    let source = "<?php new \\Illuminate\\Queue\\Middleware\\RateLimited('unknown');";
+    let (backend, _dir, uri) = workspace(source, provider, &[]).await;
+    assert!(
+        slow_diagnostic_messages(
+            &backend,
+            uri.as_str(),
+            source,
+            "invalid_laravel_rate_limiter"
+        )
+        .is_empty()
     );
 }

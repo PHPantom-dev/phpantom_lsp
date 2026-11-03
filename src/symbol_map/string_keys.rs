@@ -327,6 +327,7 @@ impl StringKeyKind {
             | Self::GateAbility
             | Self::ContainerBinding
             | Self::Middleware
+            | Self::RateLimiter
             | Self::Env
             | Self::Asset
             | Self::MixAsset
@@ -565,6 +566,7 @@ impl StringKeyDependency {
                 6 => name.eq_ignore_ascii_case("Config"),
                 7 => name.eq_ignore_ascii_case("Artisan"),
                 8 => name.eq_ignore_ascii_case("Response") || name.eq_ignore_ascii_case("Schedule"),
+                11 => name.eq_ignore_ascii_case("RateLimiter"),
                 _ => false,
             };
         is_alias.then(|| Self::Class(crate::atom::ascii_lowercase_atom(name)))

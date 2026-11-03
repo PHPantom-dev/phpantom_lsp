@@ -64,15 +64,15 @@ impl Backend {
                             if !site.array_rule && candidate.name.contains('|') {
                                 return None;
                             }
-                            crate::text_scan::escape_php_string_content(
+                            escape_literal_value(
                                 &validation::csv_parameter(&candidate.name)?,
                                 quote,
                             )
                         } else {
-                            crate::text_scan::escape_php_string_content(&candidate.name, quote)
+                            escape_literal_value(&candidate.name, quote)
                         }
                     } else {
-                        crate::text_scan::escape_php_string_content(&candidate.name, quote)
+                        escape_literal_value(&candidate.name, quote)
                     };
                     // Editors filter against the source the user typed, which may
                     // contain PHP escapes or a CSV enclosure absent from the value.

@@ -112,9 +112,10 @@ impl LaravelStringKeyCache {
                 || uri.ends_with("/composer.json")
                 || uri.ends_with("/composer.lock")
                 || uri.ends_with("/composer/installed.json")
-                || crate::virtual_members::laravel::rate_limiters::may_register_rate_limiter(
-                    content,
-                ))
+                || (memchr::memmem::find(content.as_bytes(), b"RateLimiter").is_some()
+                    && crate::virtual_members::laravel::rate_limiters::may_register_rate_limiter(
+                        content,
+                    )))
         {
             self.rate_limiters = None;
         }

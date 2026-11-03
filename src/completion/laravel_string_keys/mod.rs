@@ -354,17 +354,7 @@ impl Backend {
         // The candidate lists are shared with every other consumer, so only
         // the names the typed prefix keeps are copied out of them.
         let candidates = self.string_key_candidates(&ctx.kind, ctx.prefix);
-        let limiter_quote = (ctx.kind == StringKeyKind::RateLimiter)
-            .then(|| code.open_string.map(|(_, quote)| quote))
-            .flatten();
-        let literal = limiter_quote
-            .filter(|_| ctx.prefix.contains('\\'))
-            .map(|quote| format!("{quote}{}{quote}", ctx.prefix));
-        let prefix = literal
-            .as_deref()
-            .and_then(crate::text_scan::decode_php_string_literal)
-            .unwrap_or(std::borrow::Cow::Borrowed(ctx.prefix));
-        let prefix = prefix.as_bytes();
+        let prefix = ctx.prefix.as_bytes();
         let names: Vec<String> = candidates
             .iter()
             .filter(|name| {
@@ -375,25 +365,13 @@ impl Backend {
             .cloned()
             .collect();
 
-        let mut response = string_key_response(
+        string_key_response(
             names,
             string_key_item_kind(&ctx.kind),
             content,
             ctx.content_start_offset,
             position,
-        )?;
-        if let Some(quote) = limiter_quote
-            && let CompletionResponse::CompletionItemList(items) = &mut response
-        {
-            for item in items {
-                if let Some(CompletionItemTextEdit::TextEdit(edit)) = &mut item.text_edit {
-                    edit.new_text =
-                        crate::text_scan::escape_php_string_content(&edit.new_text, quote);
-                    item.filter_text = Some(edit.new_text.clone());
-                }
-            }
-        }
-        Some(response)
+        )
     }
 
     /// Try view-name completion inside a `view-string` argument.
