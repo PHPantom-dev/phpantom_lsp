@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793670676190,
+  "lastUpdate": 1793673937868,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9349,6 +9349,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 105,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "pierre@janalis.com",
+            "name": "phcorp",
+            "username": "phcorp"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2ada54f2f94415562b83e48d3cc6c2fc3a822ba3",
+          "message": "Walk a finally block with the paths that returned early from its try",
+          "timestamp": "2026-11-03T03:08:09+01:00",
+          "tree_id": "000ab871cd25dcf542e20489f7af5b52425f0a10",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2ada54f2f94415562b83e48d3cc6c2fc3a822ba3"
+        },
+        "date": 1793673925493,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 44.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 75.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 107.2,
             "unit": "MiB"
           }
         ]
