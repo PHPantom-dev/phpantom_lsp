@@ -10499,6 +10499,115 @@ fn mapwithkeys_does_not_bind_the_key_to_the_whole_return_type() {
     );
 }
 
+// ─── A null check written through `?? null` ────────────────────────────────
+
+/// `($row['k'] ?? null) !== null` holds exactly when the entry is set and
+/// not `null`, so it narrows the entry the way `isset()` does — in either
+/// operand order, on a property, after a guard clause and in the `else` of
+/// the `=== null` form. Read through the full pipeline, which is the one
+/// that narrows a property path.
+#[test]
+fn a_null_check_through_a_null_coalesce_narrows_the_coalesced_value() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class Coalesce
+{
+    private static function take(string $value): void {}
+
+    /** @param array{tooltip?: ?string} $cell */
+    public function offset(array $cell): void
+    {
+        if (null !== ($cell['tooltip'] ?? null)) {
+            self::take($cell['tooltip']);
+        }
+    }
+
+    /** @param array{tooltip?: ?string} $cell */
+    public function yoda(array $cell): void
+    {
+        if (($cell['tooltip'] ?? null) !== null) {
+            self::take($cell['tooltip']);
+        }
+    }
+
+    public function property(?Box $box): void
+    {
+        if (null !== ($box->label ?? null)) {
+            self::take($box->label);
+        }
+    }
+
+    /** @param array{tooltip?: ?string} $cell */
+    public function guard(array $cell): void
+    {
+        if (($cell['tooltip'] ?? null) === null) {
+            return;
+        }
+        self::take($cell['tooltip']);
+    }
+
+    public function propertyGuard(Box $box): void
+    {
+        if (($box->label ?? null) === null) {
+            return;
+        }
+        self::take($box->label);
+    }
+
+    /** @param array{meta?: array{tooltip?: ?string}} $cell */
+    public function nested(array $cell): void
+    {
+        if (($cell['meta']['tooltip'] ?? null) !== null) {
+            self::take($cell['meta']['tooltip']);
+        }
+    }
+
+    /** @param array{tooltip?: ?string} $cell */
+    public function otherwise(array $cell): void
+    {
+        if (($cell['tooltip'] ?? null) === null) {
+            echo 'none';
+        } else {
+            self::take($cell['tooltip']);
+        }
+    }
+}
+
+final class Box
+{
+    public ?string $label = null;
+}
+"#;
+    let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// Only a `null` fallback ties a null check to the value: with any other
+/// fallback the coalesce holds that fallback whenever the entry is unset,
+/// so `($x ?? 'none') !== null` is always true.
+#[test]
+fn a_null_check_on_a_coalesce_onto_anything_but_null_proves_nothing() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class More
+{
+    private static function take(string $value): void {}
+
+    /** @param array{tooltip?: ?string} $cell */
+    public function otherFallback(array $cell): void
+    {
+        if (null !== ($cell['tooltip'] ?? 'none')) {
+            self::take($cell['tooltip']);
+        }
+    }
+}
+"#;
+    let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
 // ─── PHPDoc pseudo-type spellings we have no model for ──────────────────────
 
 /// A hyphenated spelling that no keyword covers used to be qualified against

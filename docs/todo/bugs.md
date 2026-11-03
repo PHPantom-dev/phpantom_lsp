@@ -65,6 +65,30 @@ matches PHP 8 throwing a `ValueError` on a negative.
 Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.
 
+### B687. A sentinel check through `?? <sentinel>` other than `null` narrows nothing
+
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param array{flag?: string|false|null} $cell */
+function f(array $cell): void {
+    if (false !== ($cell['flag'] ?? false)) {
+        take($cell['flag']); // expects string, got string|false|null
+    }
+}
+```
+
+The coalesce is `false` when the entry is unset, `null` or `false`, so
+passing the check proves the entry set and neither `null` nor `false`.
+Only the `?? null` form is read through today.
+
+**Where to change:** `coalesced_onto_null_subject` in
+`src/type_engine/variable/forward_walk/cond_narrowing/predicates.rs`
+reads only a `null` fallback. Generalize it to a fallback that is the
+compared sentinel, and have the `false` sites in `null_narrowing.rs`
+(`extract_non_false_check_var` truthy, `extract_false_equality_check_var`
+inverse) strip `null` as well as `false` from the coalesced subject.
+
 ## Array types
 
 No outstanding items.
