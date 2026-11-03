@@ -507,3 +507,71 @@ async fn a_named_service_id_is_typed() {
     .unwrap_or_default();
     assert!(hover.contains("Greeter"), "{hover}");
 }
+
+/// Core's `\Drupal::service()`, with the conditional return type that types
+/// a lookup by class name as that class.
+const DRUPAL_WITH_CONDITIONAL_RETURN: &str = r#"<?php
+class Drupal {
+    /**
+     * @param class-string<T>|string $id
+     *
+     * @template T of object
+     *
+     * @return ($id is class-string<T> ? T : object)
+     */
+    public static function service(string $id): object {}
+}
+"#;
+
+const GREETER_INTERFACE: &str = "<?php\nnamespace Drupal\\acme;\ninterface GreeterInterface {\n    public function greetFormally(): string;\n}\n";
+
+const INTERFACE_CONSUMER: &str = r#"<?php
+namespace Drupal\acme;
+
+final class InterfaceConsumer {
+    public function run(): void {
+        $greeter = \Drupal::service(GreeterInterface::class);
+        $greeter;
+        \Drupal::service(GreeterInterface::class)->
+    }
+}
+"#;
+
+const INTERFACE_CONSUMER_PATH: &str = "web/modules/custom/acme/src/InterfaceConsumer.php";
+
+/// A service registered under its interface is fetched by the interface's
+/// class name, and typed as that interface rather than as the class the
+/// alias leads to.
+#[tokio::test]
+async fn a_service_fetched_by_its_interface_is_typed_as_the_interface() {
+    let services = format!("{SERVICES}  Drupal\\acme\\GreeterInterface: '@acme.greeter'\n");
+    let (backend, dir) = workspace(&[
+        ("web/core/lib/Drupal.php", DRUPAL_WITH_CONDITIONAL_RETURN),
+        (
+            "web/modules/custom/acme/src/GreeterInterface.php",
+            GREETER_INTERFACE,
+        ),
+        (SERVICES_PATH, services.as_str()),
+        (INTERFACE_CONSUMER_PATH, INTERFACE_CONSUMER),
+    ])
+    .await;
+    let consumer = uri_for(&dir, INTERFACE_CONSUMER_PATH);
+
+    let position = position_in(INTERFACE_CONSUMER, "$greeter;", 2);
+    let hover = hover_text_at(&backend, &consumer, position.line, position.character)
+        .await
+        .unwrap_or_default();
+    assert!(hover.contains("GreeterInterface"), "{hover}");
+
+    let needle = "GreeterInterface::class)->";
+    let position = position_in(INTERFACE_CONSUMER, needle, needle.len());
+    let labels = response_labels(
+        completion_response(&backend, &consumer, position.line, position.character, None).await,
+    );
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.starts_with("greetFormally")),
+        "{labels:?}"
+    );
+}

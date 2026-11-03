@@ -134,6 +134,7 @@ require_once "$theme/acme_theme.theme";
 $themeHook = new ReflectionMethod(AcmeHooks::class, 'theme');
 $themeHooks = (new AcmeHooks())->theme();
 check('acme_help() implements hook_help procedurally', function_exists('acme_help'));
+check('acme_help() also looks the greeter up by its class name, which acme.services.yml registers', str_contains((string) file_get_contents("$module/acme.module"), '\\Drupal::service(Greeter::class)') && $container->hasAlias(Greeter::class));
 check("acme_help() looks up acme.greeter, which acme.services.yml declares", str_contains((string) file_get_contents("$module/acme.module"), "\\Drupal::service('acme.greeter')") && $container->hasDefinition('acme.greeter'));
 check("AcmeHooks::theme() implements hook_theme through #[Hook('theme')]", attributeArguments($themeHook, Hook::class) === ['theme']);
 check('hook_theme declares the acme_greeting theme hook', isset($themeHooks['acme_greeting']));
