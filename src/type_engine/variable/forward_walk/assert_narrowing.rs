@@ -242,6 +242,7 @@ pub(crate) fn process_assert_narrowing<'b>(
         // @phpstan-assert / @psalm-assert
         let mut type_guard: Option<(condition_facts::TypeGuardKind, bool)> = None;
         let mut asserted_value: Option<PhpType> = None;
+        let mut asserted_union: Option<PhpType> = None;
         let mut intersected = false;
         ResolvedType::apply_narrowing(&mut results, |classes| {
             condition_facts::try_apply_custom_assert_narrowing(
@@ -250,6 +251,7 @@ pub(crate) fn process_assert_narrowing<'b>(
                 classes,
                 &mut type_guard,
                 &mut asserted_value,
+                &mut asserted_union,
                 &mut intersected,
             )
         });
@@ -285,6 +287,9 @@ pub(crate) fn process_assert_narrowing<'b>(
         }
         if let Some(value) = &asserted_value {
             condition_facts::narrow_to_asserted_value(value, &mut results);
+        }
+        if let Some(union) = &asserted_union {
+            narrow_to_assertion(&var_name, &mut results, union, false, ctx, &scope_resolver);
         }
 
         // A not-null assertion (`@phpstan-assert !null $x`, e.g. PHPUnit's

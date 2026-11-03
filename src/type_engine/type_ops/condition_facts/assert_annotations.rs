@@ -423,6 +423,22 @@ pub(in crate::type_engine) fn scalar_inclusion_guard_kind(ty: &PhpType) -> Optio
     }
 }
 
+/// The alternatives a positive assertion of `ty` accepts: the members of a
+/// union, with a `?T` spelled out as `T` and `null`.
+pub(in crate::type_engine) fn asserted_alternatives(ty: &PhpType) -> Vec<PhpType> {
+    let mut alternatives = Vec::new();
+    for member in ty.union_members() {
+        match member.kind() {
+            TypeKind::Nullable(inner) => {
+                alternatives.extend(inner.union_members().into_iter().cloned());
+                alternatives.push(PhpType::null());
+            }
+            _ => alternatives.push(member.clone()),
+        }
+    }
+    alternatives
+}
+
 /// Narrow `results` to the one value a positive assertion pinned them to.
 ///
 /// [`scalar_inclusion_guard_kind`] keeps only the subject's members of a
@@ -464,6 +480,11 @@ pub(in crate::type_engine) fn narrow_to_asserted_value(
 /// came from a single value (`assertSame(4, $x)`), `*asserted_value` holds
 /// it for [`narrow_to_asserted_value`] to apply after the guard.
 ///
+/// A positive assertion of a union (`?Dog`, `int|string`) can be met by any
+/// of its alternatives, which neither channel above expresses, so it is
+/// handed back whole in `*asserted_union` for the caller to narrow the full
+/// resolved types to.
+///
 /// `*intersected` is set when the assertion proved a class the subject
 /// does not nominally implement — PHPUnit's `assertInstanceOf(Node::class,
 /// $mock)` on a `MockObject`, where the value really is both at once. The
@@ -482,6 +503,7 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
     results: &mut Vec<Arc<ClassInfo>>,
     type_guard: &mut Option<(TypeGuardKind, bool)>,
     asserted_value: &mut Option<PhpType>,
+    asserted_union: &mut Option<PhpType>,
     intersected: &mut bool,
 ) -> bool {
     let expr = match expr {
@@ -527,6 +549,11 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
                     Some(bound) if !assertion.negated => effective_type = bound.clone(),
                     _ => continue,
                 }
+            }
+
+            if !assertion.negated && asserted_alternatives(&effective_type).len() > 1 {
+                *asserted_union = Some(effective_type);
+                continue;
             }
 
             // Scalar / pseudo-type assertions (`assertIsString`,

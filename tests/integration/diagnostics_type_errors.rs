@@ -10854,6 +10854,56 @@ final class More
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
+/// `($x ?? false) !== false` is `false` when the entry is unset, `null` or
+/// `false`, so passing it proves the entry set and neither of the two, in
+/// the truthy branch and past a guard written as `=== false`.
+#[test]
+fn a_false_check_through_a_false_coalesce_narrows_the_coalesced_value() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class FalseCoalesce
+{
+    private static function take(string $value): void {}
+
+    /** @param array{flag?: string|false|null} $cell */
+    public function offset(array $cell): void
+    {
+        if (false !== ($cell['flag'] ?? false)) {
+            self::take($cell['flag']);
+        }
+    }
+
+    /** @param array{flag?: string|false|null} $cell */
+    public function guard(array $cell): void
+    {
+        if (($cell['flag'] ?? false) === false) {
+            return;
+        }
+        self::take($cell['flag']);
+    }
+
+    public function variable(string|false|null $flag): void
+    {
+        if (($flag ?? false) !== false) {
+            self::take($flag);
+        }
+    }
+
+    /** @param array{flag?: string|false|null} $cell */
+    public function otherFallback(array $cell): void
+    {
+        if (false !== ($cell['flag'] ?? null)) {
+            self::take($cell['flag']);
+        }
+    }
+}
+"#;
+    let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("null"), "got {messages:?}");
+}
+
 // ─── PHPDoc pseudo-type spellings we have no model for ──────────────────────
 
 /// A hyphenated spelling that no keyword covers used to be qualified against
@@ -16995,4 +17045,131 @@ final class Width {
         msgs.iter().any(|m| m.ends_with("got 4")),
         "inside `if (same(4, $width))`, `$width` is 4, got: {msgs:?}"
     );
+}
+
+// ─── A positive assertion of a nullable or union type ──────────────────────
+
+/// The classes and assertion helpers the union-assertion tests share. Each
+/// test reads the narrowed type off the "got …" of a `\stdClass` parameter.
+const UNION_ASSERTIONS: &str = r#"
+class Pet {}
+final class Dog extends Pet {}
+final class Cat {}
+
+/** @phpstan-assert ?Dog $x */
+function isMaybeDog(mixed $x): void {}
+
+/** @phpstan-assert Dog|int $x */
+function isDogOrInt(mixed $x): void {}
+
+/** @phpstan-assert-if-true ?Dog $x */
+function maybeDog(mixed $x): bool { return true; }
+
+/**
+ * @template ExpectedType
+ * @param ExpectedType $expected
+ * @phpstan-assert =ExpectedType $actual
+ */
+function assertSame(mixed $expected, mixed $actual): void {}
+
+/**
+ * @template ExpectedType of object
+ * @param class-string<ExpectedType> $expected
+ * @phpstan-assert ExpectedType $actual
+ */
+function assertInstanceOf(string $expected, mixed $actual): void {}
+
+function label(\stdClass $s): void {}
+"#;
+
+fn union_assertion_got(body: &str) -> Vec<String> {
+    let php = format!("<?php\n{UNION_ASSERTIONS}\n{body}\n");
+    let diags = collect_with_full_stubs(&php);
+    messages_with_code(&diags, "type_mismatch_argument")
+        .into_iter()
+        .filter_map(|m| m.rsplit_once("got ").map(|(_, got)| got.to_string()))
+        .collect()
+}
+
+#[test]
+fn a_nullable_class_assertion_keeps_the_null() {
+    let got = union_assertion_got(
+        r#"function f(Dog|Cat|null $x): void {
+    isMaybeDog($x);
+    label($x);
+}"#,
+    );
+    assert_eq!(got, ["Dog|null"]);
+}
+
+#[test]
+fn a_class_and_scalar_union_assertion_keeps_both_halves() {
+    let got = union_assertion_got(
+        r#"function f(Dog|Cat|int|string $x): void {
+    isDogOrInt($x);
+    label($x);
+}"#,
+    );
+    assert_eq!(got, ["Dog|int"]);
+}
+
+#[test]
+fn a_conditional_nullable_class_assertion_keeps_the_null() {
+    let got = union_assertion_got(
+        r#"function f(Dog|Cat|null $x): void {
+    if (maybeDog($x)) {
+        label($x);
+    }
+}"#,
+    );
+    assert_eq!(got, ["Dog|null"]);
+}
+
+#[test]
+fn an_equality_assertion_bound_to_a_nullable_class_keeps_the_null() {
+    let got = union_assertion_got(
+        r#"function f(?Dog $expected, Dog|Cat|null $actual): void {
+    assertSame($expected, $actual);
+    label($actual);
+}"#,
+    );
+    assert_eq!(got, ["Dog|null"]);
+}
+
+#[test]
+fn an_equality_assertion_bound_to_a_scalar_union_narrows_to_it() {
+    let got = union_assertion_got(
+        r#"function f(int|string $expected, int|string|float|null $actual): void {
+    assertSame($expected, $actual);
+    label($actual);
+}"#,
+    );
+    assert_eq!(got, ["int|string"]);
+}
+
+#[test]
+fn an_instance_assertion_from_a_class_string_variable_keeps_its_subclasses() {
+    let got = union_assertion_got(
+        r#"/** @param class-string<Pet> $petClass */
+function f(string $petClass, Dog|Pet|int $x): void {
+    assertInstanceOf($petClass, $x);
+    label($x);
+}"#,
+    );
+    assert_eq!(got, ["Dog|Pet"]);
+}
+
+/// `assertSame($row['k'] ?? null, $dog)` on a `mixed` entry binds the
+/// template to `mixed|null`, which any value satisfies, so the subject keeps
+/// its type rather than picking up the `null`.
+#[test]
+fn an_equality_assertion_bound_to_mixed_or_null_keeps_the_subject() {
+    let got = union_assertion_got(
+        r#"/** @param array<string, mixed> $data */
+function f(array $data, Dog $actual): void {
+    assertSame($data['k'] ?? null, $actual);
+    label($actual);
+}"#,
+    );
+    assert_eq!(got, ["Dog"]);
 }
