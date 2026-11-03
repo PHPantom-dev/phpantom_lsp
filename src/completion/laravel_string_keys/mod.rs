@@ -55,6 +55,7 @@ pub(crate) fn string_key_item_kind(kind: &StringKeyKind) -> CompletionItemKind {
         StringKeyKind::MorphAlias => CompletionItemKind::EnumMember,
         StringKeyKind::Middleware => CompletionItemKind::Class,
         StringKeyKind::GateAbility => CompletionItemKind::Method,
+        StringKeyKind::RateLimiter => CompletionItemKind::Value,
         StringKeyKind::Env => CompletionItemKind::Constant,
         StringKeyKind::ServiceId => CompletionItemKind::Reference,
         StringKeyKind::DrupalEntityType
@@ -207,6 +208,7 @@ impl Backend {
             }
             StringKeyKind::GateAbility => self.cached_gate_abilities(),
             StringKeyKind::Middleware => self.laravel.middleware.read().all_names().into(),
+            StringKeyKind::RateLimiter => Arc::clone(&self.cached_rate_limiters().names),
             StringKeyKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self).into(),
             StringKeyKind::MixAsset => self.mix_manifest_keys(typed_prefix).into(),
             StringKeyKind::InertiaPage => self.inertia_pages().page_names().into(),
@@ -352,7 +354,17 @@ impl Backend {
         // The candidate lists are shared with every other consumer, so only
         // the names the typed prefix keeps are copied out of them.
         let candidates = self.string_key_candidates(&ctx.kind, ctx.prefix);
-        let prefix = ctx.prefix.as_bytes();
+        let limiter_quote = (ctx.kind == StringKeyKind::RateLimiter)
+            .then(|| code.open_string.map(|(_, quote)| quote))
+            .flatten();
+        let literal = limiter_quote
+            .filter(|_| ctx.prefix.contains('\\'))
+            .map(|quote| format!("{quote}{}{quote}", ctx.prefix));
+        let prefix = literal
+            .as_deref()
+            .and_then(crate::text_scan::decode_php_string_literal)
+            .unwrap_or(std::borrow::Cow::Borrowed(ctx.prefix));
+        let prefix = prefix.as_bytes();
         let names: Vec<String> = candidates
             .iter()
             .filter(|name| {
@@ -363,13 +375,25 @@ impl Backend {
             .cloned()
             .collect();
 
-        string_key_response(
+        let mut response = string_key_response(
             names,
             string_key_item_kind(&ctx.kind),
             content,
             ctx.content_start_offset,
             position,
-        )
+        )?;
+        if let Some(quote) = limiter_quote
+            && let CompletionResponse::CompletionItemList(items) = &mut response
+        {
+            for item in items {
+                if let Some(CompletionItemTextEdit::TextEdit(edit)) = &mut item.text_edit {
+                    edit.new_text =
+                        crate::text_scan::escape_php_string_content(&edit.new_text, quote);
+                    item.filter_text = Some(edit.new_text.clone());
+                }
+            }
+        }
+        Some(response)
     }
 
     /// Try view-name completion inside a `view-string` argument.

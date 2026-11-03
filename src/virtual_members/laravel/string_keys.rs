@@ -70,6 +70,12 @@ pub(crate) fn resolve_laravel_string_key(
         StringKeyKind::MorphAlias => resolve_morph_alias_definitions(backend, key),
         StringKeyKind::GateAbility => resolve_gate_ability_definitions(backend, key),
         StringKeyKind::Middleware => resolve_middleware_definitions(backend, key),
+        StringKeyKind::RateLimiter => backend
+            .cached_rate_limiters()
+            .location(key)
+            .cloned()
+            .into_iter()
+            .collect(),
         StringKeyKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
         StringKeyKind::Env => super::env_vars::resolve_env_definitions(backend, key),
         StringKeyKind::Asset
@@ -350,6 +356,7 @@ pub(crate) fn find_laravel_string_key_references(
         | StringKeyKind::MorphAlias
         | StringKeyKind::GateAbility
         | StringKeyKind::Middleware
+        | StringKeyKind::RateLimiter
         | StringKeyKind::ContainerBinding
         | StringKeyKind::Env
         | StringKeyKind::Asset

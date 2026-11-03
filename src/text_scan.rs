@@ -169,6 +169,18 @@ pub(crate) fn unquote_php_string(raw: &str) -> Option<&str> {
     is_whole_string_literal(raw).then(|| &raw[1..raw.len() - 1])
 }
 
+/// Escape a runtime value for insertion inside an existing PHP string literal.
+pub(crate) fn escape_php_string_content(value: &str, quote: char) -> String {
+    let mut text = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch == '\\' || ch == quote || (quote == '"' && ch == '$') {
+            text.push('\\');
+        }
+        text.push(ch);
+    }
+    text
+}
+
 /// Decode a PHP string literal's source spelling (including its
 /// surrounding quotes) into the value PHP produces at runtime.
 ///
