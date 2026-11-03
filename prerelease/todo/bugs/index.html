@@ -940,6 +940,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b726-a-dynamic-class-string-key-written-into-a-shape-widens-every-key-to-string" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B726. A dynamic <code>class-string</code> key written into a shape widens every key to <code>string</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b728-a-key-written-into-a-plain-array-turns-it-into-a-closed-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B728. A key written into a plain <code>array</code> turns it into a closed shape
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1033,6 +1061,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b727-a-property-or-method-named-by-a-variable-does-not-resolve-in-a-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B727. A property or method named by a variable does not resolve in a chain
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1614,6 +1659,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b726-a-dynamic-class-string-key-written-into-a-shape-widens-every-key-to-string" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B726. A dynamic <code>class-string</code> key written into a shape widens every key to <code>string</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b728-a-key-written-into-a-plain-array-turns-it-into-a-closed-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B728. A key written into a plain <code>array</code> turns it into a closed shape
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1707,6 +1780,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b727-a-property-or-method-named-by-a-variable-does-not-resolve-in-a-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B727. A property or method named by a variable does not resolve in a chain
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1812,7 +1902,66 @@ matches PHP 8 throwing a <code>ValueError</code> on a negative.</p>
 <p>Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b726-a-dynamic-class-string-key-written-into-a-shape-widens-every-key-to-string">B726. A dynamic <code>class-string</code> key written into a shape widens every key to <code>string</code><a class="headerlink" href="#b726-a-dynamic-class-string-key-written-into-a-shape-widens-every-key-to-string" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">private const PAIRS = [NodeTraverser::class =&gt; [...]];</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$pairs = self::PAIRS;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">if (class_exists($className)) {</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    $pairs[$className] = [...];</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">foreach (array_keys($pairs) as $class) {</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    new ReflectionClass($class);</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    // expects class-string&lt;object&gt;|object, got string</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>array_keys(self::PAIRS)</code> alone gives <code>list&lt;class-string&lt;NodeTraverser&gt;&gt;</code>,
+and <code>$className</code> is a <code>class-string</code> after the <code>class_exists()</code> check, so
+every key is a class name. Once the dynamic write turns the shape into
+<code>array&lt;K, V&gt;</code>, the shape's key reads as the literal <code>'NodeTraverser'</code>
+rather than a class string, and joining it with <code>class-string</code> collapses
+the key domain to <code>string</code>. A non-class literal key (<code>['x' =&gt; 1]</code> then
+<code>$a[$cs] = 2</code>) also gives <code>array&lt;string, …&gt;</code>, where <code>'x'|class-string</code>
+would be exact.</p>
+<p>This started to show when <code>new ReflectionClass()</code>'s
+<code>T|class-string&lt;T&gt;</code> parameter began rejecting a plain <code>string</code>.</p>
+<p><strong>Where to change:</strong> <code>merge_keyed_type_inner</code> and <code>join_element_types</code>
+in <code>src/type_engine/variable/array_shape_writes.rs</code>. A shape key that
+names a class should become <code>class-string&lt;Foo&gt;</code> there, the way
+<code>merge_shape_key</code> already does through <code>class_name_key</code>, and the join
+should keep a union of <code>class-string</code> members instead of widening it to
+<code>string</code>.</p>
+<p>Found in PHPStan's own build script that collects the classes its native
+extension shadows (two sites).</p>
+<h3 id="b728-a-key-written-into-a-plain-array-turns-it-into-a-closed-shape">B728. A key written into a plain <code>array</code> turns it into a closed shape<a class="headerlink" href="#b728-a-key-written-into-a-plain-array-turns-it-into-a-closed-shape" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @param array $args */</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function add(string $id, array $args, mixed $default): void {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    $args['settings'] = $id;           // array{settings: string}</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $args['defaultValue'] = $default;  // array{settings: string, defaultValue: mixed}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    $wp_customize-&gt;add_control($id, $args);</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    // expects array{…, settings?: array, …}, got array{settings: string, defaultValue?: mixed}</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    // (undeclared key 'defaultValue')</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>$args</code> holds whatever keys the caller passed, so after the writes it is
+still an array with unknown keys that also has <code>settings</code> and
+<code>defaultValue</code>. The write rebuilds it as a shape holding only the written
+keys, which then gets checked as if those were all the keys there are:
+an <code>undeclared key</code> report against a closed parameter shape, where a plain
+<code>array</code> is accepted. A tracked <code>array&lt;K, V&gt;</code> base does not have this
+problem: <code>merge_shape_key</code> folds the write into the key/value pair. A bare
+<code>array</code> has no key type, so it falls through to the shape path meant for
+<code>[]</code>.</p>
+<p><strong>Where to change:</strong> <code>merge_shape_key</code> in
+<code>src/type_engine/variable/array_shape_writes.rs</code>. A bare <code>array</code> (or
+<code>mixed[]</code>) base should keep its open key domain after the write. Ideally
+it should also remember the written keys for later reads, the way
+PHPStan's <code>hasOffsetValue</code> does. If that is not possible without an
+intersection type, it should become <code>non-empty-array&lt;array-key, …&gt;</code>.</p>
+<p>Found in a WordPress theme's customizer helper, which adds keys to the
+caller's control arguments before passing them to
+<code>WP_Customize_Manager::add_control()</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
@@ -1824,13 +1973,13 @@ seconds a rate-limit message names.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first">B704. A function declared in two files resolves to whichever is found first<a class="headerlink" href="#b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function __() {}</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function __() {}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
 </code></pre></div>
 <p>WordPress core declares nineteen of its functions a second time as
 no-ops for its script loader. Calls across the project resolve to the
@@ -1847,7 +1996,36 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="code-actions">Code actions<a class="headerlink" href="#code-actions" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b727-a-property-or-method-named-by-a-variable-does-not-resolve-in-a-chain">B727. A property or method named by a variable does not resolve in a chain<a class="headerlink" href="#b727-a-property-or-method-named-by-a-variable-does-not-resolve-in-a-chain" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @param array{price: Decimal, member_price: Decimal} $prices */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">function differences(ProductPrice $price, array $prices): void {</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    foreach ($prices as $column =&gt; $amount) {</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">        $price-&gt;{$column}-&gt;equals($amount);</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">        // Cannot verify method 'equals': the type of its subject could not be resolved</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    }</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">}</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">$name = 'getD';</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">$p-&gt;$name()-&gt;equals($d);   // type of '$p-&gt;?()' could not be resolved</span>
+</code></pre></div>
+<p><code>$column</code> is <code>'price'|'member_price'</code>, so <code>$price-&gt;{$column}</code> is the
+union of those two properties' types. Even a single literal does not
+resolve as the subject of a chain, whether it is a property (<code>$m-&gt;$col</code>,
+<code>$m-&gt;{$col}</code>) or a method call (<code>$m-&gt;$meth()</code>). The symbol map records the
+member as <code>?</code>. <code>resolve_dynamic_member_name</code> in
+<code>src/type_engine/resolver/variable_subjects.rs</code> takes only the first
+literal it finds, and is only consulted from the call-return path in
+<code>call_resolution/return_types.rs</code>.</p>
+<p>The name should resolve to every literal the variable can hold, joining
+the member types, for property fetches as well as calls and wherever the
+access sits in a chain. The <code>dynamic_member_names</code> diagnostic already
+reads the same literal set.</p>
+<p>Before 2026-10-27 this site resolved <code>$price-&gt;{$column}</code> to <code>ProductPrice</code>
+itself, so <code>equals()</code> was looked up on the model and hidden by its
+<code>__call</code>. It now shows up as unresolved under <code>unresolved-member-access</code>.</p>
+<p>Found in a Laravel project's back-office tool comparing a price row's
+columns against a cached copy.</p>
 
 
 
