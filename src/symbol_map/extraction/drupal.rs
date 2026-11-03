@@ -1453,6 +1453,39 @@ mod tests {
     use super::*;
     use crate::names::OwnedResolvedNames;
 
+    /// Every invoking method of the module handler and the theme manager,
+    /// at the argument it names a hook in, reaches a receiver that offers
+    /// that class's hooks, whichever other table also has the method.
+    #[test]
+    fn every_hook_invoker_reaches_its_drupal_class() {
+        for (invokers, class) in [
+            (
+                &MODULE_INVOKERS[..],
+                "Drupal\\Core\\Extension\\ModuleHandlerInterface",
+            ),
+            (
+                &THEME_INVOKERS[..],
+                "Drupal\\Core\\Theme\\ThemeManagerInterface",
+            ),
+        ] {
+            for invoker in invokers {
+                let (receiver, alter) = hook_invocation(invoker.method, invoker.hook)
+                    .unwrap_or_else(|| {
+                        panic!("{}#{} names no receiver", invoker.method, invoker.hook)
+                    });
+                assert_eq!(alter, invoker.alter, "{}#{}", invoker.method, invoker.hook);
+                assert!(
+                    receiver
+                        .targets()
+                        .contains(&(class, StringKeyKind::DrupalHook)),
+                    "{}#{}: {receiver:?} has no {class} target",
+                    invoker.method,
+                    invoker.hook
+                );
+            }
+        }
+    }
+
     /// The entity type IDs, classes, and storages `php` declares.
     fn declared(php: &str) -> Vec<(String, String, Option<String>)> {
         let arena = mago_allocator::LocalArena::new();
