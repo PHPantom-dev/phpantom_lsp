@@ -607,6 +607,14 @@ fn extract_static_method_call<'a>(
                 &mut ctx.spans,
             );
         }
+        if ctx.drupal && crate::drupal::is_entity_query(semantic_subject, &member_name) {
+            try_emit_laravel_string_span(
+                crate::symbol_map::StringKeyKind::DrupalEntityType,
+                &static_call.argument_list,
+                ctx.content,
+                &mut ctx.spans,
+            );
+        }
     }
     extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);
 }

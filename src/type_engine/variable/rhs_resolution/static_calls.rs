@@ -186,6 +186,14 @@ fn static_call_on_class(
         ) {
             return result;
         }
+        if let Some(result) = super::drupal_calls::try_resolve_entity_query_type(
+            &owner.fqn(),
+            method_name,
+            argument_list,
+            ctx,
+        ) {
+            return result;
+        }
     }
 
     let arg_texts = static_arg_texts(static_call, ctx);

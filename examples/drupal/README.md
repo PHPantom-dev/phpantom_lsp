@@ -36,7 +36,10 @@ Run `composer install` here first. Composer puts core and contrib into
   `$storage` and `$note` in `first()`, typed as the storage and as `Note`,
   or go to the definition of `'acme_note'`, which lands on the `id` in
   `Note`'s attribute. Complete an ID inside `getStorage('')`; core's entity
-  types are offered too.
+  types are offered too. In `ids()` and `count()`, hover `$ids` and
+  `$count`: an entity query gives the IDs of its entity type, or their
+  number once it counts, and the ID inside `\Drupal::entityQuery('')`
+  navigates and completes too.
 
 ## What the Symfony support already reads
 

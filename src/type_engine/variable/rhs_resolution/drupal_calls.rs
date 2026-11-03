@@ -86,3 +86,48 @@ pub(super) fn try_resolve_entity_load_type(
         ),
     )
 }
+
+/// What `\Drupal::entityQuery('node')` returns: a query tagged with the
+/// entity classes declared for the ID.
+pub(super) fn try_resolve_entity_query_type(
+    owner_fqn: &str,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if !method_name.eq_ignore_ascii_case("entityQuery") {
+        return None;
+    }
+    let backend = ctx.file.backend?;
+    let id = literal_first(argument_list, "entity_type", ctx.file.content)?;
+    let ty = crate::drupal::types::entity_query_type(backend, owner_fqn, method_name, id)?;
+    Some(
+        crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+            ty,
+            "",
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+        ),
+    )
+}
+
+/// What `getQuery()` on a tagged storage, or `count()` and `execute()` on a
+/// tagged query, returns.
+pub(super) fn try_resolve_entity_query_call_type(
+    method_name: &str,
+    receiver: &[ResolvedType],
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    ctx.file
+        .backend
+        .filter(|backend| backend.is_drupal_project())?;
+    let ty = crate::drupal::types::query_call_type(method_name, receiver, ctx.file.class_loader)?;
+    Some(
+        crate::type_engine::type_ops::resolution::resolved_types_for_hint(
+            ty,
+            "",
+            ctx.file.all_classes,
+            ctx.file.class_loader,
+        ),
+    )
+}

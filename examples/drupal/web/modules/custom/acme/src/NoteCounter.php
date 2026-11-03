@@ -43,11 +43,28 @@ final class NoteCounter implements ContainerInjectionInterface
 
     public function count(): int
     {
-        return (int) $this->entityTypeManager
+        // Try: hover `$count`. An entity query that counts gives the number
+        // of matches, and keeps counting through the methods it chains.
+        $count = $this->entityTypeManager
             ->getStorage('acme_note')
             ->getQuery()
             ->accessCheck(false)
             ->count()
             ->execute();
+
+        return $count;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function ids(): array
+    {
+        // Try: hover `$ids`, the IDs of the notes keyed by revision ID, as a
+        // content entity's are. Go to the definition of 'acme_note', or
+        // complete an entity type ID inside `\Drupal::entityQuery('')`.
+        $ids = \Drupal::entityQuery('acme_note')->accessCheck(false)->execute();
+
+        return $ids;
     }
 }

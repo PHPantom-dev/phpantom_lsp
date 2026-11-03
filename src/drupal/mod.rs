@@ -71,6 +71,16 @@ pub(crate) fn is_service_lookup(class: &str, method: &str) -> bool {
         && (method.eq_ignore_ascii_case("service") || method.eq_ignore_ascii_case("hasService"))
 }
 
+/// Whether a static call of `method` on `class`, a resolved class name,
+/// starts an entity query on an entity type ID: `\Drupal::entityQuery()` or
+/// `\Drupal::entityQueryAggregate()`.  Only the global `Drupal` class
+/// counts.
+pub(crate) fn is_entity_query(class: &str, method: &str) -> bool {
+    class.strip_prefix('\\').unwrap_or(class) == "Drupal"
+        && (method.eq_ignore_ascii_case("entityQuery")
+            || method.eq_ignore_ascii_case("entityQueryAggregate"))
+}
+
 /// Whether `path` is a file Drupal reads declarations from.
 pub(crate) fn is_declaration_file(path: &Path, web_root: &Path) -> bool {
     path.file_name()
