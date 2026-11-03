@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793665759436,
+  "lastUpdate": 1793669066090,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9261,6 +9261,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 99,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9279886d17ca7dc198306a2f2f5cd0c94ca77dac",
+          "message": "Routes on Laravel controller methods",
+          "timestamp": "2026-11-03T02:00:10+01:00",
+          "tree_id": "0595f7f0f789b2ffada3195accf0e747daa1f1a4",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9279886d17ca7dc198306a2f2f5cd0c94ca77dac"
+        },
+        "date": 1793669053445,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 42,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 85.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 106.6,
             "unit": "MiB"
           }
         ]
