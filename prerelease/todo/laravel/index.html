@@ -1250,17 +1250,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#l63-middleware-alias-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L63. Middleware alias names
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l17-additional-string-contexts-without-booting" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2021,17 +2010,6 @@
   
     <nav class="md-nav" aria-label="What already works">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#l63-middleware-alias-names" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L63. Middleware alias names
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#l17-additional-string-contexts-without-booting" class="md-nav__link">
@@ -2800,24 +2778,6 @@ relation and column name strings</strong> have completion (<code>completion/eloq
 <p>The scanners already enumerate every valid key for go-to-definition. The
 items below mostly wire that existing enumeration into three more LSP
 endpoints rather than building new analysis.</p>
-<h4 id="l63-middleware-alias-names">L63. Middleware alias names<a class="headerlink" href="#l63-middleware-alias-names" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
-<p>Completion, go-to-definition, diagnostics, and hover for
-<code>-&gt;middleware('auth')</code>, <code>-&gt;withoutMiddleware(...)</code>, and the
-<code>#[Middleware]</code> controller attribute (string and array arguments).
-Every route file names middleware, and today only the parameter part
-(<code>auth:web</code>, <code>can:update</code>) is understood. Aliases are declared statically
-in <code>bootstrap/app.php</code> (<code>$middleware-&gt;alias([...])</code>) on Laravel 11+, or
-the HTTP Kernel's <code>$middlewareAliases</code>/<code>$routeMiddleware</code> on older
-versions (an application may have more than one kernel); the framework's
-built-in aliases and default groups live in
-<code>Illuminate\Foundation\Configuration\Middleware</code> and the Kernel base
-class, parseable from vendor source the same way the container alias
-table already is. Be <strong>parameter-aware</strong>: <code>auth:web</code> and <code>throttle:60,1</code>
-validate the alias before the <code>:</code>, and hover can show the middleware's
-<code>handle()</code> parameter signature. For groups (<code>'web'</code>, <code>'api'</code>), hover
-lists the member middleware. Named <code>throttle:</code> limiters are
-<a href="#l58-laravel-rate-limiter-names">L58</a>.</p>
 <h4 id="l17-additional-string-contexts-without-booting">L17. Additional string contexts without booting<a class="headerlink" href="#l17-additional-string-contexts-without-booting" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>Constructs the extension and the Laravel LSP cover that we don't, and
