@@ -575,6 +575,15 @@ impl Backend {
             )
         });
 
+        let fillable_columns: Vec<&String> = match model.laravel() {
+            Some(metadata) if es_ctx.kind == EloquentStringKind::AttributeKey => metadata
+                .column_lists()
+                .filter(|(_, sources)| sources & crate::types::model_declaration::FILLABLE != 0)
+                .map(|(name, _)| name)
+                .collect(),
+            _ => Vec::new(),
+        };
+
         let mut items = Vec::new();
         for col in &columns {
             if !col.to_lowercase().starts_with(&partial)
@@ -582,12 +591,7 @@ impl Backend {
             {
                 continue;
             }
-            let fillable = es_ctx.kind == EloquentStringKind::AttributeKey
-                && model.laravel().is_some_and(|metadata| {
-                    metadata.column_lists().any(|(name, sources)| {
-                        name == col && sources & crate::types::model_declaration::FILLABLE != 0
-                    })
-                });
+            let fillable = fillable_columns.contains(&col);
 
             items.push(CompletionItem {
                 label: col.clone(),

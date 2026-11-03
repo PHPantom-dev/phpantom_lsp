@@ -208,6 +208,18 @@ async fn eloquent_model_attribute_completion_replaces_literal_and_skips_siblings
 }
 
 #[tokio::test]
+async fn eloquent_model_attribute_completion_skips_only_the_literal_being_edited() {
+    // The unfinished literal is a column of the model being edited, wherever
+    // the cursor sits in it, but the same name from another source is not.
+    for marked in ["#[Fillable(['na|zz'])]", "#[Hidden(['na|'])]"] {
+        let items = complete(&model(marked), true).await;
+        assert_eq!(labels(&items), vec!["name"], "{marked}");
+    }
+    let items = complete(&model("#[Hidden(['email|'])]"), true).await;
+    assert_eq!(labels(&items), vec!["email"]);
+}
+
+#[tokio::test]
 async fn eloquent_model_attributes_require_supported_column_positions() {
     for attribute in [
         "#[Fillable(['na|' => 'email'])]",

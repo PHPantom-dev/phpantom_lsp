@@ -1233,8 +1233,8 @@ class Demo
         // Try: hover `storefront` to list the middleware the group runs.
         Route::middleware('storefront')->get('/storefront', fn () => 'shop');
 
-        // Try: replace bakery.open with bakery.closed for an unknown middleware diagnostic.
-        Route::get('/closed', fn () => 'closed')->withoutMiddleware('bakery.open');
+        // Unknown middleware name → `invalid_laravel_middleware` diagnostic.
+        Route::get('/closed', fn () => 'closed')->withoutMiddleware('bakery.closed');
     }
 
 

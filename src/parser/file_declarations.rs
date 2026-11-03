@@ -15,45 +15,6 @@ use mago_syntax::cst::*;
 
 use super::DocblockCtx;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn column_attributes_survive_a_nested_namespace_during_editing() {
-        // An unfinished namespace edit can leave a nested block in the CST.
-        // Its imported attributes must still supply the model's column names.
-        let source = r#"<?php
-namespace App {
-    namespace Models {
-        use Illuminate\Database\Eloquent\Attributes\Fillable as Fields;
-        #[Fields(['nickname'])]
-        class User {}
-    }
-}
-"#;
-        crate::parser::with_parsed_program(source, "nested_namespace", |program, content| {
-            let context = DocblockCtx {
-                trivias: program.trivia.as_slice(),
-                content,
-                php_version: None,
-                use_map: HashMap::new(),
-                namespace: None,
-            };
-            let declarations = Backend::collect_file_declarations(program, &context);
-            assert_eq!(declarations.classes_with_ns.len(), 1);
-            assert_eq!(
-                declarations.classes_with_ns[0]
-                    .0
-                    .laravel()
-                    .unwrap()
-                    .column_names,
-                ["nickname"],
-            );
-        });
-    }
-}
-
 impl Backend {
     /// Pull the imports out of the wrapper *method* a template whose
     /// `$this` is bound is wrapped in, for the same reason the wrapper
@@ -346,5 +307,44 @@ impl FileDeclarations {
                 self.symbol_imports.constants.extend(block.constants);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_attributes_survive_a_nested_namespace_during_editing() {
+        // An unfinished namespace edit can leave a nested block in the CST.
+        // Its imported attributes must still supply the model's column names.
+        let source = r#"<?php
+namespace App {
+    namespace Models {
+        use Illuminate\Database\Eloquent\Attributes\Fillable as Fields;
+        #[Fields(['nickname'])]
+        class User {}
+    }
+}
+"#;
+        crate::parser::with_parsed_program(source, "nested_namespace", |program, content| {
+            let context = DocblockCtx {
+                trivias: program.trivia.as_slice(),
+                content,
+                php_version: None,
+                use_map: HashMap::new(),
+                namespace: None,
+            };
+            let declarations = Backend::collect_file_declarations(program, &context);
+            assert_eq!(declarations.classes_with_ns.len(), 1);
+            assert_eq!(
+                declarations.classes_with_ns[0]
+                    .0
+                    .laravel()
+                    .unwrap()
+                    .column_names,
+                ["nickname"],
+            );
+        });
     }
 }

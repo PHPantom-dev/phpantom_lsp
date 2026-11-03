@@ -9,8 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Eloquent model attributes supply column suggestions.** Column lists declared with PHP attributes such as `#[Fillable(['name'])]` now contribute to model and query completion, with fillable names first in attribute arrays. Inherited declarations and property-based lists work together. Contributed by @shuvroroy.
-
+- **Eloquent column attributes.** Columns a model lists in class attributes such as `#[Fillable(['name'])]` or `#[Hidden([...])]` now complete on the model and in queries like those in `$fillable` and `$hidden`, and `#[Fillable]` columns are offered first in `create([...])` and `fill([...])`. Attributes and properties combine and inherit the way Laravel applies them. Contributed by @shuvroroy.
 - **Switch inlay hints off by kind.** `parameter-names = false` or `closure-types = false` under `[inlay_hints]` hides parameter name hints at call sites or inferred types on closures, without touching other extensions' hints. Editor extensions can pass the same toggles, and changes apply to open files right away.
 - **WordPress hook names.** A hook name in `add_action()`, `add_filter()` and the rest of the listener API completes, jumps to every `do_action()` or `apply_filters()` that fires it, lists its references, highlights, and renames. A hook fired under a name built at runtime, like `"save_post_{$post->post_type}"`, matches the names it can produce, and completes as a snippet. Core's hooks, and those of plugins and themes installed with Composer, complete and navigate as well, and a project with only the stubs still completes core's.
 - **`@global` tags type the globals a function imports.** A `@global wpdb $wpdb` tag on a function or method docblock types `$wpdb` after `global $wpdb;`, so WordPress code gets completion and diagnostics on `$wpdb`, `$wp_query` and the rest. A function without a tag gets the type the `@global` tags elsewhere give the global, in the stubs, in libraries, or in the project's own code, so `global $wpdb;` is typed wherever WordPress core or `php-stubs/wordpress-stubs` is indexed.
@@ -105,6 +104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Imported `#[Table]` and `#[Connection]` attributes.** A model's table and connection attributes are now read when the attribute is imported with `use`, not only when written fully qualified, in files open in the editor and in `analyze`. Contributed by @shuvroroy.
+- **Property types inferred from `new` with an imported class.** A property assigned `new Logger()` in a class loaded from disk, where `Logger` is imported into a namespaced file, now gets the imported class as its type instead of one under the file's namespace. Contributed by @shuvroroy.
 - **Find References in Drupal hook files.** Calls in a Drupal site's `.module`, `.install`, `.theme`, `.profile`, `.inc` and `.engine` files are now found by Find References and rename, and `analyze` checks those files, without listing the extensions under `[indexing] extensions`.
 - **Component tags spelled differently from their class.** `<livewire:last-24-hours-orders>` and `<x-forms.datePicker>` now navigate and complete and type their attributes like the spelling derived from the class name, since Laravel and Livewire reach the same class from either.
 - **Members read through a dynamic property name.** A call like `$model->{$column}->equals($other)` is no longer checked against the object the property is read from, which reported a method that the property's own value has.
