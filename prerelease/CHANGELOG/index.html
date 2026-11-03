@@ -5560,6 +5560,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>"Import all missing classes" with the cursor at the start of a name.</strong> The bulk import is now offered there too, wherever "Import class" is.</li>
 <li><strong>Completion shows member types next to the name.</strong> Method and property suggestions show their return or property type right after the name (e.g. <code>findOneByEmail($email): ?User</code>) in editors such as PhpStorm and VS Code, where previously only the class name was visible. Contributed by @EranNL.</li>
 <li><strong>A class declared in more than one file keeps what it inherits.</strong> When a second declaration of a class (such as a stand-in defined behind <code>class_exists()</code>) was read first, members the real class inherits are no longer reported as unknown once its own file is indexed. Contributed by @Deadsquirrel93.</li>
+<li><strong>A null check written through <code>?? null</code> narrows the value.</strong> <code>if (null !== ($row['name'] ?? null))</code> makes <code>$row['name']</code> non-null the way <code>isset()</code> does, and so does getting past <code>if (($row['name'] ?? null) === null)</code>. Contributed by @phcorp.</li>
 </ul>
 <h3 id="internal">Internal<a class="headerlink" href="#internal" title="Permanent link">&para;</a></h3>
 <ul>

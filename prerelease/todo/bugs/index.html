@@ -909,6 +909,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b687-a-sentinel-check-through-sentinel-other-than-null-narrows-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B687. A sentinel check through <code>?? &lt;sentinel&gt;</code> other than <code>null</code> narrows nothing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1566,6 +1577,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b687-a-sentinel-check-through-sentinel-other-than-null-narrows-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B687. A sentinel check through <code>?? &lt;sentinel&gt;</code> other than <code>null</code> narrows nothing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1747,6 +1769,24 @@ plain <code>int</code>. phpstorm-stubs and Mago both declare <code>int&lt;0, max
 matches PHP 8 throwing a <code>ValueError</code> on a negative.</p>
 <p>Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.</p>
+<h3 id="b687-a-sentinel-check-through-sentinel-other-than-null-narrows-nothing">B687. A sentinel check through <code>?? &lt;sentinel&gt;</code> other than <code>null</code> narrows nothing<a class="headerlink" href="#b687-a-sentinel-check-through-sentinel-other-than-null-narrows-nothing" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @param array{flag?: string|false|null} $cell */</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function f(array $cell): void {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    if (false !== ($cell['flag'] ?? false)) {</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">        take($cell['flag']); // expects string, got string|false|null</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    }</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>The coalesce is <code>false</code> when the entry is unset, <code>null</code> or <code>false</code>, so
+passing the check proves the entry set and neither <code>null</code> nor <code>false</code>.
+Only the <code>?? null</code> form is read through today.</p>
+<p><strong>Where to change:</strong> <code>coalesced_onto_null_subject</code> in
+<code>src/type_engine/variable/forward_walk/cond_narrowing/predicates.rs</code>
+reads only a <code>null</code> fallback. Generalize it to a fallback that is the
+compared sentinel, and have the <code>false</code> sites in <code>null_narrowing.rs</code>
+(<code>extract_non_false_check_var</code> truthy, <code>extract_false_equality_check_var</code>
+inverse) strip <code>null</code> as well as <code>false</code> from the coalesced subject.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
@@ -1760,13 +1800,13 @@ seconds a rate-limit message names.</p>
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first">B704. A function declared in two files resolves to whichever is found first<a class="headerlink" href="#b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function __() {}</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function __() {}</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
 </code></pre></div>
 <p>WordPress core declares nineteen of its functions a second time as
 no-ops for its script loader. Calls across the project resolve to the
