@@ -414,6 +414,14 @@ async fn typed_connections_complete_unfinished_literals_and_refresh_receiver_typ
             "<?php class Customer extends \\Illuminate\\Database\\Eloquent\\Model { protected $connection = '",
             vec!["shared", "sqlite"],
         ),
+        (
+            "<?php class Customer extends \\Illuminate\\Database\\Eloquent\\Model {\n    #[Deprecated]\n    protected ?string\n    $connection = '",
+            vec!["shared", "sqlite"],
+        ),
+        (
+            "<?php class Customer extends \\Illuminate\\Database\\Eloquent\\Model { public function run(): void { $connection = '",
+            vec![],
+        ),
     ] {
         let (backend, _dir, uri) = workspace(source).await;
         assert_eq!(

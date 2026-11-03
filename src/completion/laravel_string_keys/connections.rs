@@ -103,6 +103,9 @@ impl Backend {
         {
             return Some(Arc::clone(class));
         }
+        if !follows_property_modifier(&content[..offset as usize]) {
+            return None;
+        }
         let (quote, _) = code.open_string?;
         let mut patched = content[..quote].to_string();
         patched.push_str("'';");
@@ -132,5 +135,43 @@ impl Backend {
         let rctx = loaders.resolution_ctx_at(content, cursor as u32);
         let ty = Self::resolve_arg_text_to_type(subject, &rctx)?;
         self.typed_receiver_key_kind(&ty, "", 0, receiver, loaders.resolved_class_loader())
+    }
+}
+
+/// Whether the text before a `$name` ends in a property modifier, optionally
+/// followed by a type, as in `protected ?string `.  A property declaration
+/// always carries one, while a local assignment follows `;`, `{` or an
+/// expression, so this keeps a local `$connection = '` from paying for the
+/// reparse in `Backend::connection_property_class`.
+fn follows_property_modifier(before: &str) -> bool {
+    let is_type_char = |c: char| {
+        c.is_ascii_alphanumeric() || matches!(c, '_' | '\\' | '?' | '|' | '&' | '(' | ')')
+    };
+    let mut rest = before.trim_end();
+    loop {
+        let word_start = rest
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| !is_type_char(c))
+            .map_or(0, |(i, c)| i + c.len_utf8());
+        let word = &rest[word_start..];
+        if word.is_empty() {
+            return false;
+        }
+        if [
+            "public",
+            "protected",
+            "private",
+            "var",
+            "readonly",
+            "final",
+            "abstract",
+        ]
+        .iter()
+        .any(|modifier| word.eq_ignore_ascii_case(modifier))
+        {
+            return true;
+        }
+        rest = rest[..word_start].trim_end();
     }
 }
