@@ -15,6 +15,7 @@ use std::sync::Arc;
 ///
 /// Rules:
 ///   - Leading `\` — strip it and return (already fully-qualified).
+///   - Leading `namespace\` — the rest, relative to the current namespace.
 ///   - Unqualified (no `\`):
 ///     1. Check the `use_map` for a direct mapping.
 ///     2. Prefix with the current namespace.
@@ -33,6 +34,18 @@ pub(crate) fn resolve_to_fqn(
 ) -> String {
     if let Some(stripped) = name.strip_prefix('\\') {
         return stripped.to_string();
+    }
+
+    const NAMESPACE_RELATIVE: &str = "namespace\\";
+    if name.len() > NAMESPACE_RELATIVE.len()
+        && name.as_bytes()[..NAMESPACE_RELATIVE.len()]
+            .eq_ignore_ascii_case(NAMESPACE_RELATIVE.as_bytes())
+    {
+        let relative = &name[NAMESPACE_RELATIVE.len()..];
+        return match namespace {
+            Some(ns) => format!("{ns}\\{relative}"),
+            None => relative.to_string(),
+        };
     }
 
     if !name.contains('\\') {
@@ -501,6 +514,21 @@ mod tests {
         );
         assert_eq!(resolve_to_fqn("Baz", &imports, &namespace), r"App\Baz");
         assert_eq!(resolve_to_fqn(r"\bar", &imports, &namespace), "bar");
+    }
+
+    #[test]
+    fn namespace_relative_names_ignore_imports() {
+        let imports = HashMap::from([("Bar".to_string(), r"Lib\Bar".to_string())]);
+        let namespace = Some("App".to_string());
+        assert_eq!(
+            resolve_to_fqn(r"namespace\Bar", &imports, &namespace),
+            r"App\Bar"
+        );
+        assert_eq!(
+            resolve_to_fqn(r"NameSpace\Bar\Baz", &imports, &namespace),
+            r"App\Bar\Baz"
+        );
+        assert_eq!(resolve_to_fqn(r"namespace\Bar", &imports, &None), "Bar");
     }
 
     /// `ty` written inside `namespace App` of `content`, with `imports` and

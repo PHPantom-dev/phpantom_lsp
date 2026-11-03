@@ -436,7 +436,7 @@ impl<'a> ModelMembers<'a> {
         // ── Column name properties (last-resort fallback) ───────
         // $fillable, $guarded, $hidden, and $appends provide column names
         // without type info.  Only add those not already covered.
-        for column in &laravel.column_names {
+        for (column, _) in laravel.column_lists() {
             if !self.seen_props.insert(column.clone()) {
                 continue;
             }

@@ -7,7 +7,7 @@ use crate::class_lookup::Fqn;
 use crate::completion::source::code_context::CodeContext;
 use crate::completion::source::string_argument::{StringArgumentPosition, string_argument};
 use crate::text_position::{offset_to_position, position_to_offset};
-use crate::types::FileContext;
+use crate::types::{ClassInfo, FileContext, model_declaration};
 use crate::virtual_members::laravel::extends_eloquent_model;
 use crate::virtual_members::laravel::where_property::collect_column_names;
 
@@ -115,11 +115,18 @@ impl Backend {
             &self.resolved_class_cache,
         );
         let prefix = content.get(quote + 1..cursor)?.to_lowercase();
+        let current = content.get(quote + 1..argument.string_end)?;
         let range = Range {
             start: offset_to_position(content, quote + 1),
             end: offset_to_position(content, argument.string_end),
         };
-        let items: Vec<_> = collect_column_names(&model)
+        let columns = match column_list_flag(&name)
+            .and_then(|flag| without_edited_entry(&model, current, flag))
+        {
+            Some(model) => collect_column_names(&model),
+            None => collect_column_names(&model),
+        };
+        let items: Vec<_> = columns
             .into_iter()
             .filter(|column| {
                 column.to_lowercase().starts_with(&prefix) && !argument.used_values.contains(column)
@@ -137,4 +144,54 @@ impl Backend {
             .collect();
         (!items.is_empty()).then_some(CompletionResponse::CompletionItemList(items))
     }
+}
+
+/// The [`model_declaration`] flag a column-list attribute records its
+/// entries under, `None` for `#[RouteKey]`.
+fn column_list_flag(attribute: &str) -> Option<u16> {
+    let (_, name) = attribute.rsplit_once('\\')?;
+    [
+        ("Fillable", model_declaration::FILLABLE_ATTRIBUTE),
+        ("Guarded", model_declaration::GUARDED_ATTRIBUTE),
+        ("Hidden", model_declaration::HIDDEN_ATTRIBUTE),
+        ("Visible", model_declaration::VISIBLE_ATTRIBUTE),
+        ("Appends", model_declaration::APPENDS_ATTRIBUTE),
+    ]
+    .into_iter()
+    .find_map(|(target, flag)| name.eq_ignore_ascii_case(target).then_some(flag))
+}
+
+/// `model` without the column the string being edited contributes to it.
+///
+/// The model is parsed from the buffer, so the unfinished literal is itself
+/// one of the attribute's columns. Offering it back is not a completion, but
+/// the same name from any other source is. The model's own attribute hides
+/// an ancestor's of the same kind, so `flag` on the entry is this
+/// declaration's. `None` when the literal contributes nothing.
+fn without_edited_entry(model: &ClassInfo, current: &str, flag: u16) -> Option<ClassInfo> {
+    let metadata = model.laravel()?;
+    let index = metadata
+        .column_names
+        .iter()
+        .position(|name| name == current)?;
+    let sources = *metadata.column_sources.get(index)?;
+    if sources & flag == 0 {
+        return None;
+    }
+    let mut stripped = model.clone();
+    let metadata = stripped.laravel_mut();
+    if sources == flag {
+        metadata.column_names.remove(index);
+        metadata.column_sources.remove(index);
+    } else {
+        metadata.column_sources[index] &= !flag;
+    }
+    // The model provider types every column-list entry it finds nowhere
+    // else as a source-less `mixed` property.
+    if !metadata.column_lists().any(|(name, _)| name == current) {
+        stripped.properties.make_mut().retain(|property| {
+            !(property.is_virtual && property.source.is_none() && property.name == current)
+        });
+    }
+    Some(stripped)
 }

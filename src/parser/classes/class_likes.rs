@@ -370,6 +370,7 @@ pub(super) fn extract_trait<'a>(
         trait_def,
         &methods,
         doc_ctx.map_or("", |ctx| ctx.content),
+        doc_ctx,
     );
     ClassInfo {
         kind: ClassLikeKind::Trait,

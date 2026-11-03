@@ -1116,7 +1116,8 @@ class Demo
 
     public function eloquentAttributeArrays(): void
     {
-        // Model PHP attributes complete columns too: see Hidden in Models/Customer.php.
+        // Class attributes supply columns too: see Fillable in Models/Customer.php.
+        // Try: complete name; #[Fillable] merges it with the $fillable property's email.
         // Try: complete each array key. Fillable attributes appear first.
         $customer = Customer::create(['name' => 'Ada', 'email' => 'ada@example.test']);
 

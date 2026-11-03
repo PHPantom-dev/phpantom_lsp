@@ -69,6 +69,22 @@ $capsule->schema()->create('customers', function (\Illuminate\Database\Schema\Bl
 });
 $customerDraft = \App\Models\Customer::make(['name' => 'Ada', 'email' => 'ada@example.test']);
 check(
+    'Fillable combines class attributes with the model property',
+    $customerDraft->getFillable() === ['email', 'name']
+        && $customerDraft->isFillable('name')
+        && $customerDraft->isFillable('email')
+);
+check(
+    'Guarded replaces the default guarded property',
+    $customerDraft->getGuarded() === ['id'] && ! $customerDraft->isFillable('id')
+);
+check(
+    'Visible and Appends supply the serialized model attributes',
+    $customerDraft->getVisible() === ['name', 'email', 'display_name']
+        && $customerDraft->getAppends() === ['display_name']
+        && $customerDraft->toArray() === ['name' => 'Ada', 'display_name' => 'Ada']
+);
+check(
     'The Hidden model attribute accepts column names',
     $customerDraft->getHidden() === ['email']
         && ! array_key_exists('email', $customerDraft->toArray())

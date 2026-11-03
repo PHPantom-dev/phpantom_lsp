@@ -208,9 +208,9 @@ pub(crate) fn param_default_is_null(
 /// The default is read back as source text at the call site, so the result
 /// keeps a leading `\`: an unprefixed `Vendor\Foo` would be qualified with
 /// the caller's namespace.  Without imports or a namespace to read it
-/// against (the class parse of `update_ast` passes neither) the default is
-/// left as written, for the qualification that follows the parse
-/// ([`qualify_param_default`]) to settle.
+/// against (a file in the global namespace with no `use` before the class)
+/// the default is left as written, for the qualification that follows the
+/// parse ([`qualify_param_default`]) to settle.
 fn resolve_default_class_name(name: &str, doc_ctx: Option<&DocblockCtx<'_>>) -> String {
     match doc_ctx {
         Some(ctx) if !ctx.use_map.is_empty() || ctx.namespace.is_some() => {

@@ -495,6 +495,33 @@ public function roles(): BelongsToMany {
     assert_eq!(pivots[0].columns, vec!["expires_at", "active"]);
 }
 
+/// An opened model's imported `#[Table]` and `#[Connection]` attributes are
+/// read through the file's imports, as the lazily loaded copy's are.
+#[test]
+fn reads_imported_table_and_connection_attributes() {
+    let backend = Backend::new_test();
+    let uri = "file:///app/Models/Flight.php";
+    let content = "<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Attributes\\{Connection, Table};
+#[Table('flight_records')]
+#[Connection('archive')]
+class Flight extends Model {}
+";
+    backend.update_ast(uri, content);
+    let classes = backend.symbols.uri_classes_index.read();
+    let flight = classes
+        .get(uri)
+        .and_then(|c| c.iter().find(|c| c.name == "Flight"))
+        .expect("Flight class should be indexed");
+    let laravel = flight
+        .laravel()
+        .expect("Flight should have Laravel metadata");
+    assert_eq!(laravel.table_name.as_deref(), Some("flight_records"));
+    assert_eq!(laravel.connection_name.as_deref(), Some("archive"));
+}
+
 #[test]
 fn marks_dynamic_pivot_accessor_as_unknown() {
     let backend = Backend::new_test();
