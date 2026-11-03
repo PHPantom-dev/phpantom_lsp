@@ -1,0 +1,20 @@
+{
+    "name": "phpantom/wordpress-memory-bench",
+    "type": "project",
+    "require-dev": {
+        "php-stubs/wordpress-stubs": "7.1.2",
+        "roots/wordpress-no-content": "7.1.4"
+    },
+    "autoload": {
+        "classmap": ["src/"]
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/installers": false,
+            "roots/wordpress-core-installer": false
+        },
+        "platform": {
+            "php": "8.2.0"
+        }
+    }
+}

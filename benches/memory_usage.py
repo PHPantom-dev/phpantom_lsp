@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure PHPantom LSP resident memory (RSS) on four workloads.
+"""Measure PHPantom LSP resident memory (RSS) on five workloads.
 
 Scenarios
 ---------
@@ -10,6 +10,9 @@ Scenarios
    checkout (with Composer dependencies installed).
 4. **yii_action** – open an action inside a full yiisoft/demo-blog
    checkout (with Composer dependencies installed).
+5. **wordpress_plugin** – open a class inside a plugin project that
+   installs ``php-stubs/wordpress-stubs`` and WordPress core through
+   Composer.
 
 The script communicates with the LSP binary over JSON-RPC / stdio,
 waits for indexing to finish, sends a ``textDocument/didOpen``, lets the
@@ -22,7 +25,8 @@ Output is printed as ``customSmallerIsBetter`` JSON so
       {"name": "memory_hello_world",  "unit": "MiB", "value": 24.5},
       {"name": "memory_laravel_model", "unit": "MiB", "value": 31.7},
       {"name": "memory_symfony_controller", "unit": "MiB", "value": 45.2},
-      {"name": "memory_yii_action", "unit": "MiB", "value": 40.1}
+      {"name": "memory_yii_action", "unit": "MiB", "value": 40.1},
+      {"name": "memory_wordpress_plugin", "unit": "MiB", "value": 60.3}
     ]
 
 Usage (CI)::
@@ -81,6 +85,13 @@ YII_COMMIT = "0924761392b8f79a5896ba4e96f09e4d43b38feb"
 YII_TARBALL = (
     "https://github.com/yiisoft/demo-blog/archive/"
     f"{YII_COMMIT}.tar.gz"
+)
+
+# The WordPress plugin project's composer.json and its pinned composer.lock.
+# WordPress has no project skeleton to download, so the whole project is a
+# fixture: the stubs and core at the versions examples/wordpress uses.
+WORDPRESS_FIXTURE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "fixtures", "wordpress"
 )
 
 HELLO_WORLD_PHP = """\
@@ -149,6 +160,26 @@ final readonly class Action
         $post = $this->postRepository->getOrUserException($postId);
 
         return $this->responseFactory->render(__DIR__ . '/template.php', ['title' => $post->title]);
+    }
+}
+"""
+
+WORDPRESS_PLUGIN_PHP = r"""<?php
+
+namespace Acme\Bench;
+
+final class Plugin
+{
+    public function register(): void
+    {
+        add_action('init', [$this, 'boot']);
+    }
+
+    public function boot(): void
+    {
+        global $wpdb;
+        $post = get_post(1);
+        echo esc_html($post->post_title . $wpdb->prefix);
     }
 }
 """
@@ -786,6 +817,78 @@ def run_yii_action(binary: str, work_dir: str) -> int:
         client.shutdown()
 
 
+def setup_wordpress(work_dir: str) -> str:
+    """Create a plugin project from the fixture and install Composer deps.
+
+    Composer plugins are skipped so ``composer/installers`` never moves
+    core out of ``vendor/``, matching how plugin authors pull core in for
+    their tooling.
+
+    Returns the path to the plugin project root.
+    """
+    plugin_dir = os.path.join(work_dir, "wordpress_plugin")
+    os.makedirs(os.path.join(plugin_dir, "src"), exist_ok=True)
+    for name in ("composer.json", "composer.lock"):
+        src = os.path.join(WORDPRESS_FIXTURE_DIR, name)
+        if not os.path.isfile(src):
+            raise FileNotFoundError(f"WordPress fixture not found at {src}.")
+        shutil.copy2(src, os.path.join(plugin_dir, name))
+
+    print("  Running composer install...", file=sys.stderr)
+    subprocess.run(
+        [
+            "composer", "install",
+            "--no-interaction",
+            "--no-progress",
+            "--prefer-dist",
+            "--no-scripts",
+            "--no-plugins",
+            "--ignore-platform-reqs",
+            "--quiet",
+        ],
+        check=True,
+        cwd=plugin_dir,
+        timeout=300,
+    )
+
+    return plugin_dir
+
+
+def run_wordpress_plugin(binary: str, work_dir: str) -> int:
+    """Measure RSS after indexing a WordPress plugin project and hovering a property.
+
+    Opens a class that registers a hook and reads ``get_post()`` and
+    ``$wpdb``, then hovers on ``post_title``.  Indexing reads the
+    single-file ``wordpress-stubs`` declaration list and scans core's
+    source for the hooks it fires, which is what sets WordPress apart
+    from the Composer-autoloaded frameworks above.
+
+    Returns RSS in KiB.
+    """
+    plugin_dir = setup_wordpress(work_dir)
+
+    plugin_path = os.path.join(plugin_dir, "src", "Plugin.php")
+    with open(plugin_path, "w") as f:
+        f.write(WORDPRESS_PLUGIN_PHP)
+
+    client = LspClient(binary, plugin_dir)
+    try:
+        client.initialize()
+        client.wait_for_indexing(timeout=INDEX_TIMEOUT)
+
+        file_uri = Path(plugin_path).as_uri()
+        client.did_open(file_uri, WORDPRESS_PLUGIN_PHP)
+
+        # Hover on ``$post->post_title`` (line 15, col 31).
+        client.hover(file_uri, line=15, character=31)
+        client.drain_notifications(SETTLE_TIME)
+
+        rss = sample_rss(client.pid)
+        return rss
+    finally:
+        client.shutdown()
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
@@ -818,7 +921,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--scenario",
-        choices=["hello_world", "laravel_model", "symfony_controller", "yii_action", "all"],
+        choices=["hello_world", "laravel_model", "symfony_controller", "yii_action", "wordpress_plugin", "all"],
         default="all",
         help="Which scenario to run (default: all).",
     )
@@ -894,6 +997,14 @@ def main() -> None:
             print("Running yii_action scenario...", file=sys.stderr)
             rss = run_yii_action(binary, work_dir)
             results["memory_yii_action"] = rss
+            print(
+                f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
+            )
+
+        if args.scenario in ("wordpress_plugin", "all"):
+            print("Running wordpress_plugin scenario...", file=sys.stderr)
+            rss = run_wordpress_plugin(binary, work_dir)
+            results["memory_wordpress_plugin"] = rss
             print(
                 f"  RSS: {rss} KiB ({rss / 1024:.1f} MiB)", file=sys.stderr
             )

@@ -90,6 +90,38 @@ in `src/php_type/shape_keys.rs`.
 
 ---
 
+## P88. A statement the end of the file cuts off parses the file twice per request
+
+**Impact: Medium · Complexity: Medium**
+
+While the last top-level statement of a file is unfinished (`$x->` typed
+at the end of a script or a routes file), every pass parses the whole
+file at least twice: `recovery::parse_program` parses it normally, sees
+`UnexpectedEndOfFile`, and parses it again with `recover_incomplete`
+through `parse_keeping_end`, and bracket recovery can add a third. The
+parse cache holds one result per pass, so each completion, hover, or
+diagnostic request pays it again.
+
+It is the step in `completion_classmap_size` (+30%, scaling with file
+size) and `completion_inheritance_depth` (+20%) on the latency
+dashboard, both of which end on such a statement; `completion_carbon_class`
+stayed flat. Measured locally with `cargo bench --bench completion`
+(2026-11-03): `classmap_size/1000_classes` went from 1.55 ms before
+`fe14e1ffe` to 2.04 ms after it, and is 2.00 ms at `4b99db3ba`.
+
+Parse with `recover_incomplete` from the start instead of as a retry, if
+mago's recovery leaves a file with no unfinished statement parsed the
+same; the syntax-error reporters that read the first parse's `errors`
+would then read the one parse's. Otherwise, keep the recovered parse
+across passes for an unchanged document version.
+
+**Where to look:** `parse_program` and `reparse_dropped_code` in
+`src/parser/recovery.rs`, `close_open_brackets` in
+`src/parser/bracket_recovery.rs`, `ParsedTree` in
+`src/parser/parse_cache.rs`.
+
+---
+
 ## Appendix: Profiling
 
 ### Commands
