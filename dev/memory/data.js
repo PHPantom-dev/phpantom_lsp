@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793673937868,
+  "lastUpdate": 1793731821930,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9393,6 +9393,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 107.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "zerone0x@disroot.org",
+            "name": "zerone0x",
+            "username": "zerone0x"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e9a1a232bae7598bf5f5f7299b602518ff5ba3d7",
+          "message": "Nested `@include`s inherit their includer's data (#514)",
+          "timestamp": "2026-11-03T19:19:49+01:00",
+          "tree_id": "57de20761a0ad84098fcc84723487e0ee50e40a2",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e9a1a232bae7598bf5f5f7299b602518ff5ba3d7"
+        },
+        "date": 1793731767685,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 76.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 100.2,
             "unit": "MiB"
           }
         ]
