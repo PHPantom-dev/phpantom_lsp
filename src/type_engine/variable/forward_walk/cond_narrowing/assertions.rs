@@ -395,7 +395,7 @@ pub(super) fn apply_assertion_to_key(
         if should_exclude {
             return;
         }
-        if condition_facts::scalar_assert_guard_kind(asserted_type).is_some() {
+        if condition_facts::scalar_inclusion_guard_kind(asserted_type).is_some() {
             results.push(ResolvedType::from_type_string(asserted_type.clone()));
         } else {
             let var_ctx = build_var_ctx(target, ctx, scope_resolver);
@@ -411,7 +411,15 @@ pub(super) fn apply_assertion_to_key(
     // check never contradicted, and a class inclusion comes back empty
     // when the loader cannot find the class.
     let mut exhaustible = false;
-    if let Some(kind) = condition_facts::scalar_assert_guard_kind(asserted_type) {
+    // A literal or `class-string` that refines a string or int is left to
+    // the member-wise refinement below, which keeps `class-string` itself
+    // rather than widening it to `string`.
+    let guard_kind = if should_exclude || is_scalar_refinement(asserted_type) {
+        condition_facts::scalar_assert_guard_kind(asserted_type)
+    } else {
+        condition_facts::scalar_inclusion_guard_kind(asserted_type)
+    };
+    if let Some(kind) = guard_kind {
         exhaustible = true;
         if should_exclude {
             condition_facts::apply_type_guard_exclusion(
@@ -425,6 +433,7 @@ pub(super) fn apply_assertion_to_key(
                 &mut results,
                 Some(ctx.file.class_loader),
             );
+            condition_facts::narrow_to_asserted_value(asserted_type, &mut results);
         }
     } else if should_exclude && matches!(asserted_type.kind(), TypeKind::Union(_)) {
         // Ruling out a union rules out every member, so each one narrows on

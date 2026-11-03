@@ -65,6 +65,35 @@ matches PHP 8 throwing a `ValueError` on a negative.
 Found in a Laravel project's API client, which sleeps for the number of
 seconds a rate-limit message names.
 
+### B686. A positive `@phpstan-assert` of a nullable or union type keeps only the class
+
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @phpstan-assert ?Dog $x */
+function isMaybeDog(mixed $x): void {}
+
+function f(Dog|Pet|null $x): void {
+    isMaybeDog($x);
+    $x; // Dog, should be Dog|null
+}
+```
+
+The same happens when a template is bound to such a type from the call's
+arguments: `assertSame($expected, $actual)` with `?Dog $expected` leaves
+`$actual` a `Dog`, and with `int|string $expected` it leaves `$actual`
+unnarrowed. The reverse shows up on a plain class assertion:
+`assertInstanceOf($petClass, $x)` with a `class-string<Pet>` argument leaves
+a `Dog|Pet|int` subject as `Pet|int`. `try_apply_custom_assert_narrowing`
+(`type_engine/type_ops/condition_facts/assert_annotations.rs`) hands the
+whole asserted type to `apply_instanceof_inclusion`, which works on the
+class entries only, so the `null` member is lost and scalar members are never kept or dropped. The
+`-if-true` / `-if-false` path (`apply_assertion_to_key` in
+`forward_walk/cond_narrowing/assertions.rs`) leaves an included union whole
+for the same reason. Inclusion should keep each subject member that some
+member of the asserted union admits, routing scalar members through the
+type guards and class members through the `instanceof` machinery.
+
 ### B687. A sentinel check through `?? <sentinel>` other than `null` narrows nothing
 
 **Impact: Low · Complexity: Low**

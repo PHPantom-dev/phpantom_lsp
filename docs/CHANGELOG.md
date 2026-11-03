@@ -440,6 +440,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Completion shows member types next to the name.** Method and property suggestions show their return or property type right after the name (e.g. `findOneByEmail($email): ?User`) in editors such as PhpStorm and VS Code, where previously only the class name was visible. Contributed by @EranNL.
 - **A class declared in more than one file keeps what it inherits.** When a second declaration of a class (such as a stand-in defined behind `class_exists()`) was read first, members the real class inherits are no longer reported as unknown once its own file is indexed. Contributed by @Deadsquirrel93.
 - **A null check written through `?? null` narrows the value.** `if (null !== ($row['name'] ?? null))` makes `$row['name']` non-null the way `isset()` does, and so does getting past `if (($row['name'] ?? null) === null)`. Contributed by @phcorp.
+- **PHPUnit's `assertSame()` narrows to the expected value.** After `$this->assertSame(4, $width)`, `$width` is `4` instead of `object`, so passing it on to an `int` parameter is no longer reported. Contributed by @phcorp. Closes #473.
+- **Assertions whose type is a template.** A `@phpstan-assert` naming a `@template` now narrows to the type of the argument it is bound from, so after `$this->assertSame(4, $width)`, `$width` is `4` instead of `object`, and passing it on to an `int` parameter is no longer reported. Contributed by @phcorp.
 
 ### Internal
 
