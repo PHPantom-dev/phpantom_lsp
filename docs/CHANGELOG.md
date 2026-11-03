@@ -104,6 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`isset()` that fails on an array element.** Where `isset($values[$key])` was false, `$values[$key]` now reads as `null`, the value a missing key gives. A guard like `if (isset($values[$key]) && !is_array($values[$key])) { return; }` now leaves the element an array or `null` past it, the same as it does for a plain variable.
 - **Imported `#[Table]` and `#[Connection]` attributes.** A model's table and connection attributes are now read when the attribute is imported with `use`, not only when written fully qualified, in files open in the editor and in `analyze`. Contributed by @shuvroroy.
 - **Property types inferred from `new` with an imported class.** A property assigned `new Logger()` in a class loaded from disk, where `Logger` is imported into a namespaced file, now gets the imported class as its type instead of one under the file's namespace. Contributed by @shuvroroy.
 - **Find References in Drupal hook files.** Calls in a Drupal site's `.module`, `.install`, `.theme`, `.profile`, `.inc` and `.engine` files are now found by Find References and rename, and `analyze` checks those files, without listing the extensions under `[indexing] extensions`.
