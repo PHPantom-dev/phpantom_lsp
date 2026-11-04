@@ -20,9 +20,7 @@ use std::sync::Arc;
 
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MethodInfo};
-use crate::virtual_members::{
-    ResolvedClassCache, resolve_class_base_cached, resolve_class_fully_maybe_cached,
-};
+use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_maybe_cached};
 
 use super::helpers::{extends_eloquent_builder, extends_eloquent_model};
 use super::where_property::{build_where_property_methods_for_class, lowercase_method_names};
@@ -293,15 +291,13 @@ fn inject_scopes_and_model_methods(
     }
 
     // 2. Inject @method virtual methods from the model.
-    inject_model_virtual_methods(result, model_arg, class_loader, cache, forwarded);
+    let model_class =
+        inject_model_virtual_methods(result, model_arg, class_loader, cache, forwarded);
 
     // 3. Inject where{PropertyName}() dynamic methods from the model's
     //    known columns.  These are instance methods on the Builder so
     //    that `$query->whereBrandId(42)` resolves.
-    if let Some(model_class) = class_loader(Fqn::new(model_arg)) {
-        // Base resolution carries the column lists the model inherits
-        // without re-entering the virtual-member providers.
-        let model_class = resolve_class_base_cached(&model_class, class_loader);
+    if let Some(model_class) = model_class {
         let mut existing = lowercase_method_names(&result.methods);
         let where_methods = build_where_property_methods_for_class(&model_class, &existing);
         for mut method in where_methods {
@@ -500,20 +496,18 @@ fn forwards_as_builder(class_name: &str, class_loader: &ResolvedClassLoader<'_>)
 /// and injects them as **instance** methods on the Builder.  Return
 /// types containing `static`, `self`, or `$this` are substituted with
 /// `Builder<ConcreteModel>` so the chain continues on the builder.
+/// Returns the resolved model so column synthesis reuses its accessor sources.
 fn inject_model_virtual_methods(
     builder: &mut ClassInfo,
     model_name: &str,
     class_loader: &ResolvedClassLoader<'_>,
     cache: Option<&ResolvedClassCache>,
     forwarded: Option<&ForwardedSelf>,
-) {
-    let model_class = match class_loader(Fqn::new(model_name)) {
-        Some(c) => c,
-        None => return,
-    };
+) -> Option<Arc<ClassInfo>> {
+    let model_class = class_loader(Fqn::new(model_name))?;
 
     if !extends_eloquent_model(&model_class, class_loader) {
-        return;
+        return None;
     }
 
     // Resolve the model fully so that @method tags from traits and
@@ -572,6 +566,7 @@ fn inject_model_virtual_methods(
             class_loader,
         ));
     }
+    Some(resolved_model)
 }
 
 /// Check whether a base FQN and/or a `ClassInfo` refer to the Eloquent Builder.
