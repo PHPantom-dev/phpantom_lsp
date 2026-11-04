@@ -104,6 +104,7 @@ PHPantom stands on the shoulders of:
 - **[Mago](https://github.com/carthage-software/mago):** the PHP parser that powers all of PHPantom's AST analysis.
 - **[PHPStan](https://phpstan.org/) and [Psalm](https://psalm.dev/):** for their pioneering work in PHP static analysis and shaping the type ecosystem. PHPantom builds on PHPStan-informed type experience, with full support for `@phpstan-*` annotations.
 - **[JetBrains phpstorm-stubs](https://github.com/JetBrains/phpstorm-stubs):** type information for the entire PHP standard library, embedded directly into the binary.
+- **[Viktor Szépe (@szepeviktor)](https://github.com/szepeviktor):** for [wordpress-stubs](https://github.com/php-stubs/wordpress-stubs), which supplies PHPantom's knowledge of WordPress core, and [phpstan-wordpress](https://github.com/szepeviktor/phpstan-wordpress), whose return-type rules and test fixtures shaped PHPantom's WordPress support.
 - **[Phpactor](https://github.com/phpactor/phpactor):** the PHP language server whose comprehensive test suite and benchmark fixtures informed PHPantom's own test coverage. Many of PHPantom's type inference fixtures were adapted from Phpactor's reflection tests.
 
 ## License
