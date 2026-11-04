@@ -76,6 +76,100 @@ pub(crate) fn path_parameter_names(path: &str) -> impl Iterator<Item = &str> {
         .map(move |(start, end)| &path[start..end])
 }
 
+/// The spans of the route parameters a Twig template's `path()` and
+/// `url()` pass: the keys of the hash after each route name `routes`
+/// holds, as `{{ path('entity.node.canonical', {node: 1, 'mode': 'x'}) }}`
+/// writes them.
+pub(crate) fn twig_parameter_spans(content: &str, routes: &[SymbolSpan]) -> Vec<SymbolSpan> {
+    let bytes = content.as_bytes();
+    let skip_space = |mut at: usize| {
+        while bytes.get(at).is_some_and(u8::is_ascii_whitespace) {
+            at += 1;
+        }
+        at
+    };
+    let mut spans = Vec::new();
+    for route in routes {
+        let SymbolKind::StringKey {
+            kind: StringKeyKind::DrupalRoute,
+            key: name,
+            ..
+        } = &route.kind
+        else {
+            continue;
+        };
+        // Past the route name's closing quote, a comma and a hash.
+        let comma = skip_space(route.end as usize + 1);
+        if bytes.get(comma) != Some(&b',') {
+            continue;
+        }
+        let open = skip_space(comma + 1);
+        if bytes.get(open) != Some(&b'{') {
+            continue;
+        }
+        let mut at = open + 1;
+        let mut depth = 1usize;
+        let mut wants_key = true;
+        while at < bytes.len() && depth > 0 {
+            if depth == 1 && wants_key {
+                at = skip_space(at);
+                let (start, end) = match bytes.get(at) {
+                    Some(quote @ (b'\'' | b'"')) => {
+                        let Some(len) = memchr::memchr(*quote, &bytes[at + 1..]) else {
+                            break;
+                        };
+                        (at + 1, at + 1 + len)
+                    }
+                    Some(byte) if byte.is_ascii_alphabetic() || *byte == b'_' => {
+                        let len = bytes[at..]
+                            .iter()
+                            .take_while(|byte| byte.is_ascii_alphanumeric() || **byte == b'_')
+                            .count();
+                        (at, at + len)
+                    }
+                    // A computed key, or the end of the hash.
+                    _ => break,
+                };
+                let after = if bytes[at] == b'\'' || bytes[at] == b'"' {
+                    end + 1
+                } else {
+                    end
+                };
+                let colon = skip_space(after);
+                if bytes.get(colon) != Some(&b':') || start == end {
+                    break;
+                }
+                spans.push(SymbolSpan {
+                    start: start as u32,
+                    end: end as u32,
+                    kind: SymbolKind::StringKey {
+                        kind: StringKeyKind::DrupalRouteParameter,
+                        key: route_parameter_key(name, &content[start..end]),
+                        is_write: false,
+                        is_optional: false,
+                    },
+                });
+                wants_key = false;
+                at = colon + 1;
+                continue;
+            }
+            match bytes[at] {
+                quote @ (b'\'' | b'"') => {
+                    at = memchr::memchr(quote, &bytes[at + 1..])
+                        .map_or(bytes.len(), |len| at + len + 2);
+                    continue;
+                }
+                b'{' | b'[' | b'(' => depth += 1,
+                b'}' | b']' | b')' => depth -= 1,
+                b',' if depth == 1 => wants_key = true,
+                _ => {}
+            }
+            at += 1;
+        }
+    }
+    spans
+}
+
 /// The method a `_controller`, `_form`, or `_title_callback` value names,
 /// as [`DrupalRouteSite::controller`] spells it: `Class::method` as it is,
 /// and a class alone as its `__invoke()`.  A `service:method` is `None`.
@@ -365,6 +459,29 @@ mod tests {
                 ("node", StringKeyKind::DrupalEntityType),
                 ("node_type", StringKeyKind::DrupalEntityType),
                 ("acme.greeter", StringKeyKind::ServiceId),
+            ]
+        );
+    }
+
+    #[test]
+    fn twig_hashes_pass_the_parameters_of_their_route() {
+        let twig = "{{ path('acme.note', {acme_note: note.id, 'mode': {a: 1}|first, other: x(1, 2)}) }}\n{{ url('acme.note') }}{{ path('acme.note', vars) }}";
+        let routes = crate::symfony::routes::twig_route_spans(twig, StringKeyKind::DrupalRoute);
+        let found: Vec<(&str, String)> = twig_parameter_spans(twig, &routes)
+            .iter()
+            .map(|span| {
+                let SymbolKind::StringKey { key, .. } = &span.kind else {
+                    unreachable!()
+                };
+                (&twig[span.start as usize..span.end as usize], key.clone())
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("acme_note", "acme.note#acme_note".to_string()),
+                ("mode", "acme.note#mode".to_string()),
+                ("other", "acme.note#other".to_string()),
             ]
         );
     }

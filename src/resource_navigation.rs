@@ -257,7 +257,13 @@ impl Backend {
                 if self.is_twig_project() {
                     self.twig_template_spans(uri, content, is_symfony)
                 } else if self.is_drupal_project() {
-                    crate::symfony::routes::twig_route_spans(content, StringKeyKind::DrupalRoute)
+                    let mut spans = crate::symfony::routes::twig_route_spans(
+                        content,
+                        StringKeyKind::DrupalRoute,
+                    );
+                    let parameters = crate::drupal::routing::twig_parameter_spans(content, &spans);
+                    spans.extend(parameters);
+                    spans
                 } else {
                     Vec::new()
                 }
@@ -418,7 +424,11 @@ impl Backend {
             None
         };
         if let Some(kind) = route_kind {
-            spans.extend(crate::symfony::routes::twig_route_spans(content, kind));
+            let routes = crate::symfony::routes::twig_route_spans(content, kind);
+            spans.extend(crate::drupal::routing::twig_parameter_spans(
+                content, &routes,
+            ));
+            spans.extend(routes);
         }
         if is_symfony {
             spans.extend(crate::symfony::translations::twig_translation_spans(

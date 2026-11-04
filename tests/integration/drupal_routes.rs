@@ -1568,3 +1568,41 @@ async fn a_quoted_null_default_is_a_string() {
         assert!(text.contains("$acme_note = Note\n"), "{value}: {text}");
     }
 }
+
+const BOOK_CONTROLLER: &str = r#"<?php
+namespace Drupal\acme\Controller;
+
+use Symfony\Component\Routing\Attribute\Route;
+
+#[Route(path: '/books/{shelf}', name: 'acme.books.')]
+final class BookController {
+    #[Route(path: '/{book}', name: 'view')]
+    public function view(string $shelf, string $book): array { return []; }
+}
+"#;
+const BOOK_CONTROLLER_PATH: &str = "web/modules/custom/acme/src/Controller/BookController.php";
+const BOOK_TEMPLATE: &str = "{{ path('acme.books.view', {shelf: 'a', 'book': 1}) }}\n";
+const BOOK_TEMPLATE_PATH: &str = "web/modules/custom/acme/templates/acme-books.html.twig";
+
+/// A `#[Route]`'s path declares its parameters, the class route's
+/// included, and a template's `path()` passes them in its hash.
+#[tokio::test]
+async fn attribute_route_parameters_are_read_by_templates() {
+    let (backend, dir) = workspace(&files(&[
+        ROUTE_ATTRIBUTE,
+        (BOOK_CONTROLLER_PATH, BOOK_CONTROLLER),
+        (BOOK_TEMPLATE_PATH, BOOK_TEMPLATE),
+    ]))
+    .await;
+    let php = uri_for(&dir, BOOK_CONTROLLER_PATH);
+    let twig = uri_for(&dir, BOOK_TEMPLATE_PATH);
+    for (needle, line) in [("shelf: ", 5), ("'book'", 7)] {
+        let found = definitions_at(&backend, &twig, position_in(BOOK_TEMPLATE, needle, 2)).await;
+        assert_eq!(found.len(), 1, "{needle}: {found:?}");
+        assert_eq!(
+            (&found[0].uri, found[0].range.start.line),
+            (&php, line),
+            "{needle}"
+        );
+    }
+}

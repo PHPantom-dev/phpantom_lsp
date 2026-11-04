@@ -347,3 +347,44 @@ fn route_patterns_match_any_run_for_each_star() {
     assert!(matches_route_pattern("exact", "exact"));
     assert!(!matches_route_pattern("exact", "exactly"));
 }
+
+/// The key of the hash a Drupal template's `path()` passes is a parameter
+/// of the route, never a Twig variable, also in a project that reads
+/// Twig's variables; the value after it stays a variable.
+#[test]
+fn a_path_hash_key_is_a_route_parameter_not_a_variable() {
+    let (backend, dir) = drupal_backend(&[]);
+    backend.set_is_twig(true);
+    let content = "{{ path('entity.node.canonical', {node: node.id}) }}\n";
+    let template = uri(
+        dir.path(),
+        "web/modules/custom/acme/templates/acme.html.twig",
+    );
+    backend.update_resource_symbol_index(&template, content);
+    let map = backend
+        .symbol_map_for(&template)
+        .expect("the template's map");
+    let kinds_at = |offset: usize| -> Vec<(StringKeyKind, String)> {
+        map.spans
+            .iter()
+            .filter(|span| span.start as usize == offset)
+            .filter_map(|span| match &span.kind {
+                crate::symbol_map::SymbolKind::StringKey { kind, key, .. } => {
+                    Some((*kind, key.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        kinds_at(content.find("node:").unwrap()),
+        [(
+            StringKeyKind::DrupalRouteParameter,
+            "entity.node.canonical#node".to_string()
+        )]
+    );
+    assert_eq!(
+        kinds_at(content.find("node.id").unwrap()),
+        [(StringKeyKind::TwigVariable, "node".to_string())]
+    );
+}
