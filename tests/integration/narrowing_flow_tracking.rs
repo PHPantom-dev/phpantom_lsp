@@ -2832,6 +2832,118 @@ final class Caught
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// An exception no `catch` takes, or one a `catch` throws partway through,
+/// runs the `finally` block with the state from before the throw.
+#[test]
+fn a_finally_block_sees_the_paths_an_uncaught_exception_takes() {
+    let messages = member_access_diagnostics(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Repro;
+
+final class Tool
+{
+    public function editable(): bool
+    {
+        return true;
+    }
+}
+
+final class Uncaught
+{
+    public function mayThrow(): void
+    {
+    }
+
+    public function withoutCatch(): void
+    {
+        $tool = null;
+        try {
+            $tool = new Tool();
+            $this->mayThrow();
+            $tool = null;
+        } finally {
+            if (null !== $tool) {
+                echo $tool->editable() ? 'yes' : 'no';
+            }
+        }
+    }
+
+    public function notCaught(): void
+    {
+        $tool = null;
+        try {
+            $tool = new Tool();
+            $this->mayThrow();
+            $tool = null;
+        } catch (\LogicException $e) {
+            $tool = null;
+        } finally {
+            if (null !== $tool) {
+                echo $tool->editable() ? 'yes' : 'no';
+            }
+        }
+    }
+
+    public function thrownFromTheCatch(): void
+    {
+        $tool = null;
+        try {
+            $this->mayThrow();
+        } catch (\Throwable $e) {
+            $tool = new Tool();
+            $this->mayThrow();
+            $tool = null;
+        } finally {
+            if (null !== $tool) {
+                echo $tool->editable() ? 'yes' : 'no';
+            }
+        }
+    }
+}
+"#,
+    );
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A `try` body that cannot throw sends no exception into the `finally`
+/// block, so the state from before the `try` does not reach it.
+#[test]
+fn a_finally_block_after_a_body_that_cannot_throw_is_not_widened() {
+    let messages = member_access_diagnostics(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Repro;
+
+final class Tool
+{
+    public function editable(): bool
+    {
+        return true;
+    }
+}
+
+final class Quiet
+{
+    public function run(): void
+    {
+        $tool = null;
+        try {
+            $tool = new Tool();
+        } finally {
+            echo $tool->editable() ? 'yes' : 'no';
+        }
+    }
+}
+"#,
+    );
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 /// A `try` nested in a `finally` block whose own `try` returned early still
 /// sees both sets of returning paths.
 #[test]
