@@ -216,6 +216,52 @@ $other = (new \App\Collection())->keyBy('email');
 }
 
 #[test]
+fn collection_projections_bind_overridden_and_inherited_parameter_names() {
+    assert_projection(
+        "\\Consumer\\RenamedCollection<string, User>",
+        r#"
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @extends \Illuminate\Support\Collection<TKey, TValue>
+ */
+class RenamedCollection extends \Illuminate\Support\Collection {
+    /** @return static<array-key, mixed> */
+    public function pluck($property, $index = null) {}
+    /** @return static<array-key, static<TKey, TValue>> */
+    public function groupBy($selector, $keep = false) {}
+}
+/**
+ * @template TKey of array-key
+ * @template TValue
+ * @extends RenamedCollection<TKey, TValue>
+ */
+class InheritedCollection extends RenamedCollection {}
+/** @var InheritedCollection<string, User> $child */
+$child = null;
+$own = $users->pluck(index: 'id', property: 'profile');
+$inherited = $child->pluck(index: 'id', property: 'profile');
+$ownGroups = $users->groupBy(keep: true, selector: 'id');
+$inheritedGroups = $child->groupBy(keep: true, selector: 'id');
+$inheritedKeys = $child->keyBy(keyBy: 'email');
+"#,
+        &[
+            ("$own", "RenamedCollection<int, Profile>"),
+            ("$inherited", "InheritedCollection<int, Profile>"),
+            (
+                "$ownGroups",
+                "RenamedCollection<int, RenamedCollection<string, User>>",
+            ),
+            (
+                "$inheritedGroups",
+                "InheritedCollection<int, InheritedCollection<string, User>>",
+            ),
+            ("$inheritedKeys", "InheritedCollection<string, User>"),
+        ],
+    );
+}
+
+#[test]
 fn projection_names_ignore_case_and_callbacks_keep_template_inference() {
     assert_projection(
         "\\Illuminate\\Support\\Collection<int, User>",
@@ -254,12 +300,22 @@ fn lazy_collection_projection_keeps_the_outer_collection_lazy() {
 $keyed = $users->keyBy('email');
 $plucked = $users->pluck('email');
 $groups = $users->groupBy('id', true);
+$nested = $users->groupBy(['active', 'email'], true);
+$resetNested = $users->groupBy(['active', 'email']);
 $proxy = $users->groupBy->id;
 "#,
         &[
             ("$keyed", "LazyCollection<string, User>"),
             ("$plucked", "LazyCollection<int, string>"),
             ("$groups", "LazyCollection<int, Collection<string, User>>"),
+            (
+                "$nested",
+                "LazyCollection<int, Collection<string, Collection<string, User>>>",
+            ),
+            (
+                "$resetNested",
+                "LazyCollection<int, Collection<string, Collection<int, User>>>",
+            ),
             ("$proxy", "LazyCollection<int, Collection<int, User>>"),
         ],
     );
