@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793760498756,
+  "lastUpdate": 1793810704697,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9677,6 +9677,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 100.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a9d2f2d68a8cb051742e320c24fa6eaa4be4ce5e",
+          "message": "Members named by a variable in a chain",
+          "timestamp": "2026-11-04T17:20:29+01:00",
+          "tree_id": "977be3f3e7a5e52e3800baf425837c2e1003aff1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a9d2f2d68a8cb051742e320c24fa6eaa4be4ce5e"
+        },
+        "date": 1793810690488,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 50.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 93.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 82.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 145.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 109.9,
             "unit": "MiB"
           }
         ]
