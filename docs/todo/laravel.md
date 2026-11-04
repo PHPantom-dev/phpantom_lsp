@@ -213,42 +213,6 @@ today and what is still missing.
 
 ---
 
-#### L53. Collection key types from the column for `keyBy` / `groupBy` / `pluck`
-
-**Impact: Medium · Complexity: Medium**
-
-`keyBy` and `groupBy` produce a collection keyed by the column they were
-given, but we type the key `array-key`
-(`virtual_members/laravel/higher_order_proxy.rs`, `plan_result`). The
-column is a literal in the overwhelming majority of calls, so the key is
-recoverable by the same model property lookup `model-property<Model>`
-validation uses. (On an `Eloquent\Collection` the argument forms
-currently lose the value type as well; that is filed in
-[bugs.md](bugs.md#laravel) and should land first.)
-
-```php
-$users->keyBy('email');   // want Collection<string, User>, get Collection<array-key, User>
-$users->groupBy('id');    // want Collection<int, Collection<int, User>>
-$posts->keyBy('user.id'); // dotted path, resolved segment by segment
-```
-
-`pluck` is the same lookup applied to the value rather than the key, and
-the higher-order proxy forms (`$users->keyBy->email`) must agree with the
-argument forms or the two spellings of one expression disagree.
-
-The framework's own annotations widen these to `array-key`, so there is no
-docblock to read — but `calebdw/phpstan-laravel` resolves all three, which
-means a project running it currently gets a more precise answer from its
-analyser than from its editor. Worth matching, including `groupBy`'s
-array-argument nesting (one level per grouper) and `preserveKeys` affecting
-only the innermost collection.
-
-**Where to change:** `plan_result` in
-`virtual_members/laravel/higher_order_proxy.rs` for the proxy forms, and
-the collection return-type patches for the argument forms. The property
-lookup already exists for `model-property<Model>`; the work is threading
-a resolved key type through the generic substitution.
-
 #### L45. `*_count` properties are offered on every relationship
 
 **Impact: Low-Medium · Complexity: High**

@@ -361,15 +361,33 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
                 },
             };
 
-        let mut owner_results = resolve_owner_method_call(
-            owner,
-            &method_name,
-            argument_list,
-            ctx,
-            is_static,
-            &template_subs,
-            &self_replace,
-        );
+        let projected = argument_list.and_then(|_| {
+            crate::virtual_members::laravel::collection_projection::collection_property_return(
+                owner,
+                receiver_type,
+                &method_name,
+                &arg_refs,
+                &rctx,
+            )
+        });
+        let mut owner_results = if let Some(hint) = projected {
+            crate::type_engine::type_resolution::resolved_types_for_hint(
+                hint,
+                "",
+                ctx.file.all_classes,
+                ctx.file.class_loader,
+            )
+        } else {
+            resolve_owner_method_call(
+                owner,
+                &method_name,
+                argument_list,
+                ctx,
+                is_static,
+                &template_subs,
+                &self_replace,
+            )
+        };
         if let Some(count) = fluent_count {
             crate::virtual_members::laravel::carry_factory_count(
                 &mut owner_results,

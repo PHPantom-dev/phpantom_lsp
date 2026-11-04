@@ -146,6 +146,36 @@ impl Backend {
                 None => continue,
             };
 
+            if crate::virtual_members::laravel::collection_projection::is_projection_method(
+                method_name,
+            ) && let Some(hint) =
+                crate::virtual_members::laravel::collection_projection::collection_property_return(
+                    &owner,
+                    Some(&rt.type_string),
+                    method_name,
+                    &split_top_level_commas(text_args),
+                    ctx,
+                )
+            {
+                ClassInfo::extend_unique_arc(
+                    &mut results,
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &hint,
+                        "",
+                        ctx.file.all_classes,
+                        ctx.file.class_loader,
+                    ),
+                );
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(match hint_out.take() {
+                        Some(previous) if hint_captured => PhpType::union(vec![previous, hint]),
+                        _ => hint,
+                    });
+                    hint_captured = true;
+                }
+                continue;
+            }
+
             // Extract class-level generic type arguments from the
             // resolved type string (e.g. `Collection<Product>` →
             // `[Product]`) so we can substitute class-level
