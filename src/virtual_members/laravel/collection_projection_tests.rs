@@ -69,7 +69,7 @@ fn incomplete_collection_generics_keep_the_declared_return() {
         collection_property_return(
             &owner,
             Some(&PhpType::generic(COLLECTION, vec![PhpType::string()])),
-            "pluck",
+            ProjectionMethod::Pluck,
             &["'name'"],
             &ctx,
         )

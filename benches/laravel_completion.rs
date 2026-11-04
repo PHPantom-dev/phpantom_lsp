@@ -221,9 +221,110 @@ fn bench_morph_column_completion(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_collection_property_completion(c: &mut Criterion) {
+    const COLLECTION: &str = r#"<?php
+namespace Illuminate\Support;
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+class Collection {
+    /**
+     * @template TNewKey of array-key
+     * @param (callable(TValue, TKey): TNewKey)|string $keyBy
+     * @return static<($keyBy is string ? array-key : TNewKey), TValue>
+     */
+    public function keyBy($keyBy) {}
+    /** @return static<array-key, static<TKey, TValue>> */
+    public function groupBy($groupBy, $preserveKeys = false) {}
+    /** @return static<array-key, mixed> */
+    public function pluck($value, $key = null) {}
+    /** @return static<int, TValue> */
+    public function values() {}
+    /** @return TValue|null */
+    public function first() {}
+}
+"#;
+    let runtime = rt();
+    let mut group = c.benchmark_group("laravel_collection_property_completion");
+    for (name, expression, chain, property) in [
+        ("key_by", "$users->keyBy('email')", "first()", "email"),
+        (
+            "group_by",
+            "$users->groupBy('email')",
+            "first()->first()",
+            "email",
+        ),
+        (
+            "pluck",
+            "$users->pluck('profile')",
+            "first()",
+            "displayName",
+        ),
+        ("ordinary_method", "$users->values()", "first()", "email"),
+    ] {
+        let backend = Backend::new_test_with_stubs(HashMap::from([(
+            "Illuminate\\Support\\Collection",
+            COLLECTION,
+        )]));
+        let mut source = format!(
+            r#"<?php
+namespace App;
+class Profile {{ public string $displayName; }}
+class User {{ public string $email; public Profile $profile; }}
+/** @param \Illuminate\Support\Collection<int, User> $users */
+function show($users): void {{
+    $result = {expression};
+    $result->{chain}->"#
+        );
+        let position = Position::new(
+            source.lines().count() as u32 - 1,
+            source.lines().last().unwrap().len() as u32,
+        );
+        source.push_str("\n}\n");
+        let uri = runtime.block_on(open_file(
+            &backend,
+            &format!("file:///bench/collection_{name}.php"),
+            &source,
+        ));
+        let params = CompletionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        };
+        let request = || {
+            runtime
+                .block_on(backend.completion(params.clone()))
+                .expect("collection completion request failed")
+        };
+        let items = match request().expect("collection completion must return a response") {
+            CompletionResponse::CompletionItemList(items) => items,
+            CompletionResponse::CompletionList(list) => list.items,
+        };
+        assert!(
+            items.iter().any(|item| item.label == property),
+            "{name} must resolve the selected collection item"
+        );
+
+        group.bench_function(name, |b| {
+            b.iter_batched(
+                || backend.clear_completion_cache(),
+                |()| black_box(request()),
+                BatchSize::PerIteration,
+            );
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_laravel_model_completion,
-    bench_morph_column_completion
+    bench_morph_column_completion,
+    bench_collection_property_completion
 );
 criterion_main!(benches);

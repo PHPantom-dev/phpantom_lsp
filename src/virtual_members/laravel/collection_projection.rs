@@ -9,11 +9,39 @@ use crate::types::{BackedEnumType, ClassInfo, ClassLikeKind, ELOQUENT_COLLECTION
 const COLLECTION: &str = "Illuminate\\Support\\Collection";
 const LAZY_COLLECTION: &str = "Illuminate\\Support\\LazyCollection";
 
-/// Whether a method can use a literal item property to refine its return type.
-pub(crate) fn is_projection_method(name: &str) -> bool {
-    name.eq_ignore_ascii_case("keyBy")
-        || name.eq_ignore_ascii_case("groupBy")
-        || name.eq_ignore_ascii_case("pluck")
+/// A collection method whose return type can be refined by literal properties.
+#[derive(Clone, Copy)]
+pub(crate) enum ProjectionMethod {
+    /// Select the keys of the original items.
+    KeyBy,
+    /// Group the original items by selected keys.
+    GroupBy,
+    /// Select new values and, optionally, keys.
+    Pluck,
+}
+
+impl ProjectionMethod {
+    /// Classify the call once, before resolving any of its receiver classes.
+    #[inline]
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        if name.eq_ignore_ascii_case("keyBy") {
+            Some(Self::KeyBy)
+        } else if name.eq_ignore_ascii_case("groupBy") {
+            Some(Self::GroupBy)
+        } else if name.eq_ignore_ascii_case("pluck") {
+            Some(Self::Pluck)
+        } else {
+            None
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::KeyBy => "keyBy",
+            Self::GroupBy => "groupBy",
+            Self::Pluck => "pluck",
+        }
+    }
 }
 
 /// Refine a collection call whose literal arguments name item properties.
@@ -21,38 +49,42 @@ pub(crate) fn is_projection_method(name: &str) -> bool {
 pub(crate) fn collection_property_return(
     owner: &ClassInfo,
     receiver: Option<&PhpType>,
-    method_name: &str,
+    projection: ProjectionMethod,
     args: &[&str],
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    let method_name = if method_name.eq_ignore_ascii_case("keyBy") {
-        "keyBy"
-    } else if method_name.eq_ignore_ascii_case("groupBy") {
-        "groupBy"
-    } else if method_name.eq_ignore_ascii_case("pluck") {
-        "pluck"
-    } else {
-        return None;
-    };
     let loader = ctx.file.class_loader;
-    let lazy = is_subtype_of(owner, LAZY_COLLECTION, loader);
-    if !lazy && !is_subtype_of(owner, COLLECTION, loader) {
-        return None;
-    }
+    let owner_name = owner.fqn();
+    let lazy = match owner_name.as_str() {
+        COLLECTION => false,
+        LAZY_COLLECTION => true,
+        _ if is_subtype_of(owner, LAZY_COLLECTION, loader) => true,
+        _ if is_subtype_of(owner, COLLECTION, loader) => false,
+        _ => return None,
+    };
     let base = if lazy { LAZY_COLLECTION } else { COLLECTION };
-    let bare_receiver = PhpType::named(owner.fqn());
-    let receiver = receiver.unwrap_or(&bare_receiver);
-    let types = if owner.template_params.is_empty()
-        && let TypeKind::Generic(generic) = receiver.kind()
-        && generic.args.len() == 2
+    let bare_receiver;
+    let receiver = match receiver {
+        Some(receiver) => receiver,
+        None => {
+            bare_receiver = PhpType::named(owner_name);
+            &bare_receiver
+        }
+    };
+    let inherited_types;
+    let types = if let TypeKind::Generic(generic) = receiver.kind()
+        && (generic.name.eq_ignore_ascii_case(base)
+            || (owner.template_params.is_empty() && generic.args.len() == 2))
     {
         // A static<TKey, TValue> result can rebind an extends-only subclass.
         // Its declaration still has the original keys; the receiver has the new ones.
-        generic.args.clone()
+        generic.args.as_slice()
     } else {
-        crate::inheritance::extract_generic_args_from_ancestor(receiver, base, loader)?
+        inherited_types =
+            crate::inheritance::extract_generic_args_from_ancestor(receiver, base, loader)?;
+        inherited_types.as_slice()
     };
-    let [key, value] = types.as_slice() else {
+    let [key, value] = types else {
         return None;
     };
     let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
@@ -60,18 +92,18 @@ pub(crate) fn collection_property_return(
         loader,
         ctx.resolved_class_cache,
     );
-    let method = resolved.get_method_ci(method_name)?;
+    let method = resolved.get_method_ci(projection.name())?;
     let bound = crate::call_args::bind_text_args_to_params(&method.parameters, args);
     let selector = bound.first()?.as_deref()?;
     let second = bound.get(1).and_then(Option::as_deref);
     let property = |path: &str| property_path_type(value, path, ctx).unwrap_or_else(PhpType::mixed);
-    match method_name {
-        "keyBy" => {
+    match projection {
+        ProjectionMethod::KeyBy => {
             let path = crate::util::unescape_php_string_literal(selector)?;
             let key = collection_key_type(&property(&path), false, lazy, true, loader);
-            Some(PhpType::generic_atom(owner.fqn(), vec![key, value.clone()]))
+            Some(PhpType::generic_atom(owner_name, vec![key, value.clone()]))
         }
-        "groupBy" => {
+        ProjectionMethod::GroupBy => {
             let paths = if let Some(path) = crate::util::unescape_php_string_literal(selector) {
                 vec![path]
             } else {
@@ -107,7 +139,7 @@ pub(crate) fn collection_property_return(
                 .map(|path| collection_key_type(&property(path), true, false, true, loader))
                 .collect::<Vec<_>>();
             Some(grouped_collection(
-                owner.fqn(),
+                owner_name,
                 inner_key,
                 value.clone(),
                 &keys,
@@ -115,7 +147,7 @@ pub(crate) fn collection_property_return(
                 is_subtype_of(owner, ELOQUENT_COLLECTION_FQN, loader),
             ))
         }
-        _ => {
+        ProjectionMethod::Pluck => {
             let projected = if selector.eq_ignore_ascii_case("null") {
                 value.clone()
             } else {
@@ -135,7 +167,7 @@ pub(crate) fn collection_property_return(
             let collection = if is_subtype_of(owner, ELOQUENT_COLLECTION_FQN, loader) {
                 atom(COLLECTION)
             } else {
-                owner.fqn()
+                owner_name
             };
             Some(PhpType::generic_atom(collection, vec![key, projected]))
         }

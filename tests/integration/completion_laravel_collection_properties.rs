@@ -216,6 +216,37 @@ $other = (new \App\Collection())->keyBy('email');
 }
 
 #[test]
+fn projection_names_ignore_case_and_callbacks_keep_template_inference() {
+    assert_projection(
+        "\\Illuminate\\Support\\Collection<int, User>",
+        r#"
+$keyed = $users->KeYbY('email');
+$grouped = $users->GrOuPbY('email');
+$plucked = $users->PLUCK('profile');
+$callback = $users->KeYbY(fn (User $user): string => $user->email);
+"#,
+        &[
+            ("$keyed", "Collection<string, User>"),
+            ("$grouped", "Collection<string, Collection<int, User>>"),
+            ("$plucked", "Collection<int, Profile>"),
+            ("$callback", "Collection<string, User>"),
+        ],
+    );
+}
+
+#[test]
+fn collection_first_class_callables_infer_the_invocation_arguments() {
+    assert_projection(
+        "\\Illuminate\\Support\\Collection<string, User>",
+        r#"
+$group = $users->groupBy(...);
+$groups = $group('email');
+"#,
+        &[("$groups", "Collection<string, Collection<int, User>>")],
+    );
+}
+
+#[test]
 fn lazy_collection_projection_keeps_the_outer_collection_lazy() {
     assert_projection(
         "\\Illuminate\\Support\\LazyCollection<string, User>",

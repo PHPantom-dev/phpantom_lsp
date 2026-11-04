@@ -461,6 +461,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- **Collection inference benchmarks.** Pull-request benchmarks now measure property-based collection calls alongside ordinary collection calls. Contributed by @shuvroroy.
 - **Faster benchmark checks on pull requests.** Latency benchmarks now run split across four runners, and benchmark alerts on fork pull requests show up in the job summary instead of failing on a permission error. Contributed by @shuvroroy.
 
 ## [0.11.1] - 2026-10-07
