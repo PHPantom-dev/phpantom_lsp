@@ -884,23 +884,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Reachability">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b10-a-finally-block-does-not-see-the-paths-an-uncaught-exception-takes-into-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B10. A <code>finally</code> block does not see the paths an uncaught exception takes into it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1603,23 +1586,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Reachability">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b10-a-finally-block-does-not-see-the-paths-an-uncaught-exception-takes-into-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B10. A <code>finally</code> block does not see the paths an uncaught exception takes into it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1851,46 +1817,16 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
-<h4 id="b10-a-finally-block-does-not-see-the-paths-an-uncaught-exception-takes-into-it">B10. A <code>finally</code> block does not see the paths an uncaught exception takes into it<a class="headerlink" href="#b10-a-finally-block-does-not-see-the-paths-an-uncaught-exception-takes-into-it" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$tool = null;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">try {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    $tool = new Tool();</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    $this-&gt;mayThrow();</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    $tool = null;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">} finally {</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    if (null !== $tool) {</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">        $tool-&gt;editable();</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        // Cannot access method 'editable' on type 'never'</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    }</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">}</span>
-</code></pre></div>
-<p>A <code>finally</code> block also runs when the <code>try</code> body throws something no
-<code>catch</code> takes, or when a <code>catch</code> throws partway through its body. The
-diagnostic walk enters the block with the paths that finish the <code>try</code> or a
-<code>catch</code>, plus those that <code>return</code> or rethrow at the end of a <code>catch</code>, but
-not with the state before each statement that can throw. Hover and
-completion inside the block already merge that state in, so the two
-disagree.</p>
-<p><strong>Where to change:</strong> <code>process_try</code> in
-<code>src/type_engine/variable/forward_walk/control_flow.rs</code>. The
-cursor-in-<code>finally</code> branch merges <code>catch_entry</code> when
-<code>!catches_everything(try_stmt)</code>; the branch for code after the statement
-should hand the same state to <code>walk_finally_block</code> as one more exit. Note
-that <code>walk_try_body</code> returns the pre-<code>try</code> state when nothing in the body
-can throw, which is right for a <code>catch</code> (it cannot run then) but would
-wrongly widen the <code>finally</code> entry, so it needs to say whether anything can
-throw at all. The cursor-in-<code>finally</code> branch has the same imprecision
-today.</p>
+<p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b692-int-of-a-ctype_digit-checked-string-is-not-non-negative">B692. <code>(int)</code> of a <code>ctype_digit()</code>-checked string is not non-negative<a class="headerlink" href="#b692-int-of-a-ctype_digit-checked-string-is-not-non-negative" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function wait(string $delay): void {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    if (!ctype_digit($delay)) {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">        return;</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    }</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    sleep((int) $delay);   // expects int&lt;0, max&gt;, got int</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function wait(string $delay): void {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    if (!ctype_digit($delay)) {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        return;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    }</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    sleep((int) $delay);   // expects int&lt;0, max&gt;, got int</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>A string that passes <code>ctype_digit()</code> holds only the digits 0-9, so casting
 it to <code>int</code> cannot give a negative number, and <code>sleep()</code>'s
@@ -1904,16 +1840,16 @@ seconds a rate-limit message names.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b726-a-dynamic-class-string-key-written-into-a-shape-widens-every-key-to-string">B726. A dynamic <code>class-string</code> key written into a shape widens every key to <code>string</code><a class="headerlink" href="#b726-a-dynamic-class-string-key-written-into-a-shape-widens-every-key-to-string" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">private const PAIRS = [NodeTraverser::class =&gt; [...]];</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$pairs = self::PAIRS;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">if (class_exists($className)) {</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    $pairs[$className] = [...];</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">foreach (array_keys($pairs) as $class) {</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    new ReflectionClass($class);</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    // expects class-string&lt;object&gt;|object, got string</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">private const PAIRS = [NodeTraverser::class =&gt; [...]];</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">$pairs = self::PAIRS;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">if (class_exists($className)) {</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    $pairs[$className] = [...];</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">foreach (array_keys($pairs) as $class) {</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    new ReflectionClass($class);</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">    // expects class-string&lt;object&gt;|object, got string</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>array_keys(self::PAIRS)</code> alone gives <code>list&lt;class-string&lt;NodeTraverser&gt;&gt;</code>,
 and <code>$className</code> is a <code>class-string</code> after the <code>class_exists()</code> check, so
@@ -1935,14 +1871,14 @@ should keep a union of <code>class-string</code> members instead of widening it 
 extension shadows (two sites).</p>
 <h3 id="b728-a-key-written-into-a-plain-array-turns-it-into-a-closed-shape">B728. A key written into a plain <code>array</code> turns it into a closed shape<a class="headerlink" href="#b728-a-key-written-into-a-plain-array-turns-it-into-a-closed-shape" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @param array $args */</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function add(string $id, array $args, mixed $default): void {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    $args['settings'] = $id;           // array{settings: string}</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $args['defaultValue'] = $default;  // array{settings: string, defaultValue: mixed}</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    $wp_customize-&gt;add_control($id, $args);</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    // expects array{…, settings?: array, …}, got array{settings: string, defaultValue?: mixed}</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    // (undeclared key 'defaultValue')</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @param array $args */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function add(string $id, array $args, mixed $default): void {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    $args['settings'] = $id;           // array{settings: string}</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    $args['defaultValue'] = $default;  // array{settings: string, defaultValue: mixed}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    $wp_customize-&gt;add_control($id, $args);</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    // expects array{…, settings?: array, …}, got array{settings: string, defaultValue?: mixed}</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    // (undeclared key 'defaultValue')</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>$args</code> holds whatever keys the caller passed, so after the writes it is
 still an array with unknown keys that also has <code>settings</code> and
@@ -1973,13 +1909,13 @@ caller's control arguments before passing them to
 <h2 id="name-resolution">Name resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first">B704. A function declared in two files resolves to whichever is found first<a class="headerlink" href="#b704-a-function-declared-in-two-files-resolves-to-whichever-is-found-first" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function __() {}</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// wp-admin/includes/noop.php, loaded only by load-scripts.php</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function __() {}</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">// wp-includes/l10n.php, loaded everywhere else</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">function __( $text, $domain = 'default' ) { … }</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">__( 'Hello' );   // Expected 0 arguments, got 1</span>
 </code></pre></div>
 <p>WordPress core declares nineteen of its functions a second time as
 no-ops for its script loader. Calls across the project resolve to the
@@ -1998,16 +1934,16 @@ for hover and go-to-definition, and offer the others alongside.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b727-a-property-or-method-named-by-a-variable-does-not-resolve-in-a-chain">B727. A property or method named by a variable does not resolve in a chain<a class="headerlink" href="#b727-a-property-or-method-named-by-a-variable-does-not-resolve-in-a-chain" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @param array{price: Decimal, member_price: Decimal} $prices */</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">function differences(ProductPrice $price, array $prices): void {</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    foreach ($prices as $column =&gt; $amount) {</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">        $price-&gt;{$column}-&gt;equals($amount);</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">        // Cannot verify method 'equals': the type of its subject could not be resolved</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    }</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">}</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">$name = 'getD';</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">$p-&gt;$name()-&gt;equals($d);   // type of '$p-&gt;?()' could not be resolved</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param array{price: Decimal, member_price: Decimal} $prices */</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function differences(ProductPrice $price, array $prices): void {</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    foreach ($prices as $column =&gt; $amount) {</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">        $price-&gt;{$column}-&gt;equals($amount);</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">        // Cannot verify method 'equals': the type of its subject could not be resolved</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    }</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">}</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">$name = 'getD';</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">$p-&gt;$name()-&gt;equals($d);   // type of '$p-&gt;?()' could not be resolved</span>
 </code></pre></div>
 <p><code>$column</code> is <code>'price'|'member_price'</code>, so <code>$price-&gt;{$column}</code> is the
 union of those two properties' types. Even a single literal does not
