@@ -566,7 +566,15 @@ impl Backend {
         content: &str,
     ) -> Vec<CompletionItem> {
         let partial = es_ctx.partial.to_lowercase();
-        let columns = crate::virtual_members::laravel::where_property::collect_column_names(model);
+        use crate::virtual_members::laravel::where_property::{
+            AttributeNameKind, collect_attribute_names,
+        };
+        let kind = if es_ctx.kind == EloquentStringKind::AttributeKey {
+            AttributeNameKind::Writable
+        } else {
+            AttributeNameKind::Column
+        };
+        let columns = collect_attribute_names(model, kind);
         let argument = es_ctx.argument.as_ref();
         let range = argument.map(|argument| {
             Range::new(

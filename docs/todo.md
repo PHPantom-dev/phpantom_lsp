@@ -170,7 +170,6 @@ ships, remove every row that names it.
 | L53 | [Collection key types from the column for `keyBy` / `groupBy` / `pluck`](todo/laravel.md#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck)                   | Medium      | Medium      |
 | BL20 | [Port Bladestan's tests](todo/blade.md#bl20-port-bladestans-tests) | Medium | Medium |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
-| L70 | [Read-only accessors are offered as columns](todo/laravel.md#l70-read-only-accessors-are-offered-as-columns) | Low-Medium | Low |
 | L71 | [Inertia page props and asset helpers on a typed URL generator](todo/laravel.md#l71-inertia-page-props-and-asset-helpers-on-a-typed-url-generator) | Low | Low-Medium |
 | L59 | [Typed controller middleware names](todo/laravel.md#l59-typed-controller-middleware-names)                                                                                  | Low-Medium  | Medium      |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |

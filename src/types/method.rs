@@ -114,7 +114,7 @@ pub struct MethodInfo {
     /// its result away is reported.  PHP does not inherit the attribute:
     /// an override without it may be called for its effect alone.
     pub is_no_discard: bool,
-    /// Docblock-derived data that most methods leave empty (`@return`
+    /// Metadata that most methods leave empty (`@return`
     /// descriptions, links, deprecation, method-level templates, `@throws`,
     /// assertions, conditional and `$this`-narrowing types).
     ///
@@ -131,6 +131,8 @@ pub struct MethodInfo {
 /// pointer instead of the inline fields.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MethodExtras {
+    /// Whether a modern Eloquent `Attribute` return declares a setter.
+    pub has_attribute_setter: bool,
     /// Human-readable description extracted from the `@return` tag.
     ///
     /// For `@return list<User> The active users`, this would be
@@ -240,7 +242,8 @@ pub struct MethodExtras {
 impl MethodExtras {
     /// Whether every field is empty, i.e. the method needs no extras box.
     pub fn is_empty(&self) -> bool {
-        self.return_description.is_none()
+        !self.has_attribute_setter
+            && self.return_description.is_none()
             && self.links.is_empty()
             && self.see_refs.is_empty()
             && self.conditional_return.is_none()
