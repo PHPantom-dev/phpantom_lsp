@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793749555053,
+  "lastUpdate": 1793760498756,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -9628,6 +9628,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_yii_action",
             "value": 95.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7e4684e7c797b5327782c4a0d11eb08e29f324b8",
+          "message": "A `finally` block sees the paths an uncaught exception takes",
+          "timestamp": "2026-11-04T03:26:38+01:00",
+          "tree_id": "383ec5c940b35bcfac496a39d75b3bb68bbc9f5f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7e4684e7c797b5327782c4a0d11eb08e29f324b8"
+        },
+        "date": 1793760486709,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 45.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_symfony_controller",
+            "value": 74.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_wordpress_plugin",
+            "value": 132.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_yii_action",
+            "value": 100.1,
             "unit": "MiB"
           }
         ]
