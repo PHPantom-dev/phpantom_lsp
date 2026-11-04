@@ -10,6 +10,7 @@
  *   acme_theme adds in preprocess.
  */
 #}
-{# Try: go to the definition of 'acme.greeting' in path(). #}
+{# Try: go to the definition of 'acme.greeting' in path(), or of 'name' in the
+   parameters after it, which lands on {name} in acme.routing.yml. #}
 <p{{ attributes.addClass('acme-greeting') }} data-name="{{ name }}">{{ greeting }}</p>
 <a href="{{ path('acme.greeting', {'name': 'World'}) }}">{{ 'Greet the world'|t }}</a>

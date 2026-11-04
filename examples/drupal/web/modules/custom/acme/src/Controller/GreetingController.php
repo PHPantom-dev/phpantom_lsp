@@ -51,7 +51,9 @@ final class GreetingController extends ControllerBase
     public function worldLink(): Link
     {
         // Try: find the references of 'acme.greeting' to see every place that
-        // links or redirects to it, the links and Twig files included.
+        // links or redirects to it, the links and Twig files included. Go to
+        // the definition of 'name', which lands on {name} in the route's path,
+        // or complete a parameter key inside the array.
         $url = Url::fromRoute('acme.greeting', ['name' => 'World']);
 
         return Link::createFromRoute($this->t('Greet the world'), 'acme.greeting', $url->getRouteParameters());

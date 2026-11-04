@@ -1,5 +1,5 @@
 # Try: go to the definition of acme.greeting, or complete a route name after
-# route_name:.
+# route_name:. The name under route_parameters: goes to the route's {name}.
 acme.greeting:
   title: 'Greeting'
   route_name: acme.greeting

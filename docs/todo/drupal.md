@@ -54,40 +54,6 @@ names and report a misspelt one.
 
 ---
 
-## DR5. Route names
-
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-Url::fromRoute('acme.order_view', ['order' => $id]);
-$form_state->setRedirect('acme.order_list');
-```
-
-```yaml
-acme.order_view:
-  path: '/order/{order}'
-  defaults:
-    _controller: '\Drupal\acme\Controller\OrderController::view'
-```
-
-Routes are declared in `<module>.routing.yml`. Complete, navigate, and
-find references for route names in `Url::fromRoute()`,
-`Link::createFromRoute()`, `$this->redirect()`,
-`$form_state->setRedirect()`, and the menu, tab, and action YAML files,
-and report a name nothing declares. The `_controller`, `_form`, and
-`_entity_form` values may already navigate through the resource symbol
-maps that read `Class::method` strings in YAML; check before building
-anything for them. The parameter keys are the same problem as Symfony's
-[F27](lsp-features.md#f27-symfony-route-parameters).
-
-A path parameter named after an entity type (`/node/{node}`) is upcast
-by Drupal's parameter converters, so the controller method's `$node`
-receives a `NodeInterface`, not the ID. Type an untyped controller
-parameter from the route that names it, and check a typed one against
-it.
-
----
-
 ## DR6. Hooks
 
 **Impact: Medium-High · Complexity: Medium**
@@ -340,6 +306,23 @@ Report one where `getStorage()`, `\Drupal::entityQuery()`, and the other
 calls that take an entity type ID take it. A module can add entity types
 in code from `hook_entity_type_build()`, which no class declares, so a
 site where an implementation of that hook may add one stays silent.
+
+---
+
+## DR20. Complete route names built in code
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+Url::fromRoute('entity.node.canonical', ['node' => $nid]);
+Url::fromRoute('view.content.page_1');
+```
+
+Entity routes and Views routes are accepted without a warning, but
+neither completes nor goes to a definition, since no routing file declares
+them. Read them from where Drupal builds them: each entity type's link
+templates (`entity.<type>.<link>`) and each view's displays
+(`view.<view_id>.<display_id>`).
 
 ---
 

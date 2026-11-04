@@ -14,6 +14,7 @@
 require_once __DIR__ . '/vendor/autoload.php';
 
 use Drupal\acme\Controller\GreetingController;
+use Drupal\acme\Controller\NoteController;
 use Drupal\acme\Entity\Note;
 use Drupal\acme\Greeter;
 use Drupal\acme\Hook\AcmeHooks;
@@ -28,6 +29,7 @@ use Drupal\Core\Entity\Attribute\ContentEntityType;
 use Drupal\Core\Entity\ContentEntityBase;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\ContentEntityTypeInterface;
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeManager;
 use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Extension\InfoParser;
@@ -136,6 +138,21 @@ check('the acme.greeting menu link points at a declared route', isset($routes[$m
 check("the menu link's parameters are the ones the route's path declares", array_keys($menuLinks['acme.greeting']['route_parameters'] ?? []) === ['name']);
 preg_match_all("/path\\('([^']+)'/", (string) file_get_contents("$module/templates/acme-greeting.html.twig"), $namedInTwig);
 check('the acme_greeting template links to a declared route', $namedInTwig[1] !== [] && array_diff($namedInTwig[1], array_keys($routes)) === []);
+check("the template passes the name parameter acme.greeting's path declares", str_contains((string) file_get_contents("$module/templates/acme-greeting.html.twig"), "path('acme.greeting', {'name': 'World'})"));
+check('worldLink() passes the name parameter the path declares', str_contains($controllerSource, "Url::fromRoute('acme.greeting', ['name' => 'World'])"));
+
+// The routes CoreLinks names are built by core, not declared in a routing file.
+$coreLinksSource = (string) file_get_contents("$module/src/CoreLinks.php");
+$nodeEntitySource = (string) file_get_contents("$web/core/modules/node/src/Entity/Node.php");
+$nodeRoutesSource = (string) file_get_contents("$web/core/modules/node/src/Entity/NodeRouteProvider.php");
+$entityRoutesSource = (string) file_get_contents("$web/core/lib/Drupal/Core/Entity/Routing/DefaultHtmlRouteProvider.php");
+$contentView = Yaml::decode((string) file_get_contents("$web/core/modules/node/config/optional/views.view.content.yml"));
+check('CoreLinks passes entity.node.canonical its node parameter', str_contains($coreLinksSource, "Url::fromRoute('entity.node.canonical', ['node' => 1])"));
+check("DefaultHtmlRouteProvider builds entity.<type>.canonical from the entity type's ID", str_contains($entityRoutesSource, '$collection->add("entity.{$entity_type_id}.canonical", $canonical_route);'));
+check("node's html route provider is NodeRouteProvider, a DefaultHtmlRouteProvider", str_contains($nodeEntitySource, "'html' => NodeRouteProvider::class") && str_contains($nodeRoutesSource, 'class NodeRouteProvider extends DefaultHtmlRouteProvider'));
+check("node's canonical link takes the {node} parameter", str_contains($nodeEntitySource, "'canonical' => '/node/{node}'"));
+check('CoreLinks names view.content.page_1', str_contains($coreLinksSource, "Url::fromRoute('view.content.page_1')"));
+check('node ships the content view with the page_1 page display', ($contentView['id'] ?? '') === 'content' && ($contentView['display']['page_1']['display_plugin'] ?? '') === 'page');
 
 // ─── Entity types ───────────────────────────────────────────────────────────
 
@@ -155,6 +172,18 @@ check("NoteCounter::ids() starts an entity query on acme_note", str_contains((st
 check('acme_note is a content entity type, whose entity query gives IDs under integer keys', $noteDefinition instanceof ContentEntityTypeInterface && $noteDefinition->entityClassImplements(ContentEntityInterface::class));
 check('NoteCounter::count() counts the entity query it starts from the storage', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "->getQuery()") && str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "->count()"));
 check('NoteCounter::first() asks for acme_note', str_contains((string) file_get_contents("$module/src/NoteCounter.php"), "getStorage('acme_note');"));
+
+// Drupal upcasts a controller's parameter named after an entity type and
+// hinted with a class or interface the entity class is (core's
+// EntityResolverManager::setParametersFromReflection()).
+[$noteControllerClass, $noteControllerMethod] = explode('::', ltrim($routes['acme.note']['defaults']['_controller'] ?? '', '\\')) + [1 => ''];
+$noteView = new ReflectionMethod(NoteController::class, 'view');
+$noteParameter = $noteView->getParameters()[0];
+check('acme.note points at NoteController::view()', $noteControllerClass === NoteController::class && $noteControllerMethod === 'view');
+check('acme.note declares the {acme_note} parameter', str_contains($routes['acme.note']['path'], '{acme_note}'));
+check('NoteController::view() names its parameter after the acme_note entity type', $noteParameter->getName() === ($noteType['id'] ?? null));
+check('NoteController::view() hints the parameter with an interface Note implements, so Drupal upcasts it', $noteParameter->getType()?->getName() === EntityInterface::class && is_subclass_of(Note::class, EntityInterface::class));
+check("acme.note's title callback is NoteController::title(), which receives the same parameter", ltrim($routes['acme.note']['defaults']['_title_callback'] ?? '', '\\') === NoteController::class . '::title' && (new ReflectionMethod(NoteController::class, 'title'))->getParameters()[0]->getName() === 'acme_note');
 
 // ─── Hooks and theme hooks ──────────────────────────────────────────────────
 
