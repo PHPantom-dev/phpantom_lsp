@@ -890,17 +890,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#a28-explicit-nullable-parameter-type-php-84-deprecation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        A28. Explicit nullable parameter type (PHP 8.4 deprecation)
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#a29-simplify-boolean-return" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1685,17 +1674,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#a28-explicit-nullable-parameter-type-php-84-deprecation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        A28. Explicit nullable parameter type (PHP 8.4 deprecation)
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#a29-simplify-boolean-return" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1927,7 +1905,7 @@ quick-fixes and refactoring actions use different code paths.</p>
 </li>
 </ol>
 <h3 id="when-to-implement">When to implement<a class="headerlink" href="#when-to-implement" title="Permanent link">&para;</a></h3>
-<p>Do this when the next batch of code actions is added (A25, A28, etc.).
+<p>Do this when the next batch of code actions is added (A25 and the like).
 The refactoring pays for itself by making each subsequent action
 cheaper to add: write one function, append it to an array.</p>
 <hr />
@@ -2016,19 +1994,6 @@ must verify exactly 2 arguments to <code>strpos</code> (the 3-argument form with
 offset has different semantics).</p>
 <p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.
 <strong>Guard:</strong> <code>php_version &gt;= 8.0</code>.</p>
-<hr />
-<h3 id="a28-explicit-nullable-parameter-type-php-84-deprecation">A28. Explicit nullable parameter type (PHP 8.4 deprecation)<a class="headerlink" href="#a28-explicit-nullable-parameter-type-php-84-deprecation" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<p>Convert implicit nullable parameters to explicit nullable syntax:
-<code>function foo(string $p = null)</code> → <code>function foo(?string $p = null)</code>.</p>
-<p>PHP 8.4 deprecates the implicit nullable form. PHPStorm flags this.
-PHP-CS-Fixer's <code>NullableTypeDeclarationForDefaultNullValueFixer</code>
-handles union types, intersection types (DNF), and constructor
-property promotion.</p>
-<p>Only offer when the parameter has a type hint, a <code>= null</code> default, and
-the type does not already include <code>null</code> (no <code>?</code> prefix, no <code>|null</code>
-in a union).</p>
-<p><strong>Code action kind:</strong> <code>quickfix</code>.</p>
 <hr />
 <h3 id="a29-simplify-boolean-return">A29. Simplify boolean return<a class="headerlink" href="#a29-simplify-boolean-return" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
