@@ -38,6 +38,7 @@ mod code_action_convert_to_interpolation;
 mod code_action_create_missing_view;
 mod code_action_create_test;
 mod code_action_data_provider;
+mod code_action_explicit_nullable;
 mod code_action_extract_function;
 mod code_action_extract_interface;
 mod code_action_extract_variable;

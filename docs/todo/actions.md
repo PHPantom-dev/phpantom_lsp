@@ -44,7 +44,7 @@ quick-fixes and refactoring actions use different code paths.
 
 ### When to implement
 
-Do this when the next batch of code actions is added (A25, A28, etc.).
+Do this when the next batch of code actions is added (A25 and the like).
 The refactoring pays for itself by making each subsequent action
 cheaper to add: write one function, append it to an array.
 
@@ -132,26 +132,6 @@ offset has different semantics).
 
 **Code action kind:** `refactor.rewrite`.
 **Guard:** `php_version >= 8.0`.
-
----
-
-### A28. Explicit nullable parameter type (PHP 8.4 deprecation)
-
-**Impact: Medium · Complexity: Low**
-
-Convert implicit nullable parameters to explicit nullable syntax:
-`function foo(string $p = null)` → `function foo(?string $p = null)`.
-
-PHP 8.4 deprecates the implicit nullable form. PHPStorm flags this.
-PHP-CS-Fixer's `NullableTypeDeclarationForDefaultNullValueFixer`
-handles union types, intersection types (DNF), and constructor
-property promotion.
-
-Only offer when the parameter has a type hint, a `= null` default, and
-the type does not already include `null` (no `?` prefix, no `|null`
-in a union).
-
-**Code action kind:** `quickfix`.
 
 ---
 
