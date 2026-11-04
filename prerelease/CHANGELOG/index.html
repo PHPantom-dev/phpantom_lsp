@@ -5225,6 +5225,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Members named by a variable in a chain.</strong> <code>$row-&gt;{$column}-&gt;equals($x)</code> and <code>$obj-&gt;$getter()-&gt;format()</code> now resolve when the variable holds known strings. A variable that can hold several names reads every member they name.</li>
 <li><strong>A <code>finally</code> block sees the paths an uncaught exception takes.</strong> A variable the <code>try</code> assigned before a call that may throw, and cleared after it, is no longer treated as never set inside the <code>finally</code> block. The same goes for an exception a <code>catch</code> throws partway through.</li>
 <li><strong><code>isset()</code> that fails on an array element.</strong> Where <code>isset($values[$key])</code> was false, <code>$values[$key]</code> now reads as <code>null</code>, the value a missing key gives. A guard like <code>if (isset($values[$key]) &amp;&amp; !is_array($values[$key])) { return; }</code> now leaves the element an array or <code>null</code> past it, the same as it does for a plain variable.</li>
 <li><strong>Imported <code>#[Table]</code> and <code>#[Connection]</code> attributes.</strong> A model's table and connection attributes are now read when the attribute is imported with <code>use</code>, not only when written fully qualified, in files open in the editor and in <code>analyze</code>. Contributed by @shuvroroy.</li>
