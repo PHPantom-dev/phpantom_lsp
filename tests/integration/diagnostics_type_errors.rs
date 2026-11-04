@@ -15207,6 +15207,56 @@ function g(array $wider): void {
 }
 
 #[test]
+fn a_key_written_into_a_plain_array_leaves_its_other_keys_open() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{settings?: string, label?: string} $args */
+function add_control(array $args): void {}
+/** @param array $args */
+function add(string $id, array $args, mixed $default): void {
+    $args['settings'] = $id;
+    $args['defaultValue'] = $default;
+    add_control($args);
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+#[test]
+fn a_class_string_key_written_into_a_constant_shape_keeps_its_keys_class_names() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace App;
+class NodeTraverser {}
+function takes_int(int $i): void {}
+final class Builder {
+    private const PAIRS = [NodeTraverser::class => ['a']];
+    public function run(string $className): void {
+        $pairs = self::PAIRS;
+        if (class_exists($className)) {
+            $pairs[$className] = ['b'];
+        }
+        foreach (array_keys($pairs) as $class) {
+            new \ReflectionClass($class);
+        }
+        $a = ['x' => 1];
+        if (class_exists($className)) {
+            $a[$className] = 2;
+        }
+        takes_int($a);
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("got non-empty-array<'x'|class-string, 1|2>"),
+        "got {messages:?}"
+    );
+}
+
+#[test]
 fn a_shape_with_extra_keys_satisfies_an_unsealed_shape() {
     let php = r#"<?php
 declare(strict_types=1);

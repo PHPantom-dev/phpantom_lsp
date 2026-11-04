@@ -516,9 +516,10 @@ pub(crate) fn infer_addition_result_type(
     if rhs_is_array && (lhs_is_array || lhs_types.is_empty()) {
         // An operand with no tracked type still gets everything the array
         // beside it contributes: `+` only accepts arrays, so whatever it
-        // held was one too.
+        // held was one too. A declared bare `array` would instead keep the
+        // result as unknown as itself.
         let lhs_type = if lhs_types.is_empty() {
-            PhpType::array()
+            PhpType::mixed()
         } else {
             ResolvedType::types_joined(lhs_types)
         };

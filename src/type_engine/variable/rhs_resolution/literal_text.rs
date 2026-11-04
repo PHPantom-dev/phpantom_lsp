@@ -139,10 +139,12 @@ fn literal_array_shape(inner: &str, elements: ArrayElements<'_>) -> Option<PhpTy
             Some((key_text, value_text)) => {
                 keyed = true;
                 let key_text = key_text.trim();
+                // A `Foo::class` key is recorded by its spelling, as a
+                // docblock shape writes it, so reading the keys back gives
+                // `class-string<Foo>` rather than a plain string.
                 let key = literal_shape_key(key_text).or_else(|| {
-                    // A class name is never a decimal integer, so a
-                    // `Foo::class` key stays the string it names.
                     class_const_fetch_name(key_text, resolve?)
+                        .map(|class| crate::php_type::class_name_shape_key(&class))
                 })?;
                 (Some(key), value_text)
             }

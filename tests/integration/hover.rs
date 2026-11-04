@@ -10190,17 +10190,18 @@ fn hover_inline_var_cast_applies_to_array_element_assignment() {
     let content = r#"<?php
 class Test {
     public function run(): void {
+        $row = [];
         /** @var string */
-        $GLOBALS['sql_query'] = rand(0, 1) ? 'asd' : null;
-        echo $GLOBALS;
+        $row['sql_query'] = rand(0, 1) ? 'asd' : null;
+        echo $row;
     }
 }
 "#;
 
-    // Hover on `$GLOBALS` after the annotated array-element assignment —
-    // the @var override should type the element as `string`, not the
-    // RHS's own `'asd'|null`.
-    let hover = hover_at(&backend, uri, content, 5, 14).expect("expected hover on $GLOBALS");
+    // Hover on `$row` after the annotated array-element assignment: the
+    // @var override should type the element as `string`, not the RHS's own
+    // `'asd'|null`.
+    let hover = hover_at(&backend, uri, content, 6, 14).expect("expected hover on $row");
     let text = hover_text(&hover);
     assert!(
         text.contains("sql_query: string"),
@@ -15447,7 +15448,7 @@ fn hover_class_constant_array_keyed_by_class_constant() {
     let hover = hover_at(&backend, uri, content, 7, 10).expect("hover $b");
     let text = hover_text(&hover);
     assert!(
-        text.contains(r"array{'App\\Widget': 'X', stdClass: 'Y'}"),
+        text.contains(r"array{App\Widget::class: 'X', stdClass::class: 'Y'}"),
         "the constant should keep its class-name keys, got: {text}"
     );
 }

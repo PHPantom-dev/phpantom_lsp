@@ -857,8 +857,9 @@ namespace PsalmTest_array_assignment_60 {
     /** @psalm-suppress MixedArrayAssignment */
     $options['b']['c'] = 2;
 
-    // PHPantom is more precise than Psalm here: the nested write gives `$options['b']` a known shape.
-    assertType('array{c: 2}', $options['b']);
+    // A plain `array` may already hold a `b` entry, so what the write put
+    // there is not all it holds.
+    assertType('mixed', $options['b']);
 }
 
 // Test: binaryOperation

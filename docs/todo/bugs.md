@@ -67,80 +67,34 @@ seconds a rate-limit message names.
 
 ## Array types
 
-### B726. A dynamic `class-string` key written into a shape widens every key to `string`
+### B729. Keys written into a plain `array` cannot be read back
 
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-private const PAIRS = [NodeTraverser::class => [...]];
-
-$pairs = self::PAIRS;
-if (class_exists($className)) {
-    $pairs[$className] = [...];
-}
-foreach (array_keys($pairs) as $class) {
-    new ReflectionClass($class);
-    // expects class-string<object>|object, got string
-}
-```
-
-`array_keys(self::PAIRS)` alone gives `list<class-string<NodeTraverser>>`,
-and `$className` is a `class-string` after the `class_exists()` check, so
-every key is a class name. Once the dynamic write turns the shape into
-`array<K, V>`, the shape's key reads as the literal `'NodeTraverser'`
-rather than a class string, and joining it with `class-string` collapses
-the key domain to `string`. A non-class literal key (`['x' => 1]` then
-`$a[$cs] = 2`) also gives `array<string, …>`, where `'x'|class-string`
-would be exact.
-
-This started to show when `new ReflectionClass()`'s
-`T|class-string<T>` parameter began rejecting a plain `string`.
-
-**Where to change:** `merge_keyed_type_inner` and `join_element_types`
-in `src/type_engine/variable/array_shape_writes.rs`. A shape key that
-names a class should become `class-string<Foo>` there, the way
-`merge_shape_key` already does through `class_name_key`, and the join
-should keep a union of `class-string` members instead of widening it to
-`string`.
-
-Found in PHPStan's own build script that collects the classes its native
-extension shadows (two sites).
-
-### B728. A key written into a plain `array` turns it into a closed shape
-
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium-High**
 
 ```php
 /** @param array $args */
-function add(string $id, array $args, mixed $default): void {
-    $args['settings'] = $id;           // array{settings: string}
-    $args['defaultValue'] = $default;  // array{settings: string, defaultValue: mixed}
-    $wp_customize->add_control($id, $args);
-    // expects array{…, settings?: array, …}, got array{settings: string, defaultValue?: mixed}
-    // (undeclared key 'defaultValue')
+function add(array $args, Foo $foo): void {
+    $args['foo'] = $foo;
+    $args['foo']->  // no completion: `$args` is still a plain `array`
 }
 ```
 
-`$args` holds whatever keys the caller passed, so after the writes it is
-still an array with unknown keys that also has `settings` and
-`defaultValue`. The write rebuilds it as a shape holding only the written
-keys, which then gets checked as if those were all the keys there are:
-an `undeclared key` report against a closed parameter shape, where a plain
-`array` is accepted. A tracked `array<K, V>` base does not have this
-problem: `merge_shape_key` folds the write into the key/value pair. A bare
-`array` has no key type, so it falls through to the shape path meant for
-`[]`.
+A write into a plain `array` leaves it a plain `array`, since the caller
+may have passed any other keys too. That keeps it from being checked as
+if the written keys were all it held, but it also forgets what was
+written, so reading the entry back gives `mixed`. PHPStan keeps both by
+intersecting the array with `hasOffsetValue('foo', Foo)`.
 
-**Where to change:** `merge_shape_key` in
-`src/type_engine/variable/array_shape_writes.rs`. A bare `array` (or
-`mixed[]`) base should keep its open key domain after the write. Ideally
-it should also remember the written keys for later reads, the way
-PHPStan's `hasOffsetValue` does. If that is not possible without an
-intersection type, it should become `non-empty-array<array-key, …>`.
+An unsealed shape (`array{foo: Foo, ...}`) would remember the entry, but
+the argument check then reports every written key a sealed parameter
+shape does not declare, which a plain `array` is not reported for. The
+fix needs a type that records the entries a write put there without
+claiming they are checked against a sealed shape, or an argument check
+that tells the two apart.
 
-Found in a WordPress theme's customizer helper, which adds keys to the
-caller's control arguments before passing them to
-`WP_Customize_Manager::add_control()`.
+**Where to change:** `merge_shape_key` and `is_bare_array` in
+`src/type_engine/variable/array_shape_writes.rs`, and
+`undeclared_shape_keys` in `src/class_lookup/compatibility.rs`.
 
 ## Laravel
 
