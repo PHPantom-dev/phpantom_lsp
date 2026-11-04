@@ -835,3 +835,340 @@ async fn route_parameters_no_path_declares_are_not_reported() {
         "{diagnostics:?}"
     );
 }
+
+const NOTE: &str = r#"<?php
+namespace Drupal\acme\Entity;
+
+use Drupal\Core\Entity\Attribute\ContentEntityType;
+use Drupal\Core\Entity\ContentEntityInterface;
+
+#[ContentEntityType(id: 'acme_note')]
+class Note implements ContentEntityInterface {}
+"#;
+const NOTE_PATH: &str = "web/modules/custom/acme/src/Entity/Note.php";
+const ENTITY_INTERFACE: &str =
+    "<?php\nnamespace Drupal\\Core\\Entity;\ninterface EntityInterface {}\n";
+const ENTITY_INTERFACE_PATH: &str = "web/core/lib/Drupal/Core/Entity/EntityInterface.php";
+const CONTENT_ENTITY_INTERFACE: &str = "<?php\nnamespace Drupal\\Core\\Entity;\ninterface ContentEntityInterface extends EntityInterface {}\n";
+const CONTENT_ENTITY_INTERFACE_PATH: &str =
+    "web/core/lib/Drupal/Core/Entity/ContentEntityInterface.php";
+const USER_INTERFACE: &str = "<?php\nnamespace Drupal\\user;\ninterface UserInterface {}\n";
+const USER_INTERFACE_PATH: &str = "web/core/modules/user/src/UserInterface.php";
+
+const NOTE_ROUTING: &str = r#"acme.note:
+  path: '/note/{acme_note}'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::view'
+    _title_callback: '\Drupal\acme\Controller\PageController::title'
+acme.note_edit:
+  path: '/note/{note}/edit'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::edit'
+  options:
+    parameters:
+      note:
+        type: entity:acme_note
+acme.note_raw:
+  path: '/note/{acme_note}/raw'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::raw'
+acme.note_page:
+  path: '/note/{acme_note}/page'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::page'
+    _entity_view: 'acme_note.full'
+acme.note_blocked:
+  path: '/note/{acme_note}/blocked'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::blocked'
+acme.note_form:
+  path: '/note/{acme_note}/form'
+  defaults:
+    _form: '\Drupal\acme\Form\NoteForm'
+acme.note_delete:
+  path: '/note/{acme_note}/delete'
+  defaults:
+    _entity_form: 'acme_note.delete'
+    _title_callback: '\Drupal\acme\Controller\PageController::deleteTitle'
+acme.note_tempstore:
+  path: '/note/{note}/draft'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::draft'
+  options:
+    parameters:
+      note:
+        type: entity:acme_note
+        tempstore: TRUE
+acme.note_revision:
+  path: '/note/{acme_note}/revisions/{acme_note_revision}'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::revision'
+    _title_callback: '\Drupal\acme\Controller\PageController::revisionTitle'
+    _entity_view: 'acme_note.full'
+  options:
+    parameters:
+      acme_note_revision:
+        type: entity_revision:acme_note
+acme.note_latest:
+  path: '/note/latest'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::latest'
+    note: 1
+  options:
+    parameters:
+      note:
+        type: entity:acme_note
+acme.note_missing:
+  path: '/note/missing'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::missing'
+  options:
+    parameters:
+      note:
+        type: entity:acme_note
+acme.note_optional:
+  path: '/note/optional/{acme_note}'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::optional'
+    acme_note: ~
+acme.note_shared_a:
+  path: '/note/a/{note}'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::shared'
+  options:
+    parameters:
+      note:
+        type: entity:acme_note
+acme.note_shared_b:
+  path: '/note/b/{note}'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::shared'
+acme.note_content:
+  path: '/note/{acme_note}/content'
+  defaults:
+    _controller: '\Drupal\acme\Controller\PageController::content'
+"#;
+
+const PAGE_CONTROLLER: &str = r#"<?php
+namespace Drupal\acme\Controller;
+
+use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\user\UserInterface;
+
+final class PageController {
+    public function view(EntityInterface $acme_note): array {
+        $acme_note; // view
+        return [];
+    }
+
+    public function title($acme_note): string {
+        $acme_note; // title
+        return '';
+    }
+
+    public function edit($note): array {
+        $note; // edit
+        return [];
+    }
+
+    public function raw($acme_note): array {
+        $acme_note; // raw
+        return [];
+    }
+
+    public function page($acme_note): array {
+        $acme_note; // page
+        return [];
+    }
+
+    public function blocked(UserInterface $acme_note, string $mode = 'full'): array {
+        $acme_note; // blocked
+        return [];
+    }
+
+    public function unrouted(EntityInterface $acme_note): array {
+        $acme_note; // unrouted
+        return [];
+    }
+
+    public function deleteTitle($acme_note): string {
+        $acme_note; // deleteTitle
+        return '';
+    }
+
+    public function draft($note): array {
+        $note; // draft
+        return [];
+    }
+
+    public function revision($acme_note_revision): array {
+        return [];
+    }
+
+    public function revisionTitle($acme_note, $acme_note_revision): string {
+        $acme_note; // revisionTitle
+        $acme_note_revision; // revisionTitle revision
+        return '';
+    }
+
+    public function latest($note): array {
+        $note; // latest
+        return [];
+    }
+
+    public function missing($note): array {
+        $note; // missing
+        return [];
+    }
+
+    public function optional(EntityInterface $acme_note): array {
+        $acme_note; // optional
+        return [];
+    }
+
+    public function shared($note): array {
+        $note; // shared
+        return [];
+    }
+
+    public function content(ContentEntityInterface $acme_note): array {
+        $acme_note; // content
+        return [];
+    }
+}
+"#;
+const PAGE_CONTROLLER_PATH: &str = "web/modules/custom/acme/src/Controller/PageController.php";
+
+const NOTE_FORM: &str = r#"<?php
+namespace Drupal\acme\Form;
+
+use Drupal\Core\Entity\EntityInterface;
+
+final class NoteForm {
+    public function buildForm(array $form, $form_state, ?EntityInterface $acme_note = NULL): array {
+        $acme_note; // buildForm
+        return $form;
+    }
+}
+"#;
+const NOTE_FORM_PATH: &str = "web/modules/custom/acme/src/Form/NoteForm.php";
+
+const ATTRIBUTE_NOTE_CONTROLLER: &str = r#"<?php
+namespace Drupal\acme\Controller;
+
+use Drupal\Core\Entity\EntityInterface;
+use Symfony\Component\Routing\Attribute\Route;
+
+final class AttributeNoteController {
+    #[Route(path: '/attribute/{acme_note}', name: 'acme.attribute_note')]
+    public function show(EntityInterface $acme_note): array {
+        $acme_note; // attribute
+        return [];
+    }
+}
+"#;
+const ATTRIBUTE_NOTE_CONTROLLER_PATH: &str =
+    "web/modules/custom/acme/src/Controller/AttributeNoteController.php";
+
+fn note_files() -> Vec<(&'static str, &'static str)> {
+    files(&[
+        (ENTITY_INTERFACE_PATH, ENTITY_INTERFACE),
+        (CONTENT_ENTITY_INTERFACE_PATH, CONTENT_ENTITY_INTERFACE),
+        (USER_INTERFACE_PATH, USER_INTERFACE),
+        (NOTE_PATH, NOTE),
+        ("web/modules/custom/acme/acme.routing.yml", NOTE_ROUTING),
+        (PAGE_CONTROLLER_PATH, PAGE_CONTROLLER),
+        (NOTE_FORM_PATH, NOTE_FORM),
+        ROUTE_ATTRIBUTE,
+        (ATTRIBUTE_NOTE_CONTROLLER_PATH, ATTRIBUTE_NOTE_CONTROLLER),
+    ])
+}
+
+/// What hovering the variable just before `marker` in `content` shows.
+async fn hover_before(
+    backend: &phpantom_lsp::Backend,
+    uri: &tower_lsp_server::gen_lsp_types::Uri,
+    content: &str,
+    marker: &str,
+) -> String {
+    let position = position_in(content, marker, 2);
+    hover_text_at(backend, uri, position.line, position.character)
+        .await
+        .unwrap_or_default()
+}
+
+/// A controller's parameter is the entity Drupal loads for it only where
+/// Drupal upcasts it: a type the route declares, a hint the entity class
+/// fits, or the entity type an `_entity_view` or `_entity_form` names, for
+/// a parameter the path or a default gives a value, and its title callback
+/// receives the same.  A parameter another converter takes, one nothing
+/// upcasts, and one a route reaching the method leaves alone keep their
+/// declared type.
+#[tokio::test]
+async fn controller_parameters_are_the_entities_drupal_upcasts() {
+    let (backend, dir) = workspace(&note_files()).await;
+    let php = uri_for(&dir, PAGE_CONTROLLER_PATH);
+    for (marker, expected) in [
+        ("$acme_note; // view", "$acme_note = Note\n"),
+        ("$acme_note; // title", "$acme_note = Note\n"),
+        ("$note; // edit", "$note = Note\n"),
+        ("$acme_note; // page", "$acme_note = Note\n"),
+        ("$acme_note; // deleteTitle", "$acme_note = Note\n"),
+        ("$acme_note; // revisionTitle", "$acme_note = Note\n"),
+        (
+            "$acme_note_revision; // revisionTitle revision",
+            "$acme_note_revision = Note\n",
+        ),
+        ("$note; // latest", "$note = Note\n"),
+        ("$acme_note; // content", "$acme_note = Note\n"),
+        // A hint the entity class does not fit blocks upcasting, and a
+        // method no route reaches keeps its hint.
+        ("$acme_note; // blocked", "$acme_note = UserInterface\n"),
+        ("$acme_note; // unrouted", "$acme_note = EntityInterface\n"),
+    ] {
+        let text = hover_before(&backend, &php, PAGE_CONTROLLER, marker).await;
+        assert!(text.contains(expected), "{marker}: {text}");
+    }
+    // A route's `NULL` default leaves the parameter `NULL` when the path
+    // gives it no value.
+    let text = hover_before(&backend, &php, PAGE_CONTROLLER, "$acme_note; // optional").await;
+    assert!(
+        text.contains("$acme_note = ?Note\n") || text.contains("$acme_note = Note|null\n"),
+        "{text}"
+    );
+    // Untyped and left alone: by nothing, by a tempstore's own converter,
+    // by a route that gives it no value, or by one of the routes that
+    // reach the method.
+    for (marker, variable) in [
+        ("$acme_note; // raw", "$acme_note"),
+        ("$note; // draft", "$note"),
+        ("$note; // missing", "$note"),
+        ("$note; // shared", "$note"),
+    ] {
+        let text = hover_before(&backend, &php, PAGE_CONTROLLER, marker).await;
+        assert!(
+            text.contains(&format!("<?php\n{variable}\n```")),
+            "{marker}: {text}"
+        );
+    }
+
+    // A `_form` route upcasts the form's `buildForm()` parameters, which
+    // default to `NULL`.
+    let form = uri_for(&dir, NOTE_FORM_PATH);
+    let text = hover_before(&backend, &form, NOTE_FORM, "$acme_note; // buildForm").await;
+    assert!(
+        text.contains("$acme_note = ?Note\n") || text.contains("$acme_note = Note|null\n"),
+        "{text}"
+    );
+    // A `#[Route]` method is upcast like a routing file's controller.
+    let attribute = uri_for(&dir, ATTRIBUTE_NOTE_CONTROLLER_PATH);
+    let text = hover_before(
+        &backend,
+        &attribute,
+        ATTRIBUTE_NOTE_CONTROLLER,
+        "$acme_note; // attribute",
+    )
+    .await;
+    assert!(text.contains("$acme_note = Note\n"), "{text}");
+}

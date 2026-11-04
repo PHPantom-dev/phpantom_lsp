@@ -97,6 +97,9 @@ pub(crate) fn seed_params<'b>(
     });
 
     let trait_prototype = trait_prototype_method(method_name, ctx);
+    // The parameters Drupal upcasts to an entity before a controller runs,
+    // looked up once, when there is a parameter it could be.
+    let mut drupal_upcasts: Option<Vec<(String, crate::atom::Atom, bool)>> = None;
 
     for (index, param) in parameters.enumerate() {
         let pname = bytes_to_str(param.variable.name).to_string();
@@ -161,6 +164,18 @@ pub(crate) fn seed_params<'b>(
             ctx,
         );
 
+        if let Some(entity) = drupal_upcast_entity(
+            &pname,
+            native_type.as_ref(),
+            crate::parser::param_default_is_null(param),
+            method_name,
+            &mut drupal_upcasts,
+            ctx,
+        ) {
+            scope.seed(&pname, ctx.resolved_types_for(entity));
+            continue;
+        }
+
         // A variadic parameter collects the arguments into an array
         // rather than taking the one at its index, so the call site's
         // types don't line up with it.
@@ -181,6 +196,60 @@ pub(crate) fn seed_params<'b>(
             scope.set_empty(&pname);
         }
     }
+}
+
+/// The type a Drupal route's controller receives for the parameter `name`
+/// (written with its `$`) of the method being seeded, when Drupal upcasts
+/// it (see [`crate::drupal::upcasting`]) and its native hint, if any,
+/// accepts the entity: the entity class, or `null` too when the hint is
+/// nullable, the parameter defaults to `null`, or a route's default leaves
+/// it `NULL`.  `upcasts` caches the method's upcast parameters.
+fn drupal_upcast_entity(
+    name: &str,
+    native_type: Option<&PhpType>,
+    defaults_to_null: bool,
+    method_name: Option<&str>,
+    upcasts: &mut Option<Vec<(String, crate::atom::Atom, bool)>>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    let method = method_name?;
+    let name = name.strip_prefix('$').unwrap_or(name);
+    let backend = ctx
+        .file
+        .backend
+        .filter(|backend| backend.is_drupal_project())?;
+    let (entity, route_null) = upcasts
+        .get_or_insert_with(|| {
+            backend.drupal_upcast_parameters(
+                &ctx.current_class.fqn(),
+                method,
+                ctx.file.class_loader,
+            )
+        })
+        .iter()
+        .find(|(parameter, _, _)| parameter.as_str() == name)
+        .map(|(_, entity, route_null)| (*entity, *route_null))?;
+    let mut nullable = route_null || defaults_to_null;
+    if let Some(written) = native_type {
+        // A builtin or union hint takes no entity, nor a class the entity's
+        // is not.
+        let resolved = ctx.written_names().resolve_hint(written);
+        let hint = crate::drupal::upcasting::hinted_class(&resolved)?;
+        let fits =
+            (ctx.file.class_loader)(crate::class_lookup::Fqn::new(&entity)).is_some_and(|class| {
+                crate::class_lookup::is_subtype_of(&class, hint, ctx.file.class_loader)
+            });
+        if !fits {
+            return None;
+        }
+        nullable |= resolved.non_null_type().is_some();
+    }
+    let entity = PhpType::named(entity);
+    Some(if nullable {
+        PhpType::nullable(entity)
+    } else {
+        entity
+    })
 }
 
 /// The scope entry a parameter gets from the argument the call site

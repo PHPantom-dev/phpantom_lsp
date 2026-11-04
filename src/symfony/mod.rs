@@ -212,6 +212,7 @@ impl Backend {
                 .lock()
                 .iter()
                 .any(|prefix| uri.starts_with(prefix.as_str()));
+        self.note_drupal_routes(uri, Some(map));
         // Only take the write lock when the answer changes.
         if self.symfony.declaring_uris.read().contains(uri) == declares {
             return;
@@ -226,6 +227,7 @@ impl Backend {
 
     /// Forget a file that no longer exists.
     pub(crate) fn forget_symfony_declarations(&self, uri: &str) {
+        self.note_drupal_routes(uri, None);
         if self.symfony.declaring_uris.read().contains(uri) {
             self.symfony.declaring_uris.write().remove(uri);
         }

@@ -18,6 +18,7 @@ use parking_lot::RwLock;
 pub(crate) mod links;
 pub(crate) mod routing;
 pub(crate) mod types;
+pub(crate) mod upcasting;
 
 use crate::Backend;
 use crate::atom::Atom;
@@ -32,6 +33,8 @@ pub(crate) struct DrupalState {
     /// the workspace's `.gitignore` leaves out, so the walk that finds the
     /// rest of the project's YAML never reaches them.
     declaration_files: RwLock<Vec<PathBuf>>,
+    /// The project's routes by the methods they dispatch to, once read.
+    route_index: RwLock<Option<std::sync::Arc<upcasting::RouteIndex>>>,
 }
 
 /// A kind of file Drupal reads declarations from.

@@ -713,6 +713,31 @@ pub(crate) struct DeclaredParameter {
     pub converted_otherwise: bool,
 }
 
+impl DrupalRouteSite {
+    /// What `options.parameters` declares for the parameter `name`.
+    pub(crate) fn declared(&self, name: &str) -> Option<&DeclaredParameter> {
+        self.parameters
+            .iter()
+            .find(|parameter| parameter.name == name)
+    }
+
+    /// Whether Drupal gives the parameter `name` a value to convert: the
+    /// path declares it, or a default gives it one.
+    pub(crate) fn passes(&self, name: &str) -> bool {
+        crate::drupal::routing::path_parameter_names(&self.path)
+            .any(|placeholder| placeholder == name)
+            || self.defaults.iter().any(|(default, _)| default == name)
+    }
+
+    /// Whether a default gives the parameter `name` the value `NULL`, which
+    /// Drupal leaves as it is.
+    pub(crate) fn defaults_to_null(&self, name: &str) -> bool {
+        self.defaults
+            .iter()
+            .any(|(default, is_null)| *is_null && default == name)
+    }
+}
+
 /// One `{name}` in a route's path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RoutePlaceholder {
