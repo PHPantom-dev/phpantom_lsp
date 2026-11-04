@@ -5,6 +5,7 @@ use crate::class_lookup::{Fqn, ResolvedClassLoader, is_subtype_of};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::types::{BackedEnumType, ClassInfo, ClassLikeKind, ELOQUENT_COLLECTION_FQN};
+use crate::util::unescape_php_string_literal_cow;
 
 const COLLECTION: &str = "Illuminate\\Support\\Collection";
 const LAZY_COLLECTION: &str = "Illuminate\\Support\\LazyCollection";
@@ -56,7 +57,7 @@ pub(crate) fn collection_property_return(
     let loader = ctx.file.class_loader;
     let owner_name = owner.fqn();
     let lazy = match owner_name.as_str() {
-        COLLECTION => false,
+        COLLECTION | ELOQUENT_COLLECTION_FQN => false,
         LAZY_COLLECTION => true,
         _ if is_subtype_of(owner, LAZY_COLLECTION, loader) => true,
         _ if is_subtype_of(owner, COLLECTION, loader) => false,
@@ -87,25 +88,40 @@ pub(crate) fn collection_property_return(
     let [key, value] = types else {
         return None;
     };
-    let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
-        owner,
-        loader,
-        ctx.resolved_class_cache,
-    );
-    let method = resolved.get_method_ci(projection.name())?;
-    let bound = crate::call_args::bind_text_args_to_params(&method.parameters, args);
-    let selector = bound.first()?.as_deref()?;
-    let second = bound.get(1).and_then(Option::as_deref);
+    let resolved;
+    let method = match owner.get_method_ci(projection.name()) {
+        Some(method) => method,
+        None => {
+            resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+                owner,
+                loader,
+                ctx.resolved_class_cache,
+            );
+            resolved.get_method_ci(projection.name())?
+        }
+    };
+    let [selector, second] =
+        crate::call_args::bind_text_args_to_param_prefix(&method.parameters, args);
+    let selector = selector?;
     let property = |path: &str| property_path_type(value, path, ctx).unwrap_or_else(PhpType::mixed);
+    let is_eloquent = || {
+        !lazy
+            && owner_name != COLLECTION
+            && (owner_name == ELOQUENT_COLLECTION_FQN
+                || is_subtype_of(owner, ELOQUENT_COLLECTION_FQN, loader))
+    };
     match projection {
         ProjectionMethod::KeyBy => {
-            let path = crate::util::unescape_php_string_literal(selector)?;
+            let path = unescape_php_string_literal_cow(selector)?;
             let key = collection_key_type(&property(&path), false, lazy, true, loader);
             Some(PhpType::generic_atom(owner_name, vec![key, value.clone()]))
         }
         ProjectionMethod::GroupBy => {
-            let paths = if let Some(path) = crate::util::unescape_php_string_literal(selector) {
-                vec![path]
+            let single_key;
+            let multiple_keys;
+            let keys = if let Some(path) = unescape_php_string_literal_cow(selector) {
+                single_key = collection_key_type(&property(&path), true, false, true, loader);
+                std::slice::from_ref(&single_key)
             } else {
                 let inner = selector
                     .strip_prefix('[')
@@ -115,17 +131,23 @@ pub(crate) fn collection_property_return(
                             .strip_prefix("array(")
                             .and_then(|s| s.strip_suffix(')'))
                     })?;
-                crate::text_scan::split_top_level_commas(inner)
+                let entries = crate::text_scan::split_top_level_commas(inner);
+                let paths = entries
                     .iter()
                     .filter(|entry| !entry.trim().is_empty())
                     .map(|entry| {
                         let entry = crate::text_scan::split_top_level_arrow(entry)
                             .map_or(*entry, |(_, value)| value);
-                        crate::util::unescape_php_string_literal(entry.trim())
+                        unescape_php_string_literal_cow(entry.trim())
                     })
-                    .collect::<Option<Vec<_>>>()?
+                    .collect::<Option<Vec<_>>>()?;
+                multiple_keys = paths
+                    .iter()
+                    .map(|path| collection_key_type(&property(path), true, false, true, loader))
+                    .collect::<Vec<_>>();
+                multiple_keys.as_slice()
             };
-            if paths.is_empty() {
+            if keys.is_empty() {
                 return None;
             }
             let inner_key = match second.map(str::trim) {
@@ -134,37 +156,33 @@ pub(crate) fn collection_property_return(
                 Some(text) if text.eq_ignore_ascii_case("true") || text == "1" => key.clone(),
                 _ => PhpType::union(vec![key.clone(), PhpType::int()]),
             };
-            let keys = paths
-                .iter()
-                .map(|path| collection_key_type(&property(path), true, false, true, loader))
-                .collect::<Vec<_>>();
             Some(grouped_collection(
                 owner_name,
                 inner_key,
                 value.clone(),
-                &keys,
+                keys,
                 lazy,
-                is_subtype_of(owner, ELOQUENT_COLLECTION_FQN, loader),
+                keys.len() > 1 && is_eloquent(),
             ))
         }
         ProjectionMethod::Pluck => {
             let projected = if selector.eq_ignore_ascii_case("null") {
                 value.clone()
             } else {
-                property(&crate::util::unescape_php_string_literal(selector)?)
+                property(&unescape_php_string_literal_cow(selector)?)
             };
             let key = match second {
                 None => PhpType::int(),
                 Some(text) if text.eq_ignore_ascii_case("null") => PhpType::int(),
                 Some(text) => collection_key_type(
-                    &property(&crate::util::unescape_php_string_literal(text)?),
+                    &property(&unescape_php_string_literal_cow(text)?),
                     false,
                     lazy,
                     false,
                     loader,
                 ),
             };
-            let collection = if is_subtype_of(owner, ELOQUENT_COLLECTION_FQN, loader) {
+            let collection = if is_eloquent() {
                 atom(COLLECTION)
             } else {
                 owner_name
@@ -186,17 +204,19 @@ pub(super) fn grouped_collection(
     // LazyCollection delegates grouping to an eager collection. Eloquent's
     // recursive map produces a base collection when its values are groups.
     let eager = if lazy { atom(COLLECTION) } else { collection };
-    let mut result = PhpType::generic_atom(eager, vec![inner_key, value]);
+    let mut result = PhpType::generic_atom(
+        if keys.is_empty() { collection } else { eager },
+        vec![inner_key, value],
+    );
     for (depth, key) in keys.iter().rev().enumerate() {
-        let owner = if eloquent && depth > 0 {
+        let owner = if lazy && depth + 1 == keys.len() {
+            collection
+        } else if eloquent && depth > 0 {
             atom(COLLECTION)
         } else {
             eager
         };
         result = PhpType::generic_atom(owner, vec![key.clone(), result]);
-    }
-    if lazy && let TypeKind::Generic(g) = result.kind() {
-        return PhpType::generic_atom(collection, g.args.clone());
     }
     result
 }
@@ -316,20 +336,24 @@ fn property_path_type(value: &PhpType, path: &str, ctx: &ResolutionCtx<'_>) -> O
                 ctx.file.all_classes,
                 ctx.file.class_loader,
             );
-            let types = classes
-                .iter()
-                .filter_map(|class| {
-                    crate::inheritance::resolve_property_type_hint(
-                        class,
-                        head,
-                        ctx.file.class_loader,
-                    )
-                })
-                .collect::<Vec<_>>();
-            if types.is_empty() {
-                return None;
+            if let [class] = classes.as_slice() {
+                crate::inheritance::resolve_property_type_hint(class, head, ctx.file.class_loader)?
+            } else {
+                let types = classes
+                    .iter()
+                    .filter_map(|class| {
+                        crate::inheritance::resolve_property_type_hint(
+                            class,
+                            head,
+                            ctx.file.class_loader,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if types.is_empty() {
+                    return None;
+                }
+                PhpType::union(types)
             }
-            PhpType::union(types)
         }
     };
     match tail {

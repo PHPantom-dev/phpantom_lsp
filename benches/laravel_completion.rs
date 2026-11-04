@@ -250,14 +250,38 @@ class Collection {
     for (name, expression, chain, property) in [
         ("key_by", "$users->keyBy('email')", "first()", "email"),
         (
+            "key_by_callback",
+            "$users->keyBy(fn (User $user): string => $user->email)",
+            "first()",
+            "email",
+        ),
+        (
             "group_by",
             "$users->groupBy('email')",
             "first()->first()",
             "email",
         ),
         (
+            "group_by_named",
+            "$users->groupBy(preserveKeys: true, groupBy: 'email')",
+            "first()->first()",
+            "email",
+        ),
+        (
+            "group_by_multilevel",
+            "$users->groupBy(['email', 'profile.displayName'], true)",
+            "first()->first()->first()",
+            "email",
+        ),
+        (
             "pluck",
             "$users->pluck('profile')",
+            "first()",
+            "displayName",
+        ),
+        (
+            "pluck_named",
+            "$users->pluck(key: 'email', value: 'profile')",
             "first()",
             "displayName",
         ),

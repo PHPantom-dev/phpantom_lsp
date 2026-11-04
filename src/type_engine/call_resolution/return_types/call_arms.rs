@@ -275,8 +275,8 @@ impl Backend {
         // type gets flattened into ClassInfo.
         let mut hint_captured = false;
         let mut results = Vec::new();
-        let projection = ProjectionMethod::from_name(method_name)
-            .map(|method| (method, split_top_level_commas(text_args)));
+        let projection = ProjectionMethod::from_name(method_name);
+        let split_args = std::cell::LazyCell::new(|| split_top_level_commas(text_args));
 
         for rt in &lhs_resolved {
             let owner = match &rt.class_info {
@@ -284,9 +284,14 @@ impl Backend {
                 None => continue,
             };
 
-            if let Some((method, args)) = &projection
-                && let Some(hint) =
-                    collection_property_return(&owner, Some(&rt.type_string), *method, args, ctx)
+            if let Some(method) = projection
+                && let Some(hint) = collection_property_return(
+                    &owner,
+                    Some(&rt.type_string),
+                    method,
+                    &split_args,
+                    ctx,
+                )
             {
                 ClassInfo::extend_unique_arc(
                     &mut results,
@@ -330,9 +335,8 @@ impl Backend {
                 _ => HashMap::new(),
             };
 
-            let split_args = split_top_level_commas(text_args);
-            let arg_refs = split_args.to_vec();
-            let method_subs = Self::build_method_template_subs(&owner, method_name, &arg_refs, ctx);
+            let arg_refs = split_args.as_slice();
+            let method_subs = Self::build_method_template_subs(&owner, method_name, arg_refs, ctx);
 
             // Merge class-level generic substitutions with
             // method-level template substitutions.  Class-level
