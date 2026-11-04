@@ -220,7 +220,7 @@ fn filtering_methods_return_the_collection_unchanged() {
 fn key_by_moves_the_member_into_the_key() {
     assert_eq!(
         result_type("keyBy", "string"),
-        "Illuminate\\Support\\Collection<array-key, App\\User>"
+        "Illuminate\\Support\\Collection<string, App\\User>"
     );
 }
 
@@ -228,7 +228,7 @@ fn key_by_moves_the_member_into_the_key() {
 fn grouping_methods_nest_the_collection() {
     assert_eq!(
         result_type("groupBy", "string"),
-        "Illuminate\\Support\\Collection<array-key, Illuminate\\Support\\Collection<int, App\\User>>"
+        "Illuminate\\Support\\Collection<string, Illuminate\\Support\\Collection<int, App\\User>>"
     );
     assert_eq!(
         result_type("partition", "bool"),
@@ -615,7 +615,7 @@ fn grouping_an_eloquent_collection_keeps_it_but_partitioning_does_not() {
         eloquent_context("groupBy")
             .result_type(Some(&PhpType::string()))
             .to_string(),
-        "Illuminate\\Database\\Eloquent\\Collection<array-key, \
+        "Illuminate\\Database\\Eloquent\\Collection<string, \
          Illuminate\\Database\\Eloquent\\Collection<int, App\\User>>"
     );
     assert_eq!(
