@@ -8445,7 +8445,7 @@ class User extends Model {
 }
 
 #[tokio::test]
-async fn test_appends_produces_mixed_virtual_properties() {
+async fn test_appends_without_accessors_does_not_declare_properties() {
     let user_php = "\
 <?php
 namespace App\\Models;
@@ -8467,33 +8467,19 @@ class User extends Model {
     let props = property_names(&items);
 
     assert!(
-        props.contains(&"full_name"),
-        "$appends should produce full_name property, got: {:?}",
+        !props.contains(&"full_name"),
+        "$appends alone does not declare full_name, got: {:?}",
         props
     );
     assert!(
-        props.contains(&"is_verified"),
-        "$appends should produce is_verified property, got: {:?}",
+        !props.contains(&"is_verified"),
+        "$appends alone does not declare is_verified, got: {:?}",
         props
-    );
-
-    // Verify they have mixed type (no type info from $appends)
-    let prop = items
-        .iter()
-        .find(|i| i.kind == Some(CompletionItemKind::Property) && i.label == "full_name");
-    assert!(
-        prop.unwrap()
-            .detail
-            .as_deref()
-            .unwrap_or("")
-            .contains("mixed"),
-        "full_name from $appends should show mixed in detail, got: {:?}",
-        prop.unwrap().detail
     );
 }
 
 #[tokio::test]
-async fn test_appends_merges_with_fillable_without_duplicates() {
+async fn test_appends_preserves_fillable_properties_without_duplicates() {
     let user_php = "\
 <?php
 namespace App\\Models;
@@ -8514,8 +8500,8 @@ class User extends Model {
 
     assert!(props.contains(&"name"), "from $fillable, got: {:?}", props);
     assert!(
-        props.contains(&"full_name"),
-        "from $appends, got: {:?}",
+        !props.contains(&"full_name"),
+        "$appends alone does not declare full_name, got: {:?}",
         props
     );
 
@@ -8561,8 +8547,8 @@ class User extends Model {
         props
     );
     assert!(
-        props.contains(&"full_name"),
-        "full_name should appear from $appends, got: {:?}",
+        !props.contains(&"full_name"),
+        "$appends alone does not declare full_name, got: {:?}",
         props
     );
 

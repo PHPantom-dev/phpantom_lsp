@@ -74,6 +74,11 @@ pub(super) fn extract_method<'a>(
     // (`$this->hasMany(Post::class)`) when the declared type does not name
     // it.
     let return_type = relationship_return_type(return_type, method, doc_ctx);
+    let has_attribute_setter = crate::virtual_members::laravel::has_attribute_setter(
+        return_type.as_ref(),
+        method,
+        doc_ctx,
+    );
 
     // Merge `@param` docblock types into parameter type hints so that
     // callable signatures like `callable(User): void` are preserved.  This
@@ -148,6 +153,7 @@ pub(super) fn extract_method<'a>(
         reads_func_args,
         is_no_discard: crate::parser::has_no_discard_attribute(&method.attribute_lists, doc_ctx),
         extras: MethodExtras {
+            has_attribute_setter,
             return_description: info.and_then(docblock::extract_return_description_from_info),
             links: info
                 .map(docblock::extract_link_urls_from_info)

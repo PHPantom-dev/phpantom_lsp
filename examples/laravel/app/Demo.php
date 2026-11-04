@@ -21,6 +21,7 @@ use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\CastSample;
 use App\Models\Customer;
+use App\Models\CustomerProfile;
 use App\Models\Danish;
 use App\Models\Delivery;
 use App\Models\Loaf;
@@ -118,7 +119,7 @@ class Demo
         $bakery->unbaked();           // scope method               → Builder
         $bakery->vendor;              // body-inferred morphTo      → Model
         $bakery->vendor_count;        // relationship count         → int
-        $bakery->warmth;              // $appends (no cast/attr)    → mixed
+        $bakery->warmth;              // appended accessor        → string
         // MUST NOT appear: secret_ingredient (private $attributes field)
 
         // Relation properties resolve case-insensitively, matching Laravel's
@@ -1131,6 +1132,21 @@ class Demo
 
         // Flour is fillable, so it ranks ahead of other known Bakery attributes.
         Bakery::make(['flour' => 'whole wheat']);
+    }
+
+    public function computedAttributes(): void
+    {
+        // Try: complete these keys. full_name has a setter; display_name and initials do not.
+        $profile = CustomerProfile::make(['full_name' => 'Ada']);
+        $profile->fill(['full_name' => 'Grace']);
+
+        // Try: complete the column. name stays because it has a backing column;
+        // display_name, initials, and full_name are computed attributes.
+        CustomerProfile::where('name', 'Grace')->orderBy('name');
+
+        // Try: complete the properties; computed values still belong to the model.
+        $profile->display_name; // string, from a legacy accessor
+        $profile->initials;     // string, from a modern accessor
     }
 
 

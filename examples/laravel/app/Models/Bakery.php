@@ -84,6 +84,8 @@ class Bakery extends Model
 
     public function getLoafNameAttribute(): string { return ''; }
 
+    public function getWarmthAttribute(): string { return 'warm'; }
+
     /** @return Attribute<string> */
     protected function sprinkle(): Attribute
     {
