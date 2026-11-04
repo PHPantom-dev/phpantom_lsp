@@ -11,6 +11,9 @@ use crate::type_engine::call_resolution::{
     facade_concrete_owner, is_reflected_property_call, is_reflected_property_class,
     resolve_reflected_property_at_call, resolve_reflected_property_at_new,
 };
+use crate::virtual_members::laravel::collection_projection::{
+    ProjectionMethod, collection_property_return,
+};
 
 impl Backend {
     /// `base->method(…)`: the instance method call arm of
@@ -272,6 +275,8 @@ impl Backend {
         // type gets flattened into ClassInfo.
         let mut hint_captured = false;
         let mut results = Vec::new();
+        let projection = ProjectionMethod::from_name(method_name)
+            .map(|method| (method, split_top_level_commas(text_args)));
 
         for rt in &lhs_resolved {
             let owner = match &rt.class_info {
@@ -279,16 +284,9 @@ impl Backend {
                 None => continue,
             };
 
-            if crate::virtual_members::laravel::collection_projection::is_projection_method(
-                method_name,
-            ) && let Some(hint) =
-                crate::virtual_members::laravel::collection_projection::collection_property_return(
-                    &owner,
-                    Some(&rt.type_string),
-                    method_name,
-                    &split_top_level_commas(text_args),
-                    ctx,
-                )
+            if let Some((method, args)) = &projection
+                && let Some(hint) =
+                    collection_property_return(&owner, Some(&rt.type_string), *method, args, ctx)
             {
                 ClassInfo::extend_unique_arc(
                     &mut results,
